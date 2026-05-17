@@ -3,6 +3,7 @@ import {
   Bot,
   ChartColumn,
   CheckCircle2,
+  Copy,
   CreditCard,
   Eye,
   EyeOff,
@@ -10,16 +11,22 @@ import {
   KeyRound,
   LoaderCircle,
   LockKeyhole,
+  LogOut,
+  Mail,
   MessageSquareText,
   PanelLeftClose,
   PanelLeftOpen,
   PanelRightClose,
   PanelRightOpen,
+  PencilLine,
   Plus,
   RefreshCcw,
+  RotateCcw,
   Send,
   Settings2,
+  Square,
   Sparkles,
+  UserPlus,
   Wallet,
   Wrench,
 } from 'lucide-react'
@@ -30,17 +37,27 @@ import {
   saveActiveAssistantId,
   saveAssistants,
 } from './domains/assistants'
-import { login, login2fa, logout, unwrapEnvelope } from './domains/auth'
-import { getUserGroups, getUserModels, sendChatCompletion } from './domains/chat'
+import {
+  getAuthStatus,
+  login,
+  login2fa,
+  logout,
+  registerUser,
+  sendEmailVerification,
+  unwrapEnvelope,
+} from './domains/auth'
+import { getUserGroups, getUserModels, sendChatCompletion, stopChatCompletion } from './domains/chat'
 import {
   deployCli,
   getCliSession,
   getCliStatus,
   listCliHistory,
+  onCliProgress,
   onDeployProgress,
   pickProjectDirectory,
   runCliPrompt,
   setDesktopWindowTitle,
+  stopCliPrompt,
 } from './domains/cli'
 import { createDesktopCliKey, fetchApiKeySecret, getApiKeys } from './domains/keys'
 import { generateAccessToken, getSelfProfile, requireSuccess, verifyCurrentPassword } from './domains/profile'
@@ -62,6 +79,7 @@ import { clipText, formatDateTime, formatPrice, formatQuota } from './lib/format
 import { readJsonStorage, writeJsonStorage } from './lib/storage'
 import type {
   AssistantRecord,
+  AuthStatus,
   BillingHistoryData,
   ChatMessage,
   ChatModelOption,
@@ -76,6 +94,7 @@ import type {
 import type {
   CliClient,
   CliHistoryEntry,
+  CliProgressPayload,
   CliSessionDetails,
   CliSessionMessage,
   CliStatus,
@@ -213,6 +232,23 @@ type CliHistoryGroup = {
   items: CliHistoryEntry[]
 }
 
+type CliLogEntry = {
+  id: string
+  level: 'status' | 'error'
+  content: string
+  createdAt: number
+}
+
+type ChatSessionRecord = {
+  id: string
+  title: string
+  assistantId: string
+  model: string
+  group: string
+  updatedAt: number
+  messages: ChatBubbleMessage[]
+}
+
 const CLI_REASONING_OPTIONS = [
   { label: '低', value: 'low' },
   { label: '中', value: 'medium' },
@@ -223,6 +259,96 @@ const CLAUDE_REASONING_OPTIONS = [
   ...CLI_REASONING_OPTIONS,
   { label: '极限', value: 'max' },
 ] as const
+
+const DEFAULT_CHAT_MODEL = 'gpt-5.4'
+const DEFAULT_CODEX_MODEL = 'gpt-5.3-codex'
+const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-4-6'
+
+type BubbleActionConfig = {
+  key: string
+  label: string
+  icon: typeof Copy
+  onClick: () => void
+  disabled?: boolean
+}
+
+function resolvePreferredModel(
+  options: ChatModelOption[],
+  preferred: string,
+  fallback = ''
+) {
+  if (options.some((item) => item.value === preferred)) {
+    return preferred
+  }
+
+  if (fallback && options.some((item) => item.value === fallback)) {
+    return fallback
+  }
+
+  return options[0]?.value || preferred || fallback || ''
+}
+
+function isAbortError(error: unknown) {
+  if (!(error instanceof Error)) {
+    return false
+  }
+
+  return error.message.includes('请求已取消') || error.message.includes('已停止')
+}
+
+function BubbleMeta(props: {
+  side: 'left' | 'right'
+  createdAt: number
+  actions: BubbleActionConfig[]
+}) {
+  const { side, createdAt, actions } = props
+
+  return (
+    <div className={`message-meta ${side}`}>
+      {side === 'right' && (
+        <div className='bubble-actions'>
+          {actions.map((action) => {
+            const Icon = action.icon
+            return (
+              <button
+                key={action.key}
+                className='bubble-action'
+                type='button'
+                onClick={action.onClick}
+                title={action.label}
+                aria-label={action.label}
+                disabled={action.disabled}
+              >
+                <Icon size={14} />
+              </button>
+            )
+          })}
+        </div>
+      )}
+      <small>{formatDateTime(createdAt)}</small>
+      {side === 'left' && (
+        <div className='bubble-actions'>
+          {actions.map((action) => {
+            const Icon = action.icon
+            return (
+              <button
+                key={action.key}
+                className='bubble-action'
+                type='button'
+                onClick={action.onClick}
+                title={action.label}
+                aria-label={action.label}
+                disabled={action.disabled}
+              >
+                <Icon size={14} />
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
 
 function getStoredVerificationKey(userId: number) {
   return `oneapi-desktop-verify-${userId}`
@@ -340,6 +466,60 @@ function groupCliHistoryByProject(items: CliHistoryEntry[]) {
     .sort((left, right) => (right.items[0]?.updatedAt || 0) - (left.items[0]?.updatedAt || 0))
 }
 
+function normalizeProjectKey(value?: string) {
+  return (value || '')
+    .replace(/[\\/]+/g, '/')
+    .replace(/\/$/, '')
+    .toLowerCase()
+}
+
+function resolveProjectNameFromPath(value?: string) {
+  const normalized = (value || '').split(/[\\/]/).filter(Boolean)
+  return normalized.at(-1) || ''
+}
+
+function createDefaultChatSession(
+  activeAssistantId: string,
+  model: string,
+  group: string
+): ChatSessionRecord {
+  return {
+    id: `chat-session-${Date.now()}`,
+    title: '新对话',
+    assistantId: activeAssistantId,
+    model,
+    group,
+    updatedAt: Date.now(),
+    messages: [],
+  }
+}
+
+function mergeCliMessages(left: CliMessage[], right: CliMessage[]) {
+  const seen = new Set<string>()
+  return [...left, ...right]
+    .sort((a, b) => a.createdAt - b.createdAt)
+    .filter((item) => {
+      const key = `${item.role}:${item.createdAt}:${item.content}`
+      if (seen.has(key)) {
+        return false
+      }
+      seen.add(key)
+      return true
+    })
+}
+
+function mergeCliLogs(left: CliLogEntry[], right: CliLogEntry[]) {
+  const seen = new Set<string>()
+  return [...left, ...right].filter((item) => {
+    const key = `${item.level}:${item.createdAt}:${item.content}`
+    if (seen.has(key)) {
+      return false
+    }
+    seen.add(key)
+    return true
+  })
+}
+
 function PasswordField(props: {
   value: string
   placeholder: string
@@ -398,11 +578,13 @@ function AssistantsChatWorkspace(props: {
 }) {
   const { toast } = props
   const [models, setModels] = useState<ChatModelOption[]>([])
-  const [messages, setMessages] = useState<ChatBubbleMessage[]>([])
+  const [chatSessions, setChatSessions] = useState<ChatSessionRecord[]>([])
+  const [activeSessionId, setActiveSessionId] = useState('')
   const [draft, setDraft] = useState('')
   const [selectedModel, setSelectedModel] = useState('')
   const [selectedGroup, setSelectedGroup] = useState('')
   const [sending, setSending] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
   const [assistantMenuOpen, setAssistantMenuOpen] = useState(false)
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
   const [assistantName, setAssistantName] = useState('')
@@ -414,11 +596,22 @@ function AssistantsChatWorkspace(props: {
   const { ref: draftRef, resize: resizeDraft } = useAutosizeTextarea(draft)
   const assistantMenuRef = useRef<HTMLDivElement | null>(null)
   const modelMenuRef = useRef<HTMLDivElement | null>(null)
+  const pendingRequestIdRef = useRef('')
+  const stoppingRef = useRef(false)
 
   const activeAssistant = useMemo(
     () => assistants.find((item) => item.id === activeAssistantId) ?? assistants[0] ?? null,
     [assistants, activeAssistantId]
   )
+  const resolvedActiveSessionId =
+    activeSessionId && chatSessions.some((item) => item.id === activeSessionId)
+      ? activeSessionId
+      : chatSessions[0]?.id || ''
+  const activeSession = useMemo(
+    () => chatSessions.find((item) => item.id === resolvedActiveSessionId) ?? null,
+    [chatSessions, resolvedActiveSessionId]
+  )
+  const messages = activeSession?.messages || []
 
   const activeModelLabel = useMemo(
     () => models.find((item) => item.value === selectedModel)?.label || selectedModel || activeAssistant?.model || '默认模型',
@@ -440,8 +633,23 @@ function AssistantsChatWorkspace(props: {
         }
 
         setModels(nextModels)
-        setSelectedModel((current) => current || activeAssistant?.model || nextModels[0]?.value || '')
+        setSelectedModel((current) =>
+          current || resolvePreferredModel(nextModels, DEFAULT_CHAT_MODEL, activeAssistant?.model)
+        )
         setSelectedGroup((current) => current || nextGroups[0]?.value || '')
+        setChatSessions((current) => {
+          if (current.length > 0) {
+            return current
+          }
+
+          return [
+            createDefaultChatSession(
+              activeAssistant?.id || initialAssistantsState.assistants[0]?.id || '',
+              resolvePreferredModel(nextModels, DEFAULT_CHAT_MODEL, activeAssistant?.model),
+              nextGroups[0]?.value || ''
+            ),
+          ]
+        })
       } catch (error) {
         if (!disposed) {
           toast(error instanceof Error ? error.message : '加载聊天配置失败')
@@ -452,7 +660,7 @@ function AssistantsChatWorkspace(props: {
     return () => {
       disposed = true
     }
-  }, [activeAssistant?.model, toast])
+  }, [activeAssistant?.id, activeAssistant?.model, initialAssistantsState.assistants, toast])
 
   useEffect(() => {
     function handlePointerDown(event: PointerEvent) {
@@ -484,7 +692,7 @@ function AssistantsChatWorkspace(props: {
       name: assistantName.trim(),
       description: assistantDescription.trim() || '自定义助手',
       prompt: assistantPrompt.trim(),
-      model: selectedModel || models[0]?.value || 'gpt-4o',
+      model: selectedModel || resolvePreferredModel(models, DEFAULT_CHAT_MODEL),
       temperature: 0.7,
     })
     const all = [next, ...assistants]
@@ -499,28 +707,73 @@ function AssistantsChatWorkspace(props: {
     toast('自定义助手已创建。')
   }
 
-  async function handleSendMessage() {
-    if (!draft.trim() || sending) {
+  function createChatSession() {
+    const next = createDefaultChatSession(
+      activeAssistantId,
+      selectedModel || resolvePreferredModel(models, DEFAULT_CHAT_MODEL, activeAssistant?.model),
+      selectedGroup
+    )
+    setChatSessions((current) => [next, ...current])
+    setActiveSessionId(next.id)
+    setDraft('')
+    window.setTimeout(() => resizeDraft(), 0)
+    setHistoryOpen(false)
+  }
+
+  function syncActiveSession(
+    updater: (session: ChatSessionRecord) => ChatSessionRecord | null
+  ) {
+    if (!resolvedActiveSessionId) {
       return
     }
 
-    const resolvedModel = selectedModel || activeAssistant?.model
+    setChatSessions((current) =>
+      current
+        .map((item) => {
+          if (item.id !== resolvedActiveSessionId) {
+            return item
+          }
+          return updater(item) ?? item
+        })
+        .sort((left, right) => right.updatedAt - left.updatedAt)
+    )
+  }
+
+  async function handleSendMessage(nextDraft?: string) {
+    const normalizedDraft = (nextDraft ?? draft).trim()
+    if (!normalizedDraft || sending || !resolvedActiveSessionId) {
+      return
+    }
+
+    const resolvedModel = selectedModel || resolvePreferredModel(models, DEFAULT_CHAT_MODEL, activeAssistant?.model)
     if (!resolvedModel) {
       toast('当前没有可用模型。')
       return
     }
     const resolvedModelLabel =
       models.find((item) => item.value === resolvedModel)?.label || resolvedModel
+    const createdAt = new Date().getTime()
+    const requestId = `chat-${createdAt}`
 
     const userMessage: ChatMessage = {
-      id: `user-${Date.now()}`,
+      id: `user-${createdAt}`,
       role: 'user',
-      content: draft.trim(),
-      createdAt: Date.now(),
+      content: normalizedDraft,
+      createdAt,
     }
 
     const history = [...messages, userMessage]
-    setMessages(history)
+    syncActiveSession((session) => ({
+      ...session,
+      assistantId: activeAssistant?.id || session.assistantId,
+      model: resolvedModel,
+      group: selectedGroup,
+      updatedAt: Date.now(),
+      title: clipText(userMessage.content.replace(/\s+/g, ' '), 24) || session.title,
+      messages: history,
+    }))
+    pendingRequestIdRef.current = requestId
+    stoppingRef.current = false
     setDraft('')
     window.setTimeout(() => resizeDraft(), 0)
     setSending(true)
@@ -538,32 +791,113 @@ function AssistantsChatWorkspace(props: {
             content: item.content,
           })),
         ],
+      }, {
+        requestId,
       })
 
-      setMessages((current) => [
-        ...current,
-        {
-          id: `assistant-${Date.now()}`,
-          role: 'assistant',
-          content: toMessageText(response.choices?.[0]?.message?.content),
-          createdAt: Date.now(),
-          usage: response.usage,
-          modelLabel: resolvedModelLabel,
-        },
-      ])
+      syncActiveSession((session) => ({
+        ...session,
+        assistantId: activeAssistant?.id || session.assistantId,
+        model: resolvedModel,
+        group: selectedGroup,
+        updatedAt: Date.now(),
+        messages: [
+          ...session.messages,
+          {
+            id: `assistant-${Date.now()}`,
+            role: 'assistant',
+            content: toMessageText(response.choices?.[0]?.message?.content),
+            createdAt: Date.now(),
+            usage: response.usage,
+            modelLabel: resolvedModelLabel,
+          },
+        ],
+      }))
     } catch (error) {
-      toast(error instanceof Error ? error.message : '聊天请求失败')
+      if (!stoppingRef.current && !isAbortError(error)) {
+        toast(error instanceof Error ? error.message : '聊天请求失败')
+      }
     } finally {
+      pendingRequestIdRef.current = ''
+      stoppingRef.current = false
       setSending(false)
     }
   }
 
+  async function handleStopMessage() {
+    if (!pendingRequestIdRef.current) {
+      return
+    }
+
+    stoppingRef.current = true
+    try {
+      await stopChatCompletion(pendingRequestIdRef.current)
+      toast('已停止当前回复。')
+    } catch (error) {
+      toast(error instanceof Error ? error.message : '停止失败')
+    }
+  }
+
+  async function copyText(content: string) {
+    try {
+      await navigator.clipboard.writeText(content)
+      toast('已复制到剪贴板。')
+    } catch {
+      toast('复制失败，请检查系统剪贴板权限。')
+    }
+  }
+
+  function findReplayPrompt(messageId: string) {
+    const targetIndex = messages.findIndex((item) => item.id === messageId)
+    if (targetIndex < 0) {
+      return ''
+    }
+
+    const target = messages[targetIndex]
+    if (target.role === 'user') {
+      return target.content
+    }
+
+    for (let index = targetIndex - 1; index >= 0; index -= 1) {
+      if (messages[index]?.role === 'user') {
+        return messages[index]?.content || ''
+      }
+    }
+
+    return ''
+  }
+
+  function handleSelectChatSession(session: ChatSessionRecord) {
+    setActiveSessionId(session.id)
+    setActiveAssistantId(session.assistantId || activeAssistantId)
+    saveActiveAssistantId(session.assistantId || activeAssistantId)
+    setSelectedModel(
+      session.model || resolvePreferredModel(models, DEFAULT_CHAT_MODEL, activeAssistant?.model)
+    )
+    setSelectedGroup(session.group || selectedGroup)
+    setDraft('')
+    window.setTimeout(() => resizeDraft(), 0)
+    setHistoryOpen(false)
+  }
+
   return (
     <section className='workspace-page chat-page'>
-      <article className='panel conversation-panel chat-panel-surface'>
-        <div className='message-stream'>
-          {messages.length > 0 &&
-            messages.map((item) => (
+      <div className={`chat-layout ${historyOpen ? 'history-open' : ''}`}>
+        <article className='panel conversation-panel chat-panel-surface'>
+          <div className='workspace-corner-tools'>
+            <button
+              className='ghost-button icon-only'
+              type='button'
+              onClick={() => setHistoryOpen((value) => !value)}
+              title='最近会话'
+              aria-label='最近会话'
+            >
+              {historyOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
+            </button>
+          </div>
+
+          <div className='message-stream'>
+            {messages.map((item) => (
               <div key={item.id} className={`message-bubble ${item.role}`}>
                 <span className='message-role'>
                   {item.role === 'assistant'
@@ -573,135 +907,213 @@ function AssistantsChatWorkspace(props: {
                       : '你'}
                 </span>
                 <p>{item.content}</p>
-                <small>{formatDateTime(item.createdAt)}</small>
+                <BubbleMeta
+                  side={item.role === 'user' ? 'right' : 'left'}
+                  createdAt={item.createdAt}
+                  actions={
+                    item.role === 'system'
+                      ? [
+                          {
+                            key: 'copy',
+                            label: '复制',
+                            icon: Copy,
+                            onClick: () => void copyText(item.content),
+                          },
+                        ]
+                      : [
+                          {
+                            key: 'copy',
+                            label: '复制',
+                            icon: Copy,
+                            onClick: () => void copyText(item.content),
+                          },
+                          {
+                            key: 'replay',
+                            label: '重发',
+                            icon: RotateCcw,
+                            disabled: sending,
+                            onClick: () => {
+                              const replayPrompt = findReplayPrompt(item.id)
+                              if (!replayPrompt) {
+                                toast('未找到可重新发送的提问。')
+                                return
+                              }
+                              void handleSendMessage(replayPrompt)
+                            },
+                          },
+                        ]
+                  }
+                />
               </div>
             ))}
-        </div>
+          </div>
 
-        <div className='composer shell-composer chat-composer'>
-          <textarea
-            ref={draftRef}
-            value={draft}
-            rows={1}
-            onChange={(event) => {
-              setDraft(event.target.value)
-              resizeDraft()
-            }}
-            onInput={(event) => syncTextareaHeight(event.currentTarget)}
-            placeholder='输入你的问题、任务或上下文。'
-          />
-          <div className='composer-toolbar'>
-            <div className='composer-actions left chat-toolbar-actions'>
-              <div className='toolbar-picker' ref={assistantMenuRef}>
-                <button
-                  className='ghost-button tiny picker-trigger icon-picker-trigger'
-                  type='button'
-                  aria-expanded={assistantMenuOpen}
-                  onClick={() => {
-                    setModelMenuOpen(false)
-                    setAssistantMenuOpen((value) => !value)
-                  }}
-                  title='助手提示词'
-                >
-                  <Sparkles size={16} />
-                  <strong>{activeAssistant?.name || '通用助手'}</strong>
-                </button>
-                {assistantMenuOpen && (
-                  <div className='picker-menu assistant-menu'>
-                    <div className='picker-menu-head'>
-                      <strong>助手示词</strong>
-                      <span>点击即可切换当前助手</span>
-                    </div>
-                    <div className='picker-menu-list'>
-                      {assistants.map((item) => (
-                        <button
-                          key={item.id}
-                          type='button'
-                          className={`picker-option ${item.id === activeAssistantId ? 'active' : ''}`}
-                          onClick={() => {
-                            setActiveAssistantId(item.id)
-                            saveActiveAssistantId(item.id)
-                            setAssistantMenuOpen(false)
-                          }}
-                        >
-                          <strong>{item.name}</strong>
-                          <span>{item.description}</span>
+          <div className='composer shell-composer chat-composer'>
+            <textarea
+              ref={draftRef}
+              value={draft}
+              rows={1}
+              onChange={(event) => {
+                setDraft(event.target.value)
+                resizeDraft()
+              }}
+              onInput={(event) => syncTextareaHeight(event.currentTarget)}
+              placeholder='输入你的问题、任务或上下文。'
+            />
+            <div className='composer-toolbar'>
+              <div className='composer-actions left chat-toolbar-actions'>
+                <div className='toolbar-picker' ref={assistantMenuRef}>
+                  <button
+                    className='ghost-button tiny picker-trigger icon-picker-trigger'
+                    type='button'
+                    aria-expanded={assistantMenuOpen}
+                    onClick={() => {
+                      setModelMenuOpen(false)
+                      setAssistantMenuOpen((value) => !value)
+                    }}
+                    title='助手提示词'
+                  >
+                    <Sparkles size={16} />
+                    <strong>{activeAssistant?.name || '通用助手'}</strong>
+                  </button>
+                  {assistantMenuOpen && (
+                    <div className='picker-menu assistant-menu'>
+                      <div className='picker-menu-head'>
+                        <strong>助手提示词</strong>
+                        <span>点击即可切换当前助手</span>
+                      </div>
+                      <div className='picker-menu-list'>
+                        {assistants.map((item) => (
+                          <button
+                            key={item.id}
+                            type='button'
+                            className={`picker-option ${item.id === activeAssistantId ? 'active' : ''}`}
+                            onClick={() => {
+                              setActiveAssistantId(item.id)
+                              saveActiveAssistantId(item.id)
+                              setAssistantMenuOpen(false)
+                            }}
+                          >
+                            <strong>{item.name}</strong>
+                            <span>{item.description}</span>
+                          </button>
+                        ))}
+                      </div>
+                      <div className='picker-divider' />
+                      <div className='subform assistant-inline-form'>
+                        <input
+                          value={assistantName}
+                          onChange={(event) => setAssistantName(event.target.value)}
+                          placeholder='助手名称，例如法务助手'
+                        />
+                        <input
+                          value={assistantDescription}
+                          onChange={(event) => setAssistantDescription(event.target.value)}
+                          placeholder='一句话描述'
+                        />
+                        <textarea
+                          value={assistantPrompt}
+                          onChange={(event) => setAssistantPrompt(event.target.value)}
+                          placeholder='输入提示词，保存后即可作为专用助手参与聊天。'
+                        />
+                        <button className='secondary-button full' type='button' onClick={handleCreateAssistant}>
+                          <Plus size={16} />
+                          <span>新建自定义助手</span>
                         </button>
-                      ))}
+                      </div>
                     </div>
-                    <div className='picker-divider' />
-                    <div className='subform assistant-inline-form'>
-                      <input
-                        value={assistantName}
-                        onChange={(event) => setAssistantName(event.target.value)}
-                        placeholder='助手名称，例如法务助手'
-                      />
-                      <input
-                        value={assistantDescription}
-                        onChange={(event) => setAssistantDescription(event.target.value)}
-                        placeholder='一句话描述'
-                      />
-                      <textarea
-                        value={assistantPrompt}
-                        onChange={(event) => setAssistantPrompt(event.target.value)}
-                        placeholder='输入提示词，保存后即可作为专用助手参与聊天。'
-                      />
-                      <button className='secondary-button full' type='button' onClick={handleCreateAssistant}>
-                        <Plus size={16} />
-                        <span>新建自定义助手</span>
-                      </button>
+                  )}
+                </div>
+
+                <div className='toolbar-picker' ref={modelMenuRef}>
+                  <button
+                    className='ghost-button tiny picker-trigger icon-picker-trigger'
+                    type='button'
+                    aria-expanded={modelMenuOpen}
+                    onClick={() => {
+                      setAssistantMenuOpen(false)
+                      setModelMenuOpen((value) => !value)
+                    }}
+                    title='AI 选择'
+                  >
+                    <Bot size={16} />
+                    <strong>{activeModelLabel}</strong>
+                  </button>
+                  {modelMenuOpen && (
+                    <div className='picker-menu model-menu'>
+                      <div className='picker-menu-head'>
+                        <strong>AI 选择</strong>
+                        <span>切换当前对话所用模型</span>
+                      </div>
+                      <div className='picker-menu-list'>
+                        {models.map((item) => (
+                          <button
+                            key={item.value}
+                            type='button'
+                            className={`picker-option ${item.value === selectedModel ? 'active' : ''}`}
+                            onClick={() => {
+                              setSelectedModel(item.value)
+                              setModelMenuOpen(false)
+                            }}
+                          >
+                            <strong>{item.label}</strong>
+                            <span>{item.value}</span>
+                          </button>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
-              <div className='toolbar-picker' ref={modelMenuRef}>
+
+              <div className='composer-actions right'>
                 <button
-                  className='ghost-button tiny picker-trigger icon-picker-trigger'
+                  className={`primary-button icon-only send-button ${sending ? 'stop-button' : ''}`}
                   type='button'
-                  aria-expanded={modelMenuOpen}
-                  onClick={() => {
-                    setAssistantMenuOpen(false)
-                    setModelMenuOpen((value) => !value)
-                  }}
-                  title='AI 选择'
+                  onClick={() => void (sending ? handleStopMessage() : handleSendMessage())}
+                  title={sending ? '停止回复' : '发送消息'}
+                  aria-label={sending ? '停止回复' : '发送消息'}
                 >
-                  <Bot size={16} />
-                  <strong>{activeModelLabel}</strong>
+                  {sending ? <Square size={14} /> : <Send size={16} />}
                 </button>
-                {modelMenuOpen && (
-                  <div className='picker-menu model-menu'>
-                    <div className='picker-menu-head'>
-                      <strong>AI 选择</strong>
-                      <span>切换当前对话所用模型</span>
-                    </div>
-                    <div className='picker-menu-list'>
-                      {models.map((item) => (
-                        <button
-                          key={item.value}
-                          type='button'
-                          className={`picker-option ${item.value === selectedModel ? 'active' : ''}`}
-                          onClick={() => {
-                            setSelectedModel(item.value)
-                            setModelMenuOpen(false)
-                          }}
-                        >
-                          <strong>{item.label}</strong>
-                          <span>{item.value}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
               </div>
-            </div>
-            <div className='composer-actions right'>
-              <button className='primary-button icon-only send-button' type='button' disabled={sending} onClick={() => void handleSendMessage()}>
-                {sending ? <LoaderCircle className='spin' size={16} /> : <Send size={16} />}
-              </button>
             </div>
           </div>
-        </div>
-      </article>
+        </article>
+
+        <aside className={`panel chat-history-panel ${historyOpen ? 'open' : ''}`}>
+          <div className='panel-header compact'>
+            <div>
+              <span className='eyebrow dark'>历史记录</span>
+              <h2>最近会话</h2>
+            </div>
+            <button className='secondary-button tiny' type='button' onClick={createChatSession}>
+              <Plus size={16} />
+              <span>新对话</span>
+            </button>
+          </div>
+
+          <div className='side-pane-scroll'>
+            {chatSessions.length === 0 ? (
+              <EmptyState title='当前没有聊天会话' description='发送第一条消息后，会话会出现在这里。' />
+            ) : (
+              <div className='subrecords compact-records'>
+                {chatSessions.map((item) => (
+                  <button
+                    key={item.id}
+                    type='button'
+                    className={`record-row action-row session-row ${item.id === resolvedActiveSessionId ? 'highlighted' : ''}`}
+                    onClick={() => handleSelectChatSession(item)}
+                  >
+                    <span className='session-row-preview'>{clipText(item.title, 56)}</span>
+                    <small>{formatDateTime(item.updatedAt)}</small>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </aside>
+      </div>
     </section>
   )
 }
@@ -833,56 +1245,58 @@ function SubscriptionsWorkspace(props: {
               )}
             </div>
 
-            <div className='panel-block'>
-              <div className='list-block-header'>
-                <strong>已有订阅</strong>
-                <span>查看当前订阅状态与额度使用情况</span>
-              </div>
-              <div className='subrecords'>
-                {allSubscriptions.length === 0 ? (
-                  <EmptyState title='还没有订阅记录' description='购买套餐后会在这里看到订阅状态和用量。' />
-                ) : (
-                  allSubscriptions.map((item) => (
-                    <div key={item.subscription.id} className='record-row'>
-                      <div>
-                        <strong>订阅 #{item.subscription.id}</strong>
-                        <span>
-                          已用 {formatQuota(item.subscription.amount_used)} / {formatQuota(item.subscription.amount_total)}
-                        </span>
+            <div className='subscription-side-column'>
+              <div className='panel-block'>
+                <div className='list-block-header'>
+                  <strong>已有订阅</strong>
+                  <span>查看当前订阅状态与额度使用情况</span>
+                </div>
+                <div className='subrecords'>
+                  {allSubscriptions.length === 0 ? (
+                    <EmptyState title='还没有订阅记录' description='购买套餐后会在这里看到订阅状态和用量。' />
+                  ) : (
+                    allSubscriptions.map((item) => (
+                      <div key={item.subscription.id} className='record-row'>
+                        <div>
+                          <strong>订阅 #{item.subscription.id}</strong>
+                          <span>
+                            已用 {formatQuota(item.subscription.amount_used)} / {formatQuota(item.subscription.amount_total)}
+                          </span>
+                        </div>
+                        <small>{item.subscription.status}</small>
                       </div>
-                      <small>{item.subscription.status}</small>
-                    </div>
-                  ))
-                )}
+                    ))
+                  )}
+                </div>
               </div>
-            </div>
 
-            <div className='panel-block'>
-              <div className='list-block-header'>
-                <strong>订阅概览</strong>
-                <span>当前账户的套餐使用摘要</span>
-              </div>
-              <div className='subrecords'>
-                <div className='record-row'>
-                  <div>
-                    <strong>生效订阅</strong>
-                    <span>{activeSubscriptions.length > 0 ? '当前存在可用套餐，可优先抵扣。' : '当前没有生效中的订阅。'}</span>
-                  </div>
-                  <small>{activeSubscriptions.length}</small>
+              <div className='panel-block'>
+                <div className='list-block-header'>
+                  <strong>订阅概览</strong>
+                  <span>当前账户的套餐使用摘要</span>
                 </div>
-                <div className='record-row'>
-                  <div>
-                    <strong>账单偏好</strong>
-                    <span>{subscriptionSelf?.billing_preference || '使用服务端默认配置'}</span>
+                <div className='subrecords'>
+                  <div className='record-row'>
+                    <div>
+                      <strong>生效订阅</strong>
+                      <span>{activeSubscriptions.length > 0 ? '当前存在可用套餐，可优先抵扣。' : '当前没有生效中的订阅。'}</span>
+                    </div>
+                    <small>{activeSubscriptions.length}</small>
                   </div>
-                  <small>计费策略</small>
-                </div>
-                <div className='record-row'>
-                  <div>
-                    <strong>钱包支付</strong>
-                    <span>{paymentInfo?.enable_wallet_payment ? '已开启，可直接用钱包购买套餐。' : '未开启钱包购买。'}</span>
+                  <div className='record-row'>
+                    <div>
+                      <strong>账单偏好</strong>
+                      <span>{subscriptionSelf?.billing_preference || '使用服务端默认配置'}</span>
+                    </div>
+                    <small>计费策略</small>
                   </div>
-                  <small>{paymentInfo?.enable_wallet_payment ? '可用' : '关闭'}</small>
+                  <div className='record-row'>
+                    <div>
+                      <strong>钱包支付</strong>
+                      <span>{paymentInfo?.enable_wallet_payment ? '已开启，可直接用钱包购买套餐。' : '未开启钱包购买。'}</span>
+                    </div>
+                    <small>{paymentInfo?.enable_wallet_payment ? '可用' : '关闭'}</small>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1006,6 +1420,30 @@ function WalletWorkspace(props: {
         </div>
 
         <div className='panel-scroll'>
+          <div className='panel-block hero-panel-block wallet-overview-card wallet-overview-top'>
+            <div className='wallet-overview-head'>
+              <div>
+                <span className='eyebrow dark'>账户统计</span>
+                <h3>钱包总览</h3>
+              </div>
+              <span className='metric-pill success'>已完成账单 {completedBillCount}</span>
+            </div>
+            <div className='wallet-overview-grid'>
+              <div className='wallet-overview-metric'>
+                <strong>{formatQuota(user.quota)}</strong>
+                <span>可用余额</span>
+              </div>
+              <div className='wallet-overview-metric'>
+                <strong>{formatQuota(user.used_quota)}</strong>
+                <span>历史消耗</span>
+              </div>
+              <div className='wallet-overview-metric'>
+                <strong>{user.request_count || 0}</strong>
+                <span>请求次数</span>
+              </div>
+            </div>
+          </div>
+
           <div className='stats-inline page-stats-grid'>
             <div className='mini-stat'>
               <strong>{formatQuota(user.quota)}</strong>
@@ -1026,30 +1464,6 @@ function WalletWorkspace(props: {
           </div>
 
           <div className='content-grid wallet-grid'>
-            <div className='panel-block hero-panel-block wallet-overview-card'>
-              <div className='wallet-overview-head'>
-                <div>
-                  <span className='eyebrow dark'>账户统计</span>
-                  <h3>钱包总览</h3>
-                </div>
-                <span className='metric-pill success'>已完成账单 {completedBillCount}</span>
-              </div>
-              <div className='wallet-overview-grid'>
-                <div className='wallet-overview-metric'>
-                  <strong>{formatQuota(user.quota)}</strong>
-                  <span>可用余额</span>
-                </div>
-                <div className='wallet-overview-metric'>
-                  <strong>{formatQuota(user.used_quota)}</strong>
-                  <span>历史消耗</span>
-                </div>
-                <div className='wallet-overview-metric'>
-                  <strong>{user.request_count || 0}</strong>
-                  <span>请求次数</span>
-                </div>
-              </div>
-            </div>
-
             <div className='panel-block'>
               <div className='list-block-header'>
                 <strong>充值与兑换</strong>
@@ -1314,17 +1728,13 @@ function MeWorkspace(props: {
 
     void (async () => {
       try {
-        const [nextKeys, nextAccessToken] = await Promise.all([
-          getApiKeys(),
-          requireSuccess(generateAccessToken()),
-        ])
+        const nextKeys = await getApiKeys()
 
         if (disposed) {
           return
         }
 
         setApiKeys(nextKeys?.items ?? [])
-        setAccessToken(nextAccessToken ?? '')
       } catch (error) {
         if (!disposed) {
           toast(error instanceof Error ? error.message : '加载账户信息失败')
@@ -1377,7 +1787,10 @@ function MeWorkspace(props: {
     }
 
     if (purpose === 'view-token') {
+      const nextAccessToken = await requireSuccess(generateAccessToken())
+      setAccessToken(nextAccessToken ?? '')
       setAccessTokenVisible(true)
+      toast('已生成新的系统访问令牌。')
     }
   }
 
@@ -1429,13 +1842,29 @@ function MeWorkspace(props: {
                   <div className='record-row'>
                     <div>
                       <strong>系统访问令牌</strong>
-                      <span>{accessTokenVisible ? clipText(accessToken, 52) : '默认隐藏，仅在验证密码后可临时查看。'}</span>
+                      <span>
+                        {accessTokenVisible
+                          ? accessToken || '当前没有可显示的系统访问令牌。'
+                          : '默认隐藏。验证密码后会生成新的系统访问令牌，并使旧令牌失效。'}
+                      </span>
                     </div>
                     <div className='record-actions'>
                       <small>高敏感</small>
                       <button className='ghost-button' type='button' onClick={() => void handleRevealAccessToken()}>
                         {accessTokenVisible ? '已显示' : '查看'}
                       </button>
+                      {accessTokenVisible && (
+                        <button
+                          className='ghost-button'
+                          type='button'
+                          onClick={() => {
+                            void navigator.clipboard.writeText(accessToken)
+                            toast('系统访问令牌已复制。')
+                          }}
+                        >
+                          复制
+                        </button>
+                      )}
                     </div>
                   </div>
                   <div className='record-row'>
@@ -1447,7 +1876,7 @@ function MeWorkspace(props: {
                   </div>
                 </div>
 
-                <div className='subform'>
+                <div className='subform me-key-create'>
                   <div className='list-block-header'>
                     <strong>新建 Key</strong>
                   </div>
@@ -1547,18 +1976,23 @@ function CliWorkspace(props: {
   client: CliClient
   toast: (message: string) => void
   openSettings: () => void
+  active: boolean
 }) {
-  const { client, toast, openSettings } = props
+  const { client, toast, openSettings, active } = props
   const [status, setStatus] = useState<CliStatus>(() => readCachedCliStatus(client))
   const [history, setHistory] = useState<CliHistoryEntry[]>([])
   const [historyOpen, setHistoryOpen] = useState(false)
-  const [activeHistoryId, setActiveHistoryId] = useState('')
   const [projectPath, setProjectPath] = useState('')
   const [projectName, setProjectName] = useState('')
   const [prompt, setPrompt] = useState('')
   const [running, setRunning] = useState(false)
-  const [activeSessionId, setActiveSessionId] = useState('')
+  const [projectSessionMap, setProjectSessionMap] = useState<Record<string, string>>({})
   const [sessionMessagesMap, setSessionMessagesMap] = useState<Record<string, CliMessage[]>>({})
+  const [sessionLogsMap, setSessionLogsMap] = useState<Record<string, CliLogEntry[]>>({})
+  const [sessionPartialMap, setSessionPartialMap] = useState<Record<string, string>>({})
+  const [requestSessionMap, setRequestSessionMap] = useState<
+    Record<string, { sessionId: string; projectPath: string }>
+  >({})
   const [cliModels, setCliModels] = useState<ChatModelOption[]>([])
   const [selectedModel, setSelectedModel] = useState('')
   const [reasoningEffort, setReasoningEffort] = useState(client === 'claude' ? 'high' : 'medium')
@@ -1567,14 +2001,39 @@ function CliWorkspace(props: {
   const { ref: promptRef, resize: resizePrompt } = useAutosizeTextarea(prompt)
   const modelMenuRef = useRef<HTMLDivElement | null>(null)
   const effortMenuRef = useRef<HTMLDivElement | null>(null)
+  const requestSessionMapRef = useRef(requestSessionMap)
+  const activeRequestIdRef = useRef('')
+  const stoppingRunRef = useRef(false)
 
   const historyGroups = useMemo(() => groupCliHistoryByProject(history), [history])
+  const currentProjectKey = useMemo(() => normalizeProjectKey(projectPath), [projectPath])
+  const activeSessionId = currentProjectKey ? projectSessionMap[currentProjectKey] || '' : ''
   const activeMessages = activeSessionId ? sessionMessagesMap[activeSessionId] || [] : []
+  const activeLogs = activeSessionId ? sessionLogsMap[activeSessionId] || [] : []
+  const activePartial = activeSessionId ? sessionPartialMap[activeSessionId] || '' : ''
   const reasoningOptions = client === 'claude' ? CLAUDE_REASONING_OPTIONS : CLI_REASONING_OPTIONS
+  const preferredCliModel = client === 'codex' ? DEFAULT_CODEX_MODEL : DEFAULT_CLAUDE_MODEL
   const selectedModelLabel =
     cliModels.find((item) => item.value === selectedModel)?.label || selectedModel || '默认模型'
   const selectedEffortLabel =
     reasoningOptions.find((item) => item.value === reasoningEffort)?.label || reasoningEffort
+  const visibleHistoryGroups = useMemo(() => {
+    if (!projectPath) {
+      return historyGroups
+    }
+
+    const filteredItems = history
+      .filter((item) => normalizeProjectKey(item.projectPath) === currentProjectKey)
+      .sort((left, right) => right.updatedAt - left.updatedAt)
+
+    return [
+      {
+        projectName: projectName || resolveProjectNameFromPath(projectPath) || '当前项目',
+        projectPath,
+        items: filteredItems,
+      },
+    ]
+  }, [currentProjectKey, history, historyGroups, projectName, projectPath])
 
   const refreshCliState = useCallback(async (silent = false) => {
     try {
@@ -1594,6 +2053,10 @@ function CliWorkspace(props: {
   }, [client, toast])
 
   useEffect(() => {
+    requestSessionMapRef.current = requestSessionMap
+  }, [requestSessionMap])
+
+  useEffect(() => {
     let disposed = false
 
     void (async () => {
@@ -1601,7 +2064,7 @@ function CliWorkspace(props: {
         const models = await getUserModels()
         if (!disposed) {
           setCliModels(models)
-          setSelectedModel((current) => current || models[0]?.value || '')
+          setSelectedModel((current) => current || resolvePreferredModel(models, preferredCliModel))
         }
       } catch {
         /* ignore model loading errors */
@@ -1611,7 +2074,7 @@ function CliWorkspace(props: {
     return () => {
       disposed = true
     }
-  }, [])
+  }, [preferredCliModel])
 
   useEffect(() => {
     window.setTimeout(() => {
@@ -1625,6 +2088,110 @@ function CliWorkspace(props: {
       window.clearInterval(timer)
     }
   }, [refreshCliState])
+
+  useEffect(() => {
+    const unsubscribe = onCliProgress((payload: CliProgressPayload) => {
+      if (payload.client !== client) {
+        return
+      }
+
+      const tracked = requestSessionMapRef.current[payload.requestId]
+      const currentSession = payload.sessionId || tracked?.sessionId
+      if (!currentSession) {
+        return
+      }
+
+      if (payload.sessionId && tracked?.sessionId && payload.sessionId !== tracked.sessionId) {
+        const nextSessionId = payload.sessionId
+        setProjectSessionMap((current) => ({
+          ...current,
+          [normalizeProjectKey(tracked.projectPath)]: nextSessionId,
+        }))
+        setSessionMessagesMap((current) => {
+          const previous = current[tracked.sessionId] || []
+          const incoming = current[nextSessionId] || []
+          const next = {
+            ...current,
+            [nextSessionId]: mergeCliMessages(previous, incoming),
+          }
+          delete next[tracked.sessionId]
+          return next
+        })
+        setSessionLogsMap((current) => {
+          const previous = current[tracked.sessionId] || []
+          const incoming = current[nextSessionId] || []
+          const next = {
+            ...current,
+            [nextSessionId]: mergeCliLogs(previous, incoming),
+          }
+          delete next[tracked.sessionId]
+          return next
+        })
+        setSessionPartialMap((current) => {
+          const fallbackPartial = current[tracked.sessionId] || ''
+          const incomingPartial = current[nextSessionId] || ''
+          const next = {
+            ...current,
+            [nextSessionId]: incomingPartial || fallbackPartial,
+          }
+          delete next[tracked.sessionId]
+          return next
+        })
+        setRequestSessionMap((current) => ({
+          ...current,
+          [payload.requestId]: {
+            ...current[payload.requestId],
+            sessionId: nextSessionId,
+          },
+        }))
+      }
+
+      const targetSessionId = payload.sessionId || tracked?.sessionId || currentSession
+
+      if (payload.kind === 'partial') {
+        setSessionPartialMap((current) => ({
+          ...current,
+          [targetSessionId]: payload.message,
+        }))
+        if (payload.done) {
+          window.setTimeout(() => {
+            setSessionPartialMap((current) => ({
+              ...current,
+              [targetSessionId]: '',
+            }))
+          }, 0)
+        }
+        return
+      }
+
+      setSessionLogsMap((current) => {
+        const nextEntry = {
+          id: `${payload.requestId}-${payload.kind}-${payload.createdAt}-${currentSession}`,
+          level: payload.kind === 'error' ? 'error' : 'status',
+          content: payload.message,
+          createdAt: payload.createdAt,
+        } satisfies CliLogEntry
+        const previous = current[targetSessionId] || []
+        const lastEntry = previous.at(-1)
+        if (lastEntry?.level === nextEntry.level && lastEntry.content === nextEntry.content) {
+          return current
+        }
+        return {
+          ...current,
+          [targetSessionId]: [...previous, nextEntry],
+        }
+      })
+
+      if (payload.done) {
+        setSessionPartialMap((current) => ({
+          ...current,
+          [targetSessionId]: '',
+        }))
+      }
+    })
+
+    return unsubscribe
+  }, [client])
 
   useEffect(() => {
     function handlePointerDown(event: PointerEvent) {
@@ -1647,48 +2214,94 @@ function CliWorkspace(props: {
   }, [effortMenuOpen, modelMenuOpen])
 
   useEffect(() => {
-    void setDesktopWindowTitle(projectName)
-  }, [projectName])
+    if (active) {
+      void setDesktopWindowTitle(projectName)
+    }
+  }, [active, projectName])
 
   function applyProjectPath(nextPath: string) {
     setProjectPath(nextPath)
-    const segments = nextPath.split(/[\\/]/).filter(Boolean)
-    setProjectName(segments.at(-1) || '')
+    setProjectName(resolveProjectNameFromPath(nextPath))
+  }
+
+  function bindProjectSession(nextProjectPath: string, sessionId: string) {
+    const nextProjectKey = normalizeProjectKey(nextProjectPath)
+    if (!nextProjectKey || !sessionId) {
+      return
+    }
+    setProjectSessionMap((current) => ({
+      ...current,
+      [nextProjectKey]: sessionId,
+    }))
+  }
+
+  function hydrateCliSession(
+    details: CliSessionDetails,
+    options: {
+      activateProject?: boolean
+    } = {}
+  ) {
+    if (details.projectPath) {
+      bindProjectSession(details.projectPath, details.id)
+      if (options.activateProject !== false) {
+        applyProjectPath(details.projectPath)
+      }
+    } else if (options.activateProject !== false) {
+      setProjectName(details.projectName || '')
+    }
+
+    setSessionMessagesMap((current) => ({
+      ...current,
+      [details.id]: details.messages,
+    }))
+    setSessionPartialMap((current) => ({
+      ...current,
+      [details.id]: '',
+    }))
+  }
+
+  async function ensureProjectSession(nextPath: string) {
+    const nextProjectKey = normalizeProjectKey(nextPath)
+    const existingSessionId = projectSessionMap[nextProjectKey]
+    if (existingSessionId) {
+      return
+    }
+
+    const matched = history
+      .filter((item) => normalizeProjectKey(item.projectPath) === nextProjectKey)
+      .sort((left, right) => right.updatedAt - left.updatedAt)[0]
+
+    if (matched) {
+      await handleOpenHistory(matched, false)
+      return
+    }
+
+    bindProjectSession(nextPath, `draft-${client}-${Date.now()}`)
   }
 
   async function handlePickProject() {
     const selected = await pickProjectDirectory()
     if (selected) {
       applyProjectPath(selected)
+      await ensureProjectSession(selected)
+      toast(`已切换到项目：${resolveProjectNameFromPath(selected) || selected}`)
     }
   }
 
-  function hydrateCliSession(details: CliSessionDetails) {
-    setActiveHistoryId(details.id)
-    setActiveSessionId(details.id)
-    if (details.projectPath) {
-      applyProjectPath(details.projectPath)
-    } else {
-      setProjectName(details.projectName || '')
-    }
-    setSessionMessagesMap((current) => ({
-      ...current,
-      [details.id]: details.messages,
-    }))
-  }
-
-  async function handleOpenHistory(item: CliHistoryEntry) {
-    setActiveHistoryId(item.id)
-    setActiveSessionId(item.id)
+  async function handleOpenHistory(item: CliHistoryEntry, activateProject = true) {
     if (item.projectPath) {
-      applyProjectPath(item.projectPath)
-    } else {
+      bindProjectSession(item.projectPath, item.id)
+      if (activateProject) {
+        applyProjectPath(item.projectPath)
+      }
+    } else if (activateProject) {
       setProjectName(item.projectName || item.title)
     }
     setPrompt('')
     window.setTimeout(() => resizePrompt(), 0)
 
     if (sessionMessagesMap[item.id]?.length) {
+      setHistoryOpen(false)
       return
     }
 
@@ -1698,10 +2311,29 @@ function CliWorkspace(props: {
         toast('未能读取完整会话记录。')
         return
       }
-      hydrateCliSession(details)
+      hydrateCliSession(details, { activateProject })
+      setHistoryOpen(false)
     } catch (error) {
       toast(error instanceof Error ? error.message : '读取会话失败')
     }
+  }
+
+  async function copyText(content: string) {
+    try {
+      await navigator.clipboard.writeText(content)
+      toast('已复制到剪贴板。')
+    } catch {
+      toast('复制失败，请检查系统剪贴板权限。')
+    }
+  }
+
+  function loadPromptForEdit(content: string) {
+    setPrompt(content)
+    window.setTimeout(() => {
+      syncTextareaHeight(promptRef.current)
+      promptRef.current?.focus()
+      promptRef.current?.setSelectionRange(content.length, content.length)
+    }, 0)
   }
 
   async function handleRun() {
@@ -1711,6 +2343,9 @@ function CliWorkspace(props: {
     }
 
     const nextPrompt = prompt.trim()
+    const requestId = `${client}-${Date.now()}`
+    const requestProjectPath = projectPath
+    const requestProjectKey = normalizeProjectKey(requestProjectPath)
     const currentSessionKey = activeSessionId || `draft-${client}-${Date.now()}`
     const userMessage = {
       id: `user-${Date.now()}`,
@@ -1719,10 +2354,26 @@ function CliWorkspace(props: {
       createdAt: Date.now(),
     }
 
-    setActiveSessionId(currentSessionKey)
+    setProjectSessionMap((current) => ({
+      ...current,
+      [requestProjectKey]: currentSessionKey,
+    }))
+    setRequestSessionMap((current) => ({
+      ...current,
+      [requestId]: {
+        sessionId: currentSessionKey,
+        projectPath: requestProjectPath,
+      },
+    }))
+    activeRequestIdRef.current = requestId
+    stoppingRunRef.current = false
     setSessionMessagesMap((current) => ({
       ...current,
       [currentSessionKey]: [...(current[currentSessionKey] || []), userMessage],
+    }))
+    setSessionPartialMap((current) => ({
+      ...current,
+      [currentSessionKey]: '',
     }))
     setPrompt('')
     window.setTimeout(() => resizePrompt(), 0)
@@ -1731,7 +2382,8 @@ function CliWorkspace(props: {
     try {
       const response = await runCliPrompt({
         client,
-        projectPath,
+        requestId,
+        projectPath: requestProjectPath,
         prompt: nextPrompt,
         sessionId: activeSessionId || undefined,
         model: selectedModel || undefined,
@@ -1739,41 +2391,100 @@ function CliWorkspace(props: {
       })
 
       const nextSessionId = response.sessionId || currentSessionKey
-      setActiveSessionId(nextSessionId)
-      setSessionMessagesMap((current) => {
-        const existing =
-          nextSessionId === currentSessionKey
-            ? current[currentSessionKey] || []
-            : current[currentSessionKey] || current[nextSessionId] || []
-        const nextMap = {
-          ...current,
-          [nextSessionId]: [
-            ...existing,
-            {
-              id: `assistant-${Date.now()}`,
-              role: 'assistant' as const,
-              content: response.output || response.error || '未返回结果。',
-              createdAt: Date.now(),
-              modelLabel: client === 'codex' ? 'Codex' : selectedModelLabel || 'Claude',
-            },
-          ],
+      bindProjectSession(requestProjectPath, nextSessionId)
+
+      if (nextSessionId !== currentSessionKey) {
+        setSessionMessagesMap((current) => {
+          const previous = current[currentSessionKey] || []
+          const incoming = current[nextSessionId] || []
+          const next = {
+            ...current,
+            [nextSessionId]: mergeCliMessages(previous, incoming),
+          }
+          delete next[currentSessionKey]
+          return next
+        })
+        setSessionLogsMap((current) => {
+          const previous = current[currentSessionKey] || []
+          const incoming = current[nextSessionId] || []
+          const next = {
+            ...current,
+            [nextSessionId]: mergeCliLogs(previous, incoming),
+          }
+          delete next[currentSessionKey]
+          return next
+        })
+      }
+
+      try {
+        if (response.sessionId) {
+          const details = await getCliSession(client, response.sessionId)
+          if (details) {
+            hydrateCliSession(details, { activateProject: false })
+          }
         }
+      } catch {
+        /* ignore session hydration errors and keep fallback transcript */
+      }
 
-        if (nextSessionId !== currentSessionKey) {
-          delete nextMap[currentSessionKey]
+      if (response.output) {
+        const responseAborted = response.metadata?.aborted === true
+        if (!response.sessionId || responseAborted) {
+          setSessionMessagesMap((current) => {
+            const existing = current[nextSessionId] || []
+            const lastAssistant = [...existing].reverse().find((item) => item.role === 'assistant')
+            if (lastAssistant?.content === response.output) {
+              return current
+            }
+
+            return {
+              ...current,
+              [nextSessionId]: [
+                ...existing,
+                {
+                  id: `assistant-${Date.now()}`,
+                  role: 'assistant' as const,
+                  content: response.output,
+                  createdAt: Date.now(),
+                  modelLabel: selectedModelLabel,
+                },
+              ],
+            }
+          })
         }
+      }
 
-        return nextMap
-      })
-
-      if (!response.success) {
+      if (!response.success && response.metadata?.aborted !== true) {
         toast(response.error || `${client} 执行失败`)
       }
       await refreshCliState()
     } catch (error) {
-      toast(error instanceof Error ? error.message : '执行失败')
+      if (!stoppingRunRef.current && !isAbortError(error)) {
+        toast(error instanceof Error ? error.message : '执行失败')
+      }
     } finally {
+      setRequestSessionMap((current) => {
+        const next = { ...current }
+        delete next[requestId]
+        return next
+      })
+      activeRequestIdRef.current = ''
+      stoppingRunRef.current = false
       setRunning(false)
+    }
+  }
+
+  async function handleStopRun() {
+    if (!activeRequestIdRef.current) {
+      return
+    }
+
+    stoppingRunRef.current = true
+    try {
+      await stopCliPrompt(activeRequestIdRef.current)
+      toast(`已停止 ${client === 'codex' ? 'Codex' : 'Claude'} 当前回复。`)
+    } catch (error) {
+      toast(error instanceof Error ? error.message : '停止失败')
     }
   }
 
@@ -1781,6 +2492,18 @@ function CliWorkspace(props: {
     <section className='workspace-page cli-page'>
       <div className={`cli-layout ${historyOpen ? 'history-open' : ''}`}>
         <article className='panel cli-main-panel cli-panel-surface'>
+          <div className='workspace-corner-tools'>
+            <button
+              className='ghost-button icon-only'
+              type='button'
+              onClick={() => setHistoryOpen((value) => !value)}
+              title='最近会话'
+              aria-label='最近会话'
+            >
+              {historyOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
+            </button>
+          </div>
+
           {(!status.installed || !status.hasConfig) && (
             <div className='inline-notice warn'>
               <span>当前环境还未完成安装或配置，请先前往设置完成一键部署。</span>
@@ -1795,11 +2518,70 @@ function CliWorkspace(props: {
               <div key={item.id} className={`message-bubble ${item.role}`}>
                 <span className='message-role'>
                   {item.role === 'assistant'
-                    ? item.modelLabel || (client === 'codex' ? 'Codex' : 'Claude')
+                    ? item.modelLabel || selectedModelLabel
                     : '你'}
                 </span>
                 <p>{item.content}</p>
-                <small>{formatDateTime(item.createdAt)}</small>
+                <BubbleMeta
+                  side={item.role === 'user' ? 'right' : 'left'}
+                  createdAt={item.createdAt}
+                  actions={[
+                    {
+                      key: 'copy',
+                      label: '复制',
+                      icon: Copy,
+                      onClick: () => void copyText(item.content),
+                    },
+                    {
+                      key: 'edit',
+                      label: '编辑',
+                      icon: PencilLine,
+                      onClick: () => loadPromptForEdit(item.content),
+                    },
+                  ]}
+                />
+              </div>
+            ))}
+            {activePartial && (
+              <div className='message-bubble assistant streaming-bubble'>
+                <span className='message-role'>{selectedModelLabel}</span>
+                <p>{activePartial}</p>
+                <BubbleMeta
+                  side='left'
+                  createdAt={Date.now()}
+                  actions={[
+                    {
+                      key: 'copy',
+                      label: '复制',
+                      icon: Copy,
+                      onClick: () => void copyText(activePartial),
+                    },
+                    {
+                      key: 'edit',
+                      label: '编辑',
+                      icon: PencilLine,
+                      onClick: () => loadPromptForEdit(activePartial),
+                    },
+                  ]}
+                />
+              </div>
+            )}
+            {activeLogs.map((item) => (
+              <div key={item.id} className={`message-bubble system cli-log-bubble ${item.level === 'error' ? 'error' : ''}`}>
+                <span className='message-role'>{item.level === 'error' ? '运行异常' : '运行日志'}</span>
+                <p>{item.content}</p>
+                <BubbleMeta
+                  side='left'
+                  createdAt={item.createdAt}
+                  actions={[
+                    {
+                      key: 'copy',
+                      label: '复制',
+                      icon: Copy,
+                      onClick: () => void copyText(item.content),
+                    },
+                  ]}
+                />
               </div>
             ))}
           </div>
@@ -1818,7 +2600,12 @@ function CliWorkspace(props: {
             />
             <div className='composer-toolbar'>
               <div className='composer-actions left cli-toolbar-actions'>
-                <button className='ghost-button tiny icon-pill-trigger' type='button' onClick={() => void handlePickProject()}>
+                <button
+                  className='ghost-button tiny icon-pill-trigger'
+                  type='button'
+                  onClick={() => void handlePickProject()}
+                  title={projectPath || '选择目录'}
+                >
                   <FolderOpen size={16} />
                   <strong>{projectName || '选择目录'}</strong>
                 </button>
@@ -1911,11 +2698,14 @@ function CliWorkspace(props: {
                 <span className='metric-pill'>{status.hasConfig ? '配置已就绪' : '待配置'}</span>
               </div>
               <div className='composer-actions right'>
-                <button className='ghost-button icon-only' type='button' onClick={() => setHistoryOpen((value) => !value)}>
-                  {historyOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
-                </button>
-                <button className='primary-button icon-only send-button' type='button' disabled={running} onClick={() => void handleRun()}>
-                  {running ? <LoaderCircle className='spin' size={16} /> : <Send size={16} />}
+                <button
+                  className={`primary-button icon-only send-button ${running ? 'stop-button' : ''}`}
+                  type='button'
+                  onClick={() => void (running ? handleStopRun() : handleRun())}
+                  title={running ? '停止回复' : '发送消息'}
+                  aria-label={running ? '停止回复' : '发送消息'}
+                >
+                  {running ? <Square size={14} /> : <Send size={16} />}
                 </button>
               </div>
             </div>
@@ -1931,11 +2721,14 @@ function CliWorkspace(props: {
           </div>
 
           <div className='side-pane-scroll'>
-            {historyGroups.length === 0 ? (
-              <EmptyState title='当前没有可读取的历史' description='使用过本地 CLI 后，会话会显示在这里。' />
+            {visibleHistoryGroups.every((group) => group.items.length === 0) ? (
+              <EmptyState
+                title='当前没有可读取的历史'
+                description={projectPath ? '当前项目还没有本地 CLI 会话记录。' : '使用过本地 CLI 后，会话会显示在这里。'}
+              />
             ) : (
               <div className='subrecords history-groups'>
-                {historyGroups.map((group) => (
+                {visibleHistoryGroups.map((group) => (
                   <div key={group.projectPath || group.projectName} className='history-group'>
                     <div className='history-group-head'>
                       <strong>{group.projectName}</strong>
@@ -1946,7 +2739,7 @@ function CliWorkspace(props: {
                         <button
                           key={item.id}
                           type='button'
-                          className={`record-row action-row session-row ${item.id === activeHistoryId ? 'highlighted' : ''}`}
+                          className={`record-row action-row session-row ${item.id === activeSessionId ? 'highlighted' : ''}`}
                           onClick={() => void handleOpenHistory(item)}
                         >
                           <span className='session-row-preview'>{clipText(item.preview, 74)}</span>
@@ -2030,6 +2823,7 @@ function CliSetupCard(props: {
         client,
         apiKey: generated.key,
         baseUrl: 'http://ai.oneapi.center',
+        model: client === 'codex' ? DEFAULT_CODEX_MODEL : DEFAULT_CLAUDE_MODEL,
       })
       toast(`${client} 安装任务已开始。`)
     } catch (error) {
@@ -2157,11 +2951,12 @@ function AssistantWorkspace(props: {
   setMode: (mode: AssistantMode) => void
   toast: (message: string) => void
   openSettings: () => void
+  visible: boolean
 }) {
-  const { mode, setMode, toast, openSettings } = props
+  const { mode, setMode, toast, openSettings, visible } = props
 
   return (
-    <section className='workspace-page assistant-page'>
+    <section className={`workspace-page assistant-page ${visible ? '' : 'workspace-hidden'}`}>
       <div className='assistant-mode-float' role='tablist' aria-label='聊天形态切换'>
         {assistantModes.map((item) => (
           <button
@@ -2176,9 +2971,15 @@ function AssistantWorkspace(props: {
       </div>
 
       <div className='workspace-host assistant-host'>
-        {mode === 'chat' && <AssistantsChatWorkspace toast={toast} />}
-        {mode === 'codex' && <CliWorkspace client='codex' toast={toast} openSettings={openSettings} />}
-        {mode === 'claude' && <CliWorkspace client='claude' toast={toast} openSettings={openSettings} />}
+        <div className={mode === 'chat' ? 'workspace-shell active' : 'workspace-shell'}>
+          <AssistantsChatWorkspace toast={toast} />
+        </div>
+        <div className={mode === 'codex' ? 'workspace-shell active' : 'workspace-shell'}>
+          <CliWorkspace client='codex' toast={toast} openSettings={openSettings} active={visible && mode === 'codex'} />
+        </div>
+        <div className={mode === 'claude' ? 'workspace-shell active' : 'workspace-shell'}>
+          <CliWorkspace client='claude' toast={toast} openSettings={openSettings} active={visible && mode === 'claude'} />
+        </div>
       </div>
     </section>
   )
@@ -2191,11 +2992,57 @@ function LoginScreen(props: {
   toast: (message: string) => void
 }) {
   const { platformLabel, productName, onLoginSuccess, toast } = props
+  const [mode, setMode] = useState<'login' | 'register'>('login')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [twoFactorCode, setTwoFactorCode] = useState('')
   const [require2fa, setRequire2fa] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [authStatus, setAuthStatus] = useState<AuthStatus | null>(null)
+  const [registerUsernameValue, setRegisterUsernameValue] = useState('')
+  const [registerEmail, setRegisterEmail] = useState('')
+  const [registerPasswordValue, setRegisterPasswordValue] = useState('')
+  const [registerConfirmPassword, setRegisterConfirmPassword] = useState('')
+  const [verificationCode, setVerificationCode] = useState('')
+  const [sendingCode, setSendingCode] = useState(false)
+  const [countdown, setCountdown] = useState(0)
+
+  const registerEnabled =
+    authStatus?.register_enabled !== false && authStatus?.password_register_enabled !== false
+  const emailVerificationRequired = authStatus?.email_verification === true
+
+  useEffect(() => {
+    let disposed = false
+
+    void (async () => {
+      try {
+        const status = await unwrapEnvelope(getAuthStatus())
+        if (!disposed) {
+          setAuthStatus(status ?? null)
+        }
+      } catch {
+        if (!disposed) {
+          setAuthStatus(null)
+        }
+      }
+    })()
+
+    return () => {
+      disposed = true
+    }
+  }, [])
+
+  useEffect(() => {
+    if (countdown <= 0) {
+      return
+    }
+
+    const timer = window.setTimeout(() => {
+      setCountdown((current) => Math.max(current - 1, 0))
+    }, 1000)
+
+    return () => window.clearTimeout(timer)
+  }, [countdown])
 
   async function handlePasswordLogin() {
     if (!username.trim() || !password.trim()) {
@@ -2220,6 +3067,84 @@ function LoginScreen(props: {
       toast('登录成功。')
     } catch (error) {
       toast(error instanceof Error ? error.message : '登录失败')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  async function handleSendVerificationCode() {
+    if (!registerEmail.trim()) {
+      toast('请输入邮箱地址。')
+      return
+    }
+
+    setSendingCode(true)
+    try {
+      const result = await sendEmailVerification(registerEmail.trim())
+      if (!result.success) {
+        throw new Error(result.message || '验证码发送失败')
+      }
+      setCountdown(60)
+      toast('验证码已发送，请检查邮箱。')
+    } catch (error) {
+      toast(error instanceof Error ? error.message : '验证码发送失败')
+    } finally {
+      setSendingCode(false)
+    }
+  }
+
+  async function handleRegister() {
+    if (!registerEnabled) {
+      toast('当前服务端未开放注册。')
+      return
+    }
+
+    if (!registerUsernameValue.trim() || !registerPasswordValue.trim()) {
+      toast('请先填写注册账号和密码。')
+      return
+    }
+
+    if (registerPasswordValue !== registerConfirmPassword) {
+      toast('两次输入的密码不一致。')
+      return
+    }
+
+    if (emailVerificationRequired) {
+      if (!registerEmail.trim()) {
+        toast('当前注册需要填写邮箱。')
+        return
+      }
+
+      if (!verificationCode.trim()) {
+        toast('请输入邮箱验证码。')
+        return
+      }
+    }
+
+    setSubmitting(true)
+    try {
+      const result = await registerUser({
+        username: registerUsernameValue.trim(),
+        password: registerPasswordValue,
+        email: registerEmail.trim() || undefined,
+        verification_code: verificationCode.trim() || undefined,
+      })
+
+      if (!result.success) {
+        throw new Error(result.message || '注册失败')
+      }
+
+      setUsername(registerUsernameValue.trim())
+      setPassword(registerPasswordValue)
+      setMode('login')
+      setRegisterUsernameValue('')
+      setRegisterEmail('')
+      setRegisterPasswordValue('')
+      setRegisterConfirmPassword('')
+      setVerificationCode('')
+      toast('注册成功，请使用新账号登录。')
+    } catch (error) {
+      toast(error instanceof Error ? error.message : '注册失败')
     } finally {
       setSubmitting(false)
     }
@@ -2268,12 +3193,113 @@ function LoginScreen(props: {
         <div className='login-card'>
           <div className='panel-header compact'>
             <div>
-              <span className='eyebrow dark'>账号登录</span>
-              <h2>{require2fa ? '输入 2FA 验证码' : '登录你的 OneAPI 账号'}</h2>
+              <span className='eyebrow dark'>
+                {require2fa ? '二次验证' : mode === 'register' ? '创建账号' : '账号登录'}
+              </span>
+              <h2>
+                {require2fa
+                  ? '输入 2FA 验证码'
+                  : mode === 'register'
+                    ? '注册新的 OneAPI 账号'
+                    : '登录你的 OneAPI 账号'}
+              </h2>
             </div>
+            {!require2fa && (
+              <div className='inline-actions'>
+                <button
+                  className={`ghost-button tiny ${mode === 'login' ? 'selected-toggle' : ''}`}
+                  type='button'
+                  onClick={() => setMode('login')}
+                >
+                  登录
+                </button>
+                {registerEnabled && (
+                  <button
+                    className={`ghost-button tiny ${mode === 'register' ? 'selected-toggle' : ''}`}
+                    type='button'
+                    onClick={() => setMode('register')}
+                  >
+                    注册
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
-          {!require2fa ? (
+          {require2fa ? (
+            <div className='subform'>
+              <input
+                value={twoFactorCode}
+                onChange={(event) => setTwoFactorCode(event.target.value)}
+                placeholder='6 位验证码或备用码'
+              />
+              <button className='primary-button full' type='button' disabled={submitting} onClick={() => void handleTwoFactorLogin()}>
+                {submitting ? <LoaderCircle className='spin' size={16} /> : <CheckCircle2 size={16} />}
+                <span>{submitting ? '验证中' : '完成验证'}</span>
+              </button>
+              <button
+                className='ghost-button'
+                type='button'
+                onClick={() => {
+                  setRequire2fa(false)
+                  setMode('login')
+                }}
+              >
+                返回账号密码登录
+              </button>
+            </div>
+          ) : mode === 'register' ? (
+            <div className='subform'>
+              <input
+                value={registerUsernameValue}
+                onChange={(event) => setRegisterUsernameValue(event.target.value)}
+                placeholder='用户名'
+              />
+              <input
+                value={registerEmail}
+                onChange={(event) => setRegisterEmail(event.target.value)}
+                placeholder={emailVerificationRequired ? '邮箱（必填）' : '邮箱（选填）'}
+              />
+              <PasswordField
+                value={registerPasswordValue}
+                onChange={setRegisterPasswordValue}
+                placeholder='密码'
+              />
+              <PasswordField
+                value={registerConfirmPassword}
+                onChange={setRegisterConfirmPassword}
+                placeholder='确认密码'
+              />
+              {emailVerificationRequired && (
+                <div className='inline-fields verification-inline-fields'>
+                  <input
+                    value={verificationCode}
+                    onChange={(event) => setVerificationCode(event.target.value)}
+                    placeholder='邮箱验证码'
+                  />
+                  <button
+                    className='secondary-button'
+                    type='button'
+                    disabled={sendingCode || countdown > 0 || !registerEmail.trim()}
+                    onClick={() => void handleSendVerificationCode()}
+                  >
+                    <Mail size={16} />
+                    <span>{countdown > 0 ? `${countdown}s` : sendingCode ? '发送中' : '发送验证码'}</span>
+                  </button>
+                </div>
+              )}
+              <p className='helper-copy'>
+                注册频控以服务端识别到的公网出口 IP 为准；若该 IP 已被限制注册，会提示“此IP已拥有账号”。
+              </p>
+              <button className='primary-button full' type='button' disabled={submitting} onClick={() => void handleRegister()}>
+                {submitting ? <LoaderCircle className='spin' size={16} /> : <UserPlus size={16} />}
+                <span>{submitting ? '注册中' : '注册账号'}</span>
+              </button>
+              <button className='ghost-button' type='button' onClick={() => setMode('login')}>
+                返回登录
+              </button>
+            </div>
+          ) : (
             <div className='subform'>
               <input
                 value={username}
@@ -2285,21 +3311,12 @@ function LoginScreen(props: {
                 {submitting ? <LoaderCircle className='spin' size={16} /> : <LockKeyhole size={16} />}
                 <span>{submitting ? '登录中' : '登录'}</span>
               </button>
-            </div>
-          ) : (
-            <div className='subform'>
-              <input
-                value={twoFactorCode}
-                onChange={(event) => setTwoFactorCode(event.target.value)}
-                placeholder='6 位验证码或备用码'
-              />
-              <button className='primary-button full' type='button' disabled={submitting} onClick={() => void handleTwoFactorLogin()}>
-                {submitting ? <LoaderCircle className='spin' size={16} /> : <CheckCircle2 size={16} />}
-                <span>{submitting ? '验证中' : '完成验证'}</span>
-              </button>
-              <button className='ghost-button' type='button' onClick={() => setRequire2fa(false)}>
-                返回账号密码登录
-              </button>
+              {registerEnabled && (
+                <button className='ghost-button' type='button' onClick={() => setMode('register')}>
+                  <UserPlus size={16} />
+                  <span>注册新账号</span>
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -2349,6 +3366,12 @@ export function App() {
       })
   }, [setBootstrapping, setUser])
 
+  useEffect(() => {
+    if (sideTab !== 'assistants') {
+      void setDesktopWindowTitle('')
+    }
+  }, [sideTab])
+
   async function handleLogout() {
     const currentUserId = auth.user?.id
     try {
@@ -2396,7 +3419,6 @@ export function App() {
         <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
           <div className='sidebar-head'>
             <div className='brand'>
-              <div className='brand-mark'>O</div>
               {!collapsed && (
                 <div>
                   <div className='brand-name'>{productName}</div>
@@ -2453,7 +3475,7 @@ export function App() {
                     title='退出'
                     aria-label='退出'
                   >
-                    <LockKeyhole size={16} />
+                    <LogOut size={16} />
                   </button>
                 </div>
               )}
@@ -2463,14 +3485,13 @@ export function App() {
 
         <main className='main-panel'>
           <div className='workspace-host'>
-            {sideTab === 'assistants' && (
-              <AssistantWorkspace
-                mode={assistantMode}
-                setMode={setAssistantMode}
-                toast={setMessage}
-                openSettings={() => setSideTab('settings')}
-              />
-            )}
+            <AssistantWorkspace
+              mode={assistantMode}
+              setMode={setAssistantMode}
+              toast={setMessage}
+              openSettings={() => setSideTab('settings')}
+              visible={sideTab === 'assistants'}
+            />
             {sideTab === 'subscriptions' && <SubscriptionsWorkspace toast={setMessage} />}
             {sideTab === 'wallet' && <WalletWorkspace user={auth.user} toast={setMessage} />}
             {sideTab === 'usage' && <UsageWorkspace toast={setMessage} />}

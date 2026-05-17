@@ -5,6 +5,7 @@ export type DeployStatus = 'pending' | 'running' | 'success' | 'error'
 export interface DesktopApiRequest {
   method: ApiMethod
   path: string
+  requestId?: string
   query?: Record<string, string | number | boolean | null | undefined>
   body?: unknown
   headers?: Record<string, string>
@@ -57,6 +58,7 @@ export interface CliStatus {
 
 export interface CliRunRequest {
   client: CliClient
+  requestId: string
   projectPath: string
   prompt: string
   sessionId?: string
@@ -66,11 +68,22 @@ export interface CliRunRequest {
 
 export interface CliRunResponse {
   success: boolean
+  requestId: string
   output: string
   error: string
   raw: string
   sessionId?: string
   metadata: Record<string, unknown>
+}
+
+export interface CliProgressPayload {
+  client: CliClient
+  requestId: string
+  sessionId?: string
+  kind: 'status' | 'partial' | 'error'
+  message: string
+  createdAt: number
+  done?: boolean
 }
 
 export interface CliDeployRequest {

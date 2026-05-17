@@ -1,4 +1,4 @@
-import { desktopEnvelope, desktopRequest } from '../lib/desktop-client'
+import { desktopBridge, desktopEnvelope, desktopRequest } from '../lib/desktop-client'
 import type {
   ApiEnvelope,
   ChatCompletionResponse,
@@ -41,15 +41,22 @@ export async function sendChatCompletion(payload: {
   group?: string
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>
   temperature?: number
-}) {
+}, options: {
+  requestId?: string
+} = {}) {
   return desktopRequest<ChatCompletionResponse>({
     method: 'POST',
     path: '/pg/chat/completions',
+    requestId: options.requestId,
     body: {
       ...payload,
       stream: false,
     },
   })
+}
+
+export function stopChatCompletion(requestId: string) {
+  return desktopBridge().stopRequest(requestId)
 }
 
 export async function requireEnvelopeData<T>(promise: Promise<ApiEnvelope<T>>) {

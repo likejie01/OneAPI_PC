@@ -2,6 +2,7 @@ import { desktopBridge } from '../lib/desktop-client'
 import type {
   CliClient,
   CliDeployRequest,
+  CliProgressPayload,
   CliRunRequest,
   CliSessionDetails,
   DeployProgressPayload,
@@ -25,6 +26,14 @@ export function pickProjectDirectory() {
 
 export function runCliPrompt(input: CliRunRequest) {
   return desktopBridge().runCliPrompt(input)
+}
+
+export function stopCliPrompt(requestId: string) {
+  return desktopBridge().stopCliPrompt(requestId)
+}
+
+export function onCliProgress(listener: (payload: CliProgressPayload) => void) {
+  return desktopBridge().onCliProgress(listener)
 }
 
 export function setDesktopWindowTitle(projectName?: string) {

@@ -39,8 +39,12 @@ function withDesktopAuthHeaders(input: DesktopApiRequest) {
     ...(input.headers ?? {}),
   }
 
+  const requestPath = input.path.split('?')[0] || input.path
   const shouldAttachUserId =
-    !input.path.startsWith('/api/user/login') && input.path !== '/api/user/register'
+    !requestPath.startsWith('/api/user/login') &&
+    requestPath !== '/api/user/register' &&
+    requestPath !== '/api/status' &&
+    requestPath !== '/api/verification'
 
   if (shouldAttachUserId && !headers['New-Api-User']) {
     const userId = getStoredDesktopUserId()

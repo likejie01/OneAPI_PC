@@ -3,6 +3,7 @@ import type {
   CliClient,
   CliDeployRequest,
   CliHistoryEntry,
+  CliProgressPayload,
   CliSessionDetails,
   CliRunRequest,
   CliRunResponse,
@@ -22,6 +23,8 @@ contextBridge.exposeInMainWorld('desktopBridge', {
     }>,
   request: (input: DesktopApiRequest) =>
     ipcRenderer.invoke('desktop:api-request', input) as Promise<DesktopApiResponse>,
+  stopRequest: (requestId: string) =>
+    ipcRenderer.invoke('desktop:stop-api-request', requestId) as Promise<void>,
   openExternal: (url: string) => ipcRenderer.invoke('desktop:open-external', url) as Promise<void>,
   pickProjectDirectory: () =>
     ipcRenderer.invoke('desktop:pick-project') as Promise<string>,
@@ -42,6 +45,16 @@ contextBridge.exposeInMainWorld('desktopBridge', {
     }) as Promise<CliSessionDetails | null>,
   runCliPrompt: (input: CliRunRequest) =>
     ipcRenderer.invoke('desktop:run-cli', input) as Promise<CliRunResponse>,
+  stopCliPrompt: (requestId: string) =>
+    ipcRenderer.invoke('desktop:stop-cli', requestId) as Promise<void>,
+  onCliProgress: (listener: (payload: CliProgressPayload) => void) => {
+    const channel = 'desktop:cli-progress'
+    const wrapped = (_event: unknown, payload: CliProgressPayload) => listener(payload)
+    ipcRenderer.on(channel, wrapped)
+    return () => {
+      ipcRenderer.removeListener(channel, wrapped)
+    }
+  },
   setWindowTitle: (projectName?: string) =>
     ipcRenderer.invoke('desktop:set-window-title', projectName) as Promise<void>,
   deployCli: (input: CliDeployRequest) =>

@@ -29,9 +29,26 @@ export interface LoginPayload {
   password: string
 }
 
+export interface RegisterPayload {
+  username: string
+  password: string
+  email?: string
+  verification_code?: string
+  aff?: string
+  turnstile?: string
+}
+
 export interface LoginResult {
   require_2fa?: boolean
   id?: number
+}
+
+export interface AuthStatus {
+  register_enabled?: boolean
+  password_register_enabled?: boolean
+  email_verification?: boolean
+  user_agreement_enabled?: boolean
+  privacy_policy_enabled?: boolean
 }
 
 export interface AssistantRecord {

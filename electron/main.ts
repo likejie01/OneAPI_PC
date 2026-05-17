@@ -8,7 +8,7 @@ import {
   type WebContents,
 } from 'electron'
 import { randomUUID } from 'node:crypto'
-import { spawn } from 'node:child_process'
+import { spawn, type ChildProcess } from 'node:child_process'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -21,6 +21,9 @@ const isDev = !!process.env.VITE_DEV_SERVER_URL
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 let mainWindow: BrowserWindow | null = null
+const activeApiRequests = new Map<string, AbortController>()
+const activeCliProcesses = new Map<string, ChildProcess>()
+const stoppedCliRequests = new Set<string>()
 
 function resolveWorkspaceTitle(projectName?: string) {
   const normalized = projectName?.trim()
@@ -38,6 +41,7 @@ type DeployStatus = 'pending' | 'running' | 'success' | 'error'
 interface DesktopApiRequest {
   method: ApiMethod
   path: string
+  requestId?: string
   query?: Record<string, string | number | boolean | null | undefined>
   body?: unknown
   headers?: Record<string, string>
@@ -90,6 +94,7 @@ interface CliStatus {
 
 interface CliRunRequest {
   client: CliClient
+  requestId: string
   projectPath: string
   prompt: string
   sessionId?: string
@@ -99,11 +104,22 @@ interface CliRunRequest {
 
 interface CliRunResponse {
   success: boolean
+  requestId: string
   output: string
   error: string
   raw: string
   sessionId?: string
   metadata: Record<string, unknown>
+}
+
+interface CliProgressPayload {
+  client: CliClient
+  requestId: string
+  sessionId?: string
+  kind: 'status' | 'partial' | 'error'
+  message: string
+  createdAt: number
+  done?: boolean
 }
 
 interface CliDeployRequest {
@@ -206,6 +222,7 @@ async function parseResponse(response: Response) {
 async function requestApi(input: DesktopApiRequest): Promise<DesktopApiResponse> {
   const headers = new Headers(input.headers ?? {})
   let body: string | undefined
+  const controller = input.requestId ? new AbortController() : null
 
   if (input.body !== undefined) {
     if (!headers.has('Content-Type')) {
@@ -214,17 +231,41 @@ async function requestApi(input: DesktopApiRequest): Promise<DesktopApiResponse>
     body = typeof input.body === 'string' ? input.body : JSON.stringify(input.body)
   }
 
-  const response = await getDesktopSession().fetch(buildUrl(input.path, input.query), {
-    method: input.method,
-    headers,
-    body,
-  })
+  if (input.requestId && controller) {
+    activeApiRequests.set(input.requestId, controller)
+  }
 
-  return {
-    ok: response.ok,
-    status: response.status,
-    headers: Object.fromEntries(response.headers.entries()),
-    data: await parseResponse(response),
+  try {
+    const response = await getDesktopSession().fetch(buildUrl(input.path, input.query), {
+      method: input.method,
+      headers,
+      body,
+      signal: controller?.signal,
+    })
+
+    return {
+      ok: response.ok,
+      status: response.status,
+      headers: Object.fromEntries(response.headers.entries()),
+      data: await parseResponse(response),
+    }
+  } catch (error) {
+    if (controller?.signal.aborted) {
+      return {
+        ok: false,
+        status: 499,
+        headers: {},
+        data: {
+          success: false,
+          message: '请求已取消',
+        },
+      }
+    }
+    throw error
+  } finally {
+    if (input.requestId) {
+      activeApiRequests.delete(input.requestId)
+    }
   }
 }
 
@@ -254,13 +295,50 @@ function quoteWindowsCommandArg(arg: string) {
   return /[\s"&()<>^|]/.test(escaped) ? `"${escaped}"` : escaped
 }
 
-function runCommand(
+function createLineConsumer(listener?: (line: string) => void) {
+  let buffer = ''
+
+  return {
+    push(chunk: Buffer | string) {
+      if (!listener) {
+        return
+      }
+
+      buffer += chunk.toString()
+      const lines = buffer.split(/\r?\n/)
+      buffer = lines.pop() ?? ''
+
+      for (const line of lines) {
+        const trimmed = line.trim()
+        if (trimmed) {
+          listener(trimmed)
+        }
+      }
+    },
+    flush() {
+      if (!listener) {
+        return
+      }
+
+      const trimmed = buffer.trim()
+      if (trimmed) {
+        listener(trimmed)
+      }
+      buffer = ''
+    },
+  }
+}
+
+function spawnCommandWithHandlers(
   command: string,
   args: string[],
   options: {
     cwd?: string
     timeoutMs?: number
     env?: NodeJS.ProcessEnv
+    onStdoutLine?: (line: string) => void
+    onStderrLine?: (line: string) => void
+    onSpawn?: (child: ChildProcess) => void
   } = {}
 ) {
   const timeoutMs = options.timeoutMs ?? 30000
@@ -281,10 +359,13 @@ function runCommand(
       shell: false,
       windowsHide: true,
     })
+    options.onSpawn?.(child)
 
     let stdout = ''
     let stderr = ''
     let settled = false
+    const stdoutConsumer = createLineConsumer(options.onStdoutLine)
+    const stderrConsumer = createLineConsumer(options.onStderrLine)
 
     const timer = setTimeout(() => {
       stderr += `\n命令执行超时（${timeoutMs}ms）`
@@ -299,10 +380,12 @@ function runCommand(
 
     child.stdout.on('data', (chunk) => {
       stdout += chunk.toString()
+      stdoutConsumer.push(chunk)
     })
 
     child.stderr.on('data', (chunk) => {
       stderr += chunk.toString()
+      stderrConsumer.push(chunk)
     })
 
     child.on('error', (error) => {
@@ -311,6 +394,8 @@ function runCommand(
       }
       settled = true
       clearTimeout(timer)
+      stdoutConsumer.flush()
+      stderrConsumer.flush()
       resolve({
         stdout,
         stderr: `${stderr}\n${error.message}`.trim(),
@@ -324,6 +409,8 @@ function runCommand(
       }
       settled = true
       clearTimeout(timer)
+      stdoutConsumer.flush()
+      stderrConsumer.flush()
       resolve({
         stdout,
         stderr,
@@ -331,6 +418,47 @@ function runCommand(
       })
     })
   })
+}
+
+async function stopChildProcess(child?: ChildProcess | null) {
+  if (!child?.pid) {
+    return
+  }
+
+  if (process.platform === 'win32') {
+    await runCommand('taskkill', ['/pid', String(child.pid), '/t', '/f'], {
+      timeoutMs: 15000,
+    })
+    return
+  }
+
+  try {
+    child.kill('SIGTERM')
+  } catch {
+    /* empty */
+  }
+
+  await wait(300)
+
+  try {
+    if (!child.killed) {
+      child.kill('SIGKILL')
+    }
+  } catch {
+    /* empty */
+  }
+}
+
+function runCommand(
+  command: string,
+  args: string[],
+  options: {
+    cwd?: string
+    timeoutMs?: number
+    env?: NodeJS.ProcessEnv
+  } = {}
+) {
+  return spawnCommandWithHandlers(command, args, options)
 }
 
 async function locateExecutable(command: string) {
@@ -824,6 +952,31 @@ async function getClaudeSession(sessionId: string): Promise<CliSessionDetails | 
   }
 }
 
+async function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function waitForCliSession(client: CliClient, sessionId?: string) {
+  if (!sessionId) {
+    return null
+  }
+
+  for (let index = 0; index < 6; index += 1) {
+    const details =
+      client === 'codex'
+        ? await getCodexSession(sessionId)
+        : await getClaudeSession(sessionId)
+
+    if (details?.messages.length) {
+      return details
+    }
+
+    await wait(250)
+  }
+
+  return null
+}
+
 function parseJsonObjectsFromText(text: string) {
   return text
     .split(/\r?\n/)
@@ -836,6 +989,46 @@ function parseJsonObjectsFromText(text: string) {
         return []
       }
     })
+}
+
+function createCliProgressEmitter(
+  webContents: WebContents,
+  client: CliClient,
+  requestId: string
+) {
+  let lastPartial = ''
+
+  return {
+    send(kind: CliProgressPayload['kind'], message: string, sessionId?: string, done = false) {
+      const trimmed = message.trim()
+      if (!trimmed) {
+        return
+      }
+
+      webContents.send('desktop:cli-progress', {
+        client,
+        requestId,
+        sessionId,
+        kind,
+        message: trimmed,
+        createdAt: Date.now(),
+        done,
+      } satisfies CliProgressPayload)
+    },
+    status(message: string, sessionId?: string, done = false) {
+      this.send('status', message, sessionId, done)
+    },
+    error(message: string, sessionId?: string, done = false) {
+      this.send('error', message, sessionId, done)
+    },
+    partial(message: string, sessionId?: string, done = false) {
+      if (!message || message === lastPartial) {
+        return
+      }
+      lastPartial = message
+      this.send('partial', message, sessionId, done)
+    },
+  }
 }
 
 function parseCodexReasoningEffort(value?: string) {
@@ -872,7 +1065,55 @@ function parseClaudeEffort(value?: string) {
   }
 }
 
-async function runCodexPrompt(input: CliRunRequest): Promise<CliRunResponse> {
+function parseJsonLine(line: string) {
+  try {
+    return JSON.parse(line) as Record<string, unknown>
+  } catch {
+    return null
+  }
+}
+
+function extractClaudeTextFromMessage(content: unknown) {
+  if (!Array.isArray(content)) {
+    return ''
+  }
+
+  return content
+    .map((item) => {
+      if (typeof item !== 'object' || !item) {
+        return ''
+      }
+      if ('type' in item && item.type === 'text' && 'text' in item && typeof item.text === 'string') {
+        return item.text
+      }
+      return ''
+    })
+    .join('')
+    .trim()
+}
+
+function extractClaudeToolName(content: unknown) {
+  if (!Array.isArray(content)) {
+    return ''
+  }
+
+  const tool = content.find(
+    (item) =>
+      typeof item === 'object' &&
+      item &&
+      'type' in item &&
+      item.type === 'tool_use' &&
+      'name' in item &&
+      typeof item.name === 'string'
+  ) as { name?: string } | undefined
+
+  return tool?.name?.trim() ?? ''
+}
+
+async function runCodexPrompt(
+  webContents: WebContents,
+  input: CliRunRequest
+): Promise<CliRunResponse> {
   const args = input.sessionId
     ? ['exec', 'resume', '--json', '--skip-git-repo-check', input.sessionId, input.prompt]
     : ['exec', '--json', '-C', input.projectPath, '--skip-git-repo-check', input.prompt]
@@ -888,45 +1129,98 @@ async function runCodexPrompt(input: CliRunRequest): Promise<CliRunResponse> {
     `model_reasoning_effort="${parseCodexReasoningEffort(input.reasoningEffort)}"`
   )
 
-  const result = await runCommand('codex', args, {
+  const progress = createCliProgressEmitter(webContents, 'codex', input.requestId)
+  let sessionId = input.sessionId
+
+  progress.status('Codex 已开始处理当前任务。', sessionId)
+
+  const result = await spawnCommandWithHandlers('codex', args, {
     cwd: input.projectPath,
     timeoutMs: 15 * 60 * 1000,
+    onSpawn: (child) => {
+      activeCliProcesses.set(input.requestId, child)
+    },
+    onStdoutLine: (line) => {
+      const parsed = parseJsonLine(line)
+      if (!parsed) {
+        return
+      }
+
+      if (parsed.type === 'thread.started' && typeof parsed.thread_id === 'string') {
+        sessionId = parsed.thread_id
+        progress.status('已连接到 Codex 会话。', sessionId)
+        return
+      }
+
+      if (parsed.type === 'turn.started') {
+        progress.status('Codex 正在分析项目并准备执行。', sessionId)
+        return
+      }
+
+      if (parsed.type === 'error' && typeof parsed.message === 'string') {
+        progress.error(parsed.message, sessionId)
+      }
+    },
+    onStderrLine: (line) => {
+      if (line.toLowerCase().includes('warn')) {
+        progress.status(line, sessionId)
+        return
+      }
+
+      progress.error(line, sessionId)
+    },
   })
+  activeCliProcesses.delete(input.requestId)
+  const aborted = stoppedCliRequests.delete(input.requestId)
 
   const events = parseJsonObjectsFromText(result.stdout)
-  const messageEvent = [...events]
-    .reverse()
-    .find((item) => item.type === 'item.completed' || item.type === 'item.delta')
   const threadEvent = events.find((item) => item.type === 'thread.started')
   const usageEvent = [...events]
     .reverse()
     .find((item) => item.type === 'turn.completed')
 
-  let output = ''
-  if (messageEvent?.item && typeof messageEvent.item === 'object') {
-    const item = messageEvent.item as { text?: string }
-    output = item.text ?? ''
+  if (!sessionId && typeof threadEvent?.thread_id === 'string') {
+    sessionId = threadEvent.thread_id
+  }
+
+  const session = await waitForCliSession('codex', sessionId)
+  const output = session?.messages.filter((item) => item.role === 'assistant').at(-1)?.content ?? ''
+  const success = !aborted && result.exitCode === 0 && output.length > 0
+
+  if (success) {
+    progress.status('Codex 已完成本次回复。', sessionId, true)
+  } else if (aborted) {
+    progress.status('Codex 已停止本次回复。', sessionId, true)
+  } else if (result.stderr.trim()) {
+    progress.error(result.stderr.trim(), sessionId, true)
   }
 
   return {
-    success: result.exitCode === 0 && output.length > 0,
+    success,
+    requestId: input.requestId,
     output,
-    error: result.stderr.trim(),
+    error: aborted ? '用户已停止当前回复' : result.stderr.trim(),
     raw: result.stdout,
-    sessionId: typeof threadEvent?.thread_id === 'string' ? threadEvent.thread_id : input.sessionId,
+    sessionId,
     metadata: {
+      aborted,
       exitCode: result.exitCode,
-      threadId: threadEvent?.thread_id ?? '',
+      threadId: sessionId ?? '',
       usage: usageEvent?.usage ?? null,
     },
   }
 }
 
-async function runClaudePrompt(input: CliRunRequest): Promise<CliRunResponse> {
+async function runClaudePrompt(
+  webContents: WebContents,
+  input: CliRunRequest
+): Promise<CliRunResponse> {
   const args = [
     '-p',
+    '--verbose',
     '--output-format',
-    'json',
+    'stream-json',
+    '--include-partial-messages',
     '--permission-mode',
     'bypassPermissions',
   ]
@@ -943,28 +1237,143 @@ async function runClaudePrompt(input: CliRunRequest): Promise<CliRunResponse> {
 
   args.push(input.prompt)
 
-  const result = await runCommand('claude', args, {
+  const progress = createCliProgressEmitter(webContents, 'claude', input.requestId)
+  let sessionId = input.sessionId
+  let partialText = ''
+  let finalResult: Record<string, unknown> | null = null
+
+  progress.status('Claude 已开始处理当前任务。', sessionId)
+
+  const result = await spawnCommandWithHandlers('claude', args, {
     cwd: input.projectPath,
     timeoutMs: 15 * 60 * 1000,
-  })
+    onSpawn: (child) => {
+      activeCliProcesses.set(input.requestId, child)
+    },
+    onStdoutLine: (line) => {
+      const parsed = parseJsonLine(line)
+      if (!parsed) {
+        return
+      }
 
-  let parsed: Record<string, unknown> | null
-  try {
-    parsed = JSON.parse(result.stdout.trim()) as Record<string, unknown>
-  } catch {
-    parsed = null
+      if (
+        typeof parsed.session_id === 'string' &&
+        parsed.session_id &&
+        sessionId !== parsed.session_id
+      ) {
+        sessionId = parsed.session_id
+        progress.status('已连接到 Claude 会话。', sessionId)
+      }
+
+      if (parsed.type === 'system') {
+        if (parsed.subtype === 'init') {
+          progress.status('Claude 会话初始化完成。', sessionId)
+          return
+        }
+
+        if (parsed.subtype === 'hook_started' && typeof parsed.hook_name === 'string') {
+          progress.status(`正在执行 ${parsed.hook_name}`, sessionId)
+        }
+        return
+      }
+
+      if (parsed.type === 'assistant') {
+        const parsedMessage =
+          typeof parsed.message === 'object' && parsed.message
+            ? (parsed.message as { content?: unknown })
+            : undefined
+        const toolName = extractClaudeToolName(
+          parsedMessage?.content
+        )
+        if (toolName) {
+          progress.status(`Claude 正在调用 ${toolName}`, sessionId)
+        }
+        return
+      }
+
+      if (parsed.type === 'stream_event' && typeof parsed.event === 'object' && parsed.event) {
+        const event = parsed.event as Record<string, unknown>
+        if (
+          event.type === 'content_block_start' &&
+          typeof event.content_block === 'object' &&
+          event.content_block
+        ) {
+          const block = event.content_block as Record<string, unknown>
+          if (block.type === 'tool_use' && typeof block.name === 'string') {
+            progress.status(`Claude 正在调用 ${block.name}`, sessionId)
+          }
+        }
+
+        if (
+          event.type === 'content_block_delta' &&
+          typeof event.delta === 'object' &&
+          event.delta
+        ) {
+          const delta = event.delta as Record<string, unknown>
+          if (delta.type === 'text_delta' && typeof delta.text === 'string') {
+            partialText += delta.text
+            progress.partial(partialText, sessionId)
+          }
+        }
+        return
+      }
+
+      if (parsed.type === 'result') {
+        finalResult = parsed
+      }
+    },
+    onStderrLine: (line) => {
+      progress.error(line, sessionId)
+    },
+  })
+  activeCliProcesses.delete(input.requestId)
+  const aborted = stoppedCliRequests.delete(input.requestId)
+
+  if (!finalResult) {
+    finalResult =
+      [...parseJsonObjectsFromText(result.stdout)]
+        .reverse()
+        .find((item) => item.type === 'result') ?? null
+  }
+
+  if (!sessionId && typeof finalResult?.session_id === 'string') {
+    sessionId = finalResult.session_id
+  }
+
+  const session = await waitForCliSession('claude', sessionId)
+  const transcriptOutput =
+    session?.messages.filter((item) => item.role === 'assistant').at(-1)?.content ?? ''
+  const parsedOutput =
+    typeof finalResult?.result === 'string'
+      ? finalResult.result
+      : extractClaudeTextFromMessage(
+          typeof finalResult?.message === 'object' && finalResult.message
+            ? (finalResult.message as { content?: unknown }).content
+            : undefined
+        )
+  const output = transcriptOutput || parsedOutput || partialText.trim()
+  const success = !aborted && result.exitCode === 0 && output.length > 0
+
+  if (success) {
+    progress.partial(output, sessionId, true)
+    progress.status('Claude 已完成本次回复。', sessionId, true)
+  } else if (aborted) {
+    progress.status('Claude 已停止本次回复。', sessionId, true)
+  } else if (result.stderr.trim()) {
+    progress.error(result.stderr.trim(), sessionId, true)
   }
 
   return {
-    success: result.exitCode === 0 && typeof parsed?.result === 'string',
-    output: typeof parsed?.result === 'string' ? parsed.result : '',
-    error: result.stderr.trim(),
+    success,
+    requestId: input.requestId,
+    output,
+    error: aborted ? '用户已停止当前回复' : result.stderr.trim(),
     raw: result.stdout,
-    sessionId:
-      typeof parsed?.session_id === 'string'
-        ? parsed.session_id
-        : input.sessionId,
-    metadata: parsed ?? { exitCode: result.exitCode },
+    sessionId,
+    metadata: {
+      ...(finalResult ?? { exitCode: result.exitCode }),
+      aborted,
+    },
   }
 }
 
@@ -996,7 +1405,7 @@ async function writeCodexConfig(request: CliDeployRequest) {
     targetPath,
     buildCodexConfig(
       request.apiKey,
-      request.model?.trim() || 'gpt-5.4',
+      request.model?.trim() || 'gpt-5.3-codex',
       request.baseUrl?.trim() || SERVER_BASE_URL
     ),
     'utf8'
@@ -1166,13 +1575,15 @@ async function deployCli(webContents: WebContents, request: CliDeployRequest, jo
   const testProjectPath = path.join(os.homedir())
   const testResult =
     client === 'codex'
-      ? await runCodexPrompt({
+      ? await runCodexPrompt(webContents, {
           client,
+          requestId: `${jobId}-test`,
           projectPath: testProjectPath,
           prompt: '只回复：连接测试成功',
         })
-      : await runClaudePrompt({
+      : await runClaudePrompt(webContents, {
           client,
+          requestId: `${jobId}-test`,
           projectPath: testProjectPath,
           prompt: '只回复：连接测试成功',
         })
@@ -1228,6 +1639,10 @@ ipcMain.handle('app:get-meta', () => getAppMeta())
 ipcMain.handle('desktop:api-request', async (_event, request: DesktopApiRequest) =>
   requestApi(request)
 )
+ipcMain.handle('desktop:stop-api-request', async (_event, requestId: string) => {
+  activeApiRequests.get(requestId)?.abort()
+  activeApiRequests.delete(requestId)
+})
 ipcMain.handle('desktop:open-external', async (_event, url: string) => {
   await shell.openExternal(url)
 })
@@ -1261,10 +1676,14 @@ ipcMain.handle(
       : getClaudeSession(input.sessionId)
   }
 )
-ipcMain.handle('desktop:run-cli', async (_event, request: CliRunRequest) => {
+ipcMain.handle('desktop:run-cli', async (event, request: CliRunRequest) => {
   return request.client === 'codex'
-    ? runCodexPrompt(request)
-    : runClaudePrompt(request)
+    ? runCodexPrompt(event.sender, request)
+    : runClaudePrompt(event.sender, request)
+})
+ipcMain.handle('desktop:stop-cli', async (_event, requestId: string) => {
+  stoppedCliRequests.add(requestId)
+  await stopChildProcess(activeCliProcesses.get(requestId))
 })
 ipcMain.handle('desktop:set-window-title', async (_event, projectName?: string) => {
   const targetWindow = BrowserWindow.getFocusedWindow() ?? mainWindow

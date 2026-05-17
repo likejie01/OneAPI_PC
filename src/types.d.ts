@@ -3,6 +3,7 @@ import type {
   CliClient,
   CliDeployRequest,
   CliHistoryEntry,
+  CliProgressPayload,
   CliSessionDetails,
   CliRunRequest,
   CliRunResponse,
@@ -22,6 +23,7 @@ declare global {
         serverBaseUrl: string
       }>
       request: (input: DesktopApiRequest) => Promise<DesktopApiResponse>
+      stopRequest: (requestId: string) => Promise<void>
       openExternal: (url: string) => Promise<void>
       pickProjectDirectory: () => Promise<string>
       getCliStatus: () => Promise<{
@@ -31,6 +33,10 @@ declare global {
       listCliHistory: (client: CliClient, limit?: number) => Promise<CliHistoryEntry[]>
       getCliSession: (client: CliClient, sessionId: string) => Promise<CliSessionDetails | null>
       runCliPrompt: (input: CliRunRequest) => Promise<CliRunResponse>
+      stopCliPrompt: (requestId: string) => Promise<void>
+      onCliProgress: (
+        listener: (payload: CliProgressPayload) => void
+      ) => () => void
       setWindowTitle: (projectName?: string) => Promise<void>
       deployCli: (input: CliDeployRequest) => Promise<{ jobId: string }>
       onDeployProgress: (
