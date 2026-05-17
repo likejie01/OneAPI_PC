@@ -1,0 +1,88 @@
+import type { DesktopApiRequest } from '../shared/desktop'
+import type { ApiEnvelope } from '../shared/contracts'
+
+const DESKTOP_USER_ID_KEY = 'uid'
+
+function getBridge() {
+  if (!window.desktopBridge) {
+    throw new Error('桌面桥接不可用，请重新启动客户端。')
+  }
+  return window.desktopBridge
+}
+
+export function getStoredDesktopUserId() {
+  try {
+    return window.localStorage.getItem(DESKTOP_USER_ID_KEY) || ''
+  } catch {
+    return ''
+  }
+}
+
+export function saveStoredDesktopUserId(userId: number | string) {
+  try {
+    window.localStorage.setItem(DESKTOP_USER_ID_KEY, String(userId))
+  } catch {
+    /* empty */
+  }
+}
+
+export function clearStoredDesktopUserId() {
+  try {
+    window.localStorage.removeItem(DESKTOP_USER_ID_KEY)
+  } catch {
+    /* empty */
+  }
+}
+
+function withDesktopAuthHeaders(input: DesktopApiRequest) {
+  const headers = {
+    ...(input.headers ?? {}),
+  }
+
+  const shouldAttachUserId =
+    !input.path.startsWith('/api/user/login') && input.path !== '/api/user/register'
+
+  if (shouldAttachUserId && !headers['New-Api-User']) {
+    const userId = getStoredDesktopUserId()
+    if (userId) {
+      headers['New-Api-User'] = userId
+    }
+  }
+
+  return {
+    ...input,
+    headers,
+  }
+}
+
+export async function desktopRequest<T>(input: DesktopApiRequest) {
+  const response = await getBridge().request(withDesktopAuthHeaders(input))
+  const message =
+    typeof response.data === 'object' &&
+    response.data &&
+    'message' in response.data &&
+    typeof response.data.message === 'string'
+      ? response.data.message
+      : `请求失败（${response.status}）`
+
+  if (!response.ok) {
+    throw new Error(message)
+  }
+
+  return response.data as T
+}
+
+export async function desktopEnvelope<T>(input: DesktopApiRequest) {
+  const response = await getBridge().request(withDesktopAuthHeaders(input))
+  const data = response.data as ApiEnvelope<T>
+
+  if (!response.ok) {
+    throw new Error(data?.message || `请求失败（${response.status}）`)
+  }
+
+  return data
+}
+
+export function desktopBridge() {
+  return getBridge()
+}
