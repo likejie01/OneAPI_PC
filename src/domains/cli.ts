@@ -3,6 +3,7 @@ import type {
   CliClient,
   CliDeployRequest,
   CliRunRequest,
+  CliSessionDetails,
   DeployProgressPayload,
 } from '../shared/desktop'
 
@@ -14,12 +15,20 @@ export function listCliHistory(client: CliClient, limit = 10) {
   return desktopBridge().listCliHistory(client, limit)
 }
 
+export function getCliSession(client: CliClient, sessionId: string): Promise<CliSessionDetails | null> {
+  return desktopBridge().getCliSession(client, sessionId)
+}
+
 export function pickProjectDirectory() {
   return desktopBridge().pickProjectDirectory()
 }
 
 export function runCliPrompt(input: CliRunRequest) {
   return desktopBridge().runCliPrompt(input)
+}
+
+export function setDesktopWindowTitle(projectName?: string) {
+  return desktopBridge().setWindowTitle(projectName)
 }
 
 export function deployCli(input: CliDeployRequest) {

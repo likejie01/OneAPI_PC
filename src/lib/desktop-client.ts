@@ -55,18 +55,31 @@ function withDesktopAuthHeaders(input: DesktopApiRequest) {
   }
 }
 
+function getResponseErrorMessage(data: unknown, status: number) {
+  if (typeof data === 'object' && data) {
+    if ('message' in data && typeof data.message === 'string') {
+      return data.message
+    }
+
+    if (
+      'error' in data &&
+      typeof data.error === 'object' &&
+      data.error &&
+      'message' in data.error &&
+      typeof data.error.message === 'string'
+    ) {
+      return data.error.message
+    }
+  }
+
+  return `请求失败（${status}）`
+}
+
 export async function desktopRequest<T>(input: DesktopApiRequest) {
   const response = await getBridge().request(withDesktopAuthHeaders(input))
-  const message =
-    typeof response.data === 'object' &&
-    response.data &&
-    'message' in response.data &&
-    typeof response.data.message === 'string'
-      ? response.data.message
-      : `请求失败（${response.status}）`
 
   if (!response.ok) {
-    throw new Error(message)
+    throw new Error(getResponseErrorMessage(response.data, response.status))
   }
 
   return response.data as T
@@ -77,7 +90,7 @@ export async function desktopEnvelope<T>(input: DesktopApiRequest) {
   const data = response.data as ApiEnvelope<T>
 
   if (!response.ok) {
-    throw new Error(data?.message || `请求失败（${response.status}）`)
+    throw new Error(getResponseErrorMessage(response.data, response.status))
   }
 
   return data

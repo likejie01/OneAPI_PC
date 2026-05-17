@@ -67,7 +67,9 @@ export async function createDesktopCliKey(name: string, group: string) {
   })
 
   const keys = await searchApiKeys(name)
-  const target = keys.find((item) => item.name === name)
+  const target = [...keys]
+    .filter((item) => item.name === name)
+    .sort((left, right) => (right.created_time || 0) - (left.created_time || 0))[0]
   if (!target) {
     throw new Error('专用 Key 已创建，但未能定位到新 Key 记录。')
   }

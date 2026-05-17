@@ -20,6 +20,12 @@ const DESKTOP_PARTITION = 'persist:oneapi-desktop'
 const isDev = !!process.env.VITE_DEV_SERVER_URL
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
+let mainWindow: BrowserWindow | null = null
+
+function resolveWorkspaceTitle(projectName?: string) {
+  const normalized = projectName?.trim()
+  return `OneAPI Workspace - ${normalized || 'empty'}`
+}
 
 function getDesktopSession() {
   return session.fromPartition(DESKTOP_PARTITION)
@@ -49,7 +55,26 @@ interface CliHistoryEntry {
   title: string
   preview: string
   updatedAt: number
+  projectName: string
   projectPath?: string
+}
+
+interface CliSessionMessage {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  createdAt: number
+  modelLabel?: string
+}
+
+interface CliSessionDetails {
+  id: string
+  client: CliClient
+  preview: string
+  updatedAt: number
+  projectName: string
+  projectPath: string
+  messages: CliSessionMessage[]
 }
 
 interface CliStatus {
@@ -67,6 +92,9 @@ interface CliRunRequest {
   client: CliClient
   projectPath: string
   prompt: string
+  sessionId?: string
+  model?: string
+  reasoningEffort?: string
 }
 
 interface CliRunResponse {
@@ -74,6 +102,7 @@ interface CliRunResponse {
   output: string
   error: string
   raw: string
+  sessionId?: string
   metadata: Record<string, unknown>
 }
 
@@ -112,7 +141,7 @@ function createWindow() {
     height: 980,
     minWidth: 1240,
     minHeight: 780,
-    title: app.name,
+    title: resolveWorkspaceTitle(),
     backgroundColor: '#f3f2ed',
     autoHideMenuBar: true,
     webPreferences: {
@@ -132,6 +161,13 @@ function createWindow() {
   win.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url)
     return { action: 'deny' }
+  })
+
+  mainWindow = win
+  win.on('closed', () => {
+    if (mainWindow === win) {
+      mainWindow = null
+    }
   })
 }
 
@@ -383,6 +419,105 @@ async function walkFiles(root: string, matcher: (filePath: string) => boolean) {
   return results
 }
 
+function normalizeWhitespace(value: string) {
+  return value.replace(/\s+/g, ' ').trim()
+}
+
+function toEpochSeconds(value: unknown) {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value > 10_000_000_000 ? Math.floor(value / 1000) : Math.floor(value)
+  }
+
+  if (typeof value === 'string') {
+    const numeric = Number(value)
+    if (Number.isFinite(numeric)) {
+      return numeric > 10_000_000_000 ? Math.floor(numeric / 1000) : Math.floor(numeric)
+    }
+
+    const parsed = Date.parse(value)
+    if (!Number.isNaN(parsed)) {
+      return Math.floor(parsed / 1000)
+    }
+  }
+
+  return 0
+}
+
+function contentPartsToText(content: unknown) {
+  if (typeof content === 'string') {
+    return content.trim()
+  }
+
+  if (!Array.isArray(content)) {
+    return ''
+  }
+
+  return content
+    .map((part) => {
+      if (typeof part === 'string') {
+        return part
+      }
+
+      if (typeof part !== 'object' || !part) {
+        return ''
+      }
+
+      if ('text' in part && typeof part.text === 'string') {
+        return part.text
+      }
+
+      if ('content' in part && typeof part.content === 'string') {
+        return part.content
+      }
+
+      if ('type' in part && part.type === 'tool_result' && 'content' in part) {
+        const contentValue = (part as { content?: unknown }).content
+        if (typeof contentValue === 'string') {
+          return contentValue
+        }
+      }
+
+      return ''
+    })
+    .filter(Boolean)
+    .join('\n')
+    .trim()
+}
+
+function shouldIgnoreClaudeMessage(text: string) {
+  return (
+    !text ||
+    text.startsWith('Launching skill:') ||
+    text.startsWith('Base directory for this skill:') ||
+    text.startsWith('Todos have been modified successfully.') ||
+    text.startsWith('<turn_aborted>')
+  )
+}
+
+function shouldIgnoreCodexMessage(text: string) {
+  return (
+    !text ||
+    text.startsWith('<permissions instructions>') ||
+    text.startsWith('<app-context>') ||
+    text.startsWith('<collaboration_mode>') ||
+    text.startsWith('<skills_instructions>') ||
+    text.startsWith('<plugins_instructions>') ||
+    text.startsWith('<environment_context>')
+  )
+}
+
+function uniqueMessages(messages: CliSessionMessage[]) {
+  const seen = new Set<string>()
+  return messages.filter((item) => {
+    const key = `${item.role}:${item.createdAt}:${item.content}`
+    if (seen.has(key)) {
+      return false
+    }
+    seen.add(key)
+    return true
+  })
+}
+
 async function buildCodexSessionMap() {
   const sessionRoot = path.join(os.homedir(), '.codex', 'sessions')
   const files = await walkFiles(sessionRoot, (filePath) => filePath.endsWith('.jsonl'))
@@ -420,6 +555,75 @@ async function buildCodexSessionMap() {
   return sessionMap
 }
 
+async function getLatestCodexSessionFile(sessionId: string) {
+  const sessionRoot = path.join(os.homedir(), '.codex', 'sessions')
+  const files = await walkFiles(
+    sessionRoot,
+    (filePath) => filePath.endsWith('.jsonl') && filePath.includes(sessionId)
+  )
+
+  if (files.length === 0) {
+    return ''
+  }
+
+  const stats = await Promise.all(
+    files.map(async (filePath) => ({
+      filePath,
+      stat: await fs.stat(filePath),
+    }))
+  )
+
+  return stats.sort((left, right) => right.stat.mtimeMs - left.stat.mtimeMs)[0]?.filePath ?? ''
+}
+
+function parseCodexSession(lines: string[]): CliSessionMessage[] {
+  const messages: CliSessionMessage[] = []
+
+  for (const line of lines) {
+    try {
+      const parsed = JSON.parse(line) as {
+        type?: string
+        timestamp?: string
+        message?: { role?: string; content?: unknown }
+        payload?: {
+          type?: string
+          role?: string
+          phase?: string
+          content?: unknown
+          message?: { role?: string; content?: unknown }
+        }
+      }
+
+      if (parsed.type === 'response_item' && parsed.payload?.type === 'message') {
+        const role = parsed.payload.role
+        if (role !== 'user' && role !== 'assistant') {
+          continue
+        }
+        if (role === 'assistant' && parsed.payload.phase !== 'final_answer') {
+          continue
+        }
+
+        const content = contentPartsToText(parsed.payload.content)
+        if (shouldIgnoreCodexMessage(content)) {
+          continue
+        }
+
+        messages.push({
+          id: `${role}-${messages.length}-${toEpochSeconds(parsed.timestamp)}`,
+          role,
+          content,
+          createdAt: toEpochSeconds(parsed.timestamp),
+          modelLabel: role === 'assistant' ? 'Codex' : undefined,
+        })
+      }
+    } catch {
+      continue
+    }
+  }
+
+  return uniqueMessages(messages)
+}
+
 async function listCodexHistory(limit = 12): Promise<CliHistoryEntry[]> {
   const lines = await readJsonLines(path.join(os.homedir(), '.codex', 'history.jsonl'))
   const sessionMap = await buildCodexSessionMap()
@@ -444,8 +648,11 @@ async function listCodexHistory(limit = 12): Promise<CliHistoryEntry[]> {
           title: sessionMap.get(parsed.session_id)
             ? path.basename(sessionMap.get(parsed.session_id) ?? '')
             : `Codex 会话 ${parsed.session_id.slice(0, 8)}`,
-          preview: parsed.text.replace(/\s+/g, ' ').trim(),
+          preview: normalizeWhitespace(parsed.text),
           updatedAt: parsed.ts,
+          projectName: sessionMap.get(parsed.session_id)
+            ? path.basename(sessionMap.get(parsed.session_id) ?? '')
+            : '未命名项目',
           projectPath: sessionMap.get(parsed.session_id),
         })
       }
@@ -457,6 +664,39 @@ async function listCodexHistory(limit = 12): Promise<CliHistoryEntry[]> {
   return [...grouped.values()]
     .sort((left, right) => right.updatedAt - left.updatedAt)
     .slice(0, limit)
+}
+
+async function getCodexSession(sessionId: string): Promise<CliSessionDetails | null> {
+  const filePath = await getLatestCodexSessionFile(sessionId)
+  if (!filePath) {
+    return null
+  }
+
+  const lines = await readJsonLines(filePath)
+  const sessionMetaLine = lines.find((line) => line.includes('"type":"session_meta"'))
+  let projectPath = ''
+
+  if (sessionMetaLine) {
+    try {
+      const parsed = JSON.parse(sessionMetaLine) as {
+        payload?: { cwd?: string }
+      }
+      projectPath = parsed.payload?.cwd ?? ''
+    } catch {
+      projectPath = ''
+    }
+  }
+
+  const messages = parseCodexSession(lines)
+  return {
+    id: sessionId,
+    client: 'codex',
+    preview: messages.at(-1)?.content ?? '',
+    updatedAt: messages.at(-1)?.createdAt ?? 0,
+    projectName: projectPath ? path.basename(projectPath) : '未命名项目',
+    projectPath,
+    messages,
+  }
 }
 
 async function listClaudeHistory(limit = 12): Promise<CliHistoryEntry[]> {
@@ -481,8 +721,9 @@ async function listClaudeHistory(limit = 12): Promise<CliHistoryEntry[]> {
         grouped.set(parsed.sessionId, {
           id: parsed.sessionId,
           title: parsed.project ? path.basename(parsed.project) : `Claude 会话 ${parsed.sessionId.slice(0, 8)}`,
-          preview: parsed.display.replace(/\s+/g, ' ').trim(),
+          preview: normalizeWhitespace(parsed.display),
           updatedAt: Math.floor(parsed.timestamp / 1000),
+          projectName: parsed.project ? path.basename(parsed.project) : '未命名项目',
           projectPath: parsed.project,
         })
       }
@@ -494,6 +735,93 @@ async function listClaudeHistory(limit = 12): Promise<CliHistoryEntry[]> {
   return [...grouped.values()]
     .sort((left, right) => right.updatedAt - left.updatedAt)
     .slice(0, limit)
+}
+
+async function getClaudeSessionFile(sessionId: string) {
+  const projectsRoot = path.join(os.homedir(), '.claude', 'projects')
+  const files = await walkFiles(
+    projectsRoot,
+    (filePath) => filePath.endsWith('.jsonl') && path.basename(filePath) === `${sessionId}.jsonl`
+  )
+  return files[0] ?? ''
+}
+
+function parseClaudeSession(lines: string[]): CliSessionMessage[] {
+  const messages: CliSessionMessage[] = []
+
+  for (const line of lines) {
+    try {
+      const parsed = JSON.parse(line) as {
+        type?: string
+        timestamp?: string
+        cwd?: string
+        message?: {
+          role?: string
+          model?: string
+          content?: unknown
+        }
+      }
+
+      if (parsed.type !== 'user' && parsed.type !== 'assistant') {
+        continue
+      }
+
+      const role = parsed.message?.role
+      if (role !== 'user' && role !== 'assistant') {
+        continue
+      }
+
+      const content = contentPartsToText(parsed.message?.content)
+      if (shouldIgnoreClaudeMessage(content)) {
+        continue
+      }
+
+      messages.push({
+        id: `${role}-${messages.length}-${toEpochSeconds(parsed.timestamp)}`,
+        role,
+        content,
+        createdAt: toEpochSeconds(parsed.timestamp),
+        modelLabel: role === 'assistant' ? parsed.message?.model || 'Claude' : undefined,
+      })
+    } catch {
+      continue
+    }
+  }
+
+  return uniqueMessages(messages)
+}
+
+async function getClaudeSession(sessionId: string): Promise<CliSessionDetails | null> {
+  const filePath = await getClaudeSessionFile(sessionId)
+  if (!filePath) {
+    return null
+  }
+
+  const lines = await readJsonLines(filePath)
+  let projectPath = ''
+
+  for (const line of lines) {
+    try {
+      const parsed = JSON.parse(line) as { cwd?: string }
+      if (parsed.cwd) {
+        projectPath = parsed.cwd
+        break
+      }
+    } catch {
+      continue
+    }
+  }
+
+  const messages = parseClaudeSession(lines)
+  return {
+    id: sessionId,
+    client: 'claude',
+    preview: messages.at(-1)?.content ?? '',
+    updatedAt: messages.at(-1)?.createdAt ?? 0,
+    projectName: projectPath ? path.basename(projectPath) : path.basename(path.dirname(filePath)) || '未命名项目',
+    projectPath,
+    messages,
+  }
 }
 
 function parseJsonObjectsFromText(text: string) {
@@ -510,15 +838,60 @@ function parseJsonObjectsFromText(text: string) {
     })
 }
 
+function parseCodexReasoningEffort(value?: string) {
+  switch (value) {
+    case '低':
+    case 'low':
+      return 'low'
+    case '中':
+    case 'medium':
+      return 'medium'
+    case '高':
+    case 'high':
+    default:
+      return 'high'
+  }
+}
+
+function parseClaudeEffort(value?: string) {
+  switch (value) {
+    case '低':
+    case 'low':
+      return 'low'
+    case '中':
+    case 'medium':
+      return 'medium'
+    case '高':
+    case 'high':
+      return 'high'
+    case '极限':
+    case 'max':
+      return 'max'
+    default:
+      return 'high'
+  }
+}
+
 async function runCodexPrompt(input: CliRunRequest): Promise<CliRunResponse> {
-  const result = await runCommand(
-    'codex',
-    ['exec', '--json', '-C', input.projectPath, '--skip-git-repo-check', input.prompt],
-    {
-      cwd: input.projectPath,
-      timeoutMs: 15 * 60 * 1000,
-    }
+  const args = input.sessionId
+    ? ['exec', 'resume', '--json', '--skip-git-repo-check', input.sessionId, input.prompt]
+    : ['exec', '--json', '-C', input.projectPath, '--skip-git-repo-check', input.prompt]
+
+  if (input.model?.trim()) {
+    args.splice(args.length - 1, 0, '--model', input.model.trim())
+  }
+
+  args.splice(
+    args.length - 1,
+    0,
+    '--config',
+    `model_reasoning_effort="${parseCodexReasoningEffort(input.reasoningEffort)}"`
   )
+
+  const result = await runCommand('codex', args, {
+    cwd: input.projectPath,
+    timeoutMs: 15 * 60 * 1000,
+  })
 
   const events = parseJsonObjectsFromText(result.stdout)
   const messageEvent = [...events]
@@ -540,6 +913,7 @@ async function runCodexPrompt(input: CliRunRequest): Promise<CliRunResponse> {
     output,
     error: result.stderr.trim(),
     raw: result.stdout,
+    sessionId: typeof threadEvent?.thread_id === 'string' ? threadEvent.thread_id : input.sessionId,
     metadata: {
       exitCode: result.exitCode,
       threadId: threadEvent?.thread_id ?? '',
@@ -549,21 +923,30 @@ async function runCodexPrompt(input: CliRunRequest): Promise<CliRunResponse> {
 }
 
 async function runClaudePrompt(input: CliRunRequest): Promise<CliRunResponse> {
-  const result = await runCommand(
-    'claude',
-    [
-      '-p',
-      '--output-format',
-      'json',
-      '--permission-mode',
-      'bypassPermissions',
-      input.prompt,
-    ],
-    {
-      cwd: input.projectPath,
-      timeoutMs: 15 * 60 * 1000,
-    }
-  )
+  const args = [
+    '-p',
+    '--output-format',
+    'json',
+    '--permission-mode',
+    'bypassPermissions',
+  ]
+
+  if (input.model?.trim()) {
+    args.push('--model', input.model.trim())
+  }
+
+  args.push('--effort', parseClaudeEffort(input.reasoningEffort))
+
+  if (input.sessionId?.trim()) {
+    args.push('--resume', input.sessionId.trim())
+  }
+
+  args.push(input.prompt)
+
+  const result = await runCommand('claude', args, {
+    cwd: input.projectPath,
+    timeoutMs: 15 * 60 * 1000,
+  })
 
   let parsed: Record<string, unknown> | null
   try {
@@ -577,6 +960,10 @@ async function runClaudePrompt(input: CliRunRequest): Promise<CliRunResponse> {
     output: typeof parsed?.result === 'string' ? parsed.result : '',
     error: result.stderr.trim(),
     raw: result.stdout,
+    sessionId:
+      typeof parsed?.session_id === 'string'
+        ? parsed.session_id
+        : input.sessionId,
     metadata: parsed ?? { exitCode: result.exitCode },
   }
 }
@@ -866,10 +1253,22 @@ ipcMain.handle(
       : listClaudeHistory(input.limit)
   }
 )
+ipcMain.handle(
+  'desktop:get-cli-session',
+  async (_event, input: { client: CliClient; sessionId: string }) => {
+    return input.client === 'codex'
+      ? getCodexSession(input.sessionId)
+      : getClaudeSession(input.sessionId)
+  }
+)
 ipcMain.handle('desktop:run-cli', async (_event, request: CliRunRequest) => {
   return request.client === 'codex'
     ? runCodexPrompt(request)
     : runClaudePrompt(request)
+})
+ipcMain.handle('desktop:set-window-title', async (_event, projectName?: string) => {
+  const targetWindow = BrowserWindow.getFocusedWindow() ?? mainWindow
+  targetWindow?.setTitle(resolveWorkspaceTitle(projectName))
 })
 ipcMain.handle('desktop:deploy-cli', async (event, request: CliDeployRequest) => {
   const jobId = randomUUID()

@@ -3,6 +3,7 @@ import type {
   CliClient,
   CliDeployRequest,
   CliHistoryEntry,
+  CliSessionDetails,
   CliRunRequest,
   CliRunResponse,
   CliStatus,
@@ -34,8 +35,15 @@ contextBridge.exposeInMainWorld('desktopBridge', {
       client,
       limit,
     }) as Promise<CliHistoryEntry[]>,
+  getCliSession: (client: CliClient, sessionId: string) =>
+    ipcRenderer.invoke('desktop:get-cli-session', {
+      client,
+      sessionId,
+    }) as Promise<CliSessionDetails | null>,
   runCliPrompt: (input: CliRunRequest) =>
     ipcRenderer.invoke('desktop:run-cli', input) as Promise<CliRunResponse>,
+  setWindowTitle: (projectName?: string) =>
+    ipcRenderer.invoke('desktop:set-window-title', projectName) as Promise<void>,
   deployCli: (input: CliDeployRequest) =>
     ipcRenderer.invoke('desktop:deploy-cli', input) as Promise<{ jobId: string }>,
   onDeployProgress: (listener: (payload: DeployProgressPayload) => void) => {

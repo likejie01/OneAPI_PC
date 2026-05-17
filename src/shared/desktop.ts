@@ -22,7 +22,26 @@ export interface CliHistoryEntry {
   title: string
   preview: string
   updatedAt: number
+  projectName: string
   projectPath?: string
+}
+
+export interface CliSessionMessage {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  createdAt: number
+  modelLabel?: string
+}
+
+export interface CliSessionDetails {
+  id: string
+  client: CliClient
+  preview: string
+  updatedAt: number
+  projectName: string
+  projectPath: string
+  messages: CliSessionMessage[]
 }
 
 export interface CliStatus {
@@ -40,6 +59,9 @@ export interface CliRunRequest {
   client: CliClient
   projectPath: string
   prompt: string
+  sessionId?: string
+  model?: string
+  reasoningEffort?: string
 }
 
 export interface CliRunResponse {
@@ -47,6 +69,7 @@ export interface CliRunResponse {
   output: string
   error: string
   raw: string
+  sessionId?: string
   metadata: Record<string, unknown>
 }
 

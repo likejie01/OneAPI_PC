@@ -3,6 +3,7 @@ import type {
   CliClient,
   CliDeployRequest,
   CliHistoryEntry,
+  CliSessionDetails,
   CliRunRequest,
   CliRunResponse,
   CliStatus,
@@ -28,7 +29,9 @@ declare global {
         claude: CliStatus
       }>
       listCliHistory: (client: CliClient, limit?: number) => Promise<CliHistoryEntry[]>
+      getCliSession: (client: CliClient, sessionId: string) => Promise<CliSessionDetails | null>
       runCliPrompt: (input: CliRunRequest) => Promise<CliRunResponse>
+      setWindowTitle: (projectName?: string) => Promise<void>
       deployCli: (input: CliDeployRequest) => Promise<{ jobId: string }>
       onDeployProgress: (
         listener: (payload: DeployProgressPayload) => void

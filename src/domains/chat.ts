@@ -1,4 +1,4 @@
-import { desktopEnvelope } from '../lib/desktop-client'
+import { desktopEnvelope, desktopRequest } from '../lib/desktop-client'
 import type {
   ApiEnvelope,
   ChatCompletionResponse,
@@ -42,7 +42,7 @@ export async function sendChatCompletion(payload: {
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>
   temperature?: number
 }) {
-  const response = await desktopEnvelope<ChatCompletionResponse>({
+  return desktopRequest<ChatCompletionResponse>({
     method: 'POST',
     path: '/pg/chat/completions',
     body: {
@@ -50,12 +50,6 @@ export async function sendChatCompletion(payload: {
       stream: false,
     },
   })
-
-  if (!response.success || !response.data) {
-    throw new Error(response.message || '聊天请求失败')
-  }
-
-  return response.data
 }
 
 export async function requireEnvelopeData<T>(promise: Promise<ApiEnvelope<T>>) {
