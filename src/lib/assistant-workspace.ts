@@ -10,6 +10,14 @@ export type CliLogEntryLike = {
   level: 'status' | 'error'
   content: string
   createdAt: number
+  files?: CliFileChange[]
+}
+
+export type CliFileChange = {
+  path: string
+  kind: 'created' | 'modified' | 'deleted' | 'renamed' | 'unknown'
+  content?: string
+  diff?: string
 }
 
 export type CliTimelineEntry =
@@ -31,7 +39,7 @@ export type CliTimelineEntry =
       requestId?: string
       sessionId?: string
       title: string
-      files: string[]
+      files: CliFileChange[]
     }
   | {
       id: string
@@ -138,16 +146,15 @@ export function buildCliTimeline(input: {
     requestId?: string
     sessionId?: string
     title: string
-    files: string[]
+    files: CliFileChange[]
   }>>((groups, item) => {
     const normalizedCreatedAt = toTimelineTimestamp(item.createdAt)
     const lastGroup = groups.at(-1)
     const sameRequest = lastGroup?.requestId && item.requestId && lastGroup.requestId === item.requestId
-    const sameSession = lastGroup?.sessionId && item.sessionId && lastGroup.sessionId === item.sessionId
-    if (lastGroup && (sameRequest || sameSession)) {
+    if (lastGroup && sameRequest) {
       lastGroup.content.push(item.content)
       lastGroup.createdAt = Math.max(lastGroup.createdAt, normalizedCreatedAt)
-      lastGroup.files.push(...extractReferencedFiles(item.content))
+      lastGroup.files.push(...(item.files || []))
       return groups
     }
 
@@ -161,7 +168,7 @@ export function buildCliTimeline(input: {
       requestId: item.requestId,
       sessionId: item.sessionId,
       title: item.content,
-      files: extractReferencedFiles(item.content),
+      files: [...(item.files || [])],
     })
     return groups
   }, [])
@@ -189,14 +196,7 @@ export function buildCliTimeline(input: {
   }
 
   for (const group of groupedLogs.sort((left, right) => left.startedAt - right.startedAt)) {
-    const insertIndex = entries.findIndex((entry) => {
-      if (entry.kind !== 'message' && entry.kind !== 'partial') {
-        return false
-      }
-
-      return entry.role === 'assistant' && entry.createdAt >= group.startedAt
-    })
-
+    const insertIndex = entries.findIndex((entry) => entry.kind === 'message' && entry.role === 'assistant' && entry.createdAt >= group.startedAt)
     if (insertIndex >= 0) {
       entries.splice(insertIndex, 0, group)
       continue
@@ -211,33 +211,7 @@ export function buildCliTimeline(input: {
     entries.push(group)
   }
 
-  return entries.sort((left, right) => {
-    const leftTime = left.createdAt
-    const rightTime = right.createdAt
-    if (leftTime !== rightTime) {
-      return leftTime - rightTime
-    }
-    if (left.kind === 'log' && right.kind !== 'log') {
-      return -1
-    }
-    if (left.kind !== 'log' && right.kind === 'log') {
-      return 1
-    }
-    if (left.kind === 'partial' && right.kind === 'message') {
-      return -1
-    }
-    if (left.kind === 'message' && right.kind === 'partial') {
-      return 1
-    }
-    return 0
-  })
-}
-
-function extractReferencedFiles(content: string) {
-  const matches = content.match(/(?:[A-Za-z]:)?[\\/][^\n\r\t<>:"|?*]+/g) || []
-  return matches
-    .map((item) => item.trim().replace(/[),.;]+$/, ''))
-    .filter(Boolean)
+  return entries
 }
 
 function normalizeWhitespace(value: string) {

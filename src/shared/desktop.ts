@@ -33,6 +33,14 @@ export interface CliSessionMessage {
   content: string
   createdAt: number
   modelLabel?: string
+  fileChanges?: CliFileChange[]
+}
+
+export interface CliFileChange {
+  path: string
+  kind: 'created' | 'modified' | 'deleted' | 'renamed' | 'unknown'
+  content?: string
+  diff?: string
 }
 
 export interface CliSessionDetails {
@@ -43,6 +51,7 @@ export interface CliSessionDetails {
   projectName: string
   projectPath: string
   messages: CliSessionMessage[]
+  fileChanges?: CliFileChange[]
 }
 
 export interface CliStatus {
@@ -64,6 +73,7 @@ export interface CliRunRequest {
   sessionId?: string
   model?: string
   reasoningEffort?: string
+  fullAccess?: boolean
 }
 
 export interface CliRunResponse {

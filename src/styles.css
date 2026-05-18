@@ -138,6 +138,12 @@ select {
   padding-left: 8px;
 }
 
+.brand-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
 .brand-mark {
   width: 42px;
   height: 42px;
@@ -212,6 +218,16 @@ select {
 
 .sidebar.collapsed .collapse-button {
   align-self: center;
+}
+
+.sidebar.collapsed .side-nav-item {
+  justify-content: center;
+  align-items: center;
+}
+
+.sidebar.collapsed .side-nav-item.active {
+  background: transparent;
+  box-shadow: none;
 }
 
 .sidebar.collapsed .collapse-button:hover {
@@ -884,6 +900,7 @@ select {
   margin: 6px 0 8px;
   white-space: pre-wrap;
   word-break: break-word;
+  font-size: 13px;
 }
 
 .message-bubble.image-bubble p {
@@ -952,7 +969,12 @@ select {
 }
 
 .chat-page .message-stream {
-  padding-top: 46px;
+  padding-top: 12px;
+}
+
+.chat-page .message-stream,
+.cli-page .cli-thread {
+  font-size: 14px;
 }
 
 .chat-page .conversation-panel,
@@ -998,8 +1020,8 @@ select {
 
 .composer-asset-card {
   position: relative;
-  width: 46px;
-  height: 46px;
+  width: 26px;
+  height: 26px;
   border-radius: 16px;
   overflow: hidden;
   background: rgba(23, 49, 74, 0.06);
@@ -1022,10 +1044,10 @@ select {
 
 .composer-asset-name {
   position: absolute;
-  left: 4px;
-  right: 4px;
-  bottom: 4px;
-  padding: 1px 4px;
+  left: 2px;
+  right: 2px;
+  bottom: 2px;
+  padding: 0 3px;
   border-radius: 999px;
   color: #fff;
   background: rgba(16, 32, 46, 0.72);
@@ -1037,10 +1059,10 @@ select {
 
 .composer-asset-remove {
   position: absolute;
-  top: 4px;
-  right: 4px;
-  width: 16px;
-  height: 16px;
+  top: 2px;
+  right: 2px;
+  width: 12px;
+  height: 12px;
   border-radius: 999px;
   background: rgba(16, 32, 46, 0.72);
   color: #fff;
@@ -1105,8 +1127,8 @@ select {
 }
 
 .status-grid-slim .status-button {
-  min-height: 28px;
-  padding: 6px 8px;
+  min-height: 26px;
+  padding: 4px 8px;
   justify-content: center;
 }
 
@@ -1246,6 +1268,15 @@ select {
   border-bottom-color: var(--accent);
 }
 
+.assistant-mode-button:not(.active) {
+  opacity: 0.92;
+}
+
+.selected-toggle {
+  background: rgba(29, 107, 120, 0.12);
+  box-shadow: none;
+}
+
 .assistant-host {
   position: relative;
   padding-top: 0;
@@ -1310,12 +1341,16 @@ select {
 }
 
 .cli-thread {
-  padding-top: 46px;
+  padding-top: 12px;
 }
 
 .message-stream,
 .cli-thread {
   align-items: flex-start;
+}
+
+.cli-thread .message-bubble {
+  align-self: flex-start;
 }
 
 .history-groups {
@@ -1423,6 +1458,10 @@ select {
 
 .cli-log-file {
   max-width: 100%;
+}
+
+.workspace-corner-tools {
+  display: none;
 }
 
 .file-preview-modal {

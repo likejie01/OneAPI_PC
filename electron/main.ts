@@ -71,6 +71,14 @@ interface CliSessionMessage {
   content: string
   createdAt: number
   modelLabel?: string
+  fileChanges?: CliFileChange[]
+}
+
+interface CliFileChange {
+  path: string
+  kind: 'created' | 'modified' | 'deleted' | 'renamed' | 'unknown'
+  content?: string
+  diff?: string
 }
 
 interface CliSessionDetails {
@@ -81,6 +89,7 @@ interface CliSessionDetails {
   projectName: string
   projectPath: string
   messages: CliSessionMessage[]
+  fileChanges?: CliFileChange[]
 }
 
 interface CliStatus {
@@ -102,6 +111,7 @@ interface CliRunRequest {
   sessionId?: string
   model?: string
   reasoningEffort?: string
+  fullAccess?: boolean
 }
 
 interface CliRunResponse {
@@ -589,6 +599,49 @@ async function readCurrentCodexConfig() {
   }
 }
 
+function extractTomlSection(raw: string, section: string) {
+  const sectionStart = raw.indexOf(`[${section}]`)
+  if (sectionStart < 0) {
+    return ''
+  }
+
+  const nextSection = raw.slice(sectionStart + section.length + 2).search(/^\[[^\]]+\]/m)
+  if (nextSection < 0) {
+    return raw.slice(sectionStart).trimEnd()
+  }
+
+  return raw.slice(sectionStart, sectionStart + section.length + 2 + nextSection).trimEnd()
+}
+
+function mergeCodexConfig(raw: string, apiKey: string, model: string, baseUrl: string) {
+  const preservedSections = [
+    'skills',
+    'plugins',
+    'projects',
+    'model_providers.oneapi_desktop',
+    'windows',
+  ]
+    .map((section) => extractTomlSection(raw, section))
+    .filter(Boolean)
+
+  return [
+    `model = "${model}"`,
+    'model_provider = "oneapi_desktop"',
+    'model_reasoning_effort = "high"',
+    '',
+    '[model_providers.oneapi_desktop]',
+    'name = "oneapi_desktop"',
+    `base_url = "${baseUrl.endsWith('/v1') ? baseUrl : `${baseUrl}/v1`}"`,
+    `api_key = "${apiKey}"`,
+    'wire_api = "responses"',
+    '',
+    ...preservedSections,
+    '',
+  ]
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+}
+
 async function readCurrentClaudeConfig() {
   const targetPath = cliConfig.claude.configPath
   const raw = await fs.readFile(targetPath, 'utf8')
@@ -713,6 +766,9 @@ function shouldIgnoreClaudeMessage(text: string) {
     normalized.startsWith('Todos have been modified successfully.') ||
     normalized.startsWith('<turn_aborted>') ||
     normalized === 'No files found' ||
+    normalized.startsWith('File created successfully at:') ||
+    normalized.startsWith('Updated task #') ||
+    normalized.startsWith('Created task #') ||
     normalized.startsWith('[{') ||
     normalized.includes('"tool_use_id"') ||
     normalized.includes('"tool_result"')
@@ -743,7 +799,8 @@ function shouldIgnoreClaudeContent(content: unknown) {
       typedPart.type === 'thinking' ||
       typedPart.type === 'tool_use' ||
       typedPart.type === 'tool_result' ||
-      typedPart.type === 'progress'
+      typedPart.type === 'progress' ||
+      typedPart.type === 'queue-operation'
     ) {
       return true
     }
@@ -776,6 +833,103 @@ function uniqueMessages(messages: CliSessionMessage[]) {
     seen.add(key)
     return true
   })
+}
+
+function extractFilePathFromText(text: string) {
+  const match = text.match(/(?:[A-Za-z]:)?[\\/][^\n\r<>:"|?*]+/)
+  return match?.[0]?.trim().replace(/[),.;]+$/, '') || ''
+}
+
+function extractCodexFileChanges(lines: string[]) {
+  const fileChanges = new Map<string, CliFileChange>()
+
+  for (const line of lines) {
+    if (!line.includes('patch_apply_end') && !line.includes('apply_patch') && !line.includes('changes')) {
+      continue
+    }
+
+    try {
+      const parsed = JSON.parse(line) as {
+        type?: string
+        changes?: Record<string, { type?: string; unified_diff?: string }>
+        stdout?: string
+      }
+
+      if (parsed.changes && typeof parsed.changes === 'object') {
+        for (const [pathName, change] of Object.entries(parsed.changes)) {
+          if (!pathName) {
+            continue
+          }
+          fileChanges.set(pathName, {
+            path: pathName,
+            kind:
+              change.type === 'create'
+                ? 'created'
+                : change.type === 'delete'
+                  ? 'deleted'
+                  : change.type === 'rename'
+                    ? 'renamed'
+                    : 'modified',
+            diff: change.unified_diff || '',
+          })
+        }
+      }
+
+      if (typeof parsed.stdout === 'string' && parsed.stdout.trim()) {
+        const filePath = extractFilePathFromText(parsed.stdout)
+        if (filePath && !fileChanges.has(filePath)) {
+          fileChanges.set(filePath, {
+            path: filePath,
+            kind: 'unknown',
+            content: parsed.stdout.trim(),
+          })
+        }
+      }
+    } catch {
+      continue
+    }
+  }
+
+  return [...fileChanges.values()]
+}
+
+function extractClaudeFileChanges(lines: string[]) {
+  const fileChanges = new Map<string, CliFileChange>()
+
+  for (const line of lines) {
+    try {
+      const parsed = JSON.parse(line) as {
+        toolUseResult?: {
+          filePath?: string
+          file?: {
+            filePath?: string
+            content?: string
+          }
+          structuredPatch?: string
+        }
+      }
+
+      const filePath =
+        parsed.toolUseResult?.file?.filePath?.trim() ||
+        parsed.toolUseResult?.filePath?.trim() ||
+        ''
+
+      if (!filePath) {
+        continue
+      }
+
+      fileChanges.set(filePath, {
+        path: filePath,
+        kind: parsed.toolUseResult?.structuredPatch ? 'modified' : 'unknown',
+        content: parsed.toolUseResult?.file?.content || '',
+        diff: parsed.toolUseResult?.structuredPatch || '',
+      })
+    } catch {
+      continue
+    }
+  }
+
+  return [...fileChanges.values()]
 }
 
 async function buildCodexSessionMap() {
@@ -836,8 +990,21 @@ async function getLatestCodexSessionFile(sessionId: string) {
   return stats.sort((left, right) => right.stat.mtimeMs - left.stat.mtimeMs)[0]?.filePath ?? ''
 }
 
-function parseCodexSession(lines: string[]): CliSessionMessage[] {
+function mergeFileChanges(left: CliFileChange[], right: CliFileChange[]) {
+  const seen = new Set<string>()
+  return [...left, ...right].filter((item) => {
+    const key = `${item.path}:${item.kind}:${item.diff || item.content || ''}`
+    if (seen.has(key)) {
+      return false
+    }
+    seen.add(key)
+    return true
+  })
+}
+
+function parseCodexSession(lines: string[]): { messages: CliSessionMessage[]; fileChanges: CliFileChange[] } {
   const messages: CliSessionMessage[] = []
+  const fileChanges: CliFileChange[] = []
 
   for (const line of lines) {
     try {
@@ -851,6 +1018,27 @@ function parseCodexSession(lines: string[]): CliSessionMessage[] {
           phase?: string
           content?: unknown
           message?: { role?: string; content?: unknown }
+        }
+        changes?: Record<string, { type?: string; unified_diff?: string }>
+      }
+
+      if (parsed.changes && typeof parsed.changes === 'object') {
+        for (const [pathName, change] of Object.entries(parsed.changes)) {
+          if (!pathName) {
+            continue
+          }
+          fileChanges.push({
+            path: pathName,
+            kind:
+              change.type === 'create'
+                ? 'created'
+                : change.type === 'delete'
+                  ? 'deleted'
+                  : change.type === 'rename'
+                    ? 'renamed'
+                    : 'modified',
+            diff: change.unified_diff || '',
+          })
         }
       }
 
@@ -884,7 +1072,10 @@ function parseCodexSession(lines: string[]): CliSessionMessage[] {
     }
   }
 
-  return uniqueMessages(messages)
+  return {
+    messages: uniqueMessages(messages),
+    fileChanges: mergeFileChanges([], fileChanges),
+  }
 }
 
 async function listCodexHistory(limit = 12): Promise<CliHistoryEntry[]> {
@@ -950,15 +1141,19 @@ async function getCodexSession(sessionId: string): Promise<CliSessionDetails | n
     }
   }
 
-  const messages = parseCodexSession(lines)
+  const parsedSession = parseCodexSession(lines)
   return {
     id: sessionId,
     client: 'codex',
-    preview: messages.at(-1)?.content ?? '',
-    updatedAt: messages.at(-1)?.createdAt ?? 0,
+    preview: parsedSession.messages.at(-1)?.content ?? '',
+    updatedAt: parsedSession.messages.at(-1)?.createdAt ?? 0,
     projectName: projectPath ? path.basename(projectPath) : '未命名项目',
     projectPath,
-    messages,
+    messages: parsedSession.messages.map((message) => ({
+      ...message,
+      fileChanges: message.role === 'assistant' ? parsedSession.fileChanges : undefined,
+    })),
+    fileChanges: parsedSession.fileChanges,
   }
 }
 
@@ -1009,8 +1204,9 @@ async function getClaudeSessionFile(sessionId: string) {
   return files[0] ?? ''
 }
 
-function parseClaudeSession(lines: string[]): CliSessionMessage[] {
+function parseClaudeSession(lines: string[]): { messages: CliSessionMessage[]; fileChanges: CliFileChange[] } {
   const messages: CliSessionMessage[] = []
+  const fileChanges: CliFileChange[] = []
 
   for (const line of lines) {
     try {
@@ -1022,6 +1218,14 @@ function parseClaudeSession(lines: string[]): CliSessionMessage[] {
           role?: string
           model?: string
           content?: unknown
+        }
+        toolUseResult?: {
+          filePath?: string
+          file?: {
+            filePath?: string
+            content?: string
+          }
+          structuredPatch?: string
         }
       }
 
@@ -1035,6 +1239,19 @@ function parseClaudeSession(lines: string[]): CliSessionMessage[] {
       }
       if (shouldIgnoreClaudeContent(parsed.message?.content)) {
         continue
+      }
+
+      const toolResultPath =
+        parsed.toolUseResult?.file?.filePath?.trim() ||
+        parsed.toolUseResult?.filePath?.trim() ||
+        ''
+      if (toolResultPath) {
+        fileChanges.push({
+          path: toolResultPath,
+          kind: parsed.toolUseResult?.structuredPatch ? 'modified' : 'unknown',
+          content: parsed.toolUseResult?.file?.content || '',
+          diff: parsed.toolUseResult?.structuredPatch || '',
+        })
       }
 
       const content = contentPartsToText(parsed.message?.content)
@@ -1054,7 +1271,10 @@ function parseClaudeSession(lines: string[]): CliSessionMessage[] {
     }
   }
 
-  return uniqueMessages(messages)
+  return {
+    messages: uniqueMessages(messages),
+    fileChanges: mergeFileChanges([], fileChanges),
+  }
 }
 
 async function getClaudeSession(sessionId: string): Promise<CliSessionDetails | null> {
@@ -1078,15 +1298,19 @@ async function getClaudeSession(sessionId: string): Promise<CliSessionDetails | 
     }
   }
 
-  const messages = parseClaudeSession(lines)
+  const parsedSession = parseClaudeSession(lines)
   return {
     id: sessionId,
     client: 'claude',
-    preview: messages.at(-1)?.content ?? '',
-    updatedAt: messages.at(-1)?.createdAt ?? 0,
+    preview: parsedSession.messages.at(-1)?.content ?? '',
+    updatedAt: parsedSession.messages.at(-1)?.createdAt ?? 0,
     projectName: projectPath ? path.basename(projectPath) : path.basename(path.dirname(filePath)) || '未命名项目',
     projectPath,
-    messages,
+    messages: parsedSession.messages.map((message) => ({
+      ...message,
+      fileChanges: message.role === 'assistant' ? parsedSession.fileChanges : undefined,
+    })),
+    fileChanges: parsedSession.fileChanges,
   }
 }
 
@@ -1260,6 +1484,10 @@ async function runCodexPrompt(
     args.splice(args.length - 1, 0, '--model', input.model.trim())
   }
 
+  if (input.fullAccess) {
+    args.splice(args.length - 1, 0, '--permission-mode', 'bypassPermissions')
+  }
+
   args.splice(
     args.length - 1,
     0,
@@ -1316,6 +1544,10 @@ async function runCodexPrompt(
   const usageEvent = [...events]
     .reverse()
     .find((item) => item.type === 'turn.completed')
+  const fileChanges = mergeFileChanges(
+    [],
+    extractCodexFileChanges(result.stdout.split(/\r?\n/))
+  )
 
   if (!sessionId && typeof threadEvent?.thread_id === 'string') {
     sessionId = threadEvent.thread_id
@@ -1345,6 +1577,7 @@ async function runCodexPrompt(
       exitCode: result.exitCode,
       threadId: sessionId ?? '',
       usage: usageEvent?.usage ?? null,
+      fileChanges,
     },
   }
 }
@@ -1474,6 +1707,8 @@ async function runClaudePrompt(
         .find((item) => item.type === 'result') ?? null
   }
 
+  const fileChanges = mergeFileChanges([], extractClaudeFileChanges(result.stdout.split(/\r?\n/)))
+
   if (!sessionId && typeof finalResult?.session_id === 'string') {
     sessionId = finalResult.session_id
   }
@@ -1511,28 +1746,9 @@ async function runClaudePrompt(
     metadata: {
       ...(finalResult ?? { exitCode: result.exitCode }),
       aborted,
+      fileChanges,
     },
   }
-}
-
-function buildCodexConfig(apiKey: string, model: string, baseUrl: string) {
-  const normalizedBaseUrl = baseUrl.endsWith('/v1') ? baseUrl : `${baseUrl}/v1`
-
-  return [
-    `model = "${model}"`,
-    'model_provider = "oneapi_desktop"',
-    'model_reasoning_effort = "high"',
-    '',
-    '[model_providers.oneapi_desktop]',
-    'name = "oneapi_desktop"',
-    `base_url = "${normalizedBaseUrl}"`,
-    `api_key = "${apiKey}"`,
-    'wire_api = "responses"',
-    '',
-    '[windows]',
-    'sandbox = "unelevated"',
-    '',
-  ].join('\n')
 }
 
 function resolveDesktopCliKeyRecord(apiKey: string) {
@@ -1542,10 +1758,14 @@ function resolveDesktopCliKeyRecord(apiKey: string) {
 async function writeCodexConfig(request: CliDeployRequest) {
   const targetPath = cliConfig.codex.configPath
   await fs.mkdir(path.dirname(targetPath), { recursive: true })
-  await backupIfNeeded(targetPath)
+  const raw = (await pathExists(targetPath)) ? await fs.readFile(targetPath, 'utf8') : ''
+  if (raw) {
+    await backupIfNeeded(targetPath)
+  }
   await fs.writeFile(
     targetPath,
-    buildCodexConfig(
+    mergeCodexConfig(
+      raw,
       resolveDesktopCliKeyRecord(request.apiKey),
       request.model?.trim() || 'gpt-5.5',
       request.baseUrl?.trim() || SERVER_BASE_URL

@@ -15,7 +15,6 @@ import {
   LogOut,
   Mail,
   MessageSquareText,
-  Paperclip,
   PanelLeftClose,
   PanelLeftOpen,
   PanelRightOpen,
@@ -1413,7 +1412,7 @@ function AssistantsChatWorkspace(props: {
                     ? item.modelLabel || activeModelLabel
                     : item.role === 'system'
                       ? '系统'
-                    : '你'}
+                    : ''}
                 </span>
                 {item.imageUrl ? (
                   <div className='chat-image-result'>
@@ -1632,10 +1631,15 @@ function AssistantsChatWorkspace(props: {
               <span className='eyebrow dark'>历史记录</span>
               <h2>最近会话</h2>
             </div>
-            <button className='secondary-button tiny' type='button' onClick={createChatSession}>
-              <Plus size={16} />
-              <span>新对话</span>
-            </button>
+            <div className='inline-actions'>
+              <button className='secondary-button tiny' type='button' onClick={() => setHistoryOpen(false)}>
+                收起
+              </button>
+              <button className='secondary-button tiny' type='button' onClick={createChatSession}>
+                <Plus size={16} />
+                <span>新对话</span>
+              </button>
+            </div>
           </div>
 
           <div className='side-pane-scroll'>
@@ -2366,6 +2370,7 @@ function CliWorkspace(props: {
   const [projectName, setProjectName] = useState('')
   const [prompt, setPrompt] = useState('')
   const [running, setRunning] = useState(false)
+  const [fullAccess, setFullAccess] = useState(false)
   const [projectSessionMap, setProjectSessionMap] = useState<Record<string, string>>({})
   const [sessionProjectPathMap, setSessionProjectPathMap] = useState<Record<string, string>>({})
   const [sessionMessagesMap, setSessionMessagesMap] = useState<Record<string, CliMessage[]>>({})
@@ -2390,7 +2395,6 @@ function CliWorkspace(props: {
     clearAttachments,
     handleInputChange: handleAttachmentInputChange,
     handlePaste: handleAttachmentPaste,
-    openPicker: openAttachmentPicker,
   } = useComposerAttachments(toast)
   const { ref: promptRef, resize: resizePrompt } = useAutosizeTextarea(prompt)
   const modelMenuRef = useRef<HTMLDivElement | null>(null)
@@ -2845,6 +2849,7 @@ function CliWorkspace(props: {
         sessionId: getCliResumeSessionId(activeSessionId),
         model: resolveCompatibleModel(client, compatibleCliModels, selectedModel, preferredCliModel) || undefined,
         reasoningEffort,
+        fullAccess,
       })
 
       const nextSessionId = response.sessionId || currentSessionKey
@@ -2922,20 +2927,6 @@ function CliWorkspace(props: {
     <section className='workspace-page cli-page'>
       <div className={`cli-layout ${historyOpen ? 'history-open' : ''}`}>
         <article className='panel cli-main-panel cli-panel-surface'>
-          <div className='workspace-corner-tools'>
-            {!historyOpen && (
-              <button
-                className='ghost-button icon-only'
-                type='button'
-                onClick={() => setHistoryOpen(true)}
-                title='最近会话'
-                aria-label='最近会话'
-              >
-                <PanelRightOpen size={16} />
-              </button>
-            )}
-          </div>
-
           {(!status.installed || !status.hasConfig) && (
             <div className='inline-notice warn'>
               <span>当前环境还未完成安装或配置，请先前往设置完成一键部署。</span>
@@ -2965,18 +2956,20 @@ function CliWorkspace(props: {
                         <li key={`${item.id}-${index}`}>{line}</li>
                       ))}
                     </ul>
-                    {expanded && item.files.length > 0 && (
+                    {item.files.length > 0 && (
                       <div className='cli-log-files'>
-                        {Array.from(new Set(item.files)).map((filePath) => (
+                        {Array.from(new Map(item.files.map((file) => [file.path, file])).values())
+                          .slice(0, expanded ? undefined : 4)
+                          .map((fileItem) => (
                           <button
-                            key={filePath}
+                            key={fileItem.path}
                             className='ghost-button tiny cli-log-file'
                             type='button'
-                            onClick={() => void handlePreviewFile(filePath)}
-                            title={filePath}
+                            onClick={() => void handlePreviewFile(fileItem.path)}
+                            title={fileItem.path}
                           >
                             <FileText size={14} />
-                            <span>{filePath.split(/[\\/]/).filter(Boolean).at(-1) || filePath}</span>
+                            <span>{fileItem.path.split(/[\\/]/).filter(Boolean).at(-1) || fileItem.path}</span>
                           </button>
                         ))}
                       </div>
@@ -3005,7 +2998,7 @@ function CliWorkspace(props: {
                   <span className='message-role'>
                     {item.role === 'assistant'
                       ? item.modelLabel || selectedModelLabel
-                      : '你'}
+                      : ''}
                   </span>
                   <p>{item.content}</p>
                   <BubbleMeta
@@ -3044,22 +3037,6 @@ function CliWorkspace(props: {
             onPaste: handleAttachmentPaste,
             leftActions: [
               {
-                key: 'attachment',
-                node: (
-                  <div className='toolbar-picker'>
-                    <button
-                      className='ghost-button tiny icon-pill-trigger'
-                      type='button'
-                      onClick={openAttachmentPicker}
-                      title='添加附件'
-                    >
-                      <Paperclip size={16} />
-                      <strong>{attachments.length > 0 ? `附件 ${attachments.length}` : '添加附件'}</strong>
-                    </button>
-                  </div>
-                ),
-              },
-              {
                 key: 'project',
                 node: (
                   <button
@@ -3076,9 +3053,23 @@ function CliWorkspace(props: {
               {
                 key: 'refresh',
                 node: (
-                  <button className='ghost-button tiny icon-pill-trigger' type='button' onClick={() => void refreshCliState()}>
+                  <button className='ghost-button tiny icon-pill-trigger' type='button' onClick={() => void refreshCliState(true)} title='刷新环境与历史'>
                     <RefreshCcw size={16} />
                     <strong>刷新</strong>
+                  </button>
+                ),
+              },
+              {
+                key: 'permission',
+                node: (
+                  <button
+                    className={`ghost-button tiny icon-pill-trigger ${fullAccess ? 'selected-toggle' : ''}`}
+                    type='button'
+                    onClick={() => setFullAccess((current) => !current)}
+                    title='全权限'
+                  >
+                    <LockKeyhole size={16} />
+                    <strong>{fullAccess ? '全权限' : '受限'}</strong>
                   </button>
                 ),
               },
@@ -3184,7 +3175,7 @@ function CliWorkspace(props: {
               },
               {
                 key: 'status-config',
-                node: <span className='metric-pill'>{status.hasConfig ? '配置已就绪' : '待配置'}</span>,
+                node: null,
               },
             ],
             sendButton: (
@@ -3210,6 +3201,11 @@ function CliWorkspace(props: {
             <div>
               <span className='eyebrow dark'>历史记录</span>
               <h2>最近会话</h2>
+            </div>
+            <div className='inline-actions'>
+              <button className='secondary-button tiny' type='button' onClick={() => setHistoryOpen(false)}>
+                收起
+              </button>
             </div>
           </div>
 
@@ -3910,8 +3906,9 @@ export function App() {
         <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
           <div className='sidebar-head'>
             <div className='brand'>
+              <div className='brand-mark'>O</div>
               {!collapsed && (
-                <div>
+                <div className='brand-text'>
                   <div className='brand-name'>OneAPI Center</div>
                   <div className='brand-sub'>Windows 客户端</div>
                 </div>
