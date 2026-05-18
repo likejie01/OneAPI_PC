@@ -101,3 +101,26 @@ export interface DeployProgressPayload {
   message: string
   detail?: string
 }
+
+export interface DesktopAttachmentSaveRequest {
+  name: string
+  mimeType?: string
+  dataBase64: string
+}
+
+export interface DesktopAttachmentSaveResult {
+  path: string
+}
+
+export interface DesktopFilePreview {
+  path: string
+  name: string
+  content: string
+}
+
+export interface CliDeployPreset {
+  client: CliClient
+  apiKey: string
+  model: string
+  baseUrl: string
+}

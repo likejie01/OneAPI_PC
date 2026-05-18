@@ -10,6 +10,7 @@
     "electron": "wait-on tcp:5173 && electron .",
     "build": "tsc -b && vite build",
     "build:win": "cross-env-shell ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ \"npm run build && electron-builder --win nsis portable\"",
+    "test": "node --test --experimental-strip-types src/lib/cli-session.test.ts",
     "lint": "eslint .",
     "preview": "vite preview"
   },

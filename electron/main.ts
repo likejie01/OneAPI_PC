@@ -16,6 +16,8 @@ import { fileURLToPath } from 'node:url'
 import process from 'node:process'
 
 const SERVER_BASE_URL = 'http://ai.oneapi.center'
+const DEFAULT_CODEX_MODEL = 'gpt-5.5'
+const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-4-6'
 const DESKTOP_PARTITION = 'persist:oneapi-desktop'
 const isDev = !!process.env.VITE_DEV_SERVER_URL
 const __filename = fileURLToPath(import.meta.url)
@@ -136,6 +138,12 @@ interface DeployProgressPayload {
   status: DeployStatus
   message: string
   detail?: string
+}
+
+interface DesktopAttachmentSaveRequest {
+  name: string
+  mimeType?: string
+  dataBase64: string
 }
 
 const cliConfig = {
@@ -513,6 +521,90 @@ async function pathExists(target: string) {
   }
 }
 
+async function resolveOpenTarget(targetPath: string) {
+  const normalized = targetPath.trim()
+  if (!normalized) {
+    return ''
+  }
+
+  if (await pathExists(normalized)) {
+    const stat = await fs.stat(normalized)
+    return stat.isDirectory() ? normalized : path.dirname(normalized)
+  }
+
+  const parentDirectory = path.dirname(normalized)
+  if (await pathExists(parentDirectory)) {
+    return parentDirectory
+  }
+
+  return ''
+}
+
+async function saveDesktopAttachment(input: DesktopAttachmentSaveRequest) {
+  const extension = path.extname(input.name || '')
+  const safeBaseName =
+    path.basename(input.name || 'clipboard-file', extension).replace(/[<>:"/\\|?*\x00-\x1f]/g, '_') ||
+    'clipboard-file'
+  const targetDirectory = path.join(app.getPath('userData'), 'attachments')
+  await fs.mkdir(targetDirectory, { recursive: true })
+  const targetPath = path.join(
+    targetDirectory,
+    `${Date.now()}-${safeBaseName}${extension || ''}`
+  )
+
+  await fs.writeFile(targetPath, Buffer.from(input.dataBase64, 'base64'))
+  return {
+    path: targetPath,
+  }
+}
+
+async function readFilePreview(targetPath: string) {
+  const resolved = path.resolve(targetPath)
+  const stat = await fs.stat(resolved)
+  if (!stat.isFile()) {
+    throw new Error('当前路径不是文件。')
+  }
+
+  const buffer = await fs.readFile(resolved)
+  const content = buffer.toString('utf8')
+  return {
+    path: resolved,
+    name: path.basename(resolved),
+    content,
+  }
+}
+
+async function readCurrentCodexConfig() {
+  const targetPath = cliConfig.codex.configPath
+  const raw = await fs.readFile(targetPath, 'utf8')
+  const apiKeyMatch = raw.match(/api_key\s*=\s*"([^"]+)"/)
+  const modelMatch = raw.match(/model\s*=\s*"([^"]+)"/)
+  const baseUrlMatch = raw.match(/base_url\s*=\s*"([^"]+)"/)
+
+  return {
+    client: 'codex' as const,
+    apiKey: apiKeyMatch?.[1]?.trim() || '',
+    model: modelMatch?.[1]?.trim() || DEFAULT_CODEX_MODEL,
+    baseUrl: baseUrlMatch?.[1]?.trim().replace(/\/v1$/, '') || SERVER_BASE_URL,
+  }
+}
+
+async function readCurrentClaudeConfig() {
+  const targetPath = cliConfig.claude.configPath
+  const raw = await fs.readFile(targetPath, 'utf8')
+  const parsed = JSON.parse(raw) as {
+    env?: Record<string, string>
+    model?: string
+  }
+
+  return {
+    client: 'claude' as const,
+    apiKey: parsed.env?.ANTHROPIC_AUTH_TOKEN?.trim() || '',
+    model: parsed.model?.trim() || DEFAULT_CLAUDE_MODEL,
+    baseUrl: parsed.env?.ANTHROPIC_BASE_URL?.trim() || SERVER_BASE_URL,
+  }
+}
+
 async function readJsonLines(filePath: string) {
   if (!(await pathExists(filePath))) {
     return []
@@ -613,24 +705,64 @@ function contentPartsToText(content: unknown) {
 }
 
 function shouldIgnoreClaudeMessage(text: string) {
+  const normalized = text.trim()
   return (
-    !text ||
-    text.startsWith('Launching skill:') ||
-    text.startsWith('Base directory for this skill:') ||
-    text.startsWith('Todos have been modified successfully.') ||
-    text.startsWith('<turn_aborted>')
+    !normalized ||
+    normalized.startsWith('Launching skill:') ||
+    normalized.startsWith('Base directory for this skill:') ||
+    normalized.startsWith('Todos have been modified successfully.') ||
+    normalized.startsWith('<turn_aborted>') ||
+    normalized === 'No files found' ||
+    normalized.startsWith('[{') ||
+    normalized.includes('"tool_use_id"') ||
+    normalized.includes('"tool_result"')
   )
 }
 
+function shouldIgnoreClaudeContent(content: unknown) {
+  if (!Array.isArray(content) || content.length === 0) {
+    return false
+  }
+
+  return content.every((part) => {
+    if (!part || typeof part !== 'object') {
+      return false
+    }
+
+    const typedPart = part as {
+      type?: string
+      isMeta?: boolean
+      name?: string
+    }
+
+    if (typedPart.isMeta) {
+      return true
+    }
+
+    if (
+      typedPart.type === 'thinking' ||
+      typedPart.type === 'tool_use' ||
+      typedPart.type === 'tool_result' ||
+      typedPart.type === 'progress'
+    ) {
+      return true
+    }
+
+    return typedPart.name === 'queue-operation'
+  })
+}
+
 function shouldIgnoreCodexMessage(text: string) {
+  const normalized = text.trim()
   return (
-    !text ||
-    text.startsWith('<permissions instructions>') ||
-    text.startsWith('<app-context>') ||
-    text.startsWith('<collaboration_mode>') ||
-    text.startsWith('<skills_instructions>') ||
-    text.startsWith('<plugins_instructions>') ||
-    text.startsWith('<environment_context>')
+    !normalized ||
+    normalized.startsWith('<permissions instructions>') ||
+    normalized.startsWith('<app-context>') ||
+    normalized.startsWith('<collaboration_mode>') ||
+    normalized.startsWith('<skills_instructions>') ||
+    normalized.startsWith('<plugins_instructions>') ||
+    normalized.startsWith('<environment_context>') ||
+    normalized.startsWith('<model_switch>')
   )
 }
 
@@ -728,6 +860,9 @@ function parseCodexSession(lines: string[]): CliSessionMessage[] {
           continue
         }
         if (role === 'assistant' && parsed.payload.phase !== 'final_answer') {
+          continue
+        }
+        if (role === 'user' && typeof parsed.payload.phase === 'string' && parsed.payload.phase !== 'input') {
           continue
         }
 
@@ -896,6 +1031,9 @@ function parseClaudeSession(lines: string[]): CliSessionMessage[] {
 
       const role = parsed.message?.role
       if (role !== 'user' && role !== 'assistant') {
+        continue
+      }
+      if (shouldIgnoreClaudeContent(parsed.message?.content)) {
         continue
       }
 
@@ -1397,6 +1535,10 @@ function buildCodexConfig(apiKey: string, model: string, baseUrl: string) {
   ].join('\n')
 }
 
+function resolveDesktopCliKeyRecord(apiKey: string) {
+  return apiKey.startsWith('sk-') ? apiKey : `sk-${apiKey}`
+}
+
 async function writeCodexConfig(request: CliDeployRequest) {
   const targetPath = cliConfig.codex.configPath
   await fs.mkdir(path.dirname(targetPath), { recursive: true })
@@ -1404,8 +1546,8 @@ async function writeCodexConfig(request: CliDeployRequest) {
   await fs.writeFile(
     targetPath,
     buildCodexConfig(
-      request.apiKey,
-      request.model?.trim() || 'gpt-5.3-codex',
+      resolveDesktopCliKeyRecord(request.apiKey),
+      request.model?.trim() || 'gpt-5.5',
       request.baseUrl?.trim() || SERVER_BASE_URL
     ),
     'utf8'
@@ -1427,7 +1569,7 @@ async function writeClaudeConfig(request: CliDeployRequest) {
 
   const env = {
     ...(typeof current.env === 'object' && current.env ? current.env : {}),
-    ANTHROPIC_AUTH_TOKEN: request.apiKey,
+    ANTHROPIC_AUTH_TOKEN: resolveDesktopCliKeyRecord(request.apiKey),
     ANTHROPIC_BASE_URL: request.baseUrl?.trim() || SERVER_BASE_URL,
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
     API_TIMEOUT_MS: '600000',
@@ -1646,12 +1788,26 @@ ipcMain.handle('desktop:stop-api-request', async (_event, requestId: string) => 
 ipcMain.handle('desktop:open-external', async (_event, url: string) => {
   await shell.openExternal(url)
 })
+ipcMain.handle('desktop:open-path', async (_event, targetPath: string) => {
+  const resolved = await resolveOpenTarget(targetPath)
+  if (!resolved) {
+    throw new Error('目标路径当前不可打开。')
+  }
+
+  const error = await shell.openPath(resolved)
+  if (error) {
+    throw new Error(error)
+  }
+})
 ipcMain.handle('desktop:pick-project', async () => {
   const result = await dialog.showOpenDialog({
     properties: ['openDirectory'],
   })
 
   return result.canceled ? '' : result.filePaths[0] ?? ''
+})
+ipcMain.handle('desktop:file-preview', async (_event, targetPath: string) => {
+  return readFilePreview(targetPath)
 })
 ipcMain.handle('desktop:cli-status', async () => {
   const [codex, claude] = await Promise.all([inspectCli('codex'), inspectCli('claude')])
@@ -1693,4 +1849,12 @@ ipcMain.handle('desktop:deploy-cli', async (event, request: CliDeployRequest) =>
   const jobId = randomUUID()
   void deployCli(event.sender, request, jobId)
   return { jobId }
+})
+ipcMain.handle('desktop:cli-deploy-preset', async (_event, client: CliClient) => {
+  return client === 'codex'
+    ? readCurrentCodexConfig()
+    : readCurrentClaudeConfig()
+})
+ipcMain.handle('desktop:save-attachment', async (_event, input: DesktopAttachmentSaveRequest) => {
+  return saveDesktopAttachment(input)
 })

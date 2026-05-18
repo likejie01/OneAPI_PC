@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import type { ChangeEvent, ClipboardEvent, ReactNode } from 'react'
 import {
   Bot,
   ChartColumn,
@@ -7,6 +8,7 @@ import {
   CreditCard,
   Eye,
   EyeOff,
+  FileText,
   FolderOpen,
   KeyRound,
   LoaderCircle,
@@ -14,9 +16,9 @@ import {
   LogOut,
   Mail,
   MessageSquareText,
+  Paperclip,
   PanelLeftClose,
   PanelLeftOpen,
-  PanelRightClose,
   PanelRightOpen,
   PencilLine,
   Plus,
@@ -29,6 +31,7 @@ import {
   UserPlus,
   Wallet,
   Wrench,
+  X,
 } from 'lucide-react'
 import {
   createAssistant,
@@ -50,11 +53,13 @@ import { getUserGroups, getUserModels, sendChatCompletion, stopChatCompletion } 
 import {
   deployCli,
   getCliSession,
+  getCliDeployPreset,
   getCliStatus,
   listCliHistory,
   onCliProgress,
   onDeployProgress,
   pickProjectDirectory,
+  readDesktopFilePreview,
   runCliPrompt,
   setDesktopWindowTitle,
   stopCliPrompt,
@@ -74,6 +79,16 @@ import {
   redeemTopupCode,
   requestWalletPayment,
 } from './domains/wallet'
+import {
+  buildCliRecentSessions,
+  buildCliTimeline,
+  filterAssistantModels,
+  resolveCompatibleModel,
+} from './lib/assistant-workspace'
+import {
+  getCliResumeSessionId,
+  shouldAppendCliAssistantFallback,
+} from './lib/cli-session'
 import { clearStoredDesktopUserId, saveStoredDesktopUserId } from './lib/desktop-client'
 import { clipText, formatDateTime, formatPrice, formatQuota } from './lib/format'
 import { readJsonStorage, writeJsonStorage } from './lib/storage'
@@ -104,6 +119,15 @@ import { useAuthStore } from './stores/auth-store'
 
 type AssistantMode = 'chat' | 'codex' | 'claude'
 type SideTab = 'assistants' | 'subscriptions' | 'wallet' | 'usage' | 'me' | 'settings'
+
+type ComposerAttachment = {
+  id: string
+  name: string
+  filePath: string
+  size: number
+  kind: 'image' | 'file'
+  previewUrl?: string
+}
 
 const assistantModes: Array<{ key: AssistantMode; label: string }> = [
   { key: 'chat', label: '聊天' },
@@ -144,6 +168,159 @@ function useToastState() {
   }, [message])
 
   return { message, setMessage }
+}
+
+function fileToBase64(file: File) {
+  return file.arrayBuffer().then((buffer) => {
+    let binary = ''
+    const bytes = new Uint8Array(buffer)
+    const chunkSize = 0x8000
+
+    for (let index = 0; index < bytes.length; index += chunkSize) {
+      const chunk = bytes.subarray(index, index + chunkSize)
+      binary += String.fromCharCode(...chunk)
+    }
+
+    return window.btoa(binary)
+  })
+}
+
+function guessAttachmentKind(file: File, filePath: string) {
+  if (file.type.startsWith('image/')) {
+    return 'image' as const
+  }
+
+  return /\.(png|jpe?g|gif|bmp|webp|svg)$/i.test(filePath) ? 'image' as const : 'file' as const
+}
+
+function buildAttachmentReferenceText(attachments: ComposerAttachment[]) {
+  if (!attachments.length) {
+    return ''
+  }
+
+  const lines = attachments.map((item, index) => `${index + 1}. ${item.name} -> ${item.filePath}`)
+  return `\n\n附件引用：\n${lines.join('\n')}\n请结合这些附件路径处理本次任务。`
+}
+
+function useComposerAttachments(toast: (message: string) => void) {
+  const [attachments, setAttachments] = useState<ComposerAttachment[]>([])
+  const inputRef = useRef<HTMLInputElement | null>(null)
+
+  useEffect(() => {
+    return () => {
+      setAttachments((current) => {
+        current.forEach((item) => {
+          if (item.previewUrl) {
+            URL.revokeObjectURL(item.previewUrl)
+          }
+        })
+        return current
+      })
+    }
+  }, [])
+
+  const clearAttachments = useCallback(() => {
+    setAttachments((current) => {
+      current.forEach((item) => {
+        if (item.previewUrl) {
+          URL.revokeObjectURL(item.previewUrl)
+        }
+      })
+      return []
+    })
+    if (inputRef.current) {
+      inputRef.current.value = ''
+    }
+  }, [])
+
+  const removeAttachment = useCallback((attachmentId: string) => {
+    setAttachments((current) =>
+      current.filter((item) => {
+        if (item.id === attachmentId && item.previewUrl) {
+          URL.revokeObjectURL(item.previewUrl)
+        }
+        return item.id !== attachmentId
+      })
+    )
+  }, [])
+
+  const appendFiles = useCallback(async (incomingFiles: File[]) => {
+    if (!incomingFiles.length) {
+      return
+    }
+
+    try {
+      const nextAttachments = await Promise.all(
+        incomingFiles.map(async (file) => {
+          const fileWithPath = file as File & { path?: string }
+          const filePath =
+            fileWithPath.path?.trim() ||
+            (
+              await getDesktopBridge().saveAttachment({
+                name: file.name || 'clipboard-file',
+                mimeType: file.type,
+                dataBase64: await fileToBase64(file),
+              })
+            ).path
+
+          return {
+            id: globalThis.crypto.randomUUID(),
+            name: file.name || filePath.split(/[\\/]/).filter(Boolean).at(-1) || '未命名附件',
+            filePath,
+            size: file.size,
+            kind: guessAttachmentKind(file, filePath),
+            previewUrl: file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined,
+          } satisfies ComposerAttachment
+        })
+      )
+
+      setAttachments((current) => {
+        const seen = new Set(current.map((item) => `${item.name}:${item.filePath}:${item.size}`))
+        return [
+          ...current,
+          ...nextAttachments.filter((item) => {
+            const key = `${item.name}:${item.filePath}:${item.size}`
+            if (seen.has(key)) {
+              if (item.previewUrl) {
+                URL.revokeObjectURL(item.previewUrl)
+              }
+              return false
+            }
+            seen.add(key)
+            return true
+          }),
+        ]
+      })
+    } catch (error) {
+      toast(error instanceof Error ? error.message : '附件处理失败')
+    }
+  }, [toast])
+
+  const handleInputChange = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || [])
+    await appendFiles(files)
+    event.target.value = ''
+  }, [appendFiles])
+
+  const handlePaste = useCallback(async (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    const files = Array.from(event.clipboardData.files || [])
+    if (!files.length) {
+      return
+    }
+
+    event.preventDefault()
+    await appendFiles(files)
+  }, [appendFiles])
+
+  return {
+    attachments,
+    inputRef,
+    clearAttachments,
+    removeAttachment,
+    handleInputChange,
+    handlePaste,
+    openPicker: () => inputRef.current?.click(),
+  }
 }
 
 function loadInitialAssistantsState() {
@@ -194,6 +371,8 @@ function toMessageText(content: unknown) {
 }
 
 const AUTO_TEXTAREA_MAX_HEIGHT = 260
+const AUTO_TEXTAREA_MIN_ROWS = 3
+const AUTO_TEXTAREA_MAX_ROWS = 8
 
 function syncTextareaHeight(node: HTMLTextAreaElement | null) {
   if (!node) {
@@ -201,9 +380,15 @@ function syncTextareaHeight(node: HTMLTextAreaElement | null) {
   }
 
   node.style.height = 'auto'
-  const nextHeight = Math.min(node.scrollHeight, AUTO_TEXTAREA_MAX_HEIGHT)
+  const computed = window.getComputedStyle(node)
+  const lineHeight = Number.parseFloat(computed.lineHeight) || 24
+  const paddingTop = Number.parseFloat(computed.paddingTop) || 0
+  const paddingBottom = Number.parseFloat(computed.paddingBottom) || 0
+  const minHeight = lineHeight * AUTO_TEXTAREA_MIN_ROWS + paddingTop + paddingBottom
+  const maxHeight = lineHeight * AUTO_TEXTAREA_MAX_ROWS + paddingTop + paddingBottom
+  const nextHeight = Math.min(Math.max(node.scrollHeight, minHeight), Math.min(maxHeight, AUTO_TEXTAREA_MAX_HEIGHT))
   node.style.height = `${nextHeight}px`
-  node.style.overflowY = node.scrollHeight > AUTO_TEXTAREA_MAX_HEIGHT ? 'auto' : 'hidden'
+  node.style.overflowY = node.scrollHeight > maxHeight ? 'auto' : 'hidden'
 }
 
 function useAutosizeTextarea(value: string) {
@@ -226,17 +411,117 @@ type ChatBubbleMessage = ChatMessage & {
 
 type CliMessage = CliSessionMessage
 
-type CliHistoryGroup = {
-  projectName: string
-  projectPath?: string
-  items: CliHistoryEntry[]
-}
-
 type CliLogEntry = {
   id: string
+  requestId?: string
+  sessionId?: string
   level: 'status' | 'error'
   content: string
   createdAt: number
+}
+
+type ComposerActionItem = {
+  key: string
+  node: ReactNode
+}
+
+type ComposerFileAsset = {
+  id: string
+  name: string
+  previewUrl?: string
+  kind: 'image' | 'file'
+  onRemove?: () => void
+}
+
+function sumBillingMoney(items: BillingHistoryData['items'], predicate: (item: BillingHistoryData['items'][number]) => boolean) {
+  return items.reduce((sum, item) => {
+    if (!predicate(item) || item.status !== 'success') {
+      return sum
+    }
+    return sum + Number(item.money || 0)
+  }, 0)
+}
+
+function renderComposer(props: {
+  inputRef?: React.RefObject<HTMLInputElement | null>
+  onAttachmentInputChange?: (event: ChangeEvent<HTMLInputElement>) => void | Promise<void>
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>
+  value: string
+  placeholder: string
+  onChange: (value: string) => void
+  onPaste?: (event: ClipboardEvent<HTMLTextAreaElement>) => void | Promise<void>
+  leftActions: ComposerActionItem[]
+  sendButton: React.ReactNode
+  fileAssets?: ComposerFileAsset[]
+}) {
+  const {
+    inputRef,
+    onAttachmentInputChange,
+    textareaRef,
+    value,
+    placeholder,
+    onChange,
+    onPaste,
+    leftActions,
+    sendButton,
+    fileAssets = [],
+  } = props
+
+  return (
+    <div className='composer shell-composer'>
+      {inputRef && onAttachmentInputChange && (
+        <input
+          ref={inputRef}
+          type='file'
+          multiple
+          className='hidden-file-input'
+          onChange={onAttachmentInputChange}
+        />
+      )}
+      <div className='composer-input-zone'>
+        <textarea
+          ref={textareaRef}
+          value={value}
+          rows={AUTO_TEXTAREA_MIN_ROWS}
+          onChange={(event) => onChange(event.target.value)}
+          onPaste={onPaste}
+          onInput={(event) => syncTextareaHeight(event.currentTarget)}
+          placeholder={placeholder}
+        />
+        {fileAssets.length > 0 && (
+          <div className='composer-asset-strip'>
+            {fileAssets.map((item) => (
+              <div key={item.id} className='composer-asset-card'>
+                <div className='composer-asset-thumb'>
+                  {item.kind === 'image' && item.previewUrl ? (
+                    <img src={item.previewUrl} alt={item.name} />
+                  ) : (
+                    <FileText size={14} />
+                  )}
+                </div>
+                <span className='composer-asset-name' title={item.name}>{item.name}</span>
+                {item.onRemove && (
+                  <button className='composer-asset-remove' type='button' onClick={item.onRemove} aria-label='移除附件'>
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className='composer-toolbar'>
+        <div className='composer-actions left'>
+          {leftActions.map((item) => (
+            <div key={item.key} className='composer-action-slot'>
+              {item.node}
+            </div>
+          ))}
+        </div>
+        <div className='composer-actions right'>{sendButton}</div>
+      </div>
+    </div>
+  )
 }
 
 type ChatSessionRecord = {
@@ -261,7 +546,7 @@ const CLAUDE_REASONING_OPTIONS = [
 ] as const
 
 const DEFAULT_CHAT_MODEL = 'gpt-5.4'
-const DEFAULT_CODEX_MODEL = 'gpt-5.3-codex'
+const DEFAULT_CODEX_MODEL = 'gpt-5.5'
 const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-4-6'
 
 type BubbleActionConfig = {
@@ -444,26 +729,163 @@ function usageModelSummary(items: UsageData['items']) {
   return Array.from(summary.values()).sort((left, right) => right.quota - left.quota)
 }
 
-function groupCliHistoryByProject(items: CliHistoryEntry[]) {
-  const grouped = new Map<string, CliHistoryGroup>()
+const USAGE_CHART_COLORS = [
+  '#1d6b78',
+  '#c96e4b',
+  '#356f9c',
+  '#6f7d4e',
+  '#8d5bb3',
+  '#2a9fa7',
+  '#cc8f2b',
+  '#54708c',
+]
+
+function normalizeLogTimestamp(value?: number) {
+  if (!value) {
+    return 0
+  }
+  return value > 10_000_000_000 ? Math.floor(value / 1000) : Math.floor(value)
+}
+
+function buildUsageTrendData(items: UsageData['items']) {
+  const grouped = new Map<string, Map<string, number>>()
+  const modelTotals = new Map<string, number>()
 
   for (const item of items) {
-    const key = item.projectPath || item.projectName || '未命名项目'
-    const current = grouped.get(key) ?? {
-      projectName: item.projectName || '未命名项目',
-      projectPath: item.projectPath,
-      items: [],
+    const model = item.model_name || item.token_name || '未标注模型'
+    const timestamp = normalizeLogTimestamp(Number(item.created_at || item.created_time || 0))
+    if (!timestamp) {
+      continue
     }
-    current.items.push(item)
-    grouped.set(key, current)
+    const date = new Date(timestamp * 1000)
+    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+    const dayMap = grouped.get(key) ?? new Map<string, number>()
+    const quota = Number(item.quota || 0)
+    dayMap.set(model, (dayMap.get(model) || 0) + quota)
+    grouped.set(key, dayMap)
+    modelTotals.set(model, (modelTotals.get(model) || 0) + quota)
   }
 
-  return Array.from(grouped.values())
-    .map((group) => ({
-      ...group,
-      items: [...group.items].sort((left, right) => right.updatedAt - left.updatedAt),
-    }))
-    .sort((left, right) => (right.items[0]?.updatedAt || 0) - (left.items[0]?.updatedAt || 0))
+  const labels = [...grouped.keys()].sort()
+  const models = [...modelTotals.entries()]
+    .sort((left, right) => right[1] - left[1])
+    .map(([model]) => model)
+
+  const series = models.map((model, index) => ({
+    model,
+    color: USAGE_CHART_COLORS[index % USAGE_CHART_COLORS.length],
+    values: labels.map((label) => grouped.get(label)?.get(model) || 0),
+    total: modelTotals.get(model) || 0,
+  }))
+
+  const maxValue = Math.max(0, ...series.flatMap((item) => item.values))
+  return {
+    labels,
+    series,
+    maxValue,
+  }
+}
+
+function buildSmoothLinePath(points: Array<{ x: number; y: number }>) {
+  if (points.length === 0) {
+    return ''
+  }
+
+  if (points.length === 1) {
+    return `M ${points[0].x} ${points[0].y}`
+  }
+
+  const [first, ...rest] = points
+  let path = `M ${first.x} ${first.y}`
+
+  for (let index = 0; index < rest.length; index += 1) {
+    const previous = points[index]
+    const current = rest[index]
+    const midX = (previous.x + current.x) / 2
+    path += ` Q ${midX} ${previous.y} ${current.x} ${current.y}`
+  }
+
+  return path
+}
+
+function UsageTrendChart(props: {
+  items: UsageData['items']
+}) {
+  const { items } = props
+  const chart = useMemo(() => buildUsageTrendData(items), [items])
+
+  if (!chart.labels.length || !chart.series.length) {
+    return <EmptyState title='暂无模型分析数据' description='开始使用模型后，这里会自动生成时间趋势。' />
+  }
+
+  const width = 760
+  const height = 280
+  const left = 18
+  const right = 20
+  const top = 18
+  const bottom = 40
+  const chartWidth = width - left - right
+  const chartHeight = height - top - bottom
+  const maxValue = chart.maxValue || 1
+  const gridRows = 4
+
+  return (
+    <div className='usage-trend-card'>
+      <svg viewBox={`0 0 ${width} ${height}`} className='usage-trend-svg' role='img' aria-label='模型调用分析趋势图'>
+        {Array.from({ length: gridRows + 1 }).map((_, index) => {
+          const y = top + (chartHeight / gridRows) * index
+          return (
+            <line
+              key={`grid-${index}`}
+              x1={left}
+              y1={y}
+              x2={width - right}
+              y2={y}
+              className='usage-trend-grid'
+            />
+          )
+        })}
+
+        {chart.series.map((series) => {
+          const points = series.values.map((value, index) => {
+            const x = left + (chartWidth * index) / Math.max(chart.labels.length - 1, 1)
+            const y = top + chartHeight - (value / maxValue) * chartHeight
+            return { x, y }
+          })
+
+          return (
+            <g key={series.model}>
+              <path d={buildSmoothLinePath(points)} fill='none' stroke={series.color} strokeWidth='2.5' strokeLinecap='round' />
+              {points.map((point, index) => (
+                <circle key={`${series.model}-${index}`} cx={point.x} cy={point.y} r='3' fill={series.color}>
+                  <title>{`${series.model} · ${chart.labels[index]} · ${formatQuota(series.values[index])}`}</title>
+                </circle>
+              ))}
+            </g>
+          )
+        })}
+
+        {chart.labels.map((label, index) => {
+          const x = left + (chartWidth * index) / Math.max(chart.labels.length - 1, 1)
+          return (
+            <text key={label} x={x} y={height - 14} textAnchor='middle' className='usage-trend-axis'>
+              {label.slice(5)}
+            </text>
+          )
+        })}
+      </svg>
+
+      <div className='usage-trend-legend'>
+        {chart.series.map((series) => (
+          <div key={series.model} className='usage-trend-legend-item'>
+            <span className='usage-trend-swatch' style={{ backgroundColor: series.color }} />
+            <strong>{series.model}</strong>
+            <span>{formatQuota(series.total)}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
 }
 
 function normalizeProjectKey(value?: string) {
@@ -593,9 +1015,19 @@ function AssistantsChatWorkspace(props: {
   const [initialAssistantsState] = useState(loadInitialAssistantsState)
   const [assistants, setAssistants] = useState(initialAssistantsState.assistants)
   const [activeAssistantId, setActiveAssistantId] = useState(initialAssistantsState.activeAssistantId)
+  const {
+    attachments,
+    inputRef: attachmentInputRef,
+    clearAttachments,
+    removeAttachment,
+    handleInputChange: handleAttachmentInputChange,
+    handlePaste: handleAttachmentPaste,
+    openPicker: openAttachmentPicker,
+  } = useComposerAttachments(toast)
   const { ref: draftRef, resize: resizeDraft } = useAutosizeTextarea(draft)
   const assistantMenuRef = useRef<HTMLDivElement | null>(null)
   const modelMenuRef = useRef<HTMLDivElement | null>(null)
+  const historyPanelRef = useRef<HTMLDivElement | null>(null)
   const pendingRequestIdRef = useRef('')
   const stoppingRef = useRef(false)
 
@@ -612,10 +1044,18 @@ function AssistantsChatWorkspace(props: {
     [chatSessions, resolvedActiveSessionId]
   )
   const messages = activeSession?.messages || []
+  const compatibleChatModels = useMemo(
+    () => filterAssistantModels('chat', models),
+    [models]
+  )
 
   const activeModelLabel = useMemo(
-    () => models.find((item) => item.value === selectedModel)?.label || selectedModel || activeAssistant?.model || '默认模型',
-    [activeAssistant?.model, models, selectedModel]
+    () =>
+      compatibleChatModels.find((item) => item.value === selectedModel)?.label ||
+      selectedModel ||
+      activeAssistant?.model ||
+      '默认模型',
+    [activeAssistant?.model, compatibleChatModels, selectedModel]
   )
 
   useEffect(() => {
@@ -632,9 +1072,10 @@ function AssistantsChatWorkspace(props: {
           return
         }
 
-        setModels(nextModels)
+        const filteredModels = filterAssistantModels('chat', nextModels)
+        setModels(filteredModels)
         setSelectedModel((current) =>
-          current || resolvePreferredModel(nextModels, DEFAULT_CHAT_MODEL, activeAssistant?.model)
+          current || resolvePreferredModel(filteredModels, DEFAULT_CHAT_MODEL, activeAssistant?.model)
         )
         setSelectedGroup((current) => current || nextGroups[0]?.value || '')
         setChatSessions((current) => {
@@ -676,11 +1117,15 @@ function AssistantsChatWorkspace(props: {
       if (modelMenuOpen && modelMenuRef.current && !modelMenuRef.current.contains(target)) {
         setModelMenuOpen(false)
       }
+
+      if (historyOpen && historyPanelRef.current && !historyPanelRef.current.contains(target)) {
+        setHistoryOpen(false)
+      }
     }
 
     window.addEventListener('pointerdown', handlePointerDown)
     return () => window.removeEventListener('pointerdown', handlePointerDown)
-  }, [assistantMenuOpen, modelMenuOpen])
+  }, [assistantMenuOpen, historyOpen, modelMenuOpen])
 
   function handleCreateAssistant() {
     if (!assistantName.trim() || !assistantPrompt.trim()) {
@@ -754,11 +1199,10 @@ function AssistantsChatWorkspace(props: {
       models.find((item) => item.value === resolvedModel)?.label || resolvedModel
     const createdAt = new Date().getTime()
     const requestId = `chat-${createdAt}`
-
     const userMessage: ChatMessage = {
       id: `user-${createdAt}`,
       role: 'user',
-      content: normalizedDraft,
+      content: `${normalizedDraft}${buildAttachmentReferenceText(attachments)}`.trim(),
       createdAt,
     }
 
@@ -775,6 +1219,7 @@ function AssistantsChatWorkspace(props: {
     pendingRequestIdRef.current = requestId
     stoppingRef.current = false
     setDraft('')
+    clearAttachments()
     window.setTimeout(() => resizeDraft(), 0)
     setSending(true)
 
@@ -885,15 +1330,17 @@ function AssistantsChatWorkspace(props: {
       <div className={`chat-layout ${historyOpen ? 'history-open' : ''}`}>
         <article className='panel conversation-panel chat-panel-surface'>
           <div className='workspace-corner-tools'>
-            <button
-              className='ghost-button icon-only'
-              type='button'
-              onClick={() => setHistoryOpen((value) => !value)}
-              title='最近会话'
-              aria-label='最近会话'
-            >
-              {historyOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
-            </button>
+            {!historyOpen && (
+              <button
+                className='ghost-button icon-only'
+                type='button'
+                onClick={() => setHistoryOpen(true)}
+                title='最近会话'
+                aria-label='最近会话'
+              >
+                <PanelRightOpen size={16} />
+              </button>
+            )}
           </div>
 
           <div className='message-stream'>
@@ -948,140 +1395,170 @@ function AssistantsChatWorkspace(props: {
             ))}
           </div>
 
-          <div className='composer shell-composer chat-composer'>
-            <textarea
-              ref={draftRef}
-              value={draft}
-              rows={1}
-              onChange={(event) => {
-                setDraft(event.target.value)
-                resizeDraft()
-              }}
-              onInput={(event) => syncTextareaHeight(event.currentTarget)}
-              placeholder='输入你的问题、任务或上下文。'
-            />
-            <div className='composer-toolbar'>
-              <div className='composer-actions left chat-toolbar-actions'>
-                <div className='toolbar-picker' ref={assistantMenuRef}>
+          {renderComposer({
+            inputRef: attachmentInputRef,
+            onAttachmentInputChange: handleAttachmentInputChange,
+            textareaRef: draftRef,
+            value: draft,
+            placeholder: '输入你的问题、任务或上下文。',
+            onChange: (value) => {
+              setDraft(value)
+              resizeDraft()
+            },
+            onPaste: handleAttachmentPaste,
+            leftActions: [
+              {
+                key: 'attachment',
+                node: (
                   <button
-                    className='ghost-button tiny picker-trigger icon-picker-trigger'
+                    className='ghost-button tiny icon-pill-trigger'
                     type='button'
-                    aria-expanded={assistantMenuOpen}
-                    onClick={() => {
-                      setModelMenuOpen(false)
-                      setAssistantMenuOpen((value) => !value)
-                    }}
-                    title='助手提示词'
+                    onClick={openAttachmentPicker}
+                    title='添加附件'
                   >
-                    <Sparkles size={16} />
-                    <strong>{activeAssistant?.name || '通用助手'}</strong>
+                    <Paperclip size={16} />
+                    <strong>{attachments.length > 0 ? `附件 ${attachments.length}` : '添加附件'}</strong>
                   </button>
-                  {assistantMenuOpen && (
-                    <div className='picker-menu assistant-menu'>
-                      <div className='picker-menu-head'>
-                        <strong>助手提示词</strong>
-                        <span>点击即可切换当前助手</span>
-                      </div>
-                      <div className='picker-menu-list'>
-                        {assistants.map((item) => (
-                          <button
-                            key={item.id}
-                            type='button'
-                            className={`picker-option ${item.id === activeAssistantId ? 'active' : ''}`}
-                            onClick={() => {
-                              setActiveAssistantId(item.id)
-                              saveActiveAssistantId(item.id)
-                              setAssistantMenuOpen(false)
-                            }}
-                          >
-                            <strong>{item.name}</strong>
-                            <span>{item.description}</span>
+                ),
+              },
+              {
+                key: 'assistant',
+                node: (
+                  <div className='toolbar-picker' ref={assistantMenuRef}>
+                    <button
+                      className='ghost-button tiny picker-trigger icon-picker-trigger'
+                      type='button'
+                      aria-expanded={assistantMenuOpen}
+                      onClick={() => {
+                        setModelMenuOpen(false)
+                        setAssistantMenuOpen((current) => !current)
+                      }}
+                      title='助手提示词'
+                    >
+                      <Sparkles size={16} />
+                      <strong>{activeAssistant?.name || '通用助手'}</strong>
+                    </button>
+                    {assistantMenuOpen && (
+                      <div className='picker-menu assistant-menu'>
+                        <div className='picker-menu-head'>
+                          <strong>助手提示词</strong>
+                          <span>点击即可切换当前助手</span>
+                        </div>
+                        <div className='picker-menu-list'>
+                          {assistants.map((item) => (
+                            <button
+                              key={item.id}
+                              type='button'
+                              className={`picker-option ${item.id === activeAssistantId ? 'active' : ''}`}
+                              onClick={() => {
+                                setActiveAssistantId(item.id)
+                                saveActiveAssistantId(item.id)
+                                setAssistantMenuOpen(false)
+                              }}
+                            >
+                              <strong>{item.name}</strong>
+                              <span>{item.description}</span>
+                            </button>
+                          ))}
+                        </div>
+                        <div className='picker-divider' />
+                        <div className='subform assistant-inline-form'>
+                          <input
+                            value={assistantName}
+                            onChange={(event) => setAssistantName(event.target.value)}
+                            placeholder='助手名称，例如法务助手'
+                          />
+                          <input
+                            value={assistantDescription}
+                            onChange={(event) => setAssistantDescription(event.target.value)}
+                            placeholder='一句话描述'
+                          />
+                          <textarea
+                            value={assistantPrompt}
+                            onChange={(event) => setAssistantPrompt(event.target.value)}
+                            placeholder='输入提示词，保存后即可作为专用助手参与聊天。'
+                          />
+                          <button className='secondary-button full' type='button' onClick={handleCreateAssistant}>
+                            <Plus size={16} />
+                            <span>新建自定义助手</span>
                           </button>
-                        ))}
+                        </div>
                       </div>
-                      <div className='picker-divider' />
-                      <div className='subform assistant-inline-form'>
-                        <input
-                          value={assistantName}
-                          onChange={(event) => setAssistantName(event.target.value)}
-                          placeholder='助手名称，例如法务助手'
-                        />
-                        <input
-                          value={assistantDescription}
-                          onChange={(event) => setAssistantDescription(event.target.value)}
-                          placeholder='一句话描述'
-                        />
-                        <textarea
-                          value={assistantPrompt}
-                          onChange={(event) => setAssistantPrompt(event.target.value)}
-                          placeholder='输入提示词，保存后即可作为专用助手参与聊天。'
-                        />
-                        <button className='secondary-button full' type='button' onClick={handleCreateAssistant}>
-                          <Plus size={16} />
-                          <span>新建自定义助手</span>
-                        </button>
+                    )}
+                  </div>
+                ),
+              },
+              {
+                key: 'model',
+                node: (
+                  <div className='toolbar-picker' ref={modelMenuRef}>
+                    <button
+                      className='ghost-button tiny picker-trigger icon-picker-trigger'
+                      type='button'
+                      aria-expanded={modelMenuOpen}
+                      onClick={() => {
+                        setAssistantMenuOpen(false)
+                        setModelMenuOpen((current) => !current)
+                      }}
+                      title='AI 选择'
+                    >
+                      <Bot size={16} />
+                      <strong>{activeModelLabel}</strong>
+                    </button>
+                    {modelMenuOpen && (
+                      <div className='picker-menu model-menu'>
+                        <div className='picker-menu-head'>
+                          <strong>AI 选择</strong>
+                          <span>切换当前对话所用模型</span>
+                        </div>
+                        <div className='picker-menu-list'>
+                          {compatibleChatModels.map((item) => (
+                            <button
+                              key={item.value}
+                              type='button'
+                              className={`picker-option ${item.value === selectedModel ? 'active' : ''}`}
+                              onClick={() => {
+                                setSelectedModel(item.value)
+                                setModelMenuOpen(false)
+                              }}
+                            >
+                              <strong>{item.label}</strong>
+                              <span>{item.value}</span>
+                            </button>
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  )}
-                </div>
-
-                <div className='toolbar-picker' ref={modelMenuRef}>
-                  <button
-                    className='ghost-button tiny picker-trigger icon-picker-trigger'
-                    type='button'
-                    aria-expanded={modelMenuOpen}
-                    onClick={() => {
-                      setAssistantMenuOpen(false)
-                      setModelMenuOpen((value) => !value)
-                    }}
-                    title='AI 选择'
-                  >
-                    <Bot size={16} />
-                    <strong>{activeModelLabel}</strong>
-                  </button>
-                  {modelMenuOpen && (
-                    <div className='picker-menu model-menu'>
-                      <div className='picker-menu-head'>
-                        <strong>AI 选择</strong>
-                        <span>切换当前对话所用模型</span>
-                      </div>
-                      <div className='picker-menu-list'>
-                        {models.map((item) => (
-                          <button
-                            key={item.value}
-                            type='button'
-                            className={`picker-option ${item.value === selectedModel ? 'active' : ''}`}
-                            onClick={() => {
-                              setSelectedModel(item.value)
-                              setModelMenuOpen(false)
-                            }}
-                          >
-                            <strong>{item.label}</strong>
-                            <span>{item.value}</span>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className='composer-actions right'>
-                <button
-                  className={`primary-button icon-only send-button ${sending ? 'stop-button' : ''}`}
-                  type='button'
-                  onClick={() => void (sending ? handleStopMessage() : handleSendMessage())}
-                  title={sending ? '停止回复' : '发送消息'}
-                  aria-label={sending ? '停止回复' : '发送消息'}
-                >
-                  {sending ? <Square size={14} /> : <Send size={16} />}
-                </button>
-              </div>
-            </div>
-          </div>
+                    )}
+                  </div>
+                ),
+              },
+            ],
+            fileAssets: attachments.map((item) => ({
+              id: item.id,
+              name: item.name,
+              previewUrl: item.previewUrl,
+              kind: item.kind,
+              onRemove: () => removeAttachment(item.id),
+            })),
+            sendButton: (
+              <button
+                className={`primary-button icon-only send-button ${sending ? 'stop-button' : ''}`}
+                type='button'
+                onClick={() => void (sending ? handleStopMessage() : handleSendMessage())}
+                title={sending ? '停止回复' : '发送消息'}
+                aria-label={sending ? '停止回复' : '发送消息'}
+              >
+                {sending ? <Square size={14} /> : <Send size={16} />}
+              </button>
+            ),
+          })}
         </article>
 
-        <aside className={`panel chat-history-panel ${historyOpen ? 'open' : ''}`}>
+        <aside
+          ref={historyPanelRef}
+          className={`panel chat-history-panel ${historyOpen ? 'open' : ''}`}
+          tabIndex={historyOpen ? 0 : -1}
+        >
           <div className='panel-header compact'>
             <div>
               <span className='eyebrow dark'>历史记录</span>
@@ -1328,6 +1805,9 @@ function WalletWorkspace(props: {
     Number(topupInfo?.min_topup) ||
     0
   const completedBillCount = recentBills.filter((item) => item.status === 'success').length
+  const walletIncome = sumBillingMoney(recentBills, (item) => item.payment_method !== 'wallet')
+  const walletExpense = sumBillingMoney(recentBills, (item) => item.payment_method === 'wallet')
+  const walletBalance = walletIncome - walletExpense
 
   const refreshWallet = useCallback(async () => {
     const [nextTopupInfo, nextBilling] = await Promise.all([
@@ -1430,36 +1910,29 @@ function WalletWorkspace(props: {
             </div>
             <div className='wallet-overview-grid'>
               <div className='wallet-overview-metric'>
-                <strong>{formatQuota(user.quota)}</strong>
+                <strong>{formatPrice(walletBalance, 'CNY')}</strong>
                 <span>可用余额</span>
               </div>
               <div className='wallet-overview-metric'>
-                <strong>{formatQuota(user.used_quota)}</strong>
+                <strong>{formatPrice(walletExpense, 'CNY')}</strong>
                 <span>历史消耗</span>
+              </div>
+              <div className='wallet-overview-metric'>
+                <strong>{formatQuota(user.quota)}</strong>
+                <span>当前余额</span>
+              </div>
+              <div className='wallet-overview-metric'>
+                <strong>{formatQuota(user.used_quota)}</strong>
+                <span>累计消耗</span>
+              </div>
+              <div className='wallet-overview-metric'>
+                <strong>{billing?.total || 0}</strong>
+                <span>账单条目</span>
               </div>
               <div className='wallet-overview-metric'>
                 <strong>{user.request_count || 0}</strong>
                 <span>请求次数</span>
               </div>
-            </div>
-          </div>
-
-          <div className='stats-inline page-stats-grid'>
-            <div className='mini-stat'>
-              <strong>{formatQuota(user.quota)}</strong>
-              <span>当前余额</span>
-            </div>
-            <div className='mini-stat'>
-              <strong>{formatQuota(user.used_quota)}</strong>
-              <span>累计消耗</span>
-            </div>
-            <div className='mini-stat'>
-              <strong>{billing?.total || 0}</strong>
-              <span>账单条目</span>
-            </div>
-            <div className='mini-stat'>
-              <strong>{user.request_count || 0}</strong>
-              <span>累计请求数</span>
             </div>
           </div>
 
@@ -1524,9 +1997,16 @@ function WalletWorkspace(props: {
                   </div>
                 </div>
 
-                <button className='primary-button full' type='button' onClick={() => void handleWalletPay()}>
+                <button
+                  className='primary-button wallet-pay-button'
+                  type='button'
+                  disabled
+                  title='支付功能暂未开放'
+                  onClick={() => void handleWalletPay()}
+                >
                   拉起支付
                 </button>
+                <p className='helper-copy'>支付能力暂未开放，当前仅保留兑换码入口。</p>
               </div>
             </div>
 
@@ -1579,7 +2059,7 @@ function UsageWorkspace(props: {
     void (async () => {
       try {
         const [nextUsageData, nextUsageStat] = await Promise.all([
-          getUserUsageLogs(),
+          getUserUsageLogs(1, 200),
           getUserUsageStat(),
         ])
 
@@ -1665,27 +2145,9 @@ function UsageWorkspace(props: {
             <div className='panel-block'>
               <div className='list-block-header'>
                 <strong>模型调用分析</strong>
-                <span>展示调用次数、Token 和最近调用时间</span>
+                <span>按时间轴绘制各模型的额度消耗曲线</span>
               </div>
-              <div className='subrecords'>
-                {topModels.length === 0 ? (
-                  <EmptyState title='暂无模型分析数据' description='开始使用模型后，这里会自动汇总分析。' />
-                ) : (
-                  topModels.map((item) => (
-                    <div key={`${item.model}-analysis`} className='record-row'>
-                      <div>
-                        <strong>{item.model}</strong>
-                        <span>
-                          Prompt {formatQuota(item.promptTokens)} · Completion {formatQuota(item.completionTokens)}
-                        </span>
-                      </div>
-                      <small>
-                        {item.count} 次 · {formatDateTime(item.lastAt)}
-                      </small>
-                    </div>
-                  ))
-                )}
-              </div>
+              <UsageTrendChart items={usageData?.items || []} />
             </div>
           </div>
         </div>
@@ -1987,9 +2449,12 @@ function CliWorkspace(props: {
   const [prompt, setPrompt] = useState('')
   const [running, setRunning] = useState(false)
   const [projectSessionMap, setProjectSessionMap] = useState<Record<string, string>>({})
+  const [sessionProjectPathMap, setSessionProjectPathMap] = useState<Record<string, string>>({})
   const [sessionMessagesMap, setSessionMessagesMap] = useState<Record<string, CliMessage[]>>({})
   const [sessionLogsMap, setSessionLogsMap] = useState<Record<string, CliLogEntry[]>>({})
   const [sessionPartialMap, setSessionPartialMap] = useState<Record<string, string>>({})
+  const [expandedLogGroupId, setExpandedLogGroupId] = useState('')
+  const [previewFile, setPreviewFile] = useState<{ path: string; name: string; content: string } | null>(null)
   const [requestSessionMap, setRequestSessionMap] = useState<
     Record<string, { sessionId: string; projectPath: string }>
   >({})
@@ -1998,14 +2463,22 @@ function CliWorkspace(props: {
   const [reasoningEffort, setReasoningEffort] = useState(client === 'claude' ? 'high' : 'medium')
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
   const [effortMenuOpen, setEffortMenuOpen] = useState(false)
+  const {
+    attachments,
+    inputRef: attachmentInputRef,
+    clearAttachments,
+    handleInputChange: handleAttachmentInputChange,
+    handlePaste: handleAttachmentPaste,
+    openPicker: openAttachmentPicker,
+  } = useComposerAttachments(toast)
   const { ref: promptRef, resize: resizePrompt } = useAutosizeTextarea(prompt)
   const modelMenuRef = useRef<HTMLDivElement | null>(null)
   const effortMenuRef = useRef<HTMLDivElement | null>(null)
+  const historyPanelRef = useRef<HTMLDivElement | null>(null)
   const requestSessionMapRef = useRef(requestSessionMap)
   const activeRequestIdRef = useRef('')
   const stoppingRunRef = useRef(false)
 
-  const historyGroups = useMemo(() => groupCliHistoryByProject(history), [history])
   const currentProjectKey = useMemo(() => normalizeProjectKey(projectPath), [projectPath])
   const activeSessionId = currentProjectKey ? projectSessionMap[currentProjectKey] || '' : ''
   const activeMessages = activeSessionId ? sessionMessagesMap[activeSessionId] || [] : []
@@ -2013,27 +2486,46 @@ function CliWorkspace(props: {
   const activePartial = activeSessionId ? sessionPartialMap[activeSessionId] || '' : ''
   const reasoningOptions = client === 'claude' ? CLAUDE_REASONING_OPTIONS : CLI_REASONING_OPTIONS
   const preferredCliModel = client === 'codex' ? DEFAULT_CODEX_MODEL : DEFAULT_CLAUDE_MODEL
+  const fallbackCliModels = useMemo(
+    () => [
+      {
+        label: preferredCliModel,
+        value: preferredCliModel,
+      },
+    ],
+    [preferredCliModel]
+  )
+  const compatibleCliModels = useMemo(
+    () => filterAssistantModels(client, cliModels, fallbackCliModels),
+    [client, cliModels, fallbackCliModels]
+  )
   const selectedModelLabel =
-    cliModels.find((item) => item.value === selectedModel)?.label || selectedModel || '默认模型'
+    compatibleCliModels.find((item) => item.value === selectedModel)?.label || selectedModel || preferredCliModel
   const selectedEffortLabel =
     reasoningOptions.find((item) => item.value === reasoningEffort)?.label || reasoningEffort
-  const visibleHistoryGroups = useMemo(() => {
-    if (!projectPath) {
-      return historyGroups
-    }
-
-    const filteredItems = history
-      .filter((item) => normalizeProjectKey(item.projectPath) === currentProjectKey)
-      .sort((left, right) => right.updatedAt - left.updatedAt)
-
-    return [
-      {
-        projectName: projectName || resolveProjectNameFromPath(projectPath) || '当前项目',
-        projectPath,
-        items: filteredItems,
-      },
-    ]
-  }, [currentProjectKey, history, historyGroups, projectName, projectPath])
+  const recentSessions = useMemo(
+    () =>
+      buildCliRecentSessions({
+        history,
+        sessionMessagesMap,
+        sessionLogsMap,
+        sessionProjectPathMap,
+      }),
+    [history, sessionLogsMap, sessionMessagesMap, sessionProjectPathMap]
+  )
+  const activeTimeline = useMemo(
+    () =>
+      buildCliTimeline({
+        messages: activeMessages,
+        logs: activeLogs,
+        partial: activePartial,
+        partialCreatedAt: activeMessages.at(-1)?.createdAt
+          ? Math.max(Date.now(), (activeMessages.at(-1)?.createdAt || 0) + 1)
+          : Date.now(),
+        partialModelLabel: selectedModelLabel,
+      }),
+    [activeLogs, activeMessages, activePartial, selectedModelLabel]
+  )
 
   const refreshCliState = useCallback(async (silent = false) => {
     try {
@@ -2064,17 +2556,23 @@ function CliWorkspace(props: {
         const models = await getUserModels()
         if (!disposed) {
           setCliModels(models)
-          setSelectedModel((current) => current || resolvePreferredModel(models, preferredCliModel))
+          setSelectedModel((current) =>
+            resolveCompatibleModel(client, [...models, ...fallbackCliModels], current, preferredCliModel)
+          )
         }
       } catch {
-        /* ignore model loading errors */
+        if (!disposed) {
+          setSelectedModel((current) =>
+            resolveCompatibleModel(client, fallbackCliModels, current, preferredCliModel)
+          )
+        }
       }
     })()
 
     return () => {
       disposed = true
     }
-  }, [preferredCliModel])
+  }, [client, fallbackCliModels, preferredCliModel])
 
   useEffect(() => {
     window.setTimeout(() => {
@@ -2167,6 +2665,8 @@ function CliWorkspace(props: {
       setSessionLogsMap((current) => {
         const nextEntry = {
           id: `${payload.requestId}-${payload.kind}-${payload.createdAt}-${currentSession}`,
+          requestId: payload.requestId,
+          sessionId: targetSessionId,
           level: payload.kind === 'error' ? 'error' : 'status',
           content: payload.message,
           createdAt: payload.createdAt,
@@ -2207,11 +2707,15 @@ function CliWorkspace(props: {
       if (effortMenuOpen && effortMenuRef.current && !effortMenuRef.current.contains(target)) {
         setEffortMenuOpen(false)
       }
+
+      if (historyOpen && historyPanelRef.current && !historyPanelRef.current.contains(target)) {
+        setHistoryOpen(false)
+      }
     }
 
     window.addEventListener('pointerdown', handlePointerDown)
     return () => window.removeEventListener('pointerdown', handlePointerDown)
-  }, [effortMenuOpen, modelMenuOpen])
+  }, [effortMenuOpen, historyOpen, modelMenuOpen])
 
   useEffect(() => {
     if (active) {
@@ -2229,6 +2733,10 @@ function CliWorkspace(props: {
     if (!nextProjectKey || !sessionId) {
       return
     }
+    setSessionProjectPathMap((current) => ({
+      ...current,
+      [sessionId]: nextProjectPath,
+    }))
     setProjectSessionMap((current) => ({
       ...current,
       [nextProjectKey]: sessionId,
@@ -2327,6 +2835,15 @@ function CliWorkspace(props: {
     }
   }
 
+  async function handlePreviewFile(targetPath: string) {
+    try {
+      const details = await readDesktopFilePreview(targetPath)
+      setPreviewFile(details)
+    } catch (error) {
+      toast(error instanceof Error ? error.message : '文件预览失败')
+    }
+  }
+
   function loadPromptForEdit(content: string) {
     setPrompt(content)
     window.setTimeout(() => {
@@ -2347,10 +2864,11 @@ function CliWorkspace(props: {
     const requestProjectPath = projectPath
     const requestProjectKey = normalizeProjectKey(requestProjectPath)
     const currentSessionKey = activeSessionId || `draft-${client}-${Date.now()}`
+    const promptWithAttachments = `${nextPrompt}${buildAttachmentReferenceText(attachments)}`.trim()
     const userMessage = {
       id: `user-${Date.now()}`,
       role: 'user' as const,
-      content: nextPrompt,
+      content: promptWithAttachments,
       createdAt: Date.now(),
     }
 
@@ -2376,17 +2894,19 @@ function CliWorkspace(props: {
       [currentSessionKey]: '',
     }))
     setPrompt('')
+    clearAttachments()
     window.setTimeout(() => resizePrompt(), 0)
     setRunning(true)
 
     try {
+      let hydratedSessionId = ''
       const response = await runCliPrompt({
         client,
         requestId,
         projectPath: requestProjectPath,
-        prompt: nextPrompt,
-        sessionId: activeSessionId || undefined,
-        model: selectedModel || undefined,
+        prompt: promptWithAttachments,
+        sessionId: getCliResumeSessionId(activeSessionId),
+        model: resolveCompatibleModel(client, compatibleCliModels, selectedModel, preferredCliModel) || undefined,
         reasoningEffort,
       })
 
@@ -2420,6 +2940,7 @@ function CliWorkspace(props: {
         if (response.sessionId) {
           const details = await getCliSession(client, response.sessionId)
           if (details) {
+            hydratedSessionId = details.id
             hydrateCliSession(details, { activateProject: false })
           }
         }
@@ -2429,7 +2950,13 @@ function CliWorkspace(props: {
 
       if (response.output) {
         const responseAborted = response.metadata?.aborted === true
-        if (!response.sessionId || responseAborted) {
+        if (
+          shouldAppendCliAssistantFallback({
+            responseSessionId: response.sessionId,
+            responseAborted,
+            hydratedSessionId,
+          })
+        ) {
           setSessionMessagesMap((current) => {
             const existing = current[nextSessionId] || []
             const lastAssistant = [...existing].reverse().find((item) => item.role === 'assistant')
@@ -2493,15 +3020,17 @@ function CliWorkspace(props: {
       <div className={`cli-layout ${historyOpen ? 'history-open' : ''}`}>
         <article className='panel cli-main-panel cli-panel-surface'>
           <div className='workspace-corner-tools'>
-            <button
-              className='ghost-button icon-only'
-              type='button'
-              onClick={() => setHistoryOpen((value) => !value)}
-              title='最近会话'
-              aria-label='最近会话'
-            >
-              {historyOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
-            </button>
+            {!historyOpen && (
+              <button
+                className='ghost-button icon-only'
+                type='button'
+                onClick={() => setHistoryOpen(true)}
+                title='最近会话'
+                aria-label='最近会话'
+              >
+                <PanelRightOpen size={16} />
+              </button>
+            )}
           </div>
 
           {(!status.installed || !status.hasConfig) && (
@@ -2514,205 +3043,264 @@ function CliWorkspace(props: {
           )}
 
           <div className='cli-thread'>
-            {activeMessages.map((item) => (
-              <div key={item.id} className={`message-bubble ${item.role}`}>
-                <span className='message-role'>
-                  {item.role === 'assistant'
-                    ? item.modelLabel || selectedModelLabel
-                    : '你'}
-                </span>
-                <p>{item.content}</p>
-                <BubbleMeta
-                  side={item.role === 'user' ? 'right' : 'left'}
-                  createdAt={item.createdAt}
-                  actions={[
-                    {
-                      key: 'copy',
-                      label: '复制',
-                      icon: Copy,
-                      onClick: () => void copyText(item.content),
-                    },
-                    {
-                      key: 'edit',
-                      label: '编辑',
-                      icon: PencilLine,
-                      onClick: () => loadPromptForEdit(item.content),
-                    },
-                  ]}
-                />
-              </div>
-            ))}
-            {activePartial && (
-              <div className='message-bubble assistant streaming-bubble'>
-                <span className='message-role'>{selectedModelLabel}</span>
-                <p>{activePartial}</p>
-                <BubbleMeta
-                  side='left'
-                  createdAt={Date.now()}
-                  actions={[
-                    {
-                      key: 'copy',
-                      label: '复制',
-                      icon: Copy,
-                      onClick: () => void copyText(activePartial),
-                    },
-                    {
-                      key: 'edit',
-                      label: '编辑',
-                      icon: PencilLine,
-                      onClick: () => loadPromptForEdit(activePartial),
-                    },
-                  ]}
-                />
-              </div>
-            )}
-            {activeLogs.map((item) => (
-              <div key={item.id} className={`message-bubble system cli-log-bubble ${item.level === 'error' ? 'error' : ''}`}>
-                <span className='message-role'>{item.level === 'error' ? '运行异常' : '运行日志'}</span>
-                <p>{item.content}</p>
-                <BubbleMeta
-                  side='left'
-                  createdAt={item.createdAt}
-                  actions={[
-                    {
-                      key: 'copy',
-                      label: '复制',
-                      icon: Copy,
-                      onClick: () => void copyText(item.content),
-                    },
-                  ]}
-                />
-              </div>
-            ))}
+            {activeTimeline.map((item) => {
+              if (item.kind === 'log') {
+                const expanded = expandedLogGroupId === item.id
+                return (
+                  <div key={item.id} className={`message-bubble system cli-log-bubble ${item.level === 'error' ? 'error' : ''}`}>
+                    <button
+                      className='cli-log-card-head'
+                      type='button'
+                      onClick={() => setExpandedLogGroupId((current) => current === item.id ? '' : item.id)}
+                    >
+                      <span className='message-role'>{item.level === 'error' ? '运行异常' : '运行日志'}</span>
+                      <strong>{item.title}</strong>
+                      <small>{item.content.length} 步</small>
+                    </button>
+                    <ul className='cli-log-list'>
+                      {(expanded ? item.content : item.content.slice(0, 1)).map((line, index) => (
+                        <li key={`${item.id}-${index}`}>{line}</li>
+                      ))}
+                    </ul>
+                    {expanded && item.files.length > 0 && (
+                      <div className='cli-log-files'>
+                        {Array.from(new Set(item.files)).map((filePath) => (
+                          <button
+                            key={filePath}
+                            className='ghost-button tiny cli-log-file'
+                            type='button'
+                            onClick={() => void handlePreviewFile(filePath)}
+                            title={filePath}
+                          >
+                            <FileText size={14} />
+                            <span>{filePath.split(/[\\/]/).filter(Boolean).at(-1) || filePath}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <BubbleMeta
+                      side='left'
+                      createdAt={item.createdAt}
+                      actions={[
+                        {
+                          key: 'copy',
+                          label: '复制',
+                          icon: Copy,
+                          onClick: () => void copyText(item.content.join('\n')),
+                        },
+                      ]}
+                    />
+                  </div>
+                )
+              }
+
+              return (
+                <div
+                  key={item.id}
+                  className={`message-bubble ${item.role} ${item.kind === 'partial' ? 'streaming-bubble' : ''}`}
+                >
+                  <span className='message-role'>
+                    {item.role === 'assistant'
+                      ? item.modelLabel || selectedModelLabel
+                      : '你'}
+                  </span>
+                  <p>{item.content}</p>
+                  <BubbleMeta
+                    side={item.role === 'user' ? 'right' : 'left'}
+                    createdAt={item.createdAt}
+                    actions={[
+                      {
+                        key: 'copy',
+                        label: '复制',
+                        icon: Copy,
+                        onClick: () => void copyText(item.content),
+                      },
+                      {
+                        key: 'edit',
+                        label: '编辑',
+                        icon: PencilLine,
+                        onClick: () => loadPromptForEdit(item.content),
+                      },
+                    ]}
+                  />
+                </div>
+              )
+            })}
           </div>
 
-          <div className='cli-composer shell-composer'>
-            <textarea
-              ref={promptRef}
-              value={prompt}
-              rows={1}
-              onChange={(event) => {
-                setPrompt(event.target.value)
-                resizePrompt()
-              }}
-              onInput={(event) => syncTextareaHeight(event.currentTarget)}
-              placeholder={`输入要发给 ${client} 的消息，例如：阅读当前项目并总结关键模块。`}
-            />
-            <div className='composer-toolbar'>
-              <div className='composer-actions left cli-toolbar-actions'>
-                <button
-                  className='ghost-button tiny icon-pill-trigger'
-                  type='button'
-                  onClick={() => void handlePickProject()}
-                  title={projectPath || '选择目录'}
-                >
-                  <FolderOpen size={16} />
-                  <strong>{projectName || '选择目录'}</strong>
-                </button>
-                <button className='ghost-button tiny icon-pill-trigger' type='button' onClick={() => void refreshCliState()}>
-                  <RefreshCcw size={16} />
-                  <strong>刷新</strong>
-                </button>
-                <div className='toolbar-picker' ref={modelMenuRef}>
+          {renderComposer({
+            inputRef: attachmentInputRef,
+            onAttachmentInputChange: handleAttachmentInputChange,
+            textareaRef: promptRef,
+            value: prompt,
+            placeholder: `输入要发给 ${client} 的消息，例如：阅读当前项目并总结关键模块。`,
+            onChange: (value) => {
+              setPrompt(value)
+              resizePrompt()
+            },
+            onPaste: handleAttachmentPaste,
+            leftActions: [
+              {
+                key: 'attachment',
+                node: (
                   <button
-                    className='ghost-button tiny picker-trigger icon-picker-trigger'
+                    className='ghost-button tiny icon-pill-trigger'
                     type='button'
-                    aria-expanded={modelMenuOpen}
-                    onClick={() => {
-                      setEffortMenuOpen(false)
-                      setModelMenuOpen((value) => !value)
-                    }}
-                    title='AI 版本'
+                    onClick={openAttachmentPicker}
+                    title='添加附件'
                   >
-                    <Bot size={16} />
-                    <strong>{selectedModelLabel}</strong>
+                    <Paperclip size={16} />
+                    <strong>{attachments.length > 0 ? `附件 ${attachments.length}` : '添加附件'}</strong>
                   </button>
-                  {modelMenuOpen && (
-                    <div className='picker-menu model-menu'>
-                      <div className='picker-menu-head'>
-                        <strong>AI 版本</strong>
-                        <span>切换当前 CLI 会话模型</span>
-                      </div>
-                      <div className='picker-menu-list'>
-                        {cliModels.map((item) => (
-                          <button
-                            key={item.value}
-                            type='button'
-                            className={`picker-option ${item.value === selectedModel ? 'active' : ''}`}
-                            onClick={() => {
-                              setSelectedModel(item.value)
-                              setModelMenuOpen(false)
-                            }}
-                          >
-                            <strong>{item.label}</strong>
-                            <span>{item.value}</span>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-                <div className='toolbar-picker' ref={effortMenuRef}>
+                ),
+              },
+              {
+                key: 'project',
+                node: (
                   <button
-                    className='ghost-button tiny picker-trigger icon-picker-trigger'
+                    className='ghost-button tiny icon-pill-trigger'
                     type='button'
-                    aria-expanded={effortMenuOpen}
-                    onClick={() => {
-                      setModelMenuOpen(false)
-                      setEffortMenuOpen((value) => !value)
-                    }}
-                    title='思考长度'
+                    onClick={() => void handlePickProject()}
+                    title={projectPath || '选择目录'}
                   >
-                    <Sparkles size={16} />
-                    <strong>{selectedEffortLabel}</strong>
+                    <FolderOpen size={16} />
+                    <strong>{projectName || '选择目录'}</strong>
                   </button>
-                  {effortMenuOpen && (
-                    <div className='picker-menu model-menu'>
-                      <div className='picker-menu-head'>
-                        <strong>思考长度</strong>
-                        <span>控制当前 CLI 对话的推理强度</span>
+                ),
+              },
+              {
+                key: 'refresh',
+                node: (
+                  <button className='ghost-button tiny icon-pill-trigger' type='button' onClick={() => void refreshCliState()}>
+                    <RefreshCcw size={16} />
+                    <strong>刷新</strong>
+                  </button>
+                ),
+              },
+              {
+                key: 'model',
+                node: (
+                  <div className='toolbar-picker' ref={modelMenuRef}>
+                    <button
+                      className='ghost-button tiny picker-trigger icon-picker-trigger'
+                      type='button'
+                      aria-expanded={modelMenuOpen}
+                      onClick={() => {
+                        setEffortMenuOpen(false)
+                        setModelMenuOpen((value) => !value)
+                      }}
+                      title='AI 版本'
+                    >
+                      <Bot size={16} />
+                      <strong>{selectedModelLabel}</strong>
+                    </button>
+                    {modelMenuOpen && (
+                      <div className='picker-menu model-menu'>
+                        <div className='picker-menu-head'>
+                          <strong>AI 版本</strong>
+                          <span>切换当前 CLI 会话模型</span>
+                        </div>
+                        <div className='picker-menu-list'>
+                          {compatibleCliModels.map((item) => (
+                            <button
+                              key={item.value}
+                              type='button'
+                              className={`picker-option ${item.value === selectedModel ? 'active' : ''}`}
+                              onClick={() => {
+                                setSelectedModel(item.value)
+                                setModelMenuOpen(false)
+                              }}
+                            >
+                              <strong>{item.label}</strong>
+                              <span>{item.value}</span>
+                            </button>
+                          ))}
+                        </div>
                       </div>
-                      <div className='picker-menu-list'>
-                        {reasoningOptions.map((item) => (
-                          <button
-                            key={item.value}
-                            type='button'
-                            className={`picker-option ${item.value === reasoningEffort ? 'active' : ''}`}
-                            onClick={() => {
-                              setReasoningEffort(item.value)
-                              setEffortMenuOpen(false)
-                            }}
-                          >
-                            <strong>{item.label}</strong>
-                            <span>{item.value}</span>
-                          </button>
-                        ))}
+                    )}
+                  </div>
+                ),
+              },
+              {
+                key: 'reasoning',
+                node: (
+                  <div className='toolbar-picker' ref={effortMenuRef}>
+                    <button
+                      className='ghost-button tiny picker-trigger icon-picker-trigger'
+                      type='button'
+                      aria-expanded={effortMenuOpen}
+                      onClick={() => {
+                        setModelMenuOpen(false)
+                        setEffortMenuOpen((value) => !value)
+                      }}
+                      title='思考长度'
+                    >
+                      <Sparkles size={16} />
+                      <strong>{selectedEffortLabel}</strong>
+                    </button>
+                    {effortMenuOpen && (
+                      <div className='picker-menu model-menu'>
+                        <div className='picker-menu-head'>
+                          <strong>思考长度</strong>
+                          <span>控制当前 CLI 对话的推理强度</span>
+                        </div>
+                        <div className='picker-menu-list'>
+                          {reasoningOptions.map((item) => (
+                            <button
+                              key={item.value}
+                              type='button'
+                              className={`picker-option ${item.value === reasoningEffort ? 'active' : ''}`}
+                              onClick={() => {
+                                setReasoningEffort(item.value)
+                                setEffortMenuOpen(false)
+                              }}
+                            >
+                              <strong>{item.label}</strong>
+                              <span>{item.value}</span>
+                            </button>
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  )}
-                </div>
-                <span className={`metric-pill ${status.installed ? 'success' : 'warn'}`}>
-                  {status.installed ? '已安装' : '未安装'}
-                </span>
-                <span className='metric-pill'>{status.version || '版本未知'}</span>
-                <span className='metric-pill'>{status.hasConfig ? '配置已就绪' : '待配置'}</span>
-              </div>
-              <div className='composer-actions right'>
-                <button
-                  className={`primary-button icon-only send-button ${running ? 'stop-button' : ''}`}
-                  type='button'
-                  onClick={() => void (running ? handleStopRun() : handleRun())}
-                  title={running ? '停止回复' : '发送消息'}
-                  aria-label={running ? '停止回复' : '发送消息'}
-                >
-                  {running ? <Square size={14} /> : <Send size={16} />}
-                </button>
-              </div>
-            </div>
-          </div>
+                    )}
+                  </div>
+                ),
+              },
+              {
+                key: 'status-installed',
+                node: (
+                  <span className={`metric-pill ${status.installed ? 'success' : 'warn'}`}>
+                    {status.installed ? '已安装' : '未安装'}
+                  </span>
+                ),
+              },
+              {
+                key: 'status-version',
+                node: <span className='metric-pill'>{status.version || '版本未知'}</span>,
+              },
+              {
+                key: 'status-config',
+                node: <span className='metric-pill'>{status.hasConfig ? '配置已就绪' : '待配置'}</span>,
+              },
+            ],
+            sendButton: (
+              <button
+                className={`primary-button icon-only send-button ${running ? 'stop-button' : ''}`}
+                type='button'
+                onClick={() => void (running ? handleStopRun() : handleRun())}
+                title={running ? '停止回复' : '发送消息'}
+                aria-label={running ? '停止回复' : '发送消息'}
+              >
+                {running ? <Square size={14} /> : <Send size={16} />}
+              </button>
+            ),
+          })}
         </article>
 
-        <aside className={`panel cli-history-panel ${historyOpen ? 'open' : ''}`}>
+        <aside
+          ref={historyPanelRef}
+          className={`panel cli-history-panel ${historyOpen ? 'open' : ''}`}
+          tabIndex={historyOpen ? 0 : -1}
+        >
           <div className='panel-header compact'>
             <div>
               <span className='eyebrow dark'>历史记录</span>
@@ -2721,39 +3309,46 @@ function CliWorkspace(props: {
           </div>
 
           <div className='side-pane-scroll'>
-            {visibleHistoryGroups.every((group) => group.items.length === 0) ? (
+            {recentSessions.length === 0 ? (
               <EmptyState
                 title='当前没有可读取的历史'
                 description={projectPath ? '当前项目还没有本地 CLI 会话记录。' : '使用过本地 CLI 后，会话会显示在这里。'}
               />
             ) : (
-              <div className='subrecords history-groups'>
-                {visibleHistoryGroups.map((group) => (
-                  <div key={group.projectPath || group.projectName} className='history-group'>
-                    <div className='history-group-head'>
-                      <strong>{group.projectName}</strong>
-                      <span>{group.items.length} 个会话</span>
-                    </div>
-                    <div className='subrecords compact-records'>
-                      {group.items.map((item) => (
-                        <button
-                          key={item.id}
-                          type='button'
-                          className={`record-row action-row session-row ${item.id === activeSessionId ? 'highlighted' : ''}`}
-                          onClick={() => void handleOpenHistory(item)}
-                        >
-                          <span className='session-row-preview'>{clipText(item.preview, 74)}</span>
-                          <small>{formatDateTime(item.updatedAt)}</small>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+              <div className='subrecords compact-records'>
+                {recentSessions.map((item) => (
+                  <button
+                    key={item.id}
+                    type='button'
+                    className={`record-row action-row session-row ${item.id === activeSessionId ? 'highlighted' : ''}`}
+                    onClick={() => void handleOpenHistory(item)}
+                  >
+                    <span className='session-row-preview'>{clipText(item.preview || item.title, 74)}</span>
+                    <small>{formatDateTime(item.updatedAt)}</small>
+                  </button>
                 ))}
               </div>
             )}
           </div>
         </aside>
       </div>
+      {previewFile && (
+        <div className='modal-mask' onClick={() => setPreviewFile(null)}>
+          <div className='modal-card file-preview-modal' onClick={(event) => event.stopPropagation()}>
+            <div className='panel-header compact'>
+              <div>
+                <span className='eyebrow dark'>文件预览</span>
+                <h2>{previewFile.name}</h2>
+              </div>
+              <button className='ghost-button icon-only tiny' type='button' onClick={() => setPreviewFile(null)}>
+                <X size={16} />
+              </button>
+            </div>
+            <code className='file-preview-path'>{previewFile.path}</code>
+            <pre className='file-preview-content'>{previewFile.content}</pre>
+          </div>
+        </div>
+      )}
     </section>
   )
 }
@@ -2768,6 +3363,7 @@ function CliSetupCard(props: {
   const [deploying, setDeploying] = useState(false)
   const [deployLog, setDeployLog] = useState<DeployProgressPayload[]>([])
   const [freshCliKey, setFreshCliKey] = useState('')
+  const [preset, setPreset] = useState<{ apiKey: string; model: string; baseUrl: string } | null>(null)
 
   const refreshStatus = useCallback(async (silent = false) => {
     try {
@@ -2810,20 +3406,54 @@ function CliSetupCard(props: {
     return unsubscribe
   }, [client, refreshStatus])
 
+  useEffect(() => {
+    let disposed = false
+    void (async () => {
+      try {
+        const nextPreset = await getCliDeployPreset(client)
+        if (!disposed) {
+          setPreset({
+            apiKey: nextPreset.apiKey,
+            model: nextPreset.model,
+            baseUrl: nextPreset.baseUrl,
+          })
+        }
+      } catch {
+        if (!disposed) {
+          setPreset(null)
+        }
+      }
+    })()
+    return () => {
+      disposed = true
+    }
+  }, [client])
+
+  async function openFolder(targetPath?: string, filePath = false) {
+    if (!targetPath) {
+      toast('路径不存在。')
+      return
+    }
+
+    try {
+      const resolvedPath = filePath ? targetPath.replace(/[/\\][^/\\]+$/, '') : targetPath
+      await window.desktopBridge?.openPath(resolvedPath)
+    } catch (error) {
+      toast(error instanceof Error ? error.message : '打开文件夹失败')
+    }
+  }
+
   async function handleDeploy() {
     try {
       setDeploying(true)
       setDeployLog([])
-      const generated = await createDesktopCliKey(
-        `${client.toUpperCase()} 桌面安装 Key`,
-        user.group || ''
-      )
+      const generated = await createDesktopCliKey(`${client.toUpperCase()} 桌面安装 Key`, user.group || '')
       setFreshCliKey(generated.key)
       await deployCli({
         client,
-        apiKey: generated.key,
-        baseUrl: 'http://ai.oneapi.center',
-        model: client === 'codex' ? DEFAULT_CODEX_MODEL : DEFAULT_CLAUDE_MODEL,
+        apiKey: preset?.apiKey || generated.key,
+        baseUrl: preset?.baseUrl || 'http://ai.oneapi.center',
+        model: preset?.model || (client === 'codex' ? DEFAULT_CODEX_MODEL : DEFAULT_CLAUDE_MODEL),
       })
       toast(`${client} 安装任务已开始。`)
     } catch (error) {
@@ -2840,39 +3470,27 @@ function CliSetupCard(props: {
           <h2>{client === 'codex' ? 'Codex 环境配置' : 'Claude 环境配置'}</h2>
         </div>
         <div className='inline-actions'>
-          <button className='ghost-button' type='button' onClick={() => void refreshStatus()}>
+          <button className='ghost-button tiny' type='button' onClick={() => void refreshStatus()}>
             <RefreshCcw size={16} />
             <span>刷新</span>
           </button>
-          <button className='primary-button' type='button' disabled={deploying} onClick={() => void handleDeploy()}>
+          <button className='primary-button tiny' type='button' disabled={deploying} onClick={() => void handleDeploy()}>
             <Wrench size={16} />
             <span>{deploying ? '部署中' : '一键部署'}</span>
           </button>
         </div>
       </div>
 
-      <div className='panel-subcopy'>
-        <span className={`metric-pill ${status.installed ? 'success' : 'warn'}`}>
-          {status.installed ? '已安装' : '未安装'}
-        </span>
-        <span className='metric-pill'>{status.version || '版本未知'}</span>
-        <span className='metric-pill'>{status.hasConfig ? '配置已存在' : '尚未配置'}</span>
-        <span className='metric-pill'>{status.hasDataDirectory ? '数据目录已创建' : '数据目录待创建'}</span>
-      </div>
-
-      <div className='status-grid'>
-        <div className='status-card'>
+      <div className='status-grid status-grid-slim'>
+        <button className='ghost-button tiny status-button' type='button' onClick={() => void openFolder(status.executablePath, true)}>
           <strong>可执行文件</strong>
-          <span>{status.executablePath || '尚未检测到'}</span>
-        </div>
-        <div className='status-card'>
+        </button>
+        <button className='ghost-button tiny status-button' type='button' onClick={() => void openFolder(status.configPath, true)}>
           <strong>配置文件</strong>
-          <span>{status.configPath || '尚未生成'}</span>
-        </div>
-        <div className='status-card'>
+        </button>
+        <button className='ghost-button tiny status-button' type='button' onClick={() => void openFolder(status.dataPath)}>
           <strong>数据目录</strong>
-          <span>{status.dataPath || '尚未生成'}</span>
-        </div>
+        </button>
       </div>
 
       {freshCliKey && (
@@ -2913,32 +3531,6 @@ function SettingsWorkspace(props: {
   return (
     <section className='workspace-page single-panel-page'>
       <div className='settings-grid'>
-        <article className='panel settings-intro-card'>
-          <div className='panel-header compact'>
-            <div>
-              <span className='eyebrow dark'>配置</span>
-              <h2>客户端环境与部署</h2>
-            </div>
-          </div>
-          <p className='helper-copy'>
-            Codex 和 Claude 的安装、配置、测试统一放在这里处理。部署时会自动创建专用 Key，使用国内镜像安装，并写入对应的配置目录。
-          </p>
-          <div className='stats-inline'>
-            <div className='mini-stat'>
-              <strong>.codex</strong>
-              <span>Codex 配置目录</span>
-            </div>
-            <div className='mini-stat'>
-              <strong>.claude</strong>
-              <span>Claude 配置目录</span>
-            </div>
-            <div className='mini-stat'>
-              <strong>国内镜像</strong>
-              <span>安装与依赖下载</span>
-            </div>
-          </div>
-        </article>
-
         <CliSetupCard client='codex' user={user} toast={toast} />
         <CliSetupCard client='claude' user={user} toast={toast} />
       </div>
@@ -3421,8 +4013,8 @@ export function App() {
             <div className='brand'>
               {!collapsed && (
                 <div>
-                  <div className='brand-name'>{productName}</div>
-                  <div className='brand-sub'>{platformLabel} 客户端</div>
+                  <div className='brand-name'>OneAPI Center</div>
+                  <div className='brand-sub'>Windows 客户端</div>
                 </div>
               )}
             </div>
@@ -3478,6 +4070,17 @@ export function App() {
                     <LogOut size={16} />
                   </button>
                 </div>
+              )}
+              {collapsed && (
+                <button
+                  className='ghost-button icon-only tiny collapsed-logout-button'
+                  type='button'
+                  onClick={() => void handleLogout()}
+                  title='退出'
+                  aria-label='退出'
+                >
+                  <LogOut size={16} />
+                </button>
               )}
             </div>
           </div>

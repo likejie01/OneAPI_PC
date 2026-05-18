@@ -8,6 +8,10 @@ import type {
   CliRunRequest,
   CliRunResponse,
   CliStatus,
+  DesktopAttachmentSaveRequest,
+  DesktopAttachmentSaveResult,
+  DesktopFilePreview,
+  CliDeployPreset,
   DeployProgressPayload,
   DesktopApiRequest,
   DesktopApiResponse,
@@ -25,6 +29,7 @@ declare global {
       request: (input: DesktopApiRequest) => Promise<DesktopApiResponse>
       stopRequest: (requestId: string) => Promise<void>
       openExternal: (url: string) => Promise<void>
+      openPath: (targetPath: string) => Promise<void>
       pickProjectDirectory: () => Promise<string>
       getCliStatus: () => Promise<{
         codex: CliStatus
@@ -39,6 +44,11 @@ declare global {
       ) => () => void
       setWindowTitle: (projectName?: string) => Promise<void>
       deployCli: (input: CliDeployRequest) => Promise<{ jobId: string }>
+      saveAttachment: (
+        input: DesktopAttachmentSaveRequest
+      ) => Promise<DesktopAttachmentSaveResult>
+      readFilePreview: (targetPath: string) => Promise<DesktopFilePreview>
+      getCliDeployPreset: (client: CliClient) => Promise<CliDeployPreset>
       onDeployProgress: (
         listener: (payload: DeployProgressPayload) => void
       ) => () => void

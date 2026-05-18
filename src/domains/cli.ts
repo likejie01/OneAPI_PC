@@ -44,6 +44,14 @@ export function deployCli(input: CliDeployRequest) {
   return desktopBridge().deployCli(input)
 }
 
+export function readDesktopFilePreview(targetPath: string) {
+  return desktopBridge().readFilePreview(targetPath)
+}
+
+export function getCliDeployPreset(client: CliClient) {
+  return desktopBridge().getCliDeployPreset(client)
+}
+
 export function onDeployProgress(listener: (payload: DeployProgressPayload) => void) {
   return desktopBridge().onDeployProgress(listener)
 }

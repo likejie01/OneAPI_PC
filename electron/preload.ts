@@ -8,6 +8,10 @@ import type {
   CliRunRequest,
   CliRunResponse,
   CliStatus,
+  DesktopAttachmentSaveRequest,
+  DesktopAttachmentSaveResult,
+  DesktopFilePreview,
+  CliDeployPreset,
   DeployProgressPayload,
   DesktopApiRequest,
   DesktopApiResponse,
@@ -26,6 +30,8 @@ contextBridge.exposeInMainWorld('desktopBridge', {
   stopRequest: (requestId: string) =>
     ipcRenderer.invoke('desktop:stop-api-request', requestId) as Promise<void>,
   openExternal: (url: string) => ipcRenderer.invoke('desktop:open-external', url) as Promise<void>,
+  openPath: (targetPath: string) =>
+    ipcRenderer.invoke('desktop:open-path', targetPath) as Promise<void>,
   pickProjectDirectory: () =>
     ipcRenderer.invoke('desktop:pick-project') as Promise<string>,
   getCliStatus: () =>
@@ -59,6 +65,12 @@ contextBridge.exposeInMainWorld('desktopBridge', {
     ipcRenderer.invoke('desktop:set-window-title', projectName) as Promise<void>,
   deployCli: (input: CliDeployRequest) =>
     ipcRenderer.invoke('desktop:deploy-cli', input) as Promise<{ jobId: string }>,
+  saveAttachment: (input: DesktopAttachmentSaveRequest) =>
+    ipcRenderer.invoke('desktop:save-attachment', input) as Promise<DesktopAttachmentSaveResult>,
+  readFilePreview: (targetPath: string) =>
+    ipcRenderer.invoke('desktop:file-preview', targetPath) as Promise<DesktopFilePreview>,
+  getCliDeployPreset: (client: CliClient) =>
+    ipcRenderer.invoke('desktop:cli-deploy-preset', client) as Promise<CliDeployPreset>,
   onDeployProgress: (listener: (payload: DeployProgressPayload) => void) => {
     const channel = 'desktop:deploy-progress'
     const wrapped = (_event: unknown, payload: DeployProgressPayload) => listener(payload)
