@@ -3,6 +3,7 @@ import {
   BrowserWindow,
   dialog,
   ipcMain,
+  nativeImage,
   session,
   shell,
   type WebContents,
@@ -22,6 +23,9 @@ const DESKTOP_PARTITION = 'persist:oneapi-desktop'
 const isDev = !!process.env.VITE_DEV_SERVER_URL
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
+const APP_ICON_PATH = isDev
+  ? path.join(path.dirname(__dirname), 'public', 'Icon.png')
+  : path.join(path.dirname(__dirname), 'dist', 'Icon.png')
 let mainWindow: BrowserWindow | null = null
 const activeApiRequests = new Map<string, AbortController>()
 const activeCliProcesses = new Map<string, ChildProcess>()
@@ -132,6 +136,7 @@ interface CliProgressPayload {
   message: string
   createdAt: number
   done?: boolean
+  files?: CliFileChange[]
 }
 
 interface CliDeployRequest {
@@ -170,6 +175,7 @@ const cliConfig = {
 } satisfies Record<CliClient, { packageName: string; configPath: string; dataPath: string }>
 
 function createWindow() {
+  const appIcon = nativeImage.createFromPath(APP_ICON_PATH)
   const win = new BrowserWindow({
     width: 1480,
     height: 980,
@@ -177,6 +183,7 @@ function createWindow() {
     minHeight: 780,
     title: resolveWorkspaceTitle(),
     backgroundColor: '#f3f2ed',
+    icon: appIcon,
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.mjs'),
@@ -618,11 +625,19 @@ function mergeCodexConfig(raw: string, apiKey: string, model: string, baseUrl: s
     'skills',
     'plugins',
     'projects',
-    'model_providers.oneapi_desktop',
     'windows',
   ]
     .map((section) => extractTomlSection(raw, section))
     .filter(Boolean)
+
+  const originalProviderSection = extractTomlSection(raw, 'model_providers.oneapi_desktop')
+  const renamedOriginalProvider = originalProviderSection
+    ? originalProviderSection
+        .replace('[model_providers.oneapi_desktop]', '[model_providers.oneapi_desktop_original]')
+        .replace(/name\s*=\s*"oneapi_desktop"/, 'name = "oneapi_desktop_original"')
+    : ''
+
+  const preservedBlocks = [renamedOriginalProvider, ...preservedSections].filter(Boolean)
 
   return [
     `model = "${model}"`,
@@ -635,11 +650,15 @@ function mergeCodexConfig(raw: string, apiKey: string, model: string, baseUrl: s
     `api_key = "${apiKey}"`,
     'wire_api = "responses"',
     '',
-    ...preservedSections,
+    ...preservedBlocks.flatMap((section) => [section, '']),
     '',
   ]
     .join('\n')
     .replace(/\n{3,}/g, '\n\n')
+}
+
+function resolveDesktopCliKeyRecord(apiKey: string) {
+  return apiKey.startsWith('sk-') ? apiKey : `sk-${apiKey}`
 }
 
 async function readCurrentClaudeConfig() {
@@ -1361,7 +1380,12 @@ function createCliProgressEmitter(
   let lastPartial = ''
 
   return {
-    send(kind: CliProgressPayload['kind'], message: string, sessionId?: string, done = false) {
+    send(
+      kind: CliProgressPayload['kind'],
+      message: string,
+      sessionId?: string,
+      done = false,
+    ) {
       const trimmed = message.trim()
       if (!trimmed) {
         return
@@ -1485,7 +1509,13 @@ async function runCodexPrompt(
   }
 
   if (input.fullAccess) {
-    args.splice(args.length - 1, 0, '--permission-mode', 'bypassPermissions')
+    args.splice(
+      args.length - 1,
+      0,
+      '--sandbox',
+      'danger-full-access',
+      '--dangerously-bypass-approvals-and-sandbox'
+    )
   }
 
   args.splice(
@@ -1548,7 +1578,6 @@ async function runCodexPrompt(
     [],
     extractCodexFileChanges(result.stdout.split(/\r?\n/))
   )
-
   if (!sessionId && typeof threadEvent?.thread_id === 'string') {
     sessionId = threadEvent.thread_id
   }
@@ -1751,10 +1780,6 @@ async function runClaudePrompt(
   }
 }
 
-function resolveDesktopCliKeyRecord(apiKey: string) {
-  return apiKey.startsWith('sk-') ? apiKey : `sk-${apiKey}`
-}
-
 async function writeCodexConfig(request: CliDeployRequest) {
   const targetPath = cliConfig.codex.configPath
   await fs.mkdir(path.dirname(targetPath), { recursive: true })
@@ -1787,12 +1812,20 @@ async function writeClaudeConfig(request: CliDeployRequest) {
     current = {}
   }
 
+  const currentEnv = (typeof current.env === 'object' && current.env
+    ? current.env
+    : {}) as Record<string, string>
+
   const env = {
-    ...(typeof current.env === 'object' && current.env ? current.env : {}),
+    ...currentEnv,
     ANTHROPIC_AUTH_TOKEN: resolveDesktopCliKeyRecord(request.apiKey),
     ANTHROPIC_BASE_URL: request.baseUrl?.trim() || SERVER_BASE_URL,
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
     API_TIMEOUT_MS: '600000',
+    ONEAPI_ORIGINAL_ANTHROPIC_AUTH_TOKEN:
+      typeof currentEnv.ANTHROPIC_AUTH_TOKEN === 'string' ? currentEnv.ANTHROPIC_AUTH_TOKEN : undefined,
+    ONEAPI_ORIGINAL_ANTHROPIC_BASE_URL:
+      typeof currentEnv.ANTHROPIC_BASE_URL === 'string' ? currentEnv.ANTHROPIC_BASE_URL : undefined,
   }
 
   const nextConfig = {

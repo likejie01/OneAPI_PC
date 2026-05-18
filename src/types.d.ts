@@ -42,6 +42,7 @@ declare global {
       onCliProgress: (
         listener: (payload: CliProgressPayload) => void
       ) => () => void
+      openFiles: (paths: string[]) => Promise<void>
       setWindowTitle: (projectName?: string) => Promise<void>
       deployCli: (input: CliDeployRequest) => Promise<{ jobId: string }>
       saveAttachment: (

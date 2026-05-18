@@ -22,6 +22,8 @@ export interface UserProfile {
   setting?: string
   sidebar_modules?: string
   permissions?: Record<string, unknown>
+  remain_balance?: number
+  used_balance?: number
 }
 
 export interface LoginPayload {

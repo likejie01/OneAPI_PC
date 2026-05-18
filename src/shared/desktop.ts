@@ -33,6 +33,7 @@ export interface CliSessionMessage {
   content: string
   createdAt: number
   modelLabel?: string
+  files?: CliFileChange[]
   fileChanges?: CliFileChange[]
 }
 
@@ -94,6 +95,7 @@ export interface CliProgressPayload {
   message: string
   createdAt: number
   done?: boolean
+  files?: CliFileChange[]
 }
 
 export interface CliDeployRequest {

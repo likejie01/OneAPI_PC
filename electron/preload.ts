@@ -61,6 +61,8 @@ contextBridge.exposeInMainWorld('desktopBridge', {
       ipcRenderer.removeListener(channel, wrapped)
     }
   },
+  openFiles: (paths: string[]) =>
+    ipcRenderer.invoke('desktop:open-files', paths) as Promise<void>,
   setWindowTitle: (projectName?: string) =>
     ipcRenderer.invoke('desktop:set-window-title', projectName) as Promise<void>,
   deployCli: (input: CliDeployRequest) =>

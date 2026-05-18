@@ -16,7 +16,6 @@ import {
   Mail,
   MessageSquareText,
   PanelLeftClose,
-  PanelLeftOpen,
   PanelRightOpen,
   PencilLine,
   Plus,
@@ -69,7 +68,7 @@ import {
   getSubscriptionPaymentInfo,
   paySubscription,
 } from './domains/subscriptions'
-import { getUserUsageLogs, getUserUsageStat } from './domains/usage'
+import { getUserUsageLogs } from './domains/usage'
 import {
   getBillingHistory,
   redeemTopupCode,
@@ -77,6 +76,7 @@ import {
 import {
   buildCliRecentSessions,
   buildCliTimeline,
+  type CliTimelineEntry,
   filterAssistantModels,
   prioritizeFavoriteModels,
   resolveCompatibleModel,
@@ -87,6 +87,7 @@ import {
 import { clearStoredDesktopUserId, saveStoredDesktopUserId } from './lib/desktop-client'
 import { clipText, formatDateTime, formatPrice, formatQuota } from './lib/format'
 import { readJsonStorage, writeJsonStorage } from './lib/storage'
+import dayjs from 'dayjs'
 import type {
   AssistantRecord,
   AuthStatus,
@@ -97,7 +98,6 @@ import type {
   SubscriptionPaymentInfo,
   SubscriptionSelfData,
   UsageData,
-  UsageStat,
   UserProfile,
 } from './shared/contracts'
 import type {
@@ -410,6 +410,12 @@ type CliLogEntry = {
   level: 'status' | 'error'
   content: string
   createdAt: number
+  files?: {
+    path: string
+    kind: 'created' | 'modified' | 'deleted' | 'renamed' | 'unknown'
+    content?: string
+    diff?: string
+  }[]
 }
 
 type ComposerActionItem = {
@@ -782,15 +788,9 @@ function buildSmoothLinePath(points: Array<{ x: number; y: number }>) {
 
 function buildUsageSeriesFromTimeline(items: UsageData['items']) {
   const buckets = new Map<string, Map<string, number>>()
-  const labels: string[] = []
-
   for (const item of items) {
     const timestamp = Number(item.created_at || item.created_time || 0)
-    const label = timestamp ? formatDateTime(timestamp).slice(0, 10) : '未知时间'
-    if (!labels.includes(label)) {
-      labels.push(label)
-    }
-
+    const label = timestamp ? dayjs(timestamp > 10_000_000_000 ? timestamp : timestamp * 1000).format('MM-DD') : '未知时间'
     const model = item.model_name || item.token_name || '未标注模型'
     if (!buckets.has(label)) {
       buckets.set(label, new Map())
@@ -798,6 +798,17 @@ function buildUsageSeriesFromTimeline(items: UsageData['items']) {
     const current = buckets.get(label)!
     current.set(model, (current.get(model) || 0) + Number(item.quota || 0))
   }
+
+  const labels = Array.from(buckets.keys())
+  labels.sort((left, right) => {
+    if (left === '未知时间') {
+      return 1
+    }
+    if (right === '未知时间') {
+      return -1
+    }
+    return left.localeCompare(right)
+  })
 
   const models = Array.from(
     new Set(items.map((item) => item.model_name || item.token_name || '未标注模型'))
@@ -822,8 +833,8 @@ function UsageTrendChart(props: {
 
   const width = 760
   const height = 280
-  const left = 18
-  const right = 20
+  const left = 36
+  const right = 24
   const top = 18
   const bottom = 40
   const chartWidth = width - left - right
@@ -875,7 +886,7 @@ function UsageTrendChart(props: {
           const x = left + (chartWidth * (index + 0.5)) / Math.max(chart.labels.length, 1)
           return (
             <text key={label} x={x} y={height - 14} textAnchor='middle' className='usage-trend-axis'>
-              {label.slice(5)}
+              {label}
             </text>
           )
         })}
@@ -890,6 +901,60 @@ function UsageTrendChart(props: {
           </div>
         ))}
       </div>
+    </div>
+  )
+}
+
+function CliLogBubble(props: {
+  item: Extract<CliTimelineEntry, { kind: 'log' }>
+  expanded: boolean
+  onToggle: () => void
+  onOpenFile: (path: string) => void
+  onCopy: () => void
+}) {
+  const { item, expanded, onToggle, onOpenFile, onCopy } = props
+  const uniqueFiles = Array.from(new Map(item.files.map((file) => [file.path, file])).values())
+
+  return (
+    <div className={`message-bubble system cli-log-bubble ${item.level === 'error' ? 'error' : ''}`}>
+      <button className='cli-log-card-head' type='button' onClick={onToggle}>
+        <span className='message-role'>{item.level === 'error' ? '运行异常' : '运行日志'}</span>
+        <strong>{item.title}</strong>
+        <small>{item.content.length} 步</small>
+      </button>
+      <ul className='cli-log-list'>
+        {(expanded ? item.content : item.content.slice(0, 1)).map((line, index) => (
+          <li key={`${item.id}-${index}`}>{line}</li>
+        ))}
+      </ul>
+      {item.files.length > 0 && (
+        <div className='cli-log-files'>
+          {uniqueFiles.slice(0, expanded ? undefined : 4).map((fileItem) => (
+            <button
+              key={fileItem.path}
+              className='ghost-button tiny cli-log-file'
+              type='button'
+              onClick={() => onOpenFile(fileItem.path)}
+              title={fileItem.path}
+            >
+              <FileText size={14} />
+              <span>{fileItem.path.split(/[\\/]/).filter(Boolean).at(-1) || fileItem.path}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      <BubbleMeta
+        side='left'
+        createdAt={item.createdAt}
+        actions={[
+          {
+            key: 'copy',
+            label: '复制',
+            icon: Copy,
+            onClick: onCopy,
+          },
+        ]}
+      />
     </div>
   )
 }
@@ -1412,12 +1477,11 @@ function AssistantsChatWorkspace(props: {
                     ? item.modelLabel || activeModelLabel
                     : item.role === 'system'
                       ? '系统'
-                    : ''}
+                      : ''}
                 </span>
                 {item.imageUrl ? (
                   <div className='chat-image-result'>
                     <img src={item.imageUrl} alt={item.content || '生成图片'} />
-                    <p>{item.content}</p>
                   </div>
                 ) : (
                   <p>{item.content}</p>
@@ -1475,6 +1539,22 @@ function AssistantsChatWorkspace(props: {
             },
             onPaste: handleAttachmentPaste,
             leftActions: [
+              {
+                key: 'history',
+                node: !historyOpen ? (
+                  <button
+                    className='ghost-button tiny icon-pill-trigger'
+                    type='button'
+                    onClick={() => setHistoryOpen(true)}
+                    title='最近会话'
+                  >
+                    <PanelRightOpen size={16} />
+                    <strong>最近会话</strong>
+                  </button>
+                ) : (
+                  <span className='composer-placeholder' />
+                ),
+              },
               {
                 key: 'assistant',
                 node: (
@@ -1880,18 +1960,16 @@ function WalletWorkspace(props: {
   const [billing, setBilling] = useState<BillingHistoryData | null>(null)
   const [redeemCode, setRedeemCode] = useState('')
   const [usageData, setUsageData] = useState<UsageData | null>(null)
-  const [usageStat, setUsageStat] = useState<UsageStat | null>(null)
 
   const recentBills = billing?.items || []
   const completedBillCount = recentBills.filter((item) => item.status === 'success').length
-  const tokenBalance = Number(user.quota || 0)
-  const tokenExpense = Number(user.used_quota || 0)
+  const walletBalance = Number(user.remain_balance || user.quota || 0)
+  const walletExpense = Number(user.used_balance || user.used_quota || 0)
   const modelSummary = useMemo(
     () => usageModelSummary(usageData?.items || []),
     [usageData?.items]
   )
   const totalQuota = modelSummary.reduce((sum, item) => sum + item.quota, 0)
-  const totalCalls = modelSummary.reduce((sum, item) => sum + item.count, 0)
   const topModels = modelSummary.slice(0, 8)
 
   const refreshWallet = useCallback(async () => {
@@ -1904,10 +1982,9 @@ function WalletWorkspace(props: {
 
     void (async () => {
       try {
-        const [nextBilling, nextUsageData, nextUsageStat] = await Promise.all([
+        const [nextBilling, nextUsageData] = await Promise.all([
           getBillingHistory(),
           getUserUsageLogs(1, 200),
-          getUserUsageStat(),
         ])
 
         if (disposed) {
@@ -1916,7 +1993,6 @@ function WalletWorkspace(props: {
 
         setBilling(nextBilling ?? null)
         setUsageData(nextUsageData ?? null)
-        setUsageStat(nextUsageStat ?? null)
       } catch (error) {
         if (!disposed) {
           toast(error instanceof Error ? error.message : '加载钱包信息失败')
@@ -1965,11 +2041,11 @@ function WalletWorkspace(props: {
             </div>
             <div className='wallet-overview-grid'>
               <div className='wallet-overview-metric'>
-                <strong>{formatQuota(tokenBalance)}</strong>
+                <strong>{formatQuota(walletBalance)}</strong>
                 <span>当前余额</span>
               </div>
               <div className='wallet-overview-metric'>
-                <strong>{formatQuota(tokenExpense)}</strong>
+                <strong>{formatQuota(walletExpense)}</strong>
                 <span>累计消耗</span>
               </div>
               <div className='wallet-overview-metric'>
@@ -2006,15 +2082,18 @@ function WalletWorkspace(props: {
                 {(billing?.items || []).length === 0 ? (
                   <EmptyState title='当前没有账单记录' description='充值、兑换或订阅支付后会显示在这里。' />
                 ) : (
-                  (billing?.items || []).map((item, index) => (
-                    <div key={String(item.trade_no || index)} className='record-row'>
-                      <div>
-                        <strong>{String(item.payment_method || '订单')} · {formatPrice(item.money || item.amount || 0, 'CNY')}</strong>
-                        <span>{String(item.trade_no || '无交易号')} · {formatDateTime(Number(item.create_time || 0))}</span>
+                  <div className='billing-grid'>
+                    {(billing?.items || []).map((item, index) => (
+                      <div key={String(item.trade_no || index)} className='billing-card'>
+                        <div className='billing-card-fill' style={{ width: `${Math.min(100, Math.max(0, Number(item.amount || 0) * 100))}%` }} />
+                        <div className='billing-card-inner'>
+                          <strong>{String(item.payment_method || '订单')}</strong>
+                          <span>{formatPrice(item.money || item.amount || 0, 'CNY')}</span>
+                          <small>{String(item.trade_no || '无交易号')}</small>
+                        </div>
                       </div>
-                      <small>{String(item.status || 'pending')}</small>
-                    </div>
-                  ))
+                    ))}
+                  </div>
                 )}
               </div>
             </div>
@@ -2036,7 +2115,7 @@ function WalletWorkspace(props: {
                       <div className='usage-bar-track'>
                         <div className='usage-bar-fill' style={{ width: `${percentageOf(item.quota, totalQuota)}%` }} />
                       </div>
-                      <small>占比 {percentageOf(item.quota, totalQuota).toFixed(1)}% · 调用 {item.count} 次</small>
+                      <small>占比 {percentageOf(item.quota, totalQuota).toFixed(1)}%</small>
                     </div>
                   ))}
                 </div>
@@ -2046,22 +2125,6 @@ function WalletWorkspace(props: {
               <div className='list-block-header'>
                 <strong>模型调用分析</strong>
                 <span>按时间轴绘制各模型的额度消耗曲线</span>
-              </div>
-              <div className='subrecords'>
-                <div className='record-row'>
-                  <div>
-                    <strong>区间额度</strong>
-                    <span>{formatQuota(usageStat?.quota)}</span>
-                  </div>
-                  <small>RPM {formatQuota(usageStat?.rpm)}</small>
-                </div>
-                <div className='record-row'>
-                  <div>
-                    <strong>调用次数</strong>
-                    <span>{totalCalls}</span>
-                  </div>
-                  <small>TPM {formatQuota(usageStat?.tpm)}</small>
-                </div>
               </div>
               <UsageTrendChart items={usageData?.items || []} />
             </div>
@@ -2366,6 +2429,7 @@ function CliWorkspace(props: {
   const [status, setStatus] = useState<CliStatus>(() => readCachedCliStatus(client))
   const [history, setHistory] = useState<CliHistoryEntry[]>([])
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [favoriteModels, setFavoriteModels] = useState<string[]>(() => loadFavoriteModels(`oneapi-desktop-${client}-favorites`))
   const [projectPath, setProjectPath] = useState('')
   const [projectName, setProjectName] = useState('')
   const [prompt, setPrompt] = useState('')
@@ -2421,8 +2485,11 @@ function CliWorkspace(props: {
     [preferredCliModel]
   )
   const compatibleCliModels = useMemo(
-    () => prioritizeFavoriteModels(filterAssistantModels(client, cliModels, fallbackCliModels)),
-    [client, cliModels, fallbackCliModels]
+    () =>
+      prioritizeFavoriteModels(
+        filterAssistantModels(client, withFavoriteFlag(cliModels, favoriteModels), fallbackCliModels)
+      ),
+    [client, cliModels, favoriteModels, fallbackCliModels]
   )
   const selectedModelLabel =
     compatibleCliModels.find((item) => item.value === selectedModel)?.label || selectedModel || preferredCliModel
@@ -2446,6 +2513,14 @@ function CliWorkspace(props: {
     () => recentSessions.filter((item) => hiddenSessionIds.includes(item.id)),
     [hiddenSessionIds, recentSessions]
   )
+  const sessionsByProject = useMemo(() => {
+    const source = visibleRecentSessions
+    return source.reduce<Record<string, CliHistoryEntry[]>>((groups, item) => {
+      const key = item.projectName || item.projectPath || '未命名项目'
+      groups[key] = [...(groups[key] || []), item]
+      return groups
+    }, {})
+  }, [visibleRecentSessions])
   const activeTimeline = useMemo(
     () =>
       buildCliTimeline({
@@ -2459,6 +2534,17 @@ function CliWorkspace(props: {
       }),
     [activeLogs, activeMessages, activePartial, selectedModelLabel]
   )
+  const visibleHistoryButton = !historyOpen
+
+  function toggleFavoriteModel(value: string) {
+    setFavoriteModels((current) => {
+      const next = current.includes(value)
+        ? current.filter((item) => item !== value)
+        : [value, ...current]
+      storeFavoriteModels(`oneapi-desktop-${client}-favorites`, next)
+      return next
+    })
+  }
 
   const refreshCliState = useCallback(async (silent = false) => {
     try {
@@ -2668,6 +2754,12 @@ function CliWorkspace(props: {
 
   function unhideSession(sessionId: string) {
     persistHiddenSessions(hiddenSessionIds.filter((item) => item !== sessionId))
+  }
+
+  function hideSession(sessionId: string) {
+    if (!hiddenSessionIds.includes(sessionId)) {
+      persistHiddenSessions([...hiddenSessionIds, sessionId])
+    }
   }
 
   function bindProjectSession(nextProjectPath: string, sessionId: string) {
@@ -2941,52 +3033,14 @@ function CliWorkspace(props: {
               if (item.kind === 'log') {
                 const expanded = expandedLogGroupId === item.id
                 return (
-                  <div key={item.id} className={`message-bubble system cli-log-bubble ${item.level === 'error' ? 'error' : ''}`}>
-                    <button
-                      className='cli-log-card-head'
-                      type='button'
-                      onClick={() => setExpandedLogGroupId((current) => current === item.id ? '' : item.id)}
-                    >
-                      <span className='message-role'>{item.level === 'error' ? '运行异常' : '运行日志'}</span>
-                      <strong>{item.title}</strong>
-                      <small>{item.content.length} 步</small>
-                    </button>
-                    <ul className='cli-log-list'>
-                      {(expanded ? item.content : item.content.slice(0, 1)).map((line, index) => (
-                        <li key={`${item.id}-${index}`}>{line}</li>
-                      ))}
-                    </ul>
-                    {item.files.length > 0 && (
-                      <div className='cli-log-files'>
-                        {Array.from(new Map(item.files.map((file) => [file.path, file])).values())
-                          .slice(0, expanded ? undefined : 4)
-                          .map((fileItem) => (
-                          <button
-                            key={fileItem.path}
-                            className='ghost-button tiny cli-log-file'
-                            type='button'
-                            onClick={() => void handlePreviewFile(fileItem.path)}
-                            title={fileItem.path}
-                          >
-                            <FileText size={14} />
-                            <span>{fileItem.path.split(/[\\/]/).filter(Boolean).at(-1) || fileItem.path}</span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                    <BubbleMeta
-                      side='left'
-                      createdAt={item.createdAt}
-                      actions={[
-                        {
-                          key: 'copy',
-                          label: '复制',
-                          icon: Copy,
-                          onClick: () => void copyText(item.content.join('\n')),
-                        },
-                      ]}
-                    />
-                  </div>
+                  <CliLogBubble
+                    key={item.id}
+                    item={item}
+                    expanded={expanded}
+                    onToggle={() => setExpandedLogGroupId((current) => (current === item.id ? '' : item.id))}
+                    onOpenFile={(path) => void handlePreviewFile(path)}
+                    onCopy={() => void copyText(item.content.join('\n'))}
+                  />
                 )
               }
 
@@ -3036,6 +3090,22 @@ function CliWorkspace(props: {
             },
             onPaste: handleAttachmentPaste,
             leftActions: [
+              {
+                key: 'history',
+                node: visibleHistoryButton ? (
+                  <button
+                    className='ghost-button tiny icon-pill-trigger'
+                    type='button'
+                    onClick={() => setHistoryOpen(true)}
+                    title='最近会话'
+                  >
+                    <PanelRightOpen size={16} />
+                    <strong>最近会话</strong>
+                  </button>
+                ) : (
+                  <span className='composer-placeholder' />
+                ),
+              },
               {
                 key: 'project',
                 node: (
@@ -3107,7 +3177,20 @@ function CliWorkspace(props: {
                                 setModelMenuOpen(false)
                               }}
                             >
-                              <strong>{item.label}</strong>
+                              <div className='model-option-head'>
+                                <strong>{item.label}</strong>
+                                <button
+                                  className={`ghost-button icon-only tiny model-favorite ${item.favorite ? 'active' : ''}`}
+                                  type='button'
+                                  onClick={(event) => {
+                                    event.stopPropagation()
+                                    toggleFavoriteModel(item.value)
+                                  }}
+                                  aria-label={item.favorite ? '取消收藏' : '收藏'}
+                                >
+                                  <Star size={13} />
+                                </button>
+                              </div>
                               <span>{item.value}</span>
                             </button>
                           ))}
@@ -3161,22 +3244,6 @@ function CliWorkspace(props: {
                   </div>
                 ),
               },
-              {
-                key: 'status-installed',
-                node: (
-                  <span className={`metric-pill ${status.installed ? 'success' : 'warn'}`}>
-                    {status.installed ? '已安装' : '未安装'}
-                  </span>
-                ),
-              },
-              {
-                key: 'status-version',
-                node: <span className='metric-pill'>{status.version || '版本未知'}</span>,
-              },
-              {
-                key: 'status-config',
-                node: null,
-              },
             ],
             sendButton: (
               <button
@@ -3210,55 +3277,75 @@ function CliWorkspace(props: {
           </div>
 
           <div className='side-pane-scroll'>
-            {visibleRecentSessions.length === 0 && hiddenRecentSessions.length === 0 ? (
+            {Object.keys(sessionsByProject).length === 0 ? (
               <EmptyState
                 title='当前没有可读取的历史'
                 description={projectPath ? '当前项目还没有本地 CLI 会话记录。' : '使用过本地 CLI 后，会话会显示在这里。'}
               />
             ) : (
               <div className='history-project-groups'>
-                {visibleRecentSessions.length > 0 && (
-                  <div className='history-group'>
+                {Object.entries(sessionsByProject).map(([projectName, items]) => (
+                  <div key={projectName} className='history-group'>
                     <div className='history-group-head'>
-                      <strong>最近会话</strong>
-                      <span>{visibleRecentSessions.length} 条</span>
+                      <strong>{projectName}</strong>
+                      <span>{items.length} 条</span>
                     </div>
                     <div className='subrecords compact-records'>
-                      {visibleRecentSessions.map((item: CliHistoryEntry) => (
-                        <button
+                      {items.map((item: CliHistoryEntry) => (
+                        <div
                           key={item.id}
-                          type='button'
                           className={`record-row action-row session-row ${item.id === activeSessionId ? 'highlighted' : ''}`}
+                          role='button'
+                          tabIndex={0}
                           onClick={() => void handleOpenHistory(item)}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                              event.preventDefault()
+                              void handleOpenHistory(item)
+                            }
+                          }}
                         >
                           <span className='session-row-preview'>{clipText(item.preview || item.title, 74)}</span>
                           <small>{formatDateTime(item.updatedAt)}</small>
-                        </button>
+                          <button
+                            className='ghost-button icon-only tiny session-hide-button'
+                            type='button'
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              hideSession(item.id)
+                            }}
+                            aria-label='隐藏会话'
+                          >
+                            <EyeOff size={14} />
+                          </button>
+                        </div>
                       ))}
                     </div>
                   </div>
-                )}
-                {hiddenRecentSessions.length > 0 && (
-                  <div className='history-group'>
-                    <div className='history-group-head'>
-                      <strong>隐藏会话</strong>
-                      <span>{hiddenRecentSessions.length} 条</span>
+                ))}
+              </div>
+            )}
+            {hiddenRecentSessions.length > 0 && (
+              <div className='history-group'>
+                <div className='history-group-head'>
+                  <strong>隐藏会话</strong>
+                  <span>{hiddenRecentSessions.length} 条</span>
+                </div>
+                <div className='subrecords compact-records'>
+                  {hiddenRecentSessions.map((item: CliHistoryEntry) => (
+                    <div key={item.id} className='record-row action-row session-row'>
+                      <span className='session-row-preview'>{clipText(item.preview || item.title, 74)}</span>
+                      <small>已隐藏</small>
+                      <button
+                        className='ghost-button tiny'
+                        type='button'
+                        onClick={() => unhideSession(item.id)}
+                      >
+                        显示
+                      </button>
                     </div>
-                    <div className='subrecords compact-records'>
-                      {hiddenRecentSessions.map((item: CliHistoryEntry) => (
-                        <button
-                          key={item.id}
-                          type='button'
-                          className='record-row action-row session-row'
-                          onClick={() => unhideSession(item.id)}
-                        >
-                          <span className='session-row-preview'>{clipText(item.preview || item.title, 74)}</span>
-                          <small>取消隐藏</small>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                  ))}
+                </div>
               </div>
             )}
           </div>
@@ -3906,7 +3993,18 @@ export function App() {
         <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
           <div className='sidebar-head'>
             <div className='brand'>
-              <div className='brand-mark'>O</div>
+              <button
+                className='brand-mark brand-mark-button'
+                type='button'
+                onClick={() => {
+                  if (collapsed) {
+                    setCollapsed(false)
+                  }
+                }}
+                aria-label={collapsed ? '展开边栏' : 'OneAPI Center'}
+              >
+                <img src='/Icon.png' alt='OneAPI Center' />
+              </button>
               {!collapsed && (
                 <div className='brand-text'>
                   <div className='brand-name'>OneAPI Center</div>
@@ -3915,15 +4013,17 @@ export function App() {
               )}
             </div>
 
-            <button
-              className='collapse-button icon-only'
-              type='button'
-              onClick={() => setCollapsed((value) => !value)}
-              aria-label={collapsed ? '展开边栏' : '收起边栏'}
-              title={collapsed ? '展开边栏' : '收起边栏'}
-            >
-              {collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
-            </button>
+            {!collapsed && (
+              <button
+                className='collapse-button icon-only'
+                type='button'
+                onClick={() => setCollapsed(true)}
+                aria-label='收起边栏'
+                title='收起边栏'
+              >
+                <PanelLeftClose size={16} />
+              </button>
+            )}
           </div>
 
           <nav className='side-nav'>
@@ -3938,7 +4038,7 @@ export function App() {
                   onClick={() => setSideTab(item.key)}
                   title={item.label}
                 >
-                  <Icon size={18} />
+                  {collapsed && <Icon size={18} />}
                   {!collapsed && (
                     <span>
                       <strong>{item.label}</strong>

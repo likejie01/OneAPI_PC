@@ -136,6 +136,18 @@ export function buildCliTimeline(input: {
   partialCreatedAt?: number
   partialModelLabel?: string
 }) {
+  const mergeLogFiles = (items: CliFileChange[]) => {
+    const seen = new Set<string>()
+    return items.filter((item) => {
+      const key = `${item.path}:${item.kind}:${item.diff || item.content || ''}`
+      if (seen.has(key)) {
+        return false
+      }
+      seen.add(key)
+      return true
+    })
+  }
+
   const groupedLogs = input.logs.reduce<Array<{
     id: string
     kind: 'log'
@@ -150,11 +162,17 @@ export function buildCliTimeline(input: {
   }>>((groups, item) => {
     const normalizedCreatedAt = toTimelineTimestamp(item.createdAt)
     const lastGroup = groups.at(-1)
-    const sameRequest = lastGroup?.requestId && item.requestId && lastGroup.requestId === item.requestId
+    const sameRequest =
+      !!lastGroup &&
+      !!item.requestId &&
+      lastGroup.requestId === item.requestId
+
     if (lastGroup && sameRequest) {
-      lastGroup.content.push(item.content)
+      if (!lastGroup.content.includes(item.content)) {
+        lastGroup.content.push(item.content)
+      }
       lastGroup.createdAt = Math.max(lastGroup.createdAt, normalizedCreatedAt)
-      lastGroup.files.push(...(item.files || []))
+      lastGroup.files = mergeLogFiles([...lastGroup.files, ...(item.files || [])])
       return groups
     }
 
@@ -168,7 +186,7 @@ export function buildCliTimeline(input: {
       requestId: item.requestId,
       sessionId: item.sessionId,
       title: item.content,
-      files: [...(item.files || [])],
+      files: mergeLogFiles([...(item.files || [])]),
     })
     return groups
   }, [])
@@ -195,23 +213,31 @@ export function buildCliTimeline(input: {
     })
   }
 
-  for (const group of groupedLogs.sort((left, right) => left.startedAt - right.startedAt)) {
-    const insertIndex = entries.findIndex((entry) => entry.kind === 'message' && entry.role === 'assistant' && entry.createdAt >= group.startedAt)
-    if (insertIndex >= 0) {
-      entries.splice(insertIndex, 0, group)
-      continue
+  const timeline = [...entries, ...groupedLogs]
+
+  return timeline.sort((left, right) => {
+    const leftTime = left.kind === 'log' ? left.startedAt : left.createdAt
+    const rightTime = right.kind === 'log' ? right.startedAt : right.createdAt
+
+    if (leftTime !== rightTime) {
+      return leftTime - rightTime
     }
 
-    const fallbackIndex = entries.findIndex((entry) => entry.createdAt > group.startedAt)
-    if (fallbackIndex >= 0) {
-      entries.splice(fallbackIndex, 0, group)
-      continue
+    const priority = (item: CliTimelineEntry) => {
+      if (item.kind === 'message' && item.role === 'user') {
+        return 0
+      }
+      if (item.kind === 'log') {
+        return 1
+      }
+      if (item.kind === 'message' && item.role === 'assistant') {
+        return 2
+      }
+      return 3
     }
 
-    entries.push(group)
-  }
-
-  return entries
+    return priority(left) - priority(right)
+  })
 }
 
 function normalizeWhitespace(value: string) {
