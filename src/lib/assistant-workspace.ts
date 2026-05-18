@@ -54,7 +54,8 @@ function toTimelineTimestamp(value: number) {
 }
 
 export function isCodexModel(value: string) {
-  return normalizeModelValue(value).includes('codex')
+  const normalized = normalizeModelValue(value)
+  return normalized.includes('codex') || normalized.startsWith('gpt-')
 }
 
 export function isClaudeModel(value: string) {
@@ -107,6 +108,17 @@ export function resolveCompatibleModel(
   }
 
   return compatible[0]?.value || preferredModel || selectedModel || ''
+}
+
+export function prioritizeFavoriteModels(models: ChatModelOption[]) {
+  return [...models].sort((left, right) => {
+    const leftRank = left.favorite ? 1 : 0
+    const rightRank = right.favorite ? 1 : 0
+    if (leftRank !== rightRank) {
+      return rightRank - leftRank
+    }
+    return left.label.localeCompare(right.label, 'zh-Hans-CN')
+  })
 }
 
 export function buildCliTimeline(input: {
@@ -199,7 +211,26 @@ export function buildCliTimeline(input: {
     entries.push(group)
   }
 
-  return entries
+  return entries.sort((left, right) => {
+    const leftTime = left.createdAt
+    const rightTime = right.createdAt
+    if (leftTime !== rightTime) {
+      return leftTime - rightTime
+    }
+    if (left.kind === 'log' && right.kind !== 'log') {
+      return -1
+    }
+    if (left.kind !== 'log' && right.kind === 'log') {
+      return 1
+    }
+    if (left.kind === 'partial' && right.kind === 'message') {
+      return -1
+    }
+    if (left.kind === 'message' && right.kind === 'partial') {
+      return 1
+    }
+    return 0
+  })
 }
 
 function extractReferencedFiles(content: string) {

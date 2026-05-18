@@ -2,7 +2,6 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { ChangeEvent, ClipboardEvent, ReactNode } from 'react'
 import {
   Bot,
-  ChartColumn,
   CheckCircle2,
   Copy,
   CreditCard,
@@ -25,12 +24,11 @@ import {
   RefreshCcw,
   RotateCcw,
   Send,
-  Settings2,
   Square,
   Sparkles,
+  Star,
   UserPlus,
   Wallet,
-  Wrench,
   X,
 } from 'lucide-react'
 import {
@@ -81,6 +79,7 @@ import {
   buildCliRecentSessions,
   buildCliTimeline,
   filterAssistantModels,
+  prioritizeFavoriteModels,
   resolveCompatibleModel,
 } from './lib/assistant-workspace'
 import {
@@ -114,7 +113,7 @@ import type {
 import { useAuthStore } from './stores/auth-store'
 
 type AssistantMode = 'chat' | 'codex' | 'claude'
-type SideTab = 'assistants' | 'subscriptions' | 'wallet' | 'usage' | 'me' | 'settings'
+type SideTab = 'assistants' | 'subscriptions' | 'wallet' | 'me'
 
 type ComposerAttachment = {
   id: string
@@ -140,8 +139,6 @@ const primarySideTabs: Array<{
   { key: 'assistants', label: '助手', icon: Sparkles, desc: '提示词助手与聊天形态' },
   { key: 'subscriptions', label: '订阅', icon: CreditCard, desc: '套餐购买、订阅状态和额度' },
   { key: 'wallet', label: '钱包', icon: Wallet, desc: '余额、支付入口与账单记录' },
-  { key: 'usage', label: '用量', icon: ChartColumn, desc: '消耗趋势与调用分析' },
-  { key: 'settings', label: '配置', icon: Settings2, desc: 'Codex 与 Claude 安装配置' },
   { key: 'me', label: '我的', icon: KeyRound, desc: '个人信息、Key 与安全操作' },
 ]
 
@@ -537,7 +534,7 @@ const DEFAULT_CODEX_MODEL = 'gpt-5.5'
 const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-4-6'
 
 function isImageGenerationModel(value: string) {
-  return value.trim().toLowerCase() === 'image2'
+  return value.trim().toLowerCase() === 'gpt-image-2'
 }
 
 function resolveImageMessageSource(item?: { url?: string; b64_json?: string }) {
@@ -578,6 +575,21 @@ function resolvePreferredModel(
   }
 
   return options[0]?.value || preferred || fallback || ''
+}
+
+function storeFavoriteModels(key: string, value: string[]) {
+  writeJsonStorage(key, value)
+}
+
+function loadFavoriteModels(key: string) {
+  return readJsonStorage<string[]>(key, [])
+}
+
+function withFavoriteFlag(models: ChatModelOption[], favorites: string[]) {
+  return models.map((item) => ({
+    ...item,
+    favorite: favorites.includes(item.value),
+  }))
 }
 
 function isAbortError(error: unknown) {
@@ -747,55 +759,6 @@ const USAGE_CHART_COLORS = [
   '#54708c',
 ]
 
-function normalizeLogTimestamp(value?: number) {
-  if (!value) {
-    return 0
-  }
-  return value > 10_000_000_000 ? Math.floor(value / 1000) : Math.floor(value)
-}
-
-function buildUsageTrendData(items: UsageData['items']) {
-  const grouped = new Map<number, Map<string, number>>()
-  const modelTotals = new Map<string, number>()
-
-  for (const item of items) {
-    const model = item.model_name || item.token_name || '未标注模型'
-    const timestamp = normalizeLogTimestamp(Number(item.created_at || item.created_time || 0))
-    if (!timestamp) {
-      continue
-    }
-    const timeKey = Math.floor(timestamp / 60) * 60
-    const timeMap = grouped.get(timeKey) ?? new Map<string, number>()
-    const quota = Number(item.quota || 0)
-    timeMap.set(model, (timeMap.get(model) || 0) + quota)
-    grouped.set(timeKey, timeMap)
-    modelTotals.set(model, (modelTotals.get(model) || 0) + quota)
-  }
-
-  const timeline = [...grouped.entries()].sort((left, right) => left[0] - right[0])
-  const labels = timeline.map(([timestamp]) => {
-    const date = new Date(timestamp * 1000)
-    return `${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
-  })
-  const models = [...modelTotals.entries()]
-    .sort((left, right) => right[1] - left[1])
-    .map(([model]) => model)
-
-  const series = models.map((model, index) => ({
-    model,
-    color: USAGE_CHART_COLORS[index % USAGE_CHART_COLORS.length],
-    values: timeline.map(([, values]) => values.get(model) || 0),
-    total: modelTotals.get(model) || 0,
-  }))
-
-  const maxValue = Math.max(0, ...series.flatMap((item) => item.values))
-  return {
-    labels,
-    series,
-    maxValue,
-  }
-}
-
 function buildSmoothLinePath(points: Array<{ x: number; y: number }>) {
   if (points.length === 0) {
     return ''
@@ -818,13 +781,43 @@ function buildSmoothLinePath(points: Array<{ x: number; y: number }>) {
   return path
 }
 
+function buildUsageSeriesFromTimeline(items: UsageData['items']) {
+  const buckets = new Map<string, Map<string, number>>()
+  const labels: string[] = []
+
+  for (const item of items) {
+    const timestamp = Number(item.created_at || item.created_time || 0)
+    const label = timestamp ? formatDateTime(timestamp).slice(0, 10) : '未知时间'
+    if (!labels.includes(label)) {
+      labels.push(label)
+    }
+
+    const model = item.model_name || item.token_name || '未标注模型'
+    if (!buckets.has(label)) {
+      buckets.set(label, new Map())
+    }
+    const current = buckets.get(label)!
+    current.set(model, (current.get(model) || 0) + Number(item.quota || 0))
+  }
+
+  const models = Array.from(
+    new Set(items.map((item) => item.model_name || item.token_name || '未标注模型'))
+  )
+
+  return {
+    labels,
+    models,
+    buckets,
+  }
+}
+
 function UsageTrendChart(props: {
   items: UsageData['items']
 }) {
   const { items } = props
-  const chart = useMemo(() => buildUsageTrendData(items), [items])
+  const chart = useMemo(() => buildUsageSeriesFromTimeline(items), [items])
 
-  if (!chart.labels.length || !chart.series.length) {
+  if (!chart.labels.length || !chart.models.length) {
     return <EmptyState title='暂无模型分析数据' description='开始使用模型后，这里会自动生成时间趋势。' />
   }
 
@@ -836,7 +829,10 @@ function UsageTrendChart(props: {
   const bottom = 40
   const chartWidth = width - left - right
   const chartHeight = height - top - bottom
-  const maxValue = chart.maxValue || 1
+  const maxValue = Math.max(
+    1,
+    ...chart.labels.flatMap((label) => chart.models.map((model) => chart.buckets.get(label)?.get(model) || 0))
+  )
   const gridRows = 4
 
   return (
@@ -856,19 +852,20 @@ function UsageTrendChart(props: {
           )
         })}
 
-        {chart.series.map((series) => {
-          const points = series.values.map((value, index) => {
-            const x = left + (chartWidth * index) / Math.max(chart.labels.length, 1)
+        {chart.models.map((model, modelIndex) => {
+          const values = chart.labels.map((label) => chart.buckets.get(label)?.get(model) || 0)
+          const points = values.map((value, index) => {
+            const x = left + (chartWidth * (index + 0.5)) / Math.max(chart.labels.length, 1)
             const y = top + chartHeight - (value / maxValue) * chartHeight
             return { x, y }
           })
 
           return (
-            <g key={series.model}>
-              <path d={buildSmoothLinePath(points)} fill='none' stroke={series.color} strokeWidth='2.5' strokeLinecap='round' />
+            <g key={model}>
+              <path d={buildSmoothLinePath(points)} fill='none' stroke={USAGE_CHART_COLORS[modelIndex % USAGE_CHART_COLORS.length]} strokeWidth='2.5' strokeLinecap='round' />
               {points.map((point, index) => (
-                <circle key={`${series.model}-${index}`} cx={point.x} cy={point.y} r='3' fill={series.color}>
-                  <title>{`${series.model} · ${chart.labels[index]} · ${formatQuota(series.values[index])}`}</title>
+                <circle key={`${model}-${index}`} cx={point.x} cy={point.y} r='3' fill={USAGE_CHART_COLORS[modelIndex % USAGE_CHART_COLORS.length]}>
+                  <title>{`${model} · ${chart.labels[index]} · ${formatQuota(values[index])}`}</title>
                 </circle>
               ))}
             </g>
@@ -886,11 +883,11 @@ function UsageTrendChart(props: {
       </svg>
 
       <div className='usage-trend-legend'>
-        {chart.series.map((series) => (
-          <div key={series.model} className='usage-trend-legend-item'>
-            <span className='usage-trend-swatch' style={{ backgroundColor: series.color }} />
-            <strong>{series.model}</strong>
-            <span>{formatQuota(series.total)}</span>
+        {chart.models.map((model, index) => (
+          <div key={model} className='usage-trend-legend-item'>
+            <span className='usage-trend-swatch' style={{ backgroundColor: USAGE_CHART_COLORS[index % USAGE_CHART_COLORS.length] }} />
+            <strong>{model}</strong>
+            <span>{formatQuota(chart.labels.reduce((sum, label) => sum + (chart.buckets.get(label)?.get(model) || 0), 0))}</span>
           </div>
         ))}
       </div>
@@ -1010,6 +1007,7 @@ function AssistantsChatWorkspace(props: {
 }) {
   const { toast } = props
   const [models, setModels] = useState<ChatModelOption[]>([])
+  const [favoriteModels, setFavoriteModels] = useState<string[]>(() => loadFavoriteModels('oneapi-desktop-chat-favorites'))
   const [chatSessions, setChatSessions] = useState<ChatSessionRecord[]>([])
   const [activeSessionId, setActiveSessionId] = useState('')
   const [draft, setDraft] = useState('')
@@ -1054,11 +1052,11 @@ function AssistantsChatWorkspace(props: {
   )
   const messages = activeSession?.messages || []
   const compatibleChatModels = useMemo(
-    () => filterAssistantModels('chat', models),
-    [models]
+    () => prioritizeFavoriteModels(filterAssistantModels('chat', withFavoriteFlag(models, favoriteModels))),
+    [favoriteModels, models]
   )
   const chatModeModels = useMemo(
-    () => [{ label: 'image2 生图', value: 'image2' }, ...compatibleChatModels],
+    () => [{ label: 'gpt-image-2 生图', value: 'gpt-image-2' }, ...compatibleChatModels],
     [compatibleChatModels]
   )
 
@@ -1176,6 +1174,16 @@ function AssistantsChatWorkspace(props: {
     setDraft('')
     window.setTimeout(() => resizeDraft(), 0)
     setHistoryOpen(false)
+  }
+
+  function toggleFavoriteModel(value: string) {
+    setFavoriteModels((current) => {
+      const next = current.includes(value)
+        ? current.filter((item) => item !== value)
+        : [value, ...current]
+      storeFavoriteModels('oneapi-desktop-chat-favorites', next)
+      return next
+    })
   }
 
   function syncActiveSession(
@@ -1563,13 +1571,26 @@ function AssistantsChatWorkspace(props: {
                             <button
                               key={item.value}
                               type='button'
-                              className={`picker-option ${item.value === selectedModel ? 'active' : ''}`}
+                              className={`picker-option model-option ${item.value === selectedModel ? 'active' : ''}`}
                               onClick={() => {
                                 setSelectedModel(item.value)
                                 setModelMenuOpen(false)
                               }}
                             >
-                              <strong>{item.label}</strong>
+                              <div className='model-option-head'>
+                                <strong>{item.label}</strong>
+                                <button
+                                  className={`ghost-button icon-only tiny model-favorite ${item.favorite ? 'active' : ''}`}
+                                  type='button'
+                                  onClick={(event) => {
+                                    event.stopPropagation()
+                                    toggleFavoriteModel(item.value)
+                                  }}
+                                  aria-label={item.favorite ? '取消收藏' : '收藏'}
+                                >
+                                  <Star size={13} />
+                                </button>
+                              </div>
                               <span>{item.value}</span>
                             </button>
                           ))}
@@ -1621,17 +1642,33 @@ function AssistantsChatWorkspace(props: {
             {chatSessions.length === 0 ? (
               <EmptyState title='当前没有聊天会话' description='发送第一条消息后，会话会出现在这里。' />
             ) : (
-              <div className='subrecords compact-records'>
-                {chatSessions.map((item) => (
-                  <button
-                    key={item.id}
-                    type='button'
-                    className={`record-row action-row session-row ${item.id === resolvedActiveSessionId ? 'highlighted' : ''}`}
-                    onClick={() => handleSelectChatSession(item)}
-                  >
-                    <span className='session-row-preview'>{clipText(item.title, 56)}</span>
-                    <small>{formatDateTime(item.updatedAt)}</small>
-                  </button>
+              <div className='history-project-groups'>
+                {Object.entries(
+                  chatSessions.reduce<Record<string, ChatSessionRecord[]>>((groups, item) => {
+                    const key = item.group || 'default'
+                    groups[key] = [...(groups[key] || []), item]
+                    return groups
+                  }, {})
+                ).map(([groupKey, items]) => (
+                  <div key={groupKey} className='history-group'>
+                    <div className='history-group-head'>
+                      <strong>{groupKey}</strong>
+                      <span>{items.length} 条</span>
+                    </div>
+                    <div className='subrecords compact-records'>
+                      {items.map((item) => (
+                        <button
+                          key={item.id}
+                          type='button'
+                          className={`record-row action-row session-row ${item.id === resolvedActiveSessionId ? 'highlighted' : ''}`}
+                          onClick={() => handleSelectChatSession(item)}
+                        >
+                          <span className='session-row-preview'>{clipText(item.title, 56)}</span>
+                          <small>{formatDateTime(item.updatedAt)}</small>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 ))}
               </div>
             )}
@@ -1838,11 +1875,20 @@ function WalletWorkspace(props: {
   const { user, toast } = props
   const [billing, setBilling] = useState<BillingHistoryData | null>(null)
   const [redeemCode, setRedeemCode] = useState('')
+  const [usageData, setUsageData] = useState<UsageData | null>(null)
+  const [usageStat, setUsageStat] = useState<UsageStat | null>(null)
 
   const recentBills = billing?.items || []
   const completedBillCount = recentBills.filter((item) => item.status === 'success').length
   const tokenBalance = Number(user.quota || 0)
   const tokenExpense = Number(user.used_quota || 0)
+  const modelSummary = useMemo(
+    () => usageModelSummary(usageData?.items || []),
+    [usageData?.items]
+  )
+  const totalQuota = modelSummary.reduce((sum, item) => sum + item.quota, 0)
+  const totalCalls = modelSummary.reduce((sum, item) => sum + item.count, 0)
+  const topModels = modelSummary.slice(0, 8)
 
   const refreshWallet = useCallback(async () => {
     const nextBilling = await getBillingHistory()
@@ -1854,13 +1900,19 @@ function WalletWorkspace(props: {
 
     void (async () => {
       try {
-        const nextBilling = await getBillingHistory()
+        const [nextBilling, nextUsageData, nextUsageStat] = await Promise.all([
+          getBillingHistory(),
+          getUserUsageLogs(1, 200),
+          getUserUsageStat(),
+        ])
 
         if (disposed) {
           return
         }
 
         setBilling(nextBilling ?? null)
+        setUsageData(nextUsageData ?? null)
+        setUsageStat(nextUsageStat ?? null)
       } catch (error) {
         if (!disposed) {
           toast(error instanceof Error ? error.message : '加载钱包信息失败')
@@ -1962,87 +2014,6 @@ function WalletWorkspace(props: {
                 )}
               </div>
             </div>
-
-          </div>
-        </div>
-      </article>
-    </section>
-  )
-}
-
-function UsageWorkspace(props: {
-  toast: (message: string) => void
-}) {
-  const { toast } = props
-  const [usageData, setUsageData] = useState<UsageData | null>(null)
-  const [usageStat, setUsageStat] = useState<UsageStat | null>(null)
-  const modelSummary = useMemo(
-    () => usageModelSummary(usageData?.items || []),
-    [usageData?.items]
-  )
-  const totalQuota = modelSummary.reduce((sum, item) => sum + item.quota, 0)
-  const totalCalls = modelSummary.reduce((sum, item) => sum + item.count, 0)
-  const topModels = modelSummary.slice(0, 8)
-
-  useEffect(() => {
-    let disposed = false
-
-    void (async () => {
-      try {
-        const [nextUsageData, nextUsageStat] = await Promise.all([
-          getUserUsageLogs(1, 200),
-          getUserUsageStat(),
-        ])
-
-        if (disposed) {
-          return
-        }
-
-        setUsageData(nextUsageData ?? null)
-        setUsageStat(nextUsageStat ?? null)
-      } catch (error) {
-        if (!disposed) {
-          toast(error instanceof Error ? error.message : '加载用量信息失败')
-        }
-      }
-    })()
-
-    return () => {
-      disposed = true
-    }
-  }, [toast])
-
-  return (
-    <section className='workspace-page full-bleed-page'>
-      <article className='panel scroll-panel page-surface'>
-        <div className='panel-header compact'>
-          <div>
-            <span className='eyebrow dark'>用量</span>
-            <h2>消耗分布与模型调用分析</h2>
-          </div>
-        </div>
-
-        <div className='panel-scroll'>
-          <div className='stats-inline page-stats-grid'>
-            <div className='mini-stat'>
-              <strong>{formatQuota(usageStat?.quota)}</strong>
-              <span>区间额度</span>
-            </div>
-            <div className='mini-stat'>
-              <strong>{formatQuota(usageStat?.rpm)}</strong>
-              <span>RPM</span>
-            </div>
-            <div className='mini-stat'>
-              <strong>{formatQuota(usageStat?.tpm)}</strong>
-              <span>TPM</span>
-            </div>
-            <div className='mini-stat'>
-              <strong>{totalCalls}</strong>
-              <span>模型调用次数</span>
-            </div>
-          </div>
-
-          <div className='content-grid usage-grid'>
             <div className='panel-block'>
               <div className='list-block-header'>
                 <strong>消耗分布</strong>
@@ -2059,24 +2030,34 @@ function UsageWorkspace(props: {
                         <span>{formatQuota(item.quota)}</span>
                       </div>
                       <div className='usage-bar-track'>
-                        <div
-                          className='usage-bar-fill'
-                          style={{ width: `${percentageOf(item.quota, totalQuota)}%` }}
-                        />
+                        <div className='usage-bar-fill' style={{ width: `${percentageOf(item.quota, totalQuota)}%` }} />
                       </div>
-                      <small>
-                        占比 {percentageOf(item.quota, totalQuota).toFixed(1)}% · 调用 {item.count} 次
-                      </small>
+                      <small>占比 {percentageOf(item.quota, totalQuota).toFixed(1)}% · 调用 {item.count} 次</small>
                     </div>
                   ))}
                 </div>
               )}
             </div>
-
             <div className='panel-block'>
               <div className='list-block-header'>
                 <strong>模型调用分析</strong>
                 <span>按时间轴绘制各模型的额度消耗曲线</span>
+              </div>
+              <div className='subrecords'>
+                <div className='record-row'>
+                  <div>
+                    <strong>区间额度</strong>
+                    <span>{formatQuota(usageStat?.quota)}</span>
+                  </div>
+                  <small>RPM {formatQuota(usageStat?.rpm)}</small>
+                </div>
+                <div className='record-row'>
+                  <div>
+                    <strong>调用次数</strong>
+                    <span>{totalCalls}</span>
+                  </div>
+                  <small>TPM {formatQuota(usageStat?.tpm)}</small>
+                </div>
               </div>
               <UsageTrendChart items={usageData?.items || []} />
             </div>
@@ -2222,9 +2203,10 @@ function MeWorkspace(props: {
           </div>
 
           <div className='panel-scroll'>
-            <div className='content-grid two-column page-blocks'>
-              <div className='panel-block'>
-                <div className='subrecords'>
+            <div className='content-grid me-layout page-blocks'>
+              <div className='me-left-space'>
+                <div className='panel-block'>
+                  <div className='subrecords'>
                   <div className='record-row highlighted'>
                     <div>
                       <strong>{user.display_name || user.username}</strong>
@@ -2297,36 +2279,41 @@ function MeWorkspace(props: {
                     </div>
                   )}
                 </div>
+                </div>
+                <div className='panel-block'>
+                  <div className='list-block-header'>
+                    <strong>已有 Key</strong>
+                  </div>
+                  <div className='subrecords'>
+                    {apiKeys.length === 0 ? (
+                      <EmptyState title='当前还没有 API Key' description='验证密码后即可直接新建桌面端专用 Key。' />
+                    ) : (
+                      apiKeys.map((item) => (
+                        <div key={item.id} className='record-row'>
+                          <div>
+                            <strong>{item.name}</strong>
+                            <span>{item.group || 'default'} · 创建于 {formatDateTime(item.created_time)}</span>
+                          </div>
+                          <div className='record-actions'>
+                            <small>{item.status === 1 ? '启用中' : '已停用'}</small>
+                            <button
+                              className='ghost-button'
+                              type='button'
+                              onClick={() => openPasswordGate('view-key', item.id)}
+                            >
+                              查看
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
               </div>
 
-              <div className='panel-block'>
-                <div className='list-block-header'>
-                  <strong>已有 Key</strong>
-                </div>
-                <div className='subrecords'>
-                  {apiKeys.length === 0 ? (
-                    <EmptyState title='当前还没有 API Key' description='验证密码后即可直接新建桌面端专用 Key。' />
-                  ) : (
-                    apiKeys.map((item) => (
-                      <div key={item.id} className='record-row'>
-                        <div>
-                          <strong>{item.name}</strong>
-                          <span>{item.group || 'default'} · 创建于 {formatDateTime(item.created_time)}</span>
-                        </div>
-                        <div className='record-actions'>
-                          <small>{item.status === 1 ? '启用中' : '已停用'}</small>
-                          <button
-                            className='ghost-button'
-                            type='button'
-                            onClick={() => openPasswordGate('view-key', item.id)}
-                          >
-                            查看
-                          </button>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
+              <div className='me-right-space'>
+                <CliSetupCard client='codex' user={user} toast={toast} />
+                <CliSetupCard client='claude' user={user} toast={toast} />
               </div>
             </div>
           </div>
@@ -2386,6 +2373,9 @@ function CliWorkspace(props: {
   const [sessionPartialMap, setSessionPartialMap] = useState<Record<string, string>>({})
   const [expandedLogGroupId, setExpandedLogGroupId] = useState('')
   const [previewFile, setPreviewFile] = useState<{ path: string; name: string; content: string } | null>(null)
+  const [hiddenSessionIds, setHiddenSessionIds] = useState<string[]>(() =>
+    readJsonStorage<string[]>(`oneapi-desktop-${client}-hidden-sessions`, [])
+  )
   const [requestSessionMap, setRequestSessionMap] = useState<
     Record<string, { sessionId: string; projectPath: string }>
   >({})
@@ -2427,7 +2417,7 @@ function CliWorkspace(props: {
     [preferredCliModel]
   )
   const compatibleCliModels = useMemo(
-    () => filterAssistantModels(client, cliModels, fallbackCliModels),
+    () => prioritizeFavoriteModels(filterAssistantModels(client, cliModels, fallbackCliModels)),
     [client, cliModels, fallbackCliModels]
   )
   const selectedModelLabel =
@@ -2443,6 +2433,14 @@ function CliWorkspace(props: {
         sessionProjectPathMap,
       }),
     [history, sessionLogsMap, sessionMessagesMap, sessionProjectPathMap]
+  )
+  const visibleRecentSessions = useMemo(
+    () => recentSessions.filter((item) => !hiddenSessionIds.includes(item.id)),
+    [hiddenSessionIds, recentSessions]
+  )
+  const hiddenRecentSessions = useMemo(
+    () => recentSessions.filter((item) => hiddenSessionIds.includes(item.id)),
+    [hiddenSessionIds, recentSessions]
   )
   const activeTimeline = useMemo(
     () =>
@@ -2657,6 +2655,15 @@ function CliWorkspace(props: {
   function applyProjectPath(nextPath: string) {
     setProjectPath(nextPath)
     setProjectName(resolveProjectNameFromPath(nextPath))
+  }
+
+  function persistHiddenSessions(next: string[]) {
+    setHiddenSessionIds(next)
+    writeJsonStorage(`oneapi-desktop-${client}-hidden-sessions`, next)
+  }
+
+  function unhideSession(sessionId: string) {
+    persistHiddenSessions(hiddenSessionIds.filter((item) => item !== sessionId))
   }
 
   function bindProjectSession(nextProjectPath: string, sessionId: string) {
@@ -3039,15 +3046,17 @@ function CliWorkspace(props: {
               {
                 key: 'attachment',
                 node: (
-                  <button
-                    className='ghost-button tiny icon-pill-trigger'
-                    type='button'
-                    onClick={openAttachmentPicker}
-                    title='添加附件'
-                  >
-                    <Paperclip size={16} />
-                    <strong>{attachments.length > 0 ? `附件 ${attachments.length}` : '添加附件'}</strong>
-                  </button>
+                  <div className='toolbar-picker'>
+                    <button
+                      className='ghost-button tiny icon-pill-trigger'
+                      type='button'
+                      onClick={openAttachmentPicker}
+                      title='添加附件'
+                    >
+                      <Paperclip size={16} />
+                      <strong>{attachments.length > 0 ? `附件 ${attachments.length}` : '添加附件'}</strong>
+                    </button>
+                  </div>
                 ),
               },
               {
@@ -3097,7 +3106,7 @@ function CliWorkspace(props: {
                           <span>切换当前 CLI 会话模型</span>
                         </div>
                         <div className='picker-menu-list'>
-                          {compatibleCliModels.map((item) => (
+                          {compatibleCliModels.map((item: ChatModelOption) => (
                             <button
                               key={item.value}
                               type='button'
@@ -3205,24 +3214,55 @@ function CliWorkspace(props: {
           </div>
 
           <div className='side-pane-scroll'>
-            {recentSessions.length === 0 ? (
+            {visibleRecentSessions.length === 0 && hiddenRecentSessions.length === 0 ? (
               <EmptyState
                 title='当前没有可读取的历史'
                 description={projectPath ? '当前项目还没有本地 CLI 会话记录。' : '使用过本地 CLI 后，会话会显示在这里。'}
               />
             ) : (
-              <div className='subrecords compact-records'>
-                {recentSessions.map((item) => (
-                  <button
-                    key={item.id}
-                    type='button'
-                    className={`record-row action-row session-row ${item.id === activeSessionId ? 'highlighted' : ''}`}
-                    onClick={() => void handleOpenHistory(item)}
-                  >
-                    <span className='session-row-preview'>{clipText(item.preview || item.title, 74)}</span>
-                    <small>{formatDateTime(item.updatedAt)}</small>
-                  </button>
-                ))}
+              <div className='history-project-groups'>
+                {visibleRecentSessions.length > 0 && (
+                  <div className='history-group'>
+                    <div className='history-group-head'>
+                      <strong>最近会话</strong>
+                      <span>{visibleRecentSessions.length} 条</span>
+                    </div>
+                    <div className='subrecords compact-records'>
+                      {visibleRecentSessions.map((item: CliHistoryEntry) => (
+                        <button
+                          key={item.id}
+                          type='button'
+                          className={`record-row action-row session-row ${item.id === activeSessionId ? 'highlighted' : ''}`}
+                          onClick={() => void handleOpenHistory(item)}
+                        >
+                          <span className='session-row-preview'>{clipText(item.preview || item.title, 74)}</span>
+                          <small>{formatDateTime(item.updatedAt)}</small>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {hiddenRecentSessions.length > 0 && (
+                  <div className='history-group'>
+                    <div className='history-group-head'>
+                      <strong>隐藏会话</strong>
+                      <span>{hiddenRecentSessions.length} 条</span>
+                    </div>
+                    <div className='subrecords compact-records'>
+                      {hiddenRecentSessions.map((item: CliHistoryEntry) => (
+                        <button
+                          key={item.id}
+                          type='button'
+                          className='record-row action-row session-row'
+                          onClick={() => unhideSession(item.id)}
+                        >
+                          <span className='session-row-preview'>{clipText(item.preview || item.title, 74)}</span>
+                          <small>取消隐藏</small>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -3275,16 +3315,7 @@ function CliSetupCard(props: {
   }, [client, toast])
 
   useEffect(() => {
-    window.setTimeout(() => {
-      void refreshStatus(true)
-    }, 0)
-    const timer = window.setInterval(() => {
-      void refreshStatus(true)
-    }, 30000)
-
-    return () => {
-      window.clearInterval(timer)
-    }
+    void refreshStatus(true)
   }, [refreshStatus])
 
   useEffect(() => {
@@ -3308,11 +3339,7 @@ function CliSetupCard(props: {
       try {
         const nextPreset = await getCliDeployPreset(client)
         if (!disposed) {
-          setPreset({
-            apiKey: nextPreset.apiKey,
-            model: nextPreset.model,
-            baseUrl: nextPreset.baseUrl,
-          })
+          setPreset(nextPreset)
         }
       } catch {
         if (!disposed) {
@@ -3331,12 +3358,8 @@ function CliSetupCard(props: {
       return
     }
 
-    try {
-      const resolvedPath = filePath ? targetPath.replace(/[/\\][^/\\]+$/, '') : targetPath
-      await window.desktopBridge?.openPath(resolvedPath)
-    } catch (error) {
-      toast(error instanceof Error ? error.message : '打开文件夹失败')
-    }
+    const resolvedPath = filePath ? targetPath.replace(/[/\\][^/\\]+$/, '') : targetPath
+    await window.desktopBridge?.openPath(resolvedPath)
   }
 
   async function handleDeploy() {
@@ -3359,7 +3382,7 @@ function CliSetupCard(props: {
   }
 
   return (
-    <article className='panel settings-card'>
+    <article className='panel settings-card inline-settings-card'>
       <div className='panel-header compact'>
         <div>
           <span className='eyebrow dark'>{client.toUpperCase()}</span>
@@ -3371,7 +3394,6 @@ function CliSetupCard(props: {
             <span>刷新</span>
           </button>
           <button className='primary-button tiny' type='button' disabled={deploying} onClick={() => void handleDeploy()}>
-            <Wrench size={16} />
             <span>{deploying ? '部署中' : '一键部署'}</span>
           </button>
         </div>
@@ -3398,10 +3420,7 @@ function CliSetupCard(props: {
 
       <div className='timeline-list'>
         {deployLog.length === 0 ? (
-          <EmptyState
-            title='部署进度会显示在这里'
-            description='包含检测、安装、配置、测试四段结果，安装镜像使用国内源。'
-          />
+          <EmptyState title='部署进度会显示在这里' description='包含检测、安装、配置、测试四段结果。' />
         ) : (
           deployLog.map((item, index) => (
             <div key={`${item.jobId}-${item.step}-${index}`} className={`timeline-row ${item.status}`}>
@@ -3415,22 +3434,6 @@ function CliSetupCard(props: {
         )}
       </div>
     </article>
-  )
-}
-
-function SettingsWorkspace(props: {
-  user: UserProfile
-  toast: (message: string) => void
-}) {
-  const { user, toast } = props
-
-  return (
-    <section className='workspace-page single-panel-page'>
-      <div className='settings-grid'>
-        <CliSetupCard client='codex' user={user} toast={toast} />
-        <CliSetupCard client='claude' user={user} toast={toast} />
-      </div>
-    </section>
   )
 }
 
@@ -3988,14 +3991,13 @@ export function App() {
               mode={assistantMode}
               setMode={setAssistantMode}
               toast={setMessage}
-              openSettings={() => setSideTab('settings')}
+              openSettings={() => setSideTab('me')}
               visible={sideTab === 'assistants'}
             />
             {sideTab === 'subscriptions' && <SubscriptionsWorkspace toast={setMessage} />}
             {sideTab === 'wallet' && <WalletWorkspace user={auth.user} toast={setMessage} />}
-            {sideTab === 'usage' && <UsageWorkspace toast={setMessage} />}
             {sideTab === 'me' && <MeWorkspace user={auth.user} toast={setMessage} />}
-            {sideTab === 'settings' && <SettingsWorkspace user={auth.user} toast={setMessage} />}
+            {/* settings removed */}
           </div>
         </main>
       </div>

@@ -998,8 +998,8 @@ select {
 
 .composer-asset-card {
   position: relative;
-  width: 92px;
-  height: 92px;
+  width: 46px;
+  height: 46px;
   border-radius: 16px;
   overflow: hidden;
   background: rgba(23, 49, 74, 0.06);
@@ -1022,14 +1022,14 @@ select {
 
 .composer-asset-name {
   position: absolute;
-  left: 6px;
-  right: 6px;
-  bottom: 6px;
-  padding: 2px 6px;
+  left: 4px;
+  right: 4px;
+  bottom: 4px;
+  padding: 1px 4px;
   border-radius: 999px;
   color: #fff;
   background: rgba(16, 32, 46, 0.72);
-  font-size: 11px;
+  font-size: 10px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1037,10 +1037,10 @@ select {
 
 .composer-asset-remove {
   position: absolute;
-  top: 6px;
-  right: 6px;
-  width: 20px;
-  height: 20px;
+  top: 4px;
+  right: 4px;
+  width: 16px;
+  height: 16px;
   border-radius: 999px;
   background: rgba(16, 32, 46, 0.72);
   color: #fff;
@@ -1105,8 +1105,8 @@ select {
 }
 
 .status-grid-slim .status-button {
-  min-height: 34px;
-  padding: 8px 10px;
+  min-height: 28px;
+  padding: 6px 8px;
   justify-content: center;
 }
 
@@ -1126,9 +1126,9 @@ select {
 
 .picker-trigger {
   min-width: 0;
-  max-width: 290px;
+  max-width: 260px;
   justify-content: flex-start;
-  padding-inline: 10px 12px;
+  padding-inline: 8px 10px;
   gap: 8px;
 }
 
@@ -1140,9 +1140,9 @@ select {
 
 .icon-pill-trigger {
   min-width: 0;
-  max-width: 220px;
+  max-width: 190px;
   justify-content: flex-start;
-  padding-inline: 10px;
+  padding-inline: 8px;
 }
 
 .picker-trigger strong {
@@ -1288,12 +1288,12 @@ select {
 .chat-history-panel .panel-header .eyebrow,
 .cli-history-panel .panel-header .eyebrow {
   display: inline-block;
-  margin-bottom: 8px;
+  margin-bottom: 14px;
 }
 
 .chat-history-panel .panel-header h2,
 .cli-history-panel .panel-header h2 {
-  margin: 8px 0 0;
+  margin: 10px 0 0;
 }
 
 .chat-layout.history-open .chat-history-panel,
@@ -1311,6 +1311,11 @@ select {
 
 .cli-thread {
   padding-top: 46px;
+}
+
+.message-stream,
+.cli-thread {
+  align-items: flex-start;
 }
 
 .history-groups {
@@ -1610,6 +1615,44 @@ select {
   color: #173d55;
   box-shadow: none;
   border-color: transparent;
+}
+
+.model-option-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.model-favorite {
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+}
+
+.model-favorite.active {
+  color: #c9852d;
+}
+
+.history-project-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.me-settings-grid {
+  grid-template-columns: 1fr;
+}
+
+.me-left-space,
+.me-right-space {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.inline-settings-card {
+  padding: 14px;
 }
 
 .verification-inline-fields {

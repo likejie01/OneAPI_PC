@@ -79,6 +79,8 @@ export interface ChatMessage {
 export interface ChatModelOption {
   label: string
   value: string
+  provider?: 'openai' | 'codex' | 'claude'
+  favorite?: boolean
 }
 
 export interface ChatGroupOption {
