@@ -132,10 +132,9 @@ export function buildCliTimeline(input: {
     const lastGroup = groups.at(-1)
     const sameRequest = lastGroup?.requestId && item.requestId && lastGroup.requestId === item.requestId
     const sameSession = lastGroup?.sessionId && item.sessionId && lastGroup.sessionId === item.sessionId
-    const sameLevel = lastGroup?.level === item.level
-    if (lastGroup && sameLevel && (sameRequest || sameSession)) {
+    if (lastGroup && (sameRequest || sameSession)) {
       lastGroup.content.push(item.content)
-      lastGroup.createdAt = normalizedCreatedAt
+      lastGroup.createdAt = Math.max(lastGroup.createdAt, normalizedCreatedAt)
       lastGroup.files.push(...extractReferencedFiles(item.content))
       return groups
     }

@@ -218,6 +218,10 @@ select {
   transform: none;
 }
 
+.sidebar.collapsed .collapsed-logout-button {
+  margin-top: auto;
+}
+
 .secondary-button {
   background: rgba(29, 107, 120, 0.1);
   color: #1b5e68;
@@ -836,8 +840,8 @@ select {
 
 .workspace-corner-tools {
   position: absolute;
-  top: 2px;
-  right: 0;
+  top: 6px;
+  right: 8px;
   z-index: 6;
 }
 
@@ -860,14 +864,30 @@ select {
 }
 
 .message-bubble.system {
-  align-self: center;
+  align-self: flex-start;
   background: rgba(201, 110, 75, 0.1);
+}
+
+.chat-image-result {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.chat-image-result img {
+  display: block;
+  max-width: 100%;
+  border-radius: 16px;
 }
 
 .message-bubble p {
   margin: 6px 0 8px;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.message-bubble.image-bubble p {
+  margin-bottom: 0;
 }
 
 .cli-log-list {
@@ -1085,8 +1105,8 @@ select {
 }
 
 .status-grid-slim .status-button {
-  min-height: 38px;
-  padding: 10px 12px;
+  min-height: 34px;
+  padding: 8px 10px;
   justify-content: center;
 }
 
@@ -1200,7 +1220,7 @@ select {
 
 .assistant-mode-float {
   position: absolute;
-  top: -8px;
+  top: -2px;
   left: 50%;
   z-index: 4;
   display: inline-flex;
@@ -1211,21 +1231,24 @@ select {
 
 .assistant-mode-button {
   min-height: 38px;
-  padding: 0 14px;
-  border-radius: 999px;
+  padding: 0 10px 6px;
+  border-radius: 0;
   background: transparent;
   color: #688196;
+  border-bottom: 2px solid transparent;
+  box-shadow: none;
 }
 
 .assistant-mode-button.active {
   color: #173d55;
-  background: rgba(29, 107, 120, 0.12);
-  box-shadow: inset 0 -2px 0 rgba(29, 107, 120, 0.32);
+  background: transparent;
+  box-shadow: none;
+  border-bottom-color: var(--accent);
 }
 
 .assistant-host {
   position: relative;
-  padding-top: 6px;
+  padding-top: 0;
 }
 
 .chat-page,
@@ -1356,11 +1379,16 @@ select {
 .cli-log-bubble {
   align-self: flex-start;
   max-width: min(720px, 82%);
+  margin: 0;
   background: rgba(23, 49, 74, 0.04);
 }
 
 .cli-thread .cli-log-bubble {
   align-self: flex-start;
+}
+
+.cli-thread {
+  align-items: flex-start;
 }
 
 .cli-log-bubble.error {
@@ -1578,8 +1606,10 @@ select {
 }
 
 .selected-toggle {
-  background: rgba(29, 107, 120, 0.12);
+  background: transparent;
   color: #173d55;
+  box-shadow: none;
+  border-color: transparent;
 }
 
 .verification-inline-fields {

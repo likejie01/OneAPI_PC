@@ -67,6 +67,8 @@ export interface ChatMessage {
   role: 'system' | 'user' | 'assistant'
   content: string
   createdAt: number
+  imageUrl?: string
+  imagePrompt?: string
   usage?: {
     prompt_tokens?: number
     completion_tokens?: number
@@ -100,6 +102,15 @@ export interface ChatCompletionResponse {
     completion_tokens?: number
     total_tokens?: number
   }
+}
+
+export interface ImageGenerationResponse {
+  created?: number
+  data?: Array<{
+    url?: string
+    b64_json?: string
+    revised_prompt?: string
+  }>
 }
 
 export interface SubscriptionPlan {

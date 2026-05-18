@@ -49,7 +49,7 @@ import {
   sendEmailVerification,
   unwrapEnvelope,
 } from './domains/auth'
-import { getUserGroups, getUserModels, sendChatCompletion, stopChatCompletion } from './domains/chat'
+import { getUserGroups, getUserModels, sendChatCompletion, sendImageGeneration, stopChatCompletion } from './domains/chat'
 import {
   deployCli,
   getCliSession,
@@ -75,9 +75,7 @@ import {
 import { getUserUsageLogs, getUserUsageStat } from './domains/usage'
 import {
   getBillingHistory,
-  getTopupInfo,
   redeemTopupCode,
-  requestWalletPayment,
 } from './domains/wallet'
 import {
   buildCliRecentSessions,
@@ -87,7 +85,6 @@ import {
 } from './lib/assistant-workspace'
 import {
   getCliResumeSessionId,
-  shouldAppendCliAssistantFallback,
 } from './lib/cli-session'
 import { clearStoredDesktopUserId, saveStoredDesktopUserId } from './lib/desktop-client'
 import { clipText, formatDateTime, formatPrice, formatQuota } from './lib/format'
@@ -101,7 +98,6 @@ import type {
   PlanRecord,
   SubscriptionPaymentInfo,
   SubscriptionSelfData,
-  TopupInfo,
   UsageData,
   UsageStat,
   UserProfile,
@@ -433,15 +429,6 @@ type ComposerFileAsset = {
   onRemove?: () => void
 }
 
-function sumBillingMoney(items: BillingHistoryData['items'], predicate: (item: BillingHistoryData['items'][number]) => boolean) {
-  return items.reduce((sum, item) => {
-    if (!predicate(item) || item.status !== 'success') {
-      return sum
-    }
-    return sum + Number(item.money || 0)
-  }, 0)
-}
-
 function renderComposer(props: {
   inputRef?: React.RefObject<HTMLInputElement | null>
   onAttachmentInputChange?: (event: ChangeEvent<HTMLInputElement>) => void | Promise<void>
@@ -548,6 +535,26 @@ const CLAUDE_REASONING_OPTIONS = [
 const DEFAULT_CHAT_MODEL = 'gpt-5.4'
 const DEFAULT_CODEX_MODEL = 'gpt-5.5'
 const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-4-6'
+
+function isImageGenerationModel(value: string) {
+  return value.trim().toLowerCase() === 'image2'
+}
+
+function resolveImageMessageSource(item?: { url?: string; b64_json?: string }) {
+  if (!item) {
+    return ''
+  }
+
+  if (item.url?.trim()) {
+    return item.url.trim()
+  }
+
+  if (item.b64_json?.trim()) {
+    return `data:image/png;base64,${item.b64_json.trim()}`
+  }
+
+  return ''
+}
 
 type BubbleActionConfig = {
   key: string
@@ -748,7 +755,7 @@ function normalizeLogTimestamp(value?: number) {
 }
 
 function buildUsageTrendData(items: UsageData['items']) {
-  const grouped = new Map<string, Map<string, number>>()
+  const grouped = new Map<number, Map<string, number>>()
   const modelTotals = new Map<string, number>()
 
   for (const item of items) {
@@ -757,16 +764,19 @@ function buildUsageTrendData(items: UsageData['items']) {
     if (!timestamp) {
       continue
     }
-    const date = new Date(timestamp * 1000)
-    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
-    const dayMap = grouped.get(key) ?? new Map<string, number>()
+    const timeKey = Math.floor(timestamp / 60) * 60
+    const timeMap = grouped.get(timeKey) ?? new Map<string, number>()
     const quota = Number(item.quota || 0)
-    dayMap.set(model, (dayMap.get(model) || 0) + quota)
-    grouped.set(key, dayMap)
+    timeMap.set(model, (timeMap.get(model) || 0) + quota)
+    grouped.set(timeKey, timeMap)
     modelTotals.set(model, (modelTotals.get(model) || 0) + quota)
   }
 
-  const labels = [...grouped.keys()].sort()
+  const timeline = [...grouped.entries()].sort((left, right) => left[0] - right[0])
+  const labels = timeline.map(([timestamp]) => {
+    const date = new Date(timestamp * 1000)
+    return `${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+  })
   const models = [...modelTotals.entries()]
     .sort((left, right) => right[1] - left[1])
     .map(([model]) => model)
@@ -774,7 +784,7 @@ function buildUsageTrendData(items: UsageData['items']) {
   const series = models.map((model, index) => ({
     model,
     color: USAGE_CHART_COLORS[index % USAGE_CHART_COLORS.length],
-    values: labels.map((label) => grouped.get(label)?.get(model) || 0),
+    values: timeline.map(([, values]) => values.get(model) || 0),
     total: modelTotals.get(model) || 0,
   }))
 
@@ -848,7 +858,7 @@ function UsageTrendChart(props: {
 
         {chart.series.map((series) => {
           const points = series.values.map((value, index) => {
-            const x = left + (chartWidth * index) / Math.max(chart.labels.length - 1, 1)
+            const x = left + (chartWidth * index) / Math.max(chart.labels.length, 1)
             const y = top + chartHeight - (value / maxValue) * chartHeight
             return { x, y }
           })
@@ -866,7 +876,7 @@ function UsageTrendChart(props: {
         })}
 
         {chart.labels.map((label, index) => {
-          const x = left + (chartWidth * index) / Math.max(chart.labels.length - 1, 1)
+          const x = left + (chartWidth * (index + 0.5)) / Math.max(chart.labels.length, 1)
           return (
             <text key={label} x={x} y={height - 14} textAnchor='middle' className='usage-trend-axis'>
               {label.slice(5)}
@@ -1022,7 +1032,6 @@ function AssistantsChatWorkspace(props: {
     removeAttachment,
     handleInputChange: handleAttachmentInputChange,
     handlePaste: handleAttachmentPaste,
-    openPicker: openAttachmentPicker,
   } = useComposerAttachments(toast)
   const { ref: draftRef, resize: resizeDraft } = useAutosizeTextarea(draft)
   const assistantMenuRef = useRef<HTMLDivElement | null>(null)
@@ -1048,14 +1057,18 @@ function AssistantsChatWorkspace(props: {
     () => filterAssistantModels('chat', models),
     [models]
   )
+  const chatModeModels = useMemo(
+    () => [{ label: 'image2 生图', value: 'image2' }, ...compatibleChatModels],
+    [compatibleChatModels]
+  )
 
   const activeModelLabel = useMemo(
     () =>
-      compatibleChatModels.find((item) => item.value === selectedModel)?.label ||
+      chatModeModels.find((item) => item.value === selectedModel)?.label ||
       selectedModel ||
       activeAssistant?.model ||
       '默认模型',
-    [activeAssistant?.model, compatibleChatModels, selectedModel]
+    [activeAssistant?.model, chatModeModels, selectedModel]
   )
 
   useEffect(() => {
@@ -1196,7 +1209,9 @@ function AssistantsChatWorkspace(props: {
       return
     }
     const resolvedModelLabel =
-      models.find((item) => item.value === resolvedModel)?.label || resolvedModel
+      chatModeModels.find((item) => item.value === resolvedModel)?.label ||
+      models.find((item) => item.value === resolvedModel)?.label ||
+      resolvedModel
     const createdAt = new Date().getTime()
     const requestId = `chat-${createdAt}`
     const userMessage: ChatMessage = {
@@ -1224,40 +1239,76 @@ function AssistantsChatWorkspace(props: {
     setSending(true)
 
     try {
-      const systemMessage = toAssistantSystemMessage(activeAssistant)
-      const response = await sendChatCompletion({
-        model: resolvedModel,
-        group: selectedGroup || undefined,
-        temperature: activeAssistant?.temperature ?? 0.7,
-        messages: [
-          ...(systemMessage ? [systemMessage] : []),
-          ...history.map((item) => ({
-            role: item.role,
-            content: item.content,
-          })),
-        ],
-      }, {
-        requestId,
-      })
-
-      syncActiveSession((session) => ({
-        ...session,
-        assistantId: activeAssistant?.id || session.assistantId,
-        model: resolvedModel,
-        group: selectedGroup,
-        updatedAt: Date.now(),
-        messages: [
-          ...session.messages,
+      if (isImageGenerationModel(resolvedModel)) {
+        const response = await sendImageGeneration(
           {
-            id: `assistant-${Date.now()}`,
-            role: 'assistant',
-            content: toMessageText(response.choices?.[0]?.message?.content),
-            createdAt: Date.now(),
-            usage: response.usage,
-            modelLabel: resolvedModelLabel,
+            model: resolvedModel,
+            prompt: normalizedDraft,
+            n: 1,
+            response_format: 'b64_json',
           },
-        ],
-      }))
+          { requestId }
+        )
+        const imageItem = response.data?.[0]
+        const imageUrl = resolveImageMessageSource(imageItem)
+        if (!imageUrl) {
+          throw new Error('图片生成失败')
+        }
+
+        syncActiveSession((session) => ({
+          ...session,
+          assistantId: activeAssistant?.id || session.assistantId,
+          model: resolvedModel,
+          group: selectedGroup,
+          updatedAt: Date.now(),
+          messages: [
+            ...session.messages,
+            {
+              id: `assistant-${Date.now()}`,
+              role: 'assistant',
+              content: imageItem?.revised_prompt || normalizedDraft,
+              createdAt: Date.now(),
+              imageUrl,
+              modelLabel: resolvedModelLabel,
+            },
+          ],
+        }))
+      } else {
+        const systemMessage = toAssistantSystemMessage(activeAssistant)
+        const response = await sendChatCompletion({
+          model: resolvedModel,
+          group: selectedGroup || undefined,
+          temperature: activeAssistant?.temperature ?? 0.7,
+          messages: [
+            ...(systemMessage ? [systemMessage] : []),
+            ...history.map((item) => ({
+              role: item.role,
+              content: item.content,
+            })),
+          ],
+        }, {
+          requestId,
+        })
+
+        syncActiveSession((session) => ({
+          ...session,
+          assistantId: activeAssistant?.id || session.assistantId,
+          model: resolvedModel,
+          group: selectedGroup,
+          updatedAt: Date.now(),
+          messages: [
+            ...session.messages,
+            {
+              id: `assistant-${Date.now()}`,
+              role: 'assistant',
+              content: toMessageText(response.choices?.[0]?.message?.content),
+              createdAt: Date.now(),
+              usage: response.usage,
+              modelLabel: resolvedModelLabel,
+            },
+          ],
+        }))
+      }
     } catch (error) {
       if (!stoppingRef.current && !isAbortError(error)) {
         toast(error instanceof Error ? error.message : '聊天请求失败')
@@ -1345,15 +1396,25 @@ function AssistantsChatWorkspace(props: {
 
           <div className='message-stream'>
             {messages.map((item) => (
-              <div key={item.id} className={`message-bubble ${item.role}`}>
+              <div
+                key={item.id}
+                className={`message-bubble ${item.role} ${item.imageUrl ? 'image-bubble' : ''}`}
+              >
                 <span className='message-role'>
                   {item.role === 'assistant'
                     ? item.modelLabel || activeModelLabel
                     : item.role === 'system'
                       ? '系统'
-                      : '你'}
+                    : '你'}
                 </span>
-                <p>{item.content}</p>
+                {item.imageUrl ? (
+                  <div className='chat-image-result'>
+                    <img src={item.imageUrl} alt={item.content || '生成图片'} />
+                    <p>{item.content}</p>
+                  </div>
+                ) : (
+                  <p>{item.content}</p>
+                )}
                 <BubbleMeta
                   side={item.role === 'user' ? 'right' : 'left'}
                   createdAt={item.createdAt}
@@ -1407,20 +1468,6 @@ function AssistantsChatWorkspace(props: {
             },
             onPaste: handleAttachmentPaste,
             leftActions: [
-              {
-                key: 'attachment',
-                node: (
-                  <button
-                    className='ghost-button tiny icon-pill-trigger'
-                    type='button'
-                    onClick={openAttachmentPicker}
-                    title='添加附件'
-                  >
-                    <Paperclip size={16} />
-                    <strong>{attachments.length > 0 ? `附件 ${attachments.length}` : '添加附件'}</strong>
-                  </button>
-                ),
-              },
               {
                 key: 'assistant',
                 node: (
@@ -1512,7 +1559,7 @@ function AssistantsChatWorkspace(props: {
                           <span>切换当前对话所用模型</span>
                         </div>
                         <div className='picker-menu-list'>
-                          {compatibleChatModels.map((item) => (
+                          {chatModeModels.map((item) => (
                             <button
                               key={item.value}
                               type='button'
@@ -1789,36 +1836,17 @@ function WalletWorkspace(props: {
   toast: (message: string) => void
 }) {
   const { user, toast } = props
-  const [topupInfo, setTopupInfo] = useState<TopupInfo | null>(null)
   const [billing, setBilling] = useState<BillingHistoryData | null>(null)
   const [redeemCode, setRedeemCode] = useState('')
-  const [walletAmount, setWalletAmount] = useState(100)
-  const [walletPaymentMethod, setWalletPaymentMethod] = useState('alipay')
 
   const recentBills = billing?.items || []
-  const availableMethods = topupInfo?.pay_methods || []
-  const amountOptions = topupInfo?.amount_options?.length
-    ? topupInfo.amount_options
-    : [50, 100, 200, 500]
-  const minTopupValue =
-    Number(availableMethods.find((item) => item.type === walletPaymentMethod)?.min_topup) ||
-    Number(topupInfo?.min_topup) ||
-    0
   const completedBillCount = recentBills.filter((item) => item.status === 'success').length
-  const walletIncome = sumBillingMoney(recentBills, (item) => item.payment_method !== 'wallet')
-  const walletExpense = sumBillingMoney(recentBills, (item) => item.payment_method === 'wallet')
-  const walletBalance = walletIncome - walletExpense
+  const tokenBalance = Number(user.quota || 0)
+  const tokenExpense = Number(user.used_quota || 0)
 
   const refreshWallet = useCallback(async () => {
-    const [nextTopupInfo, nextBilling] = await Promise.all([
-      getTopupInfo(),
-      getBillingHistory(),
-    ])
-    setTopupInfo(nextTopupInfo ?? null)
+    const nextBilling = await getBillingHistory()
     setBilling(nextBilling ?? null)
-    if (nextTopupInfo?.pay_methods?.[0]?.type) {
-      setWalletPaymentMethod(nextTopupInfo.pay_methods[0].type)
-    }
   }, [])
 
   useEffect(() => {
@@ -1826,20 +1854,13 @@ function WalletWorkspace(props: {
 
     void (async () => {
       try {
-        const [nextTopupInfo, nextBilling] = await Promise.all([
-          getTopupInfo(),
-          getBillingHistory(),
-        ])
+        const nextBilling = await getBillingHistory()
 
         if (disposed) {
           return
         }
 
-        setTopupInfo(nextTopupInfo ?? null)
         setBilling(nextBilling ?? null)
-        if (nextTopupInfo?.pay_methods?.[0]?.type) {
-          setWalletPaymentMethod(nextTopupInfo.pay_methods[0].type)
-        }
       } catch (error) {
         if (!disposed) {
           toast(error instanceof Error ? error.message : '加载钱包信息失败')
@@ -1867,28 +1888,6 @@ function WalletWorkspace(props: {
     }
   }
 
-  async function handleWalletPay() {
-    if (!walletAmount || walletAmount <= 0) {
-      toast('请输入有效的充值金额。')
-      return
-    }
-
-    if (minTopupValue > 0 && walletAmount < minTopupValue) {
-      toast(`当前支付方式最低充值金额为 ${minTopupValue}。`)
-      return
-    }
-
-    try {
-      const result = await requestWalletPayment(walletAmount, walletPaymentMethod)
-      if (result?.url) {
-        await getDesktopBridge().openExternal(result.url)
-      }
-      toast('支付入口已发起。')
-    } catch (error) {
-      toast(error instanceof Error ? error.message : '支付发起失败')
-    }
-  }
-
   return (
     <section className='workspace-page full-bleed-page'>
       <article className='panel scroll-panel page-surface'>
@@ -1910,28 +1909,16 @@ function WalletWorkspace(props: {
             </div>
             <div className='wallet-overview-grid'>
               <div className='wallet-overview-metric'>
-                <strong>{formatPrice(walletBalance, 'CNY')}</strong>
-                <span>可用余额</span>
-              </div>
-              <div className='wallet-overview-metric'>
-                <strong>{formatPrice(walletExpense, 'CNY')}</strong>
-                <span>历史消耗</span>
-              </div>
-              <div className='wallet-overview-metric'>
-                <strong>{formatQuota(user.quota)}</strong>
+                <strong>{formatQuota(tokenBalance)}</strong>
                 <span>当前余额</span>
               </div>
               <div className='wallet-overview-metric'>
-                <strong>{formatQuota(user.used_quota)}</strong>
+                <strong>{formatQuota(tokenExpense)}</strong>
                 <span>累计消耗</span>
               </div>
               <div className='wallet-overview-metric'>
                 <strong>{billing?.total || 0}</strong>
                 <span>账单条目</span>
-              </div>
-              <div className='wallet-overview-metric'>
-                <strong>{user.request_count || 0}</strong>
-                <span>请求次数</span>
               </div>
             </div>
           </div>
@@ -1940,7 +1927,7 @@ function WalletWorkspace(props: {
             <div className='panel-block'>
               <div className='list-block-header'>
                 <strong>充值与兑换</strong>
-                <span>支持钱包充值和兑换码快速入账</span>
+                <span>仅保留兑换充值码入口</span>
               </div>
               <div className='subform'>
                 <input
@@ -1951,62 +1938,6 @@ function WalletWorkspace(props: {
                 <button className='secondary-button full' type='button' onClick={() => void handleRedeem()}>
                   兑换充值码
                 </button>
-
-                <div className='inline-fields'>
-                  <input
-                    type='number'
-                    value={walletAmount}
-                    onChange={(event) => setWalletAmount(Number(event.target.value) || 0)}
-                    placeholder='充值金额'
-                  />
-                  <select
-                    value={walletPaymentMethod}
-                    onChange={(event) => setWalletPaymentMethod(event.target.value)}
-                  >
-                    {(topupInfo?.pay_methods || []).map((method) => (
-                      <option key={method.type} value={method.type}>
-                        {method.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {amountOptions.length > 0 && (
-                  <div className='quick-amounts'>
-                    {amountOptions.slice(0, 8).map((amount) => (
-                      <button
-                        key={amount}
-                        className={`ghost-button tiny quick-amount-chip ${walletAmount === amount ? 'active' : ''}`}
-                        type='button'
-                        onClick={() => setWalletAmount(amount)}
-                      >
-                        {amount}
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                <div className='wallet-meta-grid'>
-                  <div className='status-card'>
-                    <strong>可用支付方式</strong>
-                    <span>{availableMethods.map((item) => item.name).join(' / ') || '待服务端配置'}</span>
-                  </div>
-                  <div className='status-card'>
-                    <strong>最低充值金额</strong>
-                    <span>{minTopupValue > 0 ? String(minTopupValue) : '未限制'}</span>
-                  </div>
-                </div>
-
-                <button
-                  className='primary-button wallet-pay-button'
-                  type='button'
-                  disabled
-                  title='支付功能暂未开放'
-                  onClick={() => void handleWalletPay()}
-                >
-                  拉起支付
-                </button>
-                <p className='helper-copy'>支付能力暂未开放，当前仅保留兑换码入口。</p>
               </div>
             </div>
 
@@ -2899,7 +2830,6 @@ function CliWorkspace(props: {
     setRunning(true)
 
     try {
-      let hydratedSessionId = ''
       const response = await runCliPrompt({
         client,
         requestId,
@@ -2940,45 +2870,11 @@ function CliWorkspace(props: {
         if (response.sessionId) {
           const details = await getCliSession(client, response.sessionId)
           if (details) {
-            hydratedSessionId = details.id
             hydrateCliSession(details, { activateProject: false })
           }
         }
       } catch {
         /* ignore session hydration errors and keep fallback transcript */
-      }
-
-      if (response.output) {
-        const responseAborted = response.metadata?.aborted === true
-        if (
-          shouldAppendCliAssistantFallback({
-            responseSessionId: response.sessionId,
-            responseAborted,
-            hydratedSessionId,
-          })
-        ) {
-          setSessionMessagesMap((current) => {
-            const existing = current[nextSessionId] || []
-            const lastAssistant = [...existing].reverse().find((item) => item.role === 'assistant')
-            if (lastAssistant?.content === response.output) {
-              return current
-            }
-
-            return {
-              ...current,
-              [nextSessionId]: [
-                ...existing,
-                {
-                  id: `assistant-${Date.now()}`,
-                  role: 'assistant' as const,
-                  content: response.output,
-                  createdAt: Date.now(),
-                  modelLabel: selectedModelLabel,
-                },
-              ],
-            }
-          })
-        }
       }
 
       if (!response.success && response.metadata?.aborted !== true) {

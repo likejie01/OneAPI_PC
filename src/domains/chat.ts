@@ -4,6 +4,7 @@ import type {
   ChatCompletionResponse,
   ChatGroupOption,
   ChatModelOption,
+  ImageGenerationResponse,
 } from '../shared/contracts'
 
 export async function getUserModels() {
@@ -57,6 +58,28 @@ export async function sendChatCompletion(payload: {
 
 export function stopChatCompletion(requestId: string) {
   return desktopBridge().stopRequest(requestId)
+}
+
+export async function sendImageGeneration(payload: {
+  model: string
+  prompt: string
+  n?: number
+  size?: string
+  quality?: string
+  response_format?: 'url' | 'b64_json'
+  style?: string
+}, options: {
+  requestId?: string
+} = {}) {
+  return desktopRequest<ImageGenerationResponse>({
+    method: 'POST',
+    path: '/v1/images/generations',
+    requestId: options.requestId,
+    body: {
+      ...payload,
+      stream: false,
+    },
+  })
 }
 
 export async function requireEnvelopeData<T>(promise: Promise<ApiEnvelope<T>>) {
