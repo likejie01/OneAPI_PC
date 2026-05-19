@@ -949,6 +949,16 @@ select {
   margin-bottom: 0;
 }
 
+.pending-message {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0 8px;
+  color: #35556f;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
 .cli-log-list {
   margin: 8px 0 10px;
   padding-left: 18px;
@@ -957,6 +967,12 @@ select {
 
 .cli-log-list li + li {
   margin-top: 6px;
+}
+
+.cli-log-list-spacer {
+  list-style: none;
+  height: 10px;
+  margin-top: 0;
 }
 
 .message-role {
@@ -1768,6 +1784,33 @@ select {
   margin-top: 8px;
 }
 
+.inline-file-preview {
+  width: 100%;
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(23, 49, 74, 0.1);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.inline-file-preview-path {
+  display: block;
+  margin-bottom: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.inline-file-preview-content {
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  line-height: 1.55;
+  max-height: calc(1.55em * 5 + 12px);
+}
+
 .quick-amounts {
   display: flex;
   flex-wrap: wrap;
@@ -2058,19 +2101,19 @@ select {
 }
 
 .login-shell {
-  padding: 30px;
+  padding: 40px;
 }
 
 .login-hero {
-  width: min(1180px, 100%);
+  width: min(1280px, 100%);
   display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(360px, 0.85fr);
-  gap: 22px;
+  grid-template-columns: minmax(0, 1.2fr) minmax(420px, 0.8fr);
+  gap: 28px;
 }
 
 .login-copy {
   border-radius: 34px;
-  padding: 38px;
+  padding: 48px;
   background:
     radial-gradient(circle at top right, rgba(255, 255, 255, 0.16), transparent 24%),
     linear-gradient(135deg, rgba(18, 70, 91, 0.96), rgba(30, 123, 123, 0.92));
@@ -2079,8 +2122,8 @@ select {
 }
 
 .login-copy h1 {
-  margin: 10px 0 12px;
-  font-size: 34px;
+  margin: 14px 0 16px;
+  font-size: 38px;
   line-height: 1.16;
 }
 
@@ -2092,7 +2135,20 @@ select {
 
 .login-card {
   border-radius: 30px;
-  padding: 28px;
+  padding: 34px;
+}
+
+.login-card-head {
+  margin-bottom: 24px;
+  gap: 18px;
+}
+
+.login-card-title h2 {
+  margin-top: 12px;
+}
+
+.login-card .subform {
+  gap: 14px;
 }
 
 .modal-mask {

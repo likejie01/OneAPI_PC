@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { ChangeEvent, ClipboardEvent, ReactNode } from 'react'
 import {
   Bot,
+  ChevronLeft,
   CheckCircle2,
   Copy,
   CreditCard,
@@ -251,6 +252,19 @@ function buildCliAttachmentReferenceText(attachments: ComposerAttachment[]) {
   return `\n\n附件引用：\n${lines.join('\n')}\n请结合这些附件路径处理本次任务。`
 }
 
+const CLI_EXECUTION_POLICY = [
+  '执行策略：',
+  '1. 先选择最小修改量、最高成功率、最少副作用的方案。',
+  '2. 如果当前方案失败，先分析失败原因，再列出可替代方案。',
+  '3. 将替代方案按“最小修改量、最高有效性、最低风险”的顺序排序后继续尝试。',
+  '4. 只有在问题解决，或已穷尽所有合理方案仍无法解决时，才结束任务。',
+  '5. 回复中要明确写出失败原因、尝试顺序、最终采用的方案或无法解决的结论。',
+].join('\n')
+
+function buildCliExecutionPrompt(prompt: string) {
+  return `${CLI_EXECUTION_POLICY}\n\n用户任务：\n${prompt.trim()}`
+}
+
 function toMessageAttachments(attachments: ComposerAttachment[]) {
   return attachments.map((item) => ({
     id: item.id,
@@ -291,6 +305,16 @@ async function openDesktopTarget(targetPath: string) {
     /* fall through and try opening parent path */
   }
   await window.desktopBridge?.openPath(targetPath)
+}
+
+function isInlinePreviewableFile(targetPath: string) {
+  const normalized = targetPath.trim().toLowerCase()
+  const fileName = normalized.split(/[\\/]/).filter(Boolean).at(-1) || normalized
+  if (fileName === 'dockerfile' || fileName === '.env' || fileName.endsWith('.env')) {
+    return true
+  }
+
+  return /\.(txt|md|markdown|json|ya?ml|toml|ini|conf|cfg|log|csv|ts|tsx|js|jsx|mjs|cjs|css|scss|less|html|htm|xml|vue|py|java|kt|kts|go|rs|rb|php|swift|sh|bash|zsh|ps1|sql|c|cc|cpp|h|hpp)$/i.test(normalized)
 }
 
 function useComposerAttachments(toast: (message: string) => void) {
@@ -464,6 +488,20 @@ function toMessageText(content: unknown) {
   return '模型未返回内容。'
 }
 
+function maskSecretText(value?: string) {
+  if (!value) {
+    return ''
+  }
+
+  return value.replace(/sk-[^\s"'`]+/g, (token) => {
+    if (token.length <= 14) {
+      return `${token.slice(0, 4)}****`
+    }
+
+    return `${token.slice(0, 6)}****${token.slice(-4)}`
+  })
+}
+
 const AUTO_TEXTAREA_MAX_HEIGHT = 260
 const AUTO_TEXTAREA_MIN_ROWS = 3
 const AUTO_TEXTAREA_MAX_ROWS = 8
@@ -634,6 +672,19 @@ const CLAUDE_REASONING_OPTIONS = [
 const DEFAULT_CHAT_MODEL = 'gpt-5.4'
 const DEFAULT_CODEX_MODEL = 'gpt-5.5'
 const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-4-6'
+const CHAT_SESSIONS_STORAGE_KEY = 'oneapi-desktop-chat-sessions'
+const CHAT_ACTIVE_SESSION_STORAGE_KEY = 'oneapi-desktop-chat-active-session'
+const CHAT_REASONING_STORAGE_KEY = 'oneapi-desktop-chat-reasoning'
+const CHAT_CONTEXT_WINDOW_STORAGE_KEY = 'oneapi-desktop-chat-context-window'
+const PENDING_MESSAGE_LABEL = 'Coding...'
+const CHAT_CONTEXT_WINDOW_OPTIONS = [
+  { label: '10 条', value: 10 },
+  { label: '20 条', value: 20 },
+  { label: '30 条', value: 30 },
+  { label: '全部', value: 'all' as const },
+] as const
+
+type ChatContextWindow = (typeof CHAT_CONTEXT_WINDOW_OPTIONS)[number]['value']
 
 function isImageGenerationModel(value: string) {
   return value.trim().toLowerCase() === 'gpt-image-2'
@@ -1085,6 +1136,19 @@ function MarkdownMessageContent(props: {
   )
 }
 
+function PendingMessageContent(props: {
+  label?: string
+}) {
+  const { label = PENDING_MESSAGE_LABEL.replace(/\.+$/, '') } = props
+
+  return (
+    <div className='pending-message'>
+      <LoaderCircle className='spin' size={14} />
+      <span>{label}</span>
+    </div>
+  )
+}
+
 function MessageAttachmentGallery(props: {
   attachments?: Array<{
     id: string
@@ -1123,12 +1187,20 @@ function MessageAttachmentGallery(props: {
 }
 
 function MessageFileChangeLinks(props: {
+  ownerId: string
   files?: Array<{
     path: string
     kind: 'created' | 'modified' | 'deleted' | 'renamed' | 'unknown'
   }>
+  previewFile?: {
+    ownerId: string
+    path: string
+    name: string
+    content: string
+  } | null
+  onOpenFile: (ownerId: string, path: string) => void
 }) {
-  const { files = [] } = props
+  const { ownerId, files = [], previewFile, onOpenFile } = props
   const uniqueFiles = Array.from(new Map(files.map((item) => [item.path, item])).values())
   if (!uniqueFiles.length) {
     return null
@@ -1141,13 +1213,19 @@ function MessageFileChangeLinks(props: {
           key={item.path}
           type='button'
           className='ghost-button tiny cli-log-file'
-          onClick={() => void openDesktopTarget(item.path)}
+          onClick={() => onOpenFile(ownerId, item.path)}
           title={item.path}
         >
           <FileText size={14} />
           <span>{item.path.split(/[\\/]/).filter(Boolean).at(-1) || item.path}</span>
         </button>
       ))}
+      {previewFile && previewFile.ownerId === ownerId && (
+        <div className='inline-file-preview'>
+          <code className='inline-file-preview-path'>{previewFile.path}</code>
+          <pre className='inline-file-preview-content'>{previewFile.content}</pre>
+        </div>
+      )}
     </div>
   )
 }
@@ -1156,10 +1234,16 @@ function CliLogBubble(props: {
   item: Extract<CliTimelineEntry, { kind: 'log' }>
   expanded: boolean
   onToggle: () => void
-  onOpenFile: (path: string) => void
+  onOpenFile: (ownerId: string, path: string) => void
   onCopy: () => void
+  previewFile?: {
+    ownerId: string
+    path: string
+    name: string
+    content: string
+  } | null
 }) {
-  const { item, expanded, onToggle, onOpenFile, onCopy } = props
+  const { item, expanded, onToggle, onOpenFile, onCopy, previewFile } = props
   const uniqueFiles = Array.from(new Map(item.files.map((file) => [file.path, file])).values())
 
   return (
@@ -1170,9 +1254,15 @@ function CliLogBubble(props: {
         <small>{expanded ? '点击收起' : '点击展开'}</small>
       </button>
       <ul className='cli-log-list'>
-        {(expanded ? item.content : item.content.slice(0, 1)).map((line, index) => (
-          <li key={`${item.id}-${index}`}>{line}</li>
-        ))}
+        {(expanded ? item.content : item.content.slice(0, 1)).flatMap((line, index) => {
+          const nodes = [
+            <li key={`${item.id}-${index}`}>{line}</li>,
+          ]
+          if (/\bDONE\b/i.test(line)) {
+            nodes.push(<li key={`${item.id}-${index}-spacer`} className='cli-log-list-spacer' aria-hidden='true' />)
+          }
+          return nodes
+        })}
       </ul>
       {item.files.length > 0 && (
         <div className='cli-log-files'>
@@ -1181,13 +1271,19 @@ function CliLogBubble(props: {
               key={fileItem.path}
               className='ghost-button tiny cli-log-file'
               type='button'
-              onClick={() => onOpenFile(fileItem.path)}
+              onClick={() => onOpenFile(item.id, fileItem.path)}
               title={fileItem.path}
             >
               <FileText size={14} />
               <span>{fileItem.path.split(/[\\/]/).filter(Boolean).at(-1) || fileItem.path}</span>
             </button>
           ))}
+          {previewFile && previewFile.ownerId === item.id && (
+            <div className='inline-file-preview'>
+              <code className='inline-file-preview-path'>{previewFile.path}</code>
+              <pre className='inline-file-preview-content'>{previewFile.content}</pre>
+            </div>
+          )}
         </div>
       )}
       <BubbleMeta
@@ -1232,6 +1328,18 @@ function createDefaultChatSession(
     updatedAt: Date.now(),
     messages: [],
   }
+}
+
+function loadStoredChatSessions() {
+  const sessions = readJsonStorage<ChatSessionRecord[]>(CHAT_SESSIONS_STORAGE_KEY, [])
+  return sessions
+    .map((session) => ({
+      ...session,
+      messages: (session.messages || [])
+        .filter((message) => !message.pending)
+        .sort((left, right) => left.createdAt - right.createdAt),
+    }))
+    .sort((left, right) => right.updatedAt - left.updatedAt)
 }
 
 function mergeCliMessages(left: CliMessage[], right: CliMessage[]) {
@@ -1329,8 +1437,10 @@ function AssistantsChatWorkspace(props: {
   const { toast } = props
   const [models, setModels] = useState<ChatModelOption[]>([])
   const [favoriteModels, setFavoriteModels] = useState<string[]>(() => loadFavoriteModels('oneapi-desktop-chat-favorites'))
-  const [chatSessions, setChatSessions] = useState<ChatSessionRecord[]>([])
-  const [activeSessionId, setActiveSessionId] = useState('')
+  const [chatSessions, setChatSessions] = useState<ChatSessionRecord[]>(() => loadStoredChatSessions())
+  const [activeSessionId, setActiveSessionId] = useState(() =>
+    readJsonStorage<string>(CHAT_ACTIVE_SESSION_STORAGE_KEY, '')
+  )
   const [draft, setDraft] = useState('')
   const [selectedModel, setSelectedModel] = useState('')
   const [selectedGroup, setSelectedGroup] = useState('')
@@ -1338,9 +1448,17 @@ function AssistantsChatWorkspace(props: {
   const [historyOpen, setHistoryOpen] = useState(false)
   const [assistantMenuOpen, setAssistantMenuOpen] = useState(false)
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
+  const [reasoningMenuOpen, setReasoningMenuOpen] = useState(false)
+  const [contextMenuOpen, setContextMenuOpen] = useState(false)
   const [assistantName, setAssistantName] = useState('')
   const [assistantDescription, setAssistantDescription] = useState('')
   const [assistantPrompt, setAssistantPrompt] = useState('')
+  const [reasoningEffort, setReasoningEffort] = useState(() =>
+    readJsonStorage<string>(CHAT_REASONING_STORAGE_KEY, 'medium')
+  )
+  const [contextWindow, setContextWindow] = useState<ChatContextWindow>(() =>
+    readJsonStorage<ChatContextWindow>(CHAT_CONTEXT_WINDOW_STORAGE_KEY, 20)
+  )
   const [initialAssistantsState] = useState(loadInitialAssistantsState)
   const [assistants, setAssistants] = useState(initialAssistantsState.assistants)
   const [activeAssistantId, setActiveAssistantId] = useState(initialAssistantsState.activeAssistantId)
@@ -1355,7 +1473,10 @@ function AssistantsChatWorkspace(props: {
   const { ref: draftRef, resize: resizeDraft } = useAutosizeTextarea(draft)
   const assistantMenuRef = useRef<HTMLDivElement | null>(null)
   const modelMenuRef = useRef<HTMLDivElement | null>(null)
+  const reasoningMenuRef = useRef<HTMLDivElement | null>(null)
+  const contextMenuRef = useRef<HTMLDivElement | null>(null)
   const historyPanelRef = useRef<HTMLDivElement | null>(null)
+  const hydratedSessionIdRef = useRef('')
   const pendingRequestIdRef = useRef('')
   const stoppingRef = useRef(false)
 
@@ -1377,6 +1498,10 @@ function AssistantsChatWorkspace(props: {
     [favoriteModels, models]
   )
   const chatModeModels = compatibleChatModels
+  const selectedReasoningLabel =
+    CLI_REASONING_OPTIONS.find((item) => item.value === reasoningEffort)?.label || reasoningEffort
+  const selectedContextWindowLabel =
+    CHAT_CONTEXT_WINDOW_OPTIONS.find((item) => item.value === contextWindow)?.label || `${contextWindow}`
 
   const activeModelLabel = useMemo(
     () =>
@@ -1447,6 +1572,14 @@ function AssistantsChatWorkspace(props: {
         setModelMenuOpen(false)
       }
 
+      if (reasoningMenuOpen && reasoningMenuRef.current && !reasoningMenuRef.current.contains(target)) {
+        setReasoningMenuOpen(false)
+      }
+
+      if (contextMenuOpen && contextMenuRef.current && !contextMenuRef.current.contains(target)) {
+        setContextMenuOpen(false)
+      }
+
       if (historyOpen && historyPanelRef.current && !historyPanelRef.current.contains(target)) {
         setHistoryOpen(false)
       }
@@ -1454,7 +1587,7 @@ function AssistantsChatWorkspace(props: {
 
     window.addEventListener('pointerdown', handlePointerDown)
     return () => window.removeEventListener('pointerdown', handlePointerDown)
-  }, [assistantMenuOpen, historyOpen, modelMenuOpen])
+  }, [assistantMenuOpen, contextMenuOpen, historyOpen, modelMenuOpen, reasoningMenuOpen])
 
   useEffect(() => {
     function handleOpenHistory() {
@@ -1463,6 +1596,34 @@ function AssistantsChatWorkspace(props: {
     window.addEventListener('oneapi:open-assistant-history', handleOpenHistory as EventListener)
     return () => window.removeEventListener('oneapi:open-assistant-history', handleOpenHistory as EventListener)
   }, [])
+
+  useEffect(() => {
+    writeJsonStorage(CHAT_SESSIONS_STORAGE_KEY, chatSessions)
+  }, [chatSessions])
+
+  useEffect(() => {
+    writeJsonStorage(CHAT_ACTIVE_SESSION_STORAGE_KEY, resolvedActiveSessionId)
+  }, [resolvedActiveSessionId])
+
+  useEffect(() => {
+    writeJsonStorage(CHAT_REASONING_STORAGE_KEY, reasoningEffort)
+  }, [reasoningEffort])
+
+  useEffect(() => {
+    writeJsonStorage(CHAT_CONTEXT_WINDOW_STORAGE_KEY, contextWindow)
+  }, [contextWindow])
+
+  useEffect(() => {
+    if (!activeSession?.id || hydratedSessionIdRef.current === activeSession.id) {
+      return
+    }
+
+    hydratedSessionIdRef.current = activeSession.id
+    setSelectedModel(
+      activeSession.model || resolvePreferredModel(models, DEFAULT_CHAT_MODEL, activeAssistant?.model)
+    )
+    setSelectedGroup(activeSession.group || '')
+  }, [activeAssistant?.model, activeSession?.group, activeSession?.id, activeSession?.model, models])
 
   function handleCreateAssistant() {
     if (!assistantName.trim() || !assistantPrompt.trim()) {
@@ -1560,13 +1721,15 @@ function AssistantsChatWorkspace(props: {
     const pendingAssistantMessage: ChatBubbleMessage = {
       id: pendingAssistantId,
       role: 'assistant',
-      content: 'thinking...',
+      content: PENDING_MESSAGE_LABEL,
       createdAt: createdAt + 1,
       modelLabel: resolvedModelLabel,
       pending: true,
     }
 
-    const history = [...messages, userMessage, pendingAssistantMessage]
+    const historyBase = contextWindow === 'all' ? messages : messages.slice(-contextWindow)
+    const requestHistory = [...historyBase, userMessage]
+    const renderedHistory = [...messages, userMessage, pendingAssistantMessage]
     syncActiveSession((session) => ({
       ...session,
       assistantId: activeAssistant?.id || session.assistantId,
@@ -1574,7 +1737,7 @@ function AssistantsChatWorkspace(props: {
       group: selectedGroup,
       updatedAt: Date.now(),
       title: clipText(userMessage.content.replace(/\s+/g, ' '), 24) || session.title,
-      messages: history,
+      messages: renderedHistory,
     }))
     pendingRequestIdRef.current = requestId
     stoppingRef.current = false
@@ -1626,9 +1789,10 @@ function AssistantsChatWorkspace(props: {
           model: resolvedModel,
           group: selectedGroup || undefined,
           temperature: activeAssistant?.temperature ?? 0.7,
+          reasoningEffort,
           messages: [
             ...(systemMessage ? [systemMessage] : []),
-            ...history.map((item) => ({
+            ...requestHistory.map((item) => ({
               role: item.role,
               content:
                 item.id === userMessage.id
@@ -1754,7 +1918,7 @@ function AssistantsChatWorkspace(props: {
                     <img src={item.imageUrl} alt={item.content || '生成图片'} />
                   </div>
                 ) : (
-                  <MarkdownMessageContent content={item.content} />
+                  item.pending ? <PendingMessageContent /> : <MarkdownMessageContent content={item.content} />
                 )}
                 <BubbleMeta
                   side={item.role === 'user' ? 'right' : 'left'}
@@ -1819,6 +1983,8 @@ function AssistantsChatWorkspace(props: {
                       aria-expanded={assistantMenuOpen}
                       onClick={() => {
                         setModelMenuOpen(false)
+                        setReasoningMenuOpen(false)
+                        setContextMenuOpen(false)
                         setAssistantMenuOpen((current) => !current)
                       }}
                       title='助手提示词'
@@ -1886,6 +2052,8 @@ function AssistantsChatWorkspace(props: {
                       aria-expanded={modelMenuOpen}
                       onClick={() => {
                         setAssistantMenuOpen(false)
+                        setReasoningMenuOpen(false)
+                        setContextMenuOpen(false)
                         setModelMenuOpen((current) => !current)
                       }}
                       title='AI 选择'
@@ -1925,6 +2093,98 @@ function AssistantsChatWorkspace(props: {
                                 </button>
                               </div>
                               <span>{item.value}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ),
+              },
+              {
+                key: 'reasoning',
+                node: (
+                  <div className='toolbar-picker' ref={reasoningMenuRef}>
+                    <button
+                      className='ghost-button tiny picker-trigger icon-picker-trigger'
+                      type='button'
+                      aria-expanded={reasoningMenuOpen}
+                      onClick={() => {
+                        setAssistantMenuOpen(false)
+                        setModelMenuOpen(false)
+                        setContextMenuOpen(false)
+                        setReasoningMenuOpen((current) => !current)
+                      }}
+                      title='思考长度'
+                    >
+                      <Sparkles size={16} />
+                      <strong>{selectedReasoningLabel}</strong>
+                    </button>
+                    {reasoningMenuOpen && (
+                      <div className='picker-menu model-menu'>
+                        <div className='picker-menu-head'>
+                          <strong>思考长度</strong>
+                          <span>控制聊天请求的推理强度</span>
+                        </div>
+                        <div className='picker-menu-list'>
+                          {CLI_REASONING_OPTIONS.map((item) => (
+                            <button
+                              key={item.value}
+                              type='button'
+                              className={`picker-option ${item.value === reasoningEffort ? 'active' : ''}`}
+                              onClick={() => {
+                                setReasoningEffort(item.value)
+                                setReasoningMenuOpen(false)
+                              }}
+                            >
+                              <strong>{item.label}</strong>
+                              <span>{item.value}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ),
+              },
+              {
+                key: 'context',
+                node: (
+                  <div className='toolbar-picker' ref={contextMenuRef}>
+                    <button
+                      className='ghost-button tiny picker-trigger icon-picker-trigger'
+                      type='button'
+                      aria-expanded={contextMenuOpen}
+                      onClick={() => {
+                        setAssistantMenuOpen(false)
+                        setModelMenuOpen(false)
+                        setReasoningMenuOpen(false)
+                        setContextMenuOpen((current) => !current)
+                      }}
+                      title='上下文长度'
+                    >
+                      <MessageSquareText size={16} />
+                      <strong>{selectedContextWindowLabel}</strong>
+                    </button>
+                    {contextMenuOpen && (
+                      <div className='picker-menu model-menu'>
+                        <div className='picker-menu-head'>
+                          <strong>上下文长度</strong>
+                          <span>选择最近多少条记录参与聊天</span>
+                        </div>
+                        <div className='picker-menu-list'>
+                          {CHAT_CONTEXT_WINDOW_OPTIONS.map((item) => (
+                            <button
+                              key={String(item.value)}
+                              type='button'
+                              className={`picker-option ${item.value === contextWindow ? 'active' : ''}`}
+                              onClick={() => {
+                                setContextWindow(item.value)
+                                setContextMenuOpen(false)
+                              }}
+                            >
+                              <strong>{item.label}</strong>
+                              <span>{item.value === 'all' ? '全部历史消息' : `最近 ${item.value} 条消息`}</span>
                             </button>
                           ))}
                         </div>
@@ -2729,7 +2989,12 @@ function CliWorkspace(props: {
   const [sessionLogsMap, setSessionLogsMap] = useState<Record<string, CliLogEntry[]>>({})
   const [sessionPartialMap, setSessionPartialMap] = useState<Record<string, string>>({})
   const [expandedLogGroupId, setExpandedLogGroupId] = useState('')
-  const [previewFile, setPreviewFile] = useState<{ path: string; name: string; content: string } | null>(null)
+  const [previewFile, setPreviewFile] = useState<{
+    ownerId: string
+    path: string
+    name: string
+    content: string
+  } | null>(null)
   const [hiddenSessionIds, setHiddenSessionIds] = useState<string[]>(() =>
     readJsonStorage<string[]>(`oneapi-desktop-${client}-hidden-sessions`, [])
   )
@@ -2746,6 +3011,7 @@ function CliWorkspace(props: {
     attachments,
     inputRef: attachmentInputRef,
     clearAttachments,
+    removeAttachment,
     handleInputChange: handleAttachmentInputChange,
     handlePaste: handleAttachmentPaste,
   } = useComposerAttachments(toast)
@@ -2823,6 +3089,16 @@ function CliWorkspace(props: {
       }),
     [activeLogs, activeMessages, activePartial, selectedModelLabel]
   )
+  const latestAssistantMessageId = useMemo(
+    () => [...activeMessages].reverse().find((item) => item.role === 'assistant')?.id || '',
+    [activeMessages]
+  )
+
+  useEffect(() => {
+    if (!running && latestAssistantMessageId) {
+      setExpandedLogGroupId('')
+    }
+  }, [latestAssistantMessageId, running])
   function toggleFavoriteModel(value: string) {
     setFavoriteModels((current) => {
       const next = current.includes(value)
@@ -3193,10 +3469,23 @@ function CliWorkspace(props: {
     }
   }
 
-  async function handlePreviewFile(targetPath: string) {
+  async function handlePreviewFile(ownerId: string, targetPath: string) {
+    if (!isInlinePreviewableFile(targetPath)) {
+      await openDesktopTarget(targetPath)
+      return
+    }
+
+    if (previewFile?.ownerId === ownerId && previewFile.path === targetPath) {
+      setPreviewFile(null)
+      return
+    }
+
     try {
       const details = await readDesktopFilePreview(targetPath)
-      setPreviewFile(details)
+      setPreviewFile({
+        ownerId,
+        ...details,
+      })
     } catch (error) {
       toast(error instanceof Error ? error.message : '文件预览失败')
     }
@@ -3222,7 +3511,9 @@ function CliWorkspace(props: {
     const requestProjectPath = projectPath
     const requestProjectKey = normalizeProjectKey(requestProjectPath)
     const currentSessionKey = activeSessionId || `draft-${client}-${Date.now()}`
-    const promptWithAttachments = `${nextPrompt}${buildCliAttachmentReferenceText(attachments)}`.trim()
+    const promptWithAttachments = buildCliExecutionPrompt(
+      `${nextPrompt}${buildCliAttachmentReferenceText(attachments)}`
+    )
     const userMessage = {
       id: `user-${Date.now()}`,
       role: 'user' as const,
@@ -3250,7 +3541,7 @@ function CliWorkspace(props: {
     }))
     setSessionPartialMap((current) => ({
       ...current,
-      [currentSessionKey]: 'thinking...',
+      [currentSessionKey]: PENDING_MESSAGE_LABEL,
     }))
     setPrompt('')
     clearAttachments()
@@ -3363,8 +3654,9 @@ function CliWorkspace(props: {
                     item={item}
                     expanded={expanded}
                     onToggle={() => setExpandedLogGroupId((current) => (current === item.id ? '' : item.id))}
-                    onOpenFile={(path) => void handlePreviewFile(path)}
+                    onOpenFile={(ownerId, path) => void handlePreviewFile(ownerId, path)}
                     onCopy={() => void copyText(item.content.join('\n'))}
+                    previewFile={previewFile}
                   />
                 )
               }
@@ -3380,9 +3672,18 @@ function CliWorkspace(props: {
                       : ''}
                   </span>
                   <MessageAttachmentGallery attachments={'attachments' in item ? item.attachments : undefined} />
-                  <MarkdownMessageContent content={item.content} />
+                  {item.kind === 'partial' && item.content === PENDING_MESSAGE_LABEL ? (
+                    <PendingMessageContent />
+                  ) : (
+                    <MarkdownMessageContent content={item.content} />
+                  )}
                   {'fileChanges' in item && item.role === 'assistant' ? (
-                    <MessageFileChangeLinks files={item.fileChanges} />
+                    <MessageFileChangeLinks
+                      ownerId={item.id}
+                      files={item.fileChanges}
+                      previewFile={previewFile}
+                      onOpenFile={(ownerId, path) => void handlePreviewFile(ownerId, path)}
+                    />
                   ) : null}
                   <BubbleMeta
                     side={item.role === 'user' ? 'right' : 'left'}
@@ -3418,6 +3719,13 @@ function CliWorkspace(props: {
               resizePrompt()
             },
             onPaste: handleAttachmentPaste,
+            fileAssets: attachments.map((item) => ({
+              id: item.id,
+              name: item.name,
+              previewUrl: item.previewUrl,
+              kind: item.kind,
+              onRemove: () => removeAttachment(item.id),
+            })),
             leftActions: [
               {
                 key: 'project',
@@ -3658,23 +3966,6 @@ function CliWorkspace(props: {
           </div>
         </aside>
       </div>
-      {previewFile && (
-        <div className='modal-mask' onClick={() => setPreviewFile(null)}>
-          <div className='modal-card file-preview-modal' onClick={(event) => event.stopPropagation()}>
-            <div className='panel-header compact'>
-              <div>
-                <span className='eyebrow dark'>文件预览</span>
-                <h2>{previewFile.name}</h2>
-              </div>
-              <button className='ghost-button icon-only tiny' type='button' onClick={() => setPreviewFile(null)}>
-                <X size={16} />
-              </button>
-            </div>
-            <code className='file-preview-path'>{previewFile.path}</code>
-            <pre className='file-preview-content'>{previewFile.content}</pre>
-          </div>
-        </div>
-      )}
     </section>
   )
 }
@@ -3689,7 +3980,6 @@ function CliSetupCard(props: {
   const [status, setStatus] = useState<CliStatus>(buildEmptyCliStatus(client))
   const [deploying, setDeploying] = useState(false)
   const [deployLog, setDeployLog] = useState<DeployProgressPayload[]>([])
-  const [freshCliKey, setFreshCliKey] = useState('')
   const [preset, setPreset] = useState<{ apiKey: string; model: string; baseUrl: string } | null>(null)
 
   useEffect(() => {
@@ -3767,7 +4057,6 @@ function CliSetupCard(props: {
       setDeploying(true)
       setDeployLog([])
       const generated = await createDesktopCliKey(`${client.toUpperCase()} 桌面安装 Key`, user.group || '')
-      setFreshCliKey(generated.key)
       await deployCli({
         client,
         apiKey: preset?.apiKey || generated.key,
@@ -3807,13 +4096,6 @@ function CliSetupCard(props: {
         </button>
       </div>
 
-      {freshCliKey && (
-        <div className='key-reveal'>
-          <strong>本次部署生成的专用 Key</strong>
-          <code>{freshCliKey}</code>
-        </div>
-      )}
-
       <div className='timeline-list'>
         {deployLog.length === 0 ? (
           <EmptyState title='部署进度会显示在这里' description='包含检测、安装、配置、测试四段结果。' />
@@ -3823,7 +4105,7 @@ function CliSetupCard(props: {
               <div className='timeline-dot' />
               <div>
                 <strong>{item.message}</strong>
-                <span>{item.detail || item.step}</span>
+                <span>{maskSecretText(item.detail || item.step)}</span>
               </div>
             </div>
           ))
@@ -4094,8 +4376,8 @@ function LoginScreen(props: {
         </div>
 
         <div className='login-card'>
-          <div className='panel-header compact'>
-            <div>
+          <div className='panel-header compact login-card-head'>
+            <div className='login-card-title'>
               <span className='eyebrow dark'>
                 {require2fa ? '二次验证' : mode === 'register' ? '创建账号' : '账号登录'}
               </span>
@@ -4198,9 +4480,6 @@ function LoginScreen(props: {
                 {submitting ? <LoaderCircle className='spin' size={16} /> : <UserPlus size={16} />}
                 <span>{submitting ? '注册中' : '注册账号'}</span>
               </button>
-              <button className='ghost-button' type='button' onClick={() => setMode('login')}>
-                返回登录
-              </button>
             </div>
           ) : (
             <div className='subform'>
@@ -4214,12 +4493,6 @@ function LoginScreen(props: {
                 {submitting ? <LoaderCircle className='spin' size={16} /> : <LockKeyhole size={16} />}
                 <span>{submitting ? '登录中' : '登录'}</span>
               </button>
-              {registerEnabled && (
-                <button className='ghost-button' type='button' onClick={() => setMode('register')}>
-                  <UserPlus size={16} />
-                  <span>注册新账号</span>
-                </button>
-              )}
             </div>
           )}
         </div>
@@ -4374,7 +4647,7 @@ export function App() {
                 aria-label='收起边栏'
                 title='收起边栏'
               >
-                &lt;
+                <ChevronLeft size={18} />
               </button>
             )}
           </div>

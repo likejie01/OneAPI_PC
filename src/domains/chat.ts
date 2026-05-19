@@ -41,6 +41,7 @@ export async function getUserGroups() {
 export async function sendChatCompletion(payload: {
   model: string
   group?: string
+  reasoningEffort?: string
   messages: Array<{
     role: 'system' | 'user' | 'assistant'
     content: string | ChatContentPart[]
@@ -49,12 +50,14 @@ export async function sendChatCompletion(payload: {
 }, options: {
   requestId?: string
 } = {}) {
+  const { reasoningEffort, ...rest } = payload
   return desktopRequest<ChatCompletionResponse>({
     method: 'POST',
     path: '/pg/chat/completions',
     requestId: options.requestId,
     body: {
-      ...payload,
+      ...rest,
+      reasoning_effort: reasoningEffort,
       stream: false,
     },
   })

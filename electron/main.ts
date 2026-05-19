@@ -707,6 +707,16 @@ function createCodexProviderSection(apiKey: string, baseUrl: string): TomlSectio
   }
 }
 
+function createCodexWindowsSection(): TomlSectionBlock {
+  return {
+    header: 'windows',
+    lines: [
+      '[windows]',
+      'sandbox = "unelevated"',
+    ],
+  }
+}
+
 function renameCodexProviderSection(block: TomlSectionBlock, nextHeader: string, nextName: string): TomlSectionBlock {
   return {
     header: nextHeader,
@@ -801,11 +811,28 @@ function mergeCodexConfig(raw: string, apiKey: string, model: string, baseUrl: s
     }
   }
 
+  if (!sections.some((section) => section.header === 'windows')) {
+    sections.push(createCodexWindowsSection())
+  }
+
   return serializeTomlDocument(nextPreamble, sections)
 }
 
 function resolveDesktopCliKeyRecord(apiKey: string) {
   return apiKey.startsWith('sk-') ? apiKey : `sk-${apiKey}`
+}
+
+function maskSensitiveText(value?: string) {
+  if (!value) {
+    return ''
+  }
+
+  return value.replace(/sk-[^\s"'`]+/g, (token) => {
+    if (token.length <= 14) {
+      return `${token.slice(0, 4)}****`
+    }
+    return `${token.slice(0, 6)}****${token.slice(-4)}`
+  })
 }
 
 async function readCurrentClaudeConfig() {
@@ -2101,7 +2128,10 @@ async function backupIfNeeded(filePath: string) {
 }
 
 function sendDeployProgress(webContents: WebContents, payload: DeployProgressPayload) {
-  webContents.send('desktop:deploy-progress', payload)
+  webContents.send('desktop:deploy-progress', {
+    ...payload,
+    detail: maskSensitiveText(payload.detail),
+  })
 }
 
 async function installCliPackage(client: CliClient) {
