@@ -3096,7 +3096,10 @@ function CliWorkspace(props: {
 
   useEffect(() => {
     if (!running && latestAssistantMessageId) {
-      setExpandedLogGroupId('')
+      const timer = window.setTimeout(() => {
+        setExpandedLogGroupId('')
+      }, 0)
+      return () => window.clearTimeout(timer)
     }
   }, [latestAssistantMessageId, running])
   function toggleFavoriteModel(value: string) {
@@ -4570,7 +4573,10 @@ export function App() {
 
   useEffect(() => {
     if (!enabledAssistantModes.includes(assistantMode)) {
-      setAssistantMode(enabledAssistantModes[0] || 'chat')
+      const timer = window.setTimeout(() => {
+        setAssistantMode(enabledAssistantModes[0] || 'chat')
+      }, 0)
+      return () => window.clearTimeout(timer)
     }
   }, [assistantMode, enabledAssistantModes])
 

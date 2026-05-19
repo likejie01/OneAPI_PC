@@ -573,8 +573,19 @@ async function resolveOpenTarget(targetPath: string) {
 
 async function saveDesktopAttachment(input: DesktopAttachmentSaveRequest) {
   const extension = path.extname(input.name || '')
+  const sanitizedName = path
+    .basename(input.name || 'clipboard-file', extension)
+    .split('')
+    .map((char) => {
+      const code = char.charCodeAt(0)
+      if ('<>:"/\\|?*'.includes(char) || code <= 31) {
+        return '_'
+      }
+      return char
+    })
+    .join('')
   const safeBaseName =
-    path.basename(input.name || 'clipboard-file', extension).replace(/[<>:"/\\|?*\x00-\x1f]/g, '_') ||
+    sanitizedName ||
     'clipboard-file'
   const targetDirectory = path.join(app.getPath('userData'), 'attachments')
   await fs.mkdir(targetDirectory, { recursive: true })
@@ -887,6 +898,29 @@ async function walkFiles(root: string, matcher: (filePath: string) => boolean) {
 
 function normalizeWhitespace(value: string) {
   return value.replace(/\s+/g, ' ').trim()
+}
+
+function sanitizeCliUserPrompt(raw: string) {
+  const normalized = raw.replace(/\r\n/g, '\n').trim()
+  if (!normalized) {
+    return ''
+  }
+
+  const policyMarker = '执行策略：'
+  const taskMarker = '用户任务：'
+  const attachmentMarker = '\n\n附件引用：'
+  let next = normalized
+
+  if (next.startsWith(policyMarker) && next.includes(taskMarker)) {
+    next = next.slice(next.indexOf(taskMarker) + taskMarker.length).trim()
+  }
+
+  const attachmentIndex = next.indexOf(attachmentMarker)
+  if (attachmentIndex >= 0) {
+    next = next.slice(0, attachmentIndex).trim()
+  }
+
+  return next.trim()
 }
 
 function toEpochSeconds(value: unknown) {
@@ -1277,7 +1311,8 @@ function parseCodexSession(lines: string[]): { messages: CliSessionMessage[]; fi
           continue
         }
 
-        const content = contentPartsToText(parsed.payload.content)
+        const rawContent = contentPartsToText(parsed.payload.content)
+        const content = role === 'user' ? sanitizeCliUserPrompt(rawContent) : rawContent
         if (shouldIgnoreCodexMessage(content)) {
           continue
         }
@@ -1325,7 +1360,7 @@ async function listCodexHistory(limit = 12): Promise<CliHistoryEntry[]> {
           title: sessionMap.get(parsed.session_id)
             ? path.basename(sessionMap.get(parsed.session_id) ?? '')
             : `Codex 会话 ${parsed.session_id.slice(0, 8)}`,
-          preview: normalizeWhitespace(parsed.text),
+          preview: normalizeWhitespace(sanitizeCliUserPrompt(parsed.text)),
           updatedAt: parsed.ts,
           projectName: sessionMap.get(parsed.session_id)
             ? path.basename(sessionMap.get(parsed.session_id) ?? '')
@@ -1424,7 +1459,7 @@ async function listClaudeHistory(limit = 12): Promise<CliHistoryEntry[]> {
         grouped.set(parsed.sessionId, {
           id: parsed.sessionId,
           title: parsed.project ? path.basename(parsed.project) : `Claude 会话 ${parsed.sessionId.slice(0, 8)}`,
-          preview: normalizeWhitespace(parsed.display),
+          preview: normalizeWhitespace(sanitizeCliUserPrompt(parsed.display)),
           updatedAt: Math.floor(parsed.timestamp / 1000),
           projectName: parsed.project ? path.basename(parsed.project) : '未命名项目',
           projectPath: parsed.project,
@@ -1542,7 +1577,8 @@ function parseClaudeSession(lines: string[]): { messages: CliSessionMessage[]; f
         })
       }
 
-      const content = contentPartsToText(parsed.message?.content)
+      const rawContent = contentPartsToText(parsed.message?.content)
+      const content = role === 'user' ? sanitizeCliUserPrompt(rawContent) : rawContent
       if (shouldIgnoreClaudeMessage(content)) {
         continue
       }
