@@ -1548,6 +1548,7 @@ function AssistantsChatWorkspace(props: {
       resolvedModel
     const createdAt = new Date().getTime()
     const requestId = `chat-${createdAt}`
+    const pendingAssistantId = `assistant-pending-${requestId}`
     const userMessageContent = normalizedDraft
     const userMessage: ChatMessage = {
       id: `user-${createdAt}`,
@@ -1556,8 +1557,16 @@ function AssistantsChatWorkspace(props: {
       createdAt,
       attachments: toMessageAttachments(attachments),
     }
+    const pendingAssistantMessage: ChatBubbleMessage = {
+      id: pendingAssistantId,
+      role: 'assistant',
+      content: 'thinking...',
+      createdAt: createdAt + 1,
+      modelLabel: resolvedModelLabel,
+      pending: true,
+    }
 
-    const history = [...messages, userMessage]
+    const history = [...messages, userMessage, pendingAssistantMessage]
     syncActiveSession((session) => ({
       ...session,
       assistantId: activeAssistant?.id || session.assistantId,
@@ -1598,17 +1607,18 @@ function AssistantsChatWorkspace(props: {
           model: resolvedModel,
           group: selectedGroup,
           updatedAt: Date.now(),
-          messages: [
-            ...session.messages,
-            {
-              id: `assistant-${Date.now()}`,
-              role: 'assistant',
-              content: imageItem?.revised_prompt || normalizedDraft,
-              createdAt: Date.now(),
-              imageUrl,
-              modelLabel: resolvedModelLabel,
-            },
-          ],
+          messages: session.messages.map((item) =>
+            item.id === pendingAssistantId
+              ? {
+                  id: `assistant-${Date.now()}`,
+                  role: 'assistant',
+                  content: imageItem?.revised_prompt || normalizedDraft,
+                  createdAt: Date.now(),
+                  imageUrl,
+                  modelLabel: resolvedModelLabel,
+                }
+              : item
+          ),
         }))
       } else {
         const systemMessage = toAssistantSystemMessage(activeAssistant)
@@ -1636,20 +1646,25 @@ function AssistantsChatWorkspace(props: {
           model: resolvedModel,
           group: selectedGroup,
           updatedAt: Date.now(),
-          messages: [
-            ...session.messages,
-            {
-              id: `assistant-${Date.now()}`,
-              role: 'assistant',
-              content: toMessageText(response.choices?.[0]?.message?.content),
-              createdAt: Date.now(),
-              usage: response.usage,
-              modelLabel: resolvedModelLabel,
-            },
-          ],
+          messages: session.messages.map((item) =>
+            item.id === pendingAssistantId
+              ? {
+                  id: `assistant-${Date.now()}`,
+                  role: 'assistant',
+                  content: toMessageText(response.choices?.[0]?.message?.content),
+                  createdAt: Date.now(),
+                  usage: response.usage,
+                  modelLabel: resolvedModelLabel,
+                }
+              : item
+          ),
         }))
       }
     } catch (error) {
+      syncActiveSession((session) => ({
+        ...session,
+        messages: session.messages.filter((item) => item.id !== pendingAssistantId),
+      }))
       if (!stoppingRef.current && !isAbortError(error)) {
         toast(error instanceof Error ? error.message : '聊天请求失败')
       }
@@ -1724,7 +1739,7 @@ function AssistantsChatWorkspace(props: {
             {messages.map((item) => (
               <div
                 key={item.id}
-                className={`message-bubble ${item.role} ${item.imageUrl ? 'image-bubble' : ''}`}
+                className={`message-bubble ${item.role} ${item.imageUrl ? 'image-bubble' : ''} ${item.pending ? 'streaming-bubble' : ''}`}
               >
                 <span className='message-role'>
                   {item.role === 'assistant'
@@ -1951,9 +1966,6 @@ function AssistantsChatWorkspace(props: {
               <h2>最近会话</h2>
             </div>
             <div className='inline-actions'>
-              <button className='secondary-button tiny' type='button' onClick={() => setHistoryOpen(false)}>
-                收起
-              </button>
               <button className='secondary-button tiny' type='button' onClick={createChatSession}>
                 <Plus size={16} />
                 <span>新对话</span>
@@ -2544,116 +2556,120 @@ function MeWorkspace(props: {
 
           <div className='panel-scroll'>
             <div className='content-grid me-layout page-blocks'>
-              <div className='panel-block me-user-card'>
-                <div className='subrecords'>
-                  <div className='record-row highlighted'>
-                    <div>
-                      <strong>{user.display_name || user.username}</strong>
-                      <span>{user.username} · {user.email || '未绑定邮箱'}</span>
+              <div className='me-column me-column-left'>
+                <div className='panel-block me-user-card'>
+                  <div className='subrecords'>
+                    <div className='record-row highlighted'>
+                      <div>
+                        <strong>{user.display_name || user.username}</strong>
+                        <span>{user.username} · {user.email || '未绑定邮箱'}</span>
+                      </div>
+                      <small>组 {user.group}</small>
                     </div>
-                    <small>组 {user.group}</small>
-                  </div>
-                  <div className='record-row'>
-                    <div>
-                      <strong>系统访问令牌</strong>
-                      <span>
-                        {accessTokenVisible
-                          ? accessToken || '当前没有可显示的系统访问令牌。'
-                          : '默认隐藏。验证密码后会生成新的系统访问令牌，并使旧令牌失效。'}
-                      </span>
-                    </div>
-                    <div className='record-actions'>
-                      <small>高敏感</small>
-                      <button className='ghost-button' type='button' onClick={() => void handleRevealAccessToken()}>
-                        {accessTokenVisible ? '已显示' : '查看'}
-                      </button>
-                      {accessTokenVisible && (
-                        <button
-                          className='ghost-button'
-                          type='button'
-                          onClick={() => {
-                            void navigator.clipboard.writeText(accessToken)
-                            toast('系统访问令牌已复制。')
-                          }}
-                        >
-                          复制
+                    <div className='record-row'>
+                      <div>
+                        <strong>系统访问令牌</strong>
+                        <span>
+                          {accessTokenVisible
+                            ? accessToken || '当前没有可显示的系统访问令牌。'
+                            : '默认隐藏。验证密码后会生成新的系统访问令牌，并使旧令牌失效。'}
+                        </span>
+                      </div>
+                      <div className='record-actions'>
+                        <small>高敏感</small>
+                        <button className='ghost-button' type='button' onClick={() => void handleRevealAccessToken()}>
+                          {accessTokenVisible ? '已显示' : '查看'}
                         </button>
-                      )}
-                    </div>
-                  </div>
-                  <div className='record-row'>
-                    <div>
-                      <strong>账户额度</strong>
-                      <span>剩余额度 {formatQuota(user.quota)} · 已用 {formatQuota(user.used_quota)}</span>
-                    </div>
-                    <small>请求数 {user.request_count}</small>
-                  </div>
-                </div>
-              </div>
-
-              <div className='panel-block me-key-list-card'>
-                <div className='list-block-header'>
-                  <strong>已有 Key</strong>
-                </div>
-                <div className='subrecords'>
-                  {apiKeys.length === 0 ? (
-                    <EmptyState title='当前还没有 API Key' description='验证密码后即可直接新建桌面端专用 Key。' />
-                  ) : (
-                    apiKeys.map((item) => (
-                      <div key={item.id} className='record-row'>
-                        <div>
-                          <strong>{item.name}</strong>
-                          <span>{item.group || 'default'} · 创建于 {formatDateTime(item.created_time)}</span>
-                        </div>
-                        <div className='record-actions'>
-                          <small>{item.status === 1 ? '启用中' : '已停用'}</small>
+                        {accessTokenVisible && (
                           <button
                             className='ghost-button'
                             type='button'
-                            onClick={() => openPasswordGate('view-key', item.id)}
+                            onClick={() => {
+                              void navigator.clipboard.writeText(accessToken)
+                              toast('系统访问令牌已复制。')
+                            }}
                           >
-                            查看
+                            复制
                           </button>
-                        </div>
+                        )}
                       </div>
-                    ))
-                  )}
-                </div>
-              </div>
-
-              <div className='panel-block me-key-create-card'>
-                <div className='subform me-key-create'>
-                  <div className='list-block-header'>
-                    <strong>新建 Key</strong>
-                  </div>
-                  <div className='inline-fields'>
-                    <input
-                      value={newKeyName}
-                      onChange={(event) => setNewKeyName(event.target.value)}
-                      placeholder='新 Key 名称'
-                    />
-                    <button
-                      className='secondary-button'
-                      type='button'
-                      onClick={() => openPasswordGate('create-key')}
-                    >
-                      新建 Key
-                    </button>
-                  </div>
-                  <p className='helper-copy'>
-                    查看 Key 或新建 Key 需要校验一次密码，验证后 30 分钟内无需重复输入。
-                  </p>
-                  {revealedKey && (
-                    <div className='key-reveal'>
-                      <strong>最近查看 / 创建的 Key</strong>
-                      <code>{revealedKey}</code>
                     </div>
-                  )}
+                    <div className='record-row'>
+                      <div>
+                        <strong>账户额度</strong>
+                        <span>剩余额度 {formatQuota(user.quota)} · 已用 {formatQuota(user.used_quota)}</span>
+                      </div>
+                      <small>请求数 {user.request_count}</small>
+                    </div>
+                  </div>
+                </div>
+
+                <div className='panel-block me-key-list-card'>
+                  <div className='list-block-header'>
+                    <strong>已有 Key</strong>
+                  </div>
+                  <div className='subrecords'>
+                    {apiKeys.length === 0 ? (
+                      <EmptyState title='当前还没有 API Key' description='验证密码后即可直接新建桌面端专用 Key。' />
+                    ) : (
+                      apiKeys.map((item) => (
+                        <div key={item.id} className='record-row'>
+                          <div>
+                            <strong>{item.name}</strong>
+                            <span>{item.group || 'default'} · 创建于 {formatDateTime(item.created_time)}</span>
+                          </div>
+                          <div className='record-actions'>
+                            <small>{item.status === 1 ? '启用中' : '已停用'}</small>
+                            <button
+                              className='ghost-button'
+                              type='button'
+                              onClick={() => openPasswordGate('view-key', item.id)}
+                            >
+                              查看
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+                <div className='panel-block me-key-create-card'>
+                  <div className='subform me-key-create'>
+                    <div className='list-block-header'>
+                      <strong>新建 Key</strong>
+                    </div>
+                    <div className='inline-fields'>
+                      <input
+                        value={newKeyName}
+                        onChange={(event) => setNewKeyName(event.target.value)}
+                        placeholder='新 Key 名称'
+                      />
+                      <button
+                        className='secondary-button'
+                        type='button'
+                        onClick={() => openPasswordGate('create-key')}
+                      >
+                        新建 Key
+                      </button>
+                    </div>
+                    <p className='helper-copy'>
+                      查看 Key 或新建 Key 需要校验一次密码，验证后 30 分钟内无需重复输入。
+                    </p>
+                    {revealedKey && (
+                      <div className='key-reveal'>
+                        <strong>最近查看 / 创建的 Key</strong>
+                        <code>{revealedKey}</code>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
 
-              <CliSetupCard client='claude' user={user} toast={toast} className='me-claude-card' />
-              <CliSetupCard client='codex' user={user} toast={toast} className='me-codex-card' />
+              <div className='me-column me-column-right'>
+                <CliSetupCard client='claude' user={user} toast={toast} className='me-claude-card' />
+                <CliSetupCard client='codex' user={user} toast={toast} className='me-codex-card' />
+              </div>
             </div>
           </div>
         </article>
@@ -3234,7 +3250,7 @@ function CliWorkspace(props: {
     }))
     setSessionPartialMap((current) => ({
       ...current,
-      [currentSessionKey]: '',
+      [currentSessionKey]: 'thinking...',
     }))
     setPrompt('')
     clearAttachments()
@@ -3560,9 +3576,6 @@ function CliWorkspace(props: {
               <div className='inline-actions'>
                 <button className='ghost-button tiny' type='button' onClick={() => void refreshCliState()}>
                   刷新
-                </button>
-                <button className='secondary-button tiny' type='button' onClick={() => setHistoryOpen(false)}>
-                  收起
                 </button>
               </div>
           </div>

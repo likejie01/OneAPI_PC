@@ -888,14 +888,16 @@ select {
 }
 
 .message-bubble {
-  width: fit-content;
+  width: auto;
+  display: inline-flex;
+  flex-direction: column;
   max-width: calc(100% - 50px);
   padding: 10px 12px 9px;
   border-radius: 18px;
   border: 1px solid var(--line);
   box-shadow: 0 8px 20px rgba(36, 56, 76, 0.05);
   min-width: 0;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .message-bubble.user {
@@ -924,12 +926,14 @@ select {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-width: 0;
 }
 
 .chat-image-result img {
   display: block;
   max-width: 100%;
   border-radius: 16px;
+  height: auto;
 }
 
 .message-bubble p {
@@ -1366,19 +1370,21 @@ select {
   min-width: 0;
   width: 100%;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 0;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0);
   gap: 16px;
-  overflow: visible;
+  overflow: hidden;
+  align-items: stretch;
 }
 
 .chat-layout.history-open,
 .cli-layout.history-open {
-  grid-template-columns: minmax(0, 1fr) minmax(300px, 0.68fr);
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 360px);
 }
 
 .chat-history-panel,
 .cli-history-panel {
   min-height: 0;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1951,8 +1957,11 @@ select {
 }
 
 .subscription-progress-inline {
-  min-width: 120px;
-  flex: 1;
+  width: 40%;
+  min-width: 160px;
+  margin-left: auto;
+  flex: 0 0 40%;
+  align-self: center;
 }
 
 .history-project-groups {
@@ -1966,10 +1975,17 @@ select {
 }
 
 .me-layout {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 18px;
   align-items: start;
   align-content: start;
+}
+
+.me-column {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
 }
 
 .me-row-grid {
@@ -1978,31 +1994,29 @@ select {
 }
 
 .me-user-card {
-  grid-column: 1;
-  grid-row: 1;
+  margin-top: 0;
 }
 
 .me-codex-card {
-  grid-column: 2;
-  grid-row: 2;
   margin-bottom: 0;
 }
 
 .me-key-create-card {
-  grid-column: 1;
-  grid-row: 3;
   margin-top: 0;
 }
 
 .me-key-list-card {
-  grid-column: 1;
-  grid-row: 2;
   margin-top: 0;
 }
 
 .me-claude-card {
-  grid-column: 2;
-  grid-row: 1;
+  margin-top: 0;
+}
+
+.me-codex-card .panel-header,
+.me-claude-card .panel-header,
+.me-key-list-card .list-block-header,
+.me-key-create-card .list-block-header {
   margin-top: 0;
 }
 

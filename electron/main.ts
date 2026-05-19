@@ -365,6 +365,7 @@ function spawnCommandWithHandlers(
     onStdoutLine?: (line: string) => void
     onStderrLine?: (line: string) => void
     onSpawn?: (child: ChildProcess) => void
+    stdinData?: string
   } = {}
 ) {
   const timeoutMs = options.timeoutMs ?? 30000
@@ -399,7 +400,11 @@ function spawnCommandWithHandlers(
     }, timeoutMs)
 
     try {
-      child.stdin.end()
+      if (typeof options.stdinData === 'string') {
+        child.stdin.end(options.stdinData)
+      } else {
+        child.stdin.end()
+      }
     } catch {
       /* empty */
     }
@@ -501,6 +506,14 @@ async function locateExecutable(command: string) {
     .find(Boolean)
 
   return firstLine ?? ''
+}
+
+function resolveCliSpawnCommand(command: string, executablePath: string) {
+  const normalized = executablePath.trim()
+  if (!normalized) {
+    return command
+  }
+  return normalized
 }
 
 async function inspectCli(client: CliClient): Promise<CliStatus> {
@@ -1738,9 +1751,9 @@ async function runCodexPrompt(
   }
 
   if (input.sessionId) {
-    args.push('resume', '--json', '--skip-git-repo-check', input.sessionId, input.prompt)
+    args.push('resume', '--json', '--skip-git-repo-check', input.sessionId, '-')
   } else {
-    args.push('--json', '-C', input.projectPath, '--skip-git-repo-check', input.prompt)
+    args.push('--json', '-C', input.projectPath, '--skip-git-repo-check', '-')
   }
 
   if (input.model?.trim()) {
@@ -1756,12 +1769,15 @@ async function runCodexPrompt(
 
   const progress = createCliProgressEmitter(webContents, 'codex', input.requestId)
   let sessionId = input.sessionId
+  const executablePath = await locateExecutable('codex')
+  const spawnCommand = resolveCliSpawnCommand('codex', executablePath)
 
   progress.status('Codex 已开始处理当前任务。', sessionId)
 
-  const result = await spawnCommandWithHandlers('codex', args, {
+  const result = await spawnCommandWithHandlers(spawnCommand, args, {
     cwd: input.projectPath,
     timeoutMs: 15 * 60 * 1000,
+    stdinData: input.prompt,
     onSpawn: (child) => {
       activeCliProcesses.set(input.requestId, child)
     },
@@ -1864,18 +1880,19 @@ async function runClaudePrompt(
     args.push('--resume', input.sessionId.trim())
   }
 
-  args.push(input.prompt)
-
   const progress = createCliProgressEmitter(webContents, 'claude', input.requestId)
   let sessionId = input.sessionId
   let partialText = ''
   let finalResult: Record<string, unknown> | null = null
+  const executablePath = await locateExecutable('claude')
+  const spawnCommand = resolveCliSpawnCommand('claude', executablePath)
 
   progress.status('Claude 已开始处理当前任务。', sessionId)
 
-  const result = await spawnCommandWithHandlers('claude', args, {
+  const result = await spawnCommandWithHandlers(spawnCommand, args, {
     cwd: input.projectPath,
     timeoutMs: 15 * 60 * 1000,
+    stdinData: input.prompt,
     onSpawn: (child) => {
       activeCliProcesses.set(input.requestId, child)
     },

@@ -69,6 +69,7 @@ export interface ChatMessage {
   role: 'system' | 'user' | 'assistant'
   content: string
   createdAt: number
+  pending?: boolean
   imageUrl?: string
   imagePrompt?: string
   attachments?: Array<{
