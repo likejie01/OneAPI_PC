@@ -145,16 +145,20 @@ select {
   min-width: 0;
 }
 
+.sidebar.collapsed .brand {
+  min-width: 0;
+}
+
 .brand-mark {
   width: 42px;
   height: 42px;
   border-radius: 15px;
   display: grid;
   place-items: center;
-  background: linear-gradient(135deg, var(--accent), #2aa1a9);
-  color: #fff;
+  background: transparent;
+  color: inherit;
   font-weight: 700;
-  box-shadow: 0 12px 26px rgba(29, 107, 120, 0.26);
+  box-shadow: none;
   flex-shrink: 0;
 }
 
@@ -223,14 +227,34 @@ select {
   color: #35556f;
 }
 
+.collapse-text-button {
+  width: auto;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+  border: 0;
+  border-radius: 0;
+  font-size: 22px;
+  line-height: 1;
+  color: #35556f;
+}
+
+.collapse-text-button:hover {
+  background: transparent;
+  transform: none;
+}
+
 .sidebar.collapsed .side-nav-item {
   justify-content: center;
   align-items: center;
 }
 
 .sidebar.collapsed .side-nav-item.active {
-  background: transparent;
-  box-shadow: none;
+  background: linear-gradient(135deg, rgba(29, 107, 120, 0.16), rgba(201, 110, 75, 0.11));
+  box-shadow: 0 10px 24px rgba(29, 107, 120, 0.1);
+  color: #143d51;
 }
 
 .sidebar.collapsed .collapsed-logout-button {
@@ -383,6 +407,8 @@ select {
 
 .assistant-page {
   position: relative;
+  flex-direction: column;
+  width: 100%;
 }
 
 .panel,
@@ -987,6 +1013,10 @@ select {
   flex: 1;
   min-height: 0;
   min-width: 0;
+  width: min(1120px, 100%);
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
 }
 
 .composer {
@@ -1000,6 +1030,7 @@ select {
 .chat-composer,
 .cli-composer {
   margin-top: 10px;
+  width: 100%;
   padding: 14px;
   border: 1px solid var(--line);
   border-radius: 24px;
@@ -1253,19 +1284,24 @@ select {
 
 .assistant-topbar {
   position: relative;
-  min-height: 38px;
-  margin-bottom: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  min-height: 48px;
+  margin: 0 auto 8px;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: start;
+  width: 100%;
+  flex: 0 0 auto;
+  max-width: 1120px;
 }
 
 .assistant-topbar-tabs {
+  grid-column: 2;
   display: inline-flex;
   align-items: center;
+  justify-self: center;
   gap: 14px;
   flex-wrap: wrap;
+  max-width: 100%;
 }
 
 .assistant-mode-button {
@@ -1290,18 +1326,29 @@ select {
 }
 
 .selected-toggle {
-  background: rgba(29, 107, 120, 0.12);
+  background: transparent;
+  color: #173d55;
   box-shadow: none;
+  border-color: transparent;
 }
 
 .assistant-host {
   position: relative;
   padding-top: 0;
+  width: 100%;
+  flex: 1;
+}
+
+.assistant-host .workspace-shell {
+  inset: 0;
+  width: 100%;
+  height: 100%;
 }
 
 .chat-page,
 .cli-page {
   background: transparent;
+  width: 100%;
 }
 
 .chat-layout,
@@ -1309,6 +1356,7 @@ select {
   flex: 1;
   min-height: 0;
   min-width: 0;
+  width: 100%;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 0;
   gap: 16px;
@@ -1529,6 +1577,20 @@ select {
   display: flex;
   gap: 8px;
   margin-bottom: 12px;
+}
+
+.history-panel-tabs .ghost-button.tiny {
+  background: transparent;
+  color: #688196;
+  box-shadow: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  padding: 0 8px 6px;
+}
+
+.history-panel-tabs .ghost-button.tiny.selected-toggle {
+  color: #173d55;
+  border-bottom-color: var(--accent);
 }
 
 .file-preview-modal {
@@ -1757,8 +1819,9 @@ select {
 
 .me-layout {
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  gap: 14px;
   align-items: start;
+  align-content: start;
 }
 
 .me-row-grid {
@@ -1774,28 +1837,40 @@ select {
 .me-codex-card {
   grid-column: 2;
   grid-row: 1;
+  margin-bottom: 0;
 }
 
 .me-key-create-card {
   grid-column: 1;
   grid-row: 2;
+  margin-top: 0;
 }
 
 .me-key-list-card {
   grid-column: 1;
   grid-row: 3;
+  margin-top: 0;
 }
 
 .me-claude-card {
   grid-column: 2;
   grid-row: 2;
+  margin-top: 0;
+}
+
+.me-key-create-card .subform,
+.me-key-list-card .subrecords,
+.me-claude-card .status-grid,
+.me-codex-card .status-grid {
+  margin-top: 0;
 }
 
 .assistant-topbar-actions {
+  grid-column: 3;
+  justify-self: end;
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-left: auto;
 }
 
 .inline-settings-card {
@@ -1931,11 +2006,6 @@ select {
 
   .subscription-grid {
     grid-template-columns: 1fr;
-  }
-
-  .assistant-mode-float {
-    left: 16px;
-    transform: none;
   }
 
   .chat-layout.history-open,

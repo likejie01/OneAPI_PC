@@ -15,7 +15,6 @@ import {
   LogOut,
   Mail,
   MessageSquareText,
-  PanelLeftClose,
   PanelRightOpen,
   PencilLine,
   Plus,
@@ -4068,18 +4067,16 @@ export function App() {
         <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
           <div className='sidebar-head'>
             <div className='brand'>
-              <button
-                className='brand-mark brand-mark-button'
-                type='button'
-                onClick={() => {
-                  if (collapsed) {
-                    setCollapsed(false)
-                  }
-                }}
-                aria-label={collapsed ? '展开边栏' : 'OneAPI Center'}
-              >
-                {collapsed && iconPath ? <img src={iconPath} alt='' /> : null}
-              </button>
+              {collapsed && iconPath ? (
+                <button
+                  className='brand-mark brand-mark-button'
+                  type='button'
+                  onClick={() => setCollapsed(false)}
+                  aria-label='展开边栏'
+                >
+                  <img src={iconPath} alt='' />
+                </button>
+              ) : null}
               {!collapsed && (
                 <div className='brand-text'>
                   <div className='brand-name'>OneAPI Center</div>
@@ -4090,13 +4087,13 @@ export function App() {
 
             {!collapsed && (
               <button
-                className='collapse-button icon-only'
+                className='collapse-button collapse-text-button'
                 type='button'
                 onClick={() => setCollapsed(true)}
                 aria-label='收起边栏'
                 title='收起边栏'
               >
-                <PanelLeftClose size={16} />
+                &lt;
               </button>
             )}
           </div>
