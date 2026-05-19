@@ -71,6 +71,12 @@ export interface ChatMessage {
   createdAt: number
   imageUrl?: string
   imagePrompt?: string
+  attachments?: Array<{
+    id: string
+    name: string
+    filePath: string
+    kind: 'image' | 'file'
+  }>
   usage?: {
     prompt_tokens?: number
     completion_tokens?: number

@@ -33,6 +33,12 @@ export interface CliSessionMessage {
   content: string
   createdAt: number
   modelLabel?: string
+  attachments?: Array<{
+    id: string
+    name: string
+    filePath: string
+    kind: 'image' | 'file'
+  }>
   files?: CliFileChange[]
   fileChanges?: CliFileChange[]
 }

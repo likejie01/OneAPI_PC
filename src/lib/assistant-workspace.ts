@@ -28,6 +28,8 @@ export type CliTimelineEntry =
       content: string
       createdAt: number
       modelLabel?: string
+      attachments?: CliSessionMessage['attachments']
+      fileChanges?: CliFileChange[]
     }
   | {
       id: string
@@ -199,6 +201,8 @@ export function buildCliTimeline(input: {
       content: item.content,
       createdAt: toTimelineTimestamp(item.createdAt),
       modelLabel: item.modelLabel,
+      attachments: item.attachments,
+      fileChanges: item.fileChanges,
     }))
     .sort((left, right) => left.createdAt - right.createdAt)
 

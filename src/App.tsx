@@ -86,6 +86,8 @@ import { clearStoredDesktopUserId, saveStoredDesktopUserId } from './lib/desktop
 import { clipText, formatDateTime, formatPrice, formatQuota } from './lib/format'
 import { readJsonStorage, writeJsonStorage } from './lib/storage'
 import dayjs from 'dayjs'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import type {
   AssistantRecord,
   AuthStatus,
@@ -247,6 +249,48 @@ function buildCliAttachmentReferenceText(attachments: ComposerAttachment[]) {
 
   const lines = attachments.map((item, index) => `${index + 1}. ${item.name} -> ${item.filePath}`)
   return `\n\n附件引用：\n${lines.join('\n')}\n请结合这些附件路径处理本次任务。`
+}
+
+function toMessageAttachments(attachments: ComposerAttachment[]) {
+  return attachments.map((item) => ({
+    id: item.id,
+    name: item.name,
+    filePath: item.filePath,
+    kind: item.kind,
+  }))
+}
+
+function toRenderableFileUrl(filePath: string) {
+  if (!filePath.trim()) {
+    return ''
+  }
+  const normalized = filePath.replace(/\\/g, '/')
+  if (/^file:\/\//i.test(normalized)) {
+    return normalized
+  }
+  if (/^[A-Za-z]:\//.test(normalized)) {
+    return encodeURI(`file:///${normalized}`)
+  }
+  if (normalized.startsWith('/')) {
+    return encodeURI(`file://${normalized}`)
+  }
+  return encodeURI(normalized)
+}
+
+async function openDesktopTarget(targetPath: string) {
+  if (!targetPath.trim()) {
+    return
+  }
+  const targetUrl = toRenderableFileUrl(targetPath)
+  try {
+    if (targetUrl) {
+      await window.desktopBridge?.openExternal(targetUrl)
+      return
+    }
+  } catch {
+    /* fall through and try opening parent path */
+  }
+  await window.desktopBridge?.openPath(targetPath)
 }
 
 function useComposerAttachments(toast: (message: string) => void) {
@@ -989,6 +1033,125 @@ function UsageTrendChart(props: {
   )
 }
 
+function MarkdownMessageContent(props: {
+  content: string
+}) {
+  const { content } = props
+
+  return (
+    <div className='markdown-body'>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          a: ({ href, children }) => {
+            const target = href || ''
+            const isLocalPath =
+              /^file:\/\//i.test(target) ||
+              /^[A-Za-z]:[\\/]/.test(target) ||
+              /^\/(Users|home|var|private|Volumes)\//.test(target)
+
+            if (isLocalPath) {
+              const resolved = target.replace(/^file:\/\/\/?/i, '')
+              return (
+                <button
+                  type='button'
+                  className='markdown-inline-link'
+                  onClick={() => void openDesktopTarget(decodeURIComponent(resolved))}
+                >
+                  {children}
+                </button>
+              )
+            }
+
+            return (
+              <a
+                href={target}
+                target='_blank'
+                rel='noreferrer'
+                onClick={(event) => {
+                  event.preventDefault()
+                  void window.desktopBridge?.openExternal(target)
+                }}
+              >
+                {children}
+              </a>
+            )
+          },
+        }}
+      >
+        {content}
+      </ReactMarkdown>
+    </div>
+  )
+}
+
+function MessageAttachmentGallery(props: {
+  attachments?: Array<{
+    id: string
+    name: string
+    filePath: string
+    kind: 'image' | 'file'
+  }>
+}) {
+  const { attachments = [] } = props
+  if (!attachments.length) {
+    return null
+  }
+
+  return (
+    <div className='message-attachment-strip'>
+      {attachments.map((item) => (
+        <button
+          key={item.id}
+          type='button'
+          className='message-attachment-card'
+          onClick={() => void openDesktopTarget(item.filePath)}
+          title={`打开附件：${item.filePath}`}
+        >
+          <div className='message-attachment-thumb'>
+            {item.kind === 'image' ? (
+              <img src={toRenderableFileUrl(item.filePath)} alt={item.name} />
+            ) : (
+              <FileText size={16} />
+            )}
+          </div>
+          <span className='message-attachment-name'>{item.name}</span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function MessageFileChangeLinks(props: {
+  files?: Array<{
+    path: string
+    kind: 'created' | 'modified' | 'deleted' | 'renamed' | 'unknown'
+  }>
+}) {
+  const { files = [] } = props
+  const uniqueFiles = Array.from(new Map(files.map((item) => [item.path, item])).values())
+  if (!uniqueFiles.length) {
+    return null
+  }
+
+  return (
+    <div className='message-file-links'>
+      {uniqueFiles.map((item) => (
+        <button
+          key={item.path}
+          type='button'
+          className='ghost-button tiny cli-log-file'
+          onClick={() => void openDesktopTarget(item.path)}
+          title={item.path}
+        >
+          <FileText size={14} />
+          <span>{item.path.split(/[\\/]/).filter(Boolean).at(-1) || item.path}</span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
 function CliLogBubble(props: {
   item: Extract<CliTimelineEntry, { kind: 'log' }>
   expanded: boolean
@@ -1007,13 +1170,13 @@ function CliLogBubble(props: {
         <small>{expanded ? '点击收起' : '点击展开'}</small>
       </button>
       <ul className='cli-log-list'>
-        {item.content.map((line, index) => (
+        {(expanded ? item.content : item.content.slice(0, 1)).map((line, index) => (
           <li key={`${item.id}-${index}`}>{line}</li>
         ))}
       </ul>
       {item.files.length > 0 && (
         <div className='cli-log-files'>
-          {uniqueFiles.map((fileItem) => (
+          {uniqueFiles.slice(0, expanded ? undefined : 4).map((fileItem) => (
             <button
               key={fileItem.path}
               className='ghost-button tiny cli-log-file'
@@ -1391,6 +1554,7 @@ function AssistantsChatWorkspace(props: {
       role: 'user',
       content: userMessageContent,
       createdAt,
+      attachments: toMessageAttachments(attachments),
     }
 
     const history = [...messages, userMessage]
@@ -1569,12 +1733,13 @@ function AssistantsChatWorkspace(props: {
                       ? '系统'
                       : ''}
                 </span>
+                <MessageAttachmentGallery attachments={item.attachments} />
                 {item.imageUrl ? (
                   <div className='chat-image-result'>
                     <img src={item.imageUrl} alt={item.content || '生成图片'} />
                   </div>
                 ) : (
-                  <p>{item.content}</p>
+                  <MarkdownMessageContent content={item.content} />
                 )}
                 <BubbleMeta
                   side={item.role === 'user' ? 'right' : 'left'}
@@ -2426,7 +2591,35 @@ function MeWorkspace(props: {
                 </div>
               </div>
 
-              <CliSetupCard client='codex' user={user} toast={toast} className='me-codex-card' />
+              <div className='panel-block me-key-list-card'>
+                <div className='list-block-header'>
+                  <strong>已有 Key</strong>
+                </div>
+                <div className='subrecords'>
+                  {apiKeys.length === 0 ? (
+                    <EmptyState title='当前还没有 API Key' description='验证密码后即可直接新建桌面端专用 Key。' />
+                  ) : (
+                    apiKeys.map((item) => (
+                      <div key={item.id} className='record-row'>
+                        <div>
+                          <strong>{item.name}</strong>
+                          <span>{item.group || 'default'} · 创建于 {formatDateTime(item.created_time)}</span>
+                        </div>
+                        <div className='record-actions'>
+                          <small>{item.status === 1 ? '启用中' : '已停用'}</small>
+                          <button
+                            className='ghost-button'
+                            type='button'
+                            onClick={() => openPasswordGate('view-key', item.id)}
+                          >
+                            查看
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
 
               <div className='panel-block me-key-create-card'>
                 <div className='subform me-key-create'>
@@ -2459,37 +2652,8 @@ function MeWorkspace(props: {
                 </div>
               </div>
 
-              <div className='panel-block me-key-list-card'>
-                <div className='list-block-header'>
-                  <strong>已有 Key</strong>
-                </div>
-                <div className='subrecords'>
-                  {apiKeys.length === 0 ? (
-                    <EmptyState title='当前还没有 API Key' description='验证密码后即可直接新建桌面端专用 Key。' />
-                  ) : (
-                    apiKeys.map((item) => (
-                      <div key={item.id} className='record-row'>
-                        <div>
-                          <strong>{item.name}</strong>
-                          <span>{item.group || 'default'} · 创建于 {formatDateTime(item.created_time)}</span>
-                        </div>
-                        <div className='record-actions'>
-                          <small>{item.status === 1 ? '启用中' : '已停用'}</small>
-                          <button
-                            className='ghost-button'
-                            type='button'
-                            onClick={() => openPasswordGate('view-key', item.id)}
-                          >
-                            查看
-                          </button>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-
               <CliSetupCard client='claude' user={user} toast={toast} className='me-claude-card' />
+              <CliSetupCard client='codex' user={user} toast={toast} className='me-codex-card' />
             </div>
           </div>
         </article>
@@ -3046,8 +3210,9 @@ function CliWorkspace(props: {
     const userMessage = {
       id: `user-${Date.now()}`,
       role: 'user' as const,
-      content: promptWithAttachments,
+      content: nextPrompt,
       createdAt: Date.now(),
+      attachments: toMessageAttachments(attachments),
     }
 
     setProjectSessionMap((current) => ({
@@ -3198,7 +3363,11 @@ function CliWorkspace(props: {
                       ? item.modelLabel || selectedModelLabel
                       : ''}
                   </span>
-                  <p>{item.content}</p>
+                  <MessageAttachmentGallery attachments={'attachments' in item ? item.attachments : undefined} />
+                  <MarkdownMessageContent content={item.content} />
+                  {'fileChanges' in item && item.role === 'assistant' ? (
+                    <MessageFileChangeLinks files={item.fileChanges} />
+                  ) : null}
                   <BubbleMeta
                     side={item.role === 'user' ? 'right' : 'left'}
                     createdAt={item.createdAt}

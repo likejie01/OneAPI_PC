@@ -595,67 +595,200 @@ async function readFilePreview(targetPath: string) {
 async function readCurrentCodexConfig() {
   const targetPath = cliConfig.codex.configPath
   const raw = await fs.readFile(targetPath, 'utf8')
-  const apiKeyMatch = raw.match(/api_key\s*=\s*"([^"]+)"/)
-  const modelMatch = raw.match(/model\s*=\s*"([^"]+)"/)
-  const baseUrlMatch = raw.match(/base_url\s*=\s*"([^"]+)"/)
+  const parsed = parseTomlDocument(raw)
+  const model = readTomlTopLevelString(parsed.preamble, 'model') || DEFAULT_CODEX_MODEL
+  const provider = readTomlTopLevelString(parsed.preamble, 'model_provider') || 'oneapi_desktop'
+  const providerSection =
+    parsed.sections.find((section) => section.header === `model_providers.${provider}`) ||
+    parsed.sections.find((section) => section.header === 'model_providers.oneapi_desktop')
+  const apiKey = providerSection ? readTomlSectionString(providerSection.lines, 'api_key') : ''
+  const baseUrl = providerSection ? readTomlSectionString(providerSection.lines, 'base_url') : ''
 
   return {
     client: 'codex' as const,
-    apiKey: apiKeyMatch?.[1]?.trim() || '',
-    model: modelMatch?.[1]?.trim() || DEFAULT_CODEX_MODEL,
-    baseUrl: baseUrlMatch?.[1]?.trim().replace(/\/v1$/, '') || SERVER_BASE_URL,
+    apiKey: apiKey?.trim() || '',
+    model: model.trim() || DEFAULT_CODEX_MODEL,
+    baseUrl: baseUrl?.trim().replace(/\/v1$/, '') || SERVER_BASE_URL,
   }
 }
 
-function extractTomlSection(raw: string, section: string) {
-  const sectionStart = raw.indexOf(`[${section}]`)
-  if (sectionStart < 0) {
-    return ''
+type TomlSectionBlock = {
+  header: string
+  lines: string[]
+}
+
+function parseTomlDocument(raw: string) {
+  const normalized = raw.replace(/\r\n/g, '\n')
+  const lines = normalized.split('\n')
+  const preamble: string[] = []
+  const sections: TomlSectionBlock[] = []
+  let currentHeader = ''
+  let currentLines: string[] | null = null
+
+  for (const line of lines) {
+    const match = line.match(/^\s*\[([^\]]+)\]\s*$/)
+    if (match) {
+      if (currentLines && currentHeader) {
+        sections.push({
+          header: currentHeader,
+          lines: currentLines,
+        })
+      }
+      currentHeader = match[1].trim()
+      currentLines = [line]
+      continue
+    }
+
+    if (currentLines) {
+      currentLines.push(line)
+    } else {
+      preamble.push(line)
+    }
   }
 
-  const nextSection = raw.slice(sectionStart + section.length + 2).search(/^\[[^\]]+\]/m)
-  if (nextSection < 0) {
-    return raw.slice(sectionStart).trimEnd()
+  if (currentLines && currentHeader) {
+    sections.push({
+      header: currentHeader,
+      lines: currentLines,
+    })
   }
 
-  return raw.slice(sectionStart, sectionStart + section.length + 2 + nextSection).trimEnd()
+  return {
+    preamble,
+    sections,
+  }
+}
+
+function readTomlTopLevelString(lines: string[], key: string) {
+  const pattern = new RegExp(`^\\s*${key}\\s*=\\s*"([^"]*)"\\s*$`)
+  for (const line of lines) {
+    const match = line.match(pattern)
+    if (match) {
+      return match[1]
+    }
+  }
+  return ''
+}
+
+function readTomlSectionString(lines: string[], key: string) {
+  const pattern = new RegExp(`^\\s*${key}\\s*=\\s*"([^"]*)"\\s*$`)
+  for (const line of lines) {
+    const match = line.match(pattern)
+    if (match) {
+      return match[1]
+    }
+  }
+  return ''
+}
+
+function createCodexProviderSection(apiKey: string, baseUrl: string): TomlSectionBlock {
+  return {
+    header: 'model_providers.oneapi_desktop',
+    lines: [
+      '[model_providers.oneapi_desktop]',
+      'name = "oneapi_desktop"',
+      `base_url = "${baseUrl.endsWith('/v1') ? baseUrl : `${baseUrl}/v1`}"`,
+      `api_key = "${apiKey}"`,
+      'wire_api = "responses"',
+    ],
+  }
+}
+
+function renameCodexProviderSection(block: TomlSectionBlock, nextHeader: string, nextName: string): TomlSectionBlock {
+  return {
+    header: nextHeader,
+    lines: block.lines.map((line, index) => {
+      if (index === 0) {
+        return `[${nextHeader}]`
+      }
+      if (/^\s*name\s*=/.test(line)) {
+        return `name = "${nextName}"`
+      }
+      return line
+    }),
+  }
+}
+
+function serializeTomlDocument(preamble: string[], sections: TomlSectionBlock[]) {
+  const blocks = [
+    preamble.join('\n').trimEnd(),
+    ...sections.map((section) => section.lines.join('\n').trimEnd()).filter(Boolean),
+  ].filter(Boolean)
+
+  return `${blocks.join('\n\n').replace(/\n{3,}/g, '\n\n')}\n`
 }
 
 function mergeCodexConfig(raw: string, apiKey: string, model: string, baseUrl: string) {
-  const preservedSections = [
-    'skills',
-    'plugins',
-    'projects',
-    'windows',
-  ]
-    .map((section) => extractTomlSection(raw, section))
-    .filter(Boolean)
+  const parsed = parseTomlDocument(raw)
+  const nextProviderBlock = createCodexProviderSection(apiKey, baseUrl)
+  const filteredPreamble = parsed.preamble.filter(
+    (line) =>
+      !/^\s*model\s*=/.test(line) &&
+      !/^\s*model_provider\s*=/.test(line) &&
+      !/^\s*model_reasoning_effort\s*=/.test(line)
+  )
 
-  const originalProviderSection = extractTomlSection(raw, 'model_providers.oneapi_desktop')
-  const renamedOriginalProvider = originalProviderSection
-    ? originalProviderSection
-        .replace('[model_providers.oneapi_desktop]', '[model_providers.oneapi_desktop_original]')
-        .replace(/name\s*=\s*"oneapi_desktop"/, 'name = "oneapi_desktop_original"')
-    : ''
-
-  const preservedBlocks = [renamedOriginalProvider, ...preservedSections].filter(Boolean)
-
-  return [
+  const nextPreamble = [
     `model = "${model}"`,
     'model_provider = "oneapi_desktop"',
     'model_reasoning_effort = "high"',
     '',
-    '[model_providers.oneapi_desktop]',
-    'name = "oneapi_desktop"',
-    `base_url = "${baseUrl.endsWith('/v1') ? baseUrl : `${baseUrl}/v1`}"`,
-    `api_key = "${apiKey}"`,
-    'wire_api = "responses"',
-    '',
-    ...preservedBlocks.flatMap((section) => [section, '']),
-    '',
+    ...filteredPreamble,
   ]
-    .join('\n')
-    .replace(/\n{3,}/g, '\n\n')
+
+  const sections: TomlSectionBlock[] = []
+  const existingOneApiDesktop = parsed.sections.find(
+    (section) => section.header === 'model_providers.oneapi_desktop'
+  )
+  const hasOriginalBackup = parsed.sections.some(
+    (section) => section.header === 'model_providers.oneapi_desktop_original'
+  )
+  let insertedProvider = false
+
+  for (const section of parsed.sections) {
+    if (section.header === 'model_providers.oneapi_desktop') {
+      sections.push(nextProviderBlock)
+      insertedProvider = true
+
+      const currentApiKey = readTomlSectionString(section.lines, 'api_key')
+      const currentBaseUrl = readTomlSectionString(section.lines, 'base_url')
+      if (
+        !hasOriginalBackup &&
+        (currentApiKey.trim() !== apiKey.trim() || currentBaseUrl.trim() !== (baseUrl.endsWith('/v1') ? baseUrl : `${baseUrl}/v1`))
+      ) {
+        sections.push(
+          renameCodexProviderSection(
+            section,
+            'model_providers.oneapi_desktop_original',
+            'oneapi_desktop_original'
+          )
+        )
+      }
+      continue
+    }
+
+    if (!insertedProvider && section.header.startsWith('model_providers.')) {
+      sections.push(nextProviderBlock)
+      insertedProvider = true
+    }
+
+    sections.push(section)
+  }
+
+  if (!insertedProvider) {
+    sections.push(nextProviderBlock)
+    if (existingOneApiDesktop && !hasOriginalBackup) {
+      sections.push(
+        renameCodexProviderSection(
+          existingOneApiDesktop,
+          'model_providers.oneapi_desktop_original',
+          'oneapi_desktop_original'
+        )
+      )
+    }
+  }
+
+  return serializeTomlDocument(nextPreamble, sections)
 }
 
 function resolveDesktopCliKeyRecord(apiKey: string) {

@@ -889,27 +889,31 @@ select {
 
 .message-bubble {
   width: fit-content;
-  max-width: 100%;
+  max-width: calc(100% - 50px);
   padding: 10px 12px 9px;
   border-radius: 18px;
   border: 1px solid var(--line);
   box-shadow: 0 8px 20px rgba(36, 56, 76, 0.05);
   min-width: 0;
+  overflow: hidden;
 }
 
 .message-bubble.user {
   align-self: flex-end;
   background: linear-gradient(135deg, rgba(29, 107, 120, 0.14), rgba(59, 168, 176, 0.08));
+  margin-left: 50px;
 }
 
 .message-bubble.assistant {
   align-self: flex-start;
   background: rgba(255, 255, 255, 0.92);
+  margin-right: 50px;
 }
 
 .message-bubble.system {
   align-self: flex-start;
   background: rgba(201, 110, 75, 0.1);
+  margin-right: 50px;
 }
 
 .cli-thread .message-bubble.user {
@@ -930,10 +934,9 @@ select {
 
 .message-bubble p {
   margin: 6px 0 8px;
-  white-space: pre-wrap;
   word-break: break-word;
   overflow-wrap: anywhere;
-  font-size: 14px;
+  font-size: 13px;
   line-height: 1.62;
   min-width: 0;
 }
@@ -1492,8 +1495,8 @@ select {
 
 .cli-log-bubble {
   align-self: flex-start;
-  width: 100%;
-  max-width: 100%;
+  width: calc(100% - 50px);
+  max-width: calc(100% - 50px);
   margin: 0;
   background: rgba(23, 49, 74, 0.04);
 }
@@ -1618,6 +1621,145 @@ select {
   white-space: pre-wrap;
   word-break: break-word;
   overflow-wrap: anywhere;
+}
+
+.markdown-body {
+  min-width: 0;
+  color: inherit;
+}
+
+.markdown-body > :first-child {
+  margin-top: 6px;
+}
+
+.markdown-body > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4,
+.markdown-body h5,
+.markdown-body h6 {
+  margin: 10px 0 8px;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.markdown-body ul,
+.markdown-body ol {
+  margin: 6px 0 10px;
+  padding-left: 20px;
+}
+
+.markdown-body li + li {
+  margin-top: 4px;
+}
+
+.markdown-body code {
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: rgba(21, 44, 64, 0.08);
+  font-size: 12px;
+}
+
+.markdown-body pre {
+  margin: 8px 0 10px;
+  padding: 12px;
+  overflow: auto;
+  border-radius: 14px;
+  background: rgba(21, 44, 64, 0.06);
+}
+
+.markdown-body pre code {
+  padding: 0;
+  background: transparent;
+}
+
+.markdown-body blockquote {
+  margin: 8px 0 10px;
+  padding-left: 12px;
+  border-left: 3px solid rgba(29, 107, 120, 0.24);
+  color: #486276;
+}
+
+.markdown-body table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0 10px;
+}
+
+.markdown-body th,
+.markdown-body td {
+  padding: 8px 10px;
+  border: 1px solid rgba(23, 49, 74, 0.1);
+  text-align: left;
+}
+
+.markdown-body a,
+.markdown-inline-link {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.markdown-inline-link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.message-attachment-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 6px 0 8px;
+}
+
+.message-attachment-card {
+  width: 76px;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid rgba(23, 49, 74, 0.1);
+  background: rgba(255, 255, 255, 0.8);
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
+  text-align: left;
+}
+
+.message-attachment-thumb {
+  width: 100%;
+  height: 60px;
+  display: grid;
+  place-items: center;
+  background: rgba(23, 49, 74, 0.04);
+  overflow: hidden;
+}
+
+.message-attachment-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.message-attachment-name {
+  display: block;
+  padding: 6px 8px;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.message-file-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
 }
 
 .quick-amounts {
@@ -1842,25 +1984,25 @@ select {
 
 .me-codex-card {
   grid-column: 2;
-  grid-row: 1;
+  grid-row: 2;
   margin-bottom: 0;
 }
 
 .me-key-create-card {
   grid-column: 1;
-  grid-row: 2;
+  grid-row: 3;
   margin-top: 0;
 }
 
 .me-key-list-card {
   grid-column: 1;
-  grid-row: 3;
+  grid-row: 2;
   margin-top: 0;
 }
 
 .me-claude-card {
   grid-column: 2;
-  grid-row: 2;
+  grid-row: 1;
   margin-top: 0;
 }
 
