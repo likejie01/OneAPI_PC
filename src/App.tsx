@@ -90,6 +90,7 @@ import type {
   AssistantRecord,
   AuthStatus,
   BillingHistoryData,
+  ChatContentPart,
   ChatMessage,
   ChatModelOption,
   PlanRecord,
@@ -119,6 +120,8 @@ type ComposerAttachment = {
   filePath: string
   size: number
   kind: 'image' | 'file'
+  mimeType?: string
+  dataBase64: string
   previewUrl?: string
 }
 
@@ -184,7 +187,60 @@ function guessAttachmentKind(file: File, filePath: string) {
   return /\.(png|jpe?g|gif|bmp|webp|svg)$/i.test(filePath) ? 'image' as const : 'file' as const
 }
 
-function buildAttachmentReferenceText(attachments: ComposerAttachment[]) {
+function normalizeAttachmentMimeType(attachment: ComposerAttachment) {
+  if (attachment.mimeType?.trim()) {
+    return attachment.mimeType.trim()
+  }
+  return attachment.kind === 'image' ? 'image/png' : 'application/octet-stream'
+}
+
+function buildAttachmentDataUrl(attachment: ComposerAttachment) {
+  return `data:${normalizeAttachmentMimeType(attachment)};base64,${attachment.dataBase64}`
+}
+
+function buildChatAttachmentContent(
+  text: string,
+  attachments: ComposerAttachment[]
+): string | ChatContentPart[] {
+  if (!attachments.length) {
+    return text
+  }
+
+  const parts: ChatContentPart[] = [
+    {
+      type: 'text',
+      text,
+    },
+  ]
+
+  for (const attachment of attachments) {
+    if (!attachment.dataBase64) {
+      continue
+    }
+
+    if (attachment.kind === 'image') {
+      parts.push({
+        type: 'image_url',
+        image_url: {
+          url: buildAttachmentDataUrl(attachment),
+        },
+      })
+      continue
+    }
+
+    parts.push({
+      type: 'file',
+      file: {
+        filename: attachment.name,
+        file_data: buildAttachmentDataUrl(attachment),
+      },
+    })
+  }
+
+  return parts.length === 1 ? text : parts
+}
+
+function buildCliAttachmentReferenceText(attachments: ComposerAttachment[]) {
   if (!attachments.length) {
     return ''
   }
@@ -244,13 +300,14 @@ function useComposerAttachments(toast: (message: string) => void) {
       const nextAttachments = await Promise.all(
         incomingFiles.map(async (file) => {
           const fileWithPath = file as File & { path?: string }
+          const dataBase64 = await fileToBase64(file)
           const filePath =
             fileWithPath.path?.trim() ||
             (
               await getDesktopBridge().saveAttachment({
                 name: file.name || 'clipboard-file',
                 mimeType: file.type,
-                dataBase64: await fileToBase64(file),
+                dataBase64,
               })
             ).path
 
@@ -260,6 +317,8 @@ function useComposerAttachments(toast: (message: string) => void) {
             filePath,
             size: file.size,
             kind: guessAttachmentKind(file, filePath),
+            mimeType: file.type || undefined,
+            dataBase64,
             previewUrl: file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined,
           } satisfies ComposerAttachment
         })
@@ -536,6 +595,13 @@ function isImageGenerationModel(value: string) {
   return value.trim().toLowerCase() === 'gpt-image-2'
 }
 
+function normalizeTimestampMs(value: number) {
+  if (!value) {
+    return 0
+  }
+  return value > 10_000_000_000 ? Math.floor(value) : Math.floor(value * 1000)
+}
+
 function resolveUsageTimestamp(item: UsageData['items'][number]) {
   const raw = Number(item.created_at || item.created_time || 0)
   if (!raw) {
@@ -789,36 +855,38 @@ function buildSmoothLinePath(points: Array<{ x: number; y: number }>) {
 }
 
 function buildUsageSeriesFromTimeline(items: UsageData['items']) {
-  const buckets = new Map<string, Map<string, number>>()
-  const bucketTimes = new Map<string, number>()
+  const buckets = new Map<number, Map<string, number>>()
   const timestamps = items
     .map((item) => resolveUsageTimestamp(item))
     .filter((value) => value > 0)
     .sort((left, right) => left - right)
   const hasMultiDayRange =
     timestamps.length >= 2 && timestamps[timestamps.length - 1] - timestamps[0] >= 24 * 60 * 60 * 1000
-  const minuteBucketSize = hasMultiDayRange ? 60 : 10
+  const rangeMinutes =
+    timestamps.length >= 2 ? Math.ceil((timestamps[timestamps.length - 1] - timestamps[0]) / 60000) : 0
+  const baseBucketMinutes = hasMultiDayRange ? 60 : 5
+  const targetBuckets = hasMultiDayRange ? 8 : 10
+  const minuteBucketSize = Math.max(
+    baseBucketMinutes,
+    rangeMinutes > 0
+      ? Math.ceil(rangeMinutes / targetBuckets / baseBucketMinutes) * baseBucketMinutes
+      : baseBucketMinutes
+  )
 
   for (const item of items) {
     const timestamp = resolveUsageTimestamp(item)
-    const roundedTimestamp = timestamp
+    const bucketKey = timestamp
       ? Math.floor(timestamp / (minuteBucketSize * 60 * 1000)) * minuteBucketSize * 60 * 1000
       : 0
-    const label = roundedTimestamp
-      ? dayjs(roundedTimestamp).format(hasMultiDayRange ? 'MM-DD HH:mm' : 'HH:mm')
-      : '未知时间'
     const model = item.model_name || item.token_name || '未标注模型'
-    if (!buckets.has(label)) {
-      buckets.set(label, new Map())
-      bucketTimes.set(label, roundedTimestamp || Number.MAX_SAFE_INTEGER)
+    if (!buckets.has(bucketKey)) {
+      buckets.set(bucketKey, new Map())
     }
-    const current = buckets.get(label)!
+    const current = buckets.get(bucketKey)!
     current.set(model, (current.get(model) || 0) + Number(item.quota || 0))
   }
 
-  const labels = Array.from(buckets.keys()).sort(
-    (left, right) => (bucketTimes.get(left) || Number.MAX_SAFE_INTEGER) - (bucketTimes.get(right) || Number.MAX_SAFE_INTEGER)
-  )
+  const labels = Array.from(buckets.keys()).sort((left, right) => left - right)
 
   const models = Array.from(new Set(items.map((item) => item.model_name || item.token_name || '未标注模型')))
 
@@ -826,7 +894,10 @@ function buildUsageSeriesFromTimeline(items: UsageData['items']) {
     labels,
     models,
     buckets,
-    bucketTimes,
+    formatLabel: (value: number) =>
+      value
+        ? dayjs(value).format(hasMultiDayRange ? 'MM-DD HH:mm' : 'HH:mm')
+        : '未知时间',
   }
 }
 
@@ -853,6 +924,7 @@ function UsageTrendChart(props: {
     ...chart.labels.flatMap((label) => chart.models.map((model) => chart.buckets.get(label)?.get(model) || 0))
   )
   const gridRows = 4
+  const tickStep = Math.max(1, Math.ceil(chart.labels.length / 6))
 
   return (
     <div className='usage-trend-card'>
@@ -884,7 +956,7 @@ function UsageTrendChart(props: {
               <path d={buildSmoothLinePath(points)} fill='none' stroke={USAGE_CHART_COLORS[modelIndex % USAGE_CHART_COLORS.length]} strokeWidth='2.5' strokeLinecap='round' />
               {points.map((point, index) => (
                 <circle key={`${model}-${index}`} cx={point.x} cy={point.y} r='3' fill={USAGE_CHART_COLORS[modelIndex % USAGE_CHART_COLORS.length]}>
-                  <title>{`${model} · ${chart.labels[index]} · ${formatQuota(values[index])}`}</title>
+                  <title>{`${model} · ${chart.formatLabel(chart.labels[index])} · ${formatQuota(values[index])}`}</title>
                 </circle>
               ))}
             </g>
@@ -892,10 +964,13 @@ function UsageTrendChart(props: {
         })}
 
         {chart.labels.map((label, index) => {
+          if (index % tickStep !== 0 && index !== chart.labels.length - 1) {
+            return null
+          }
           const x = left + (chartWidth * index) / Math.max(chart.labels.length - 1, 1)
           return (
             <text key={label} x={x} y={height - 14} textAnchor='middle' className='usage-trend-axis'>
-              {label}
+              {chart.formatLabel(label)}
             </text>
           )
         })}
@@ -928,17 +1003,17 @@ function CliLogBubble(props: {
     <div className={`message-bubble system cli-log-bubble ${item.level === 'error' ? 'error' : ''}`}>
       <button className='cli-log-card-head' type='button' onClick={onToggle}>
         <span className='message-role'>{item.level === 'error' ? '运行异常' : '运行日志'}</span>
-        <strong>{item.title}</strong>
-        <small>{item.content.length} 步</small>
+        <strong>{`已执行 ${item.content.length} 步`}</strong>
+        <small>{expanded ? '点击收起' : '点击展开'}</small>
       </button>
       <ul className='cli-log-list'>
-        {(expanded ? item.content : item.content.slice(0, 1)).map((line, index) => (
+        {item.content.map((line, index) => (
           <li key={`${item.id}-${index}`}>{line}</li>
         ))}
       </ul>
       {item.files.length > 0 && (
         <div className='cli-log-files'>
-          {uniqueFiles.slice(0, expanded ? undefined : 4).map((fileItem) => (
+          {uniqueFiles.map((fileItem) => (
             <button
               key={fileItem.path}
               className='ghost-button tiny cli-log-file'
@@ -999,6 +1074,10 @@ function createDefaultChatSession(
 function mergeCliMessages(left: CliMessage[], right: CliMessage[]) {
   const seen = new Set<string>()
   return [...left, ...right]
+    .map((item) => ({
+      ...item,
+      createdAt: normalizeTimestampMs(item.createdAt),
+    }))
     .sort((a, b) => a.createdAt - b.createdAt)
     .filter((item) => {
       const key = `${item.role}:${item.createdAt}:${item.content}`
@@ -1012,14 +1091,20 @@ function mergeCliMessages(left: CliMessage[], right: CliMessage[]) {
 
 function mergeCliLogs(left: CliLogEntry[], right: CliLogEntry[]) {
   const seen = new Set<string>()
-  return [...left, ...right].filter((item) => {
-    const key = `${item.level}:${item.createdAt}:${item.content}`
-    if (seen.has(key)) {
-      return false
-    }
-    seen.add(key)
-    return true
-  })
+  return [...left, ...right]
+    .map((item) => ({
+      ...item,
+      createdAt: normalizeTimestampMs(item.createdAt),
+    }))
+    .sort((a, b) => a.createdAt - b.createdAt)
+    .filter((item) => {
+      const key = `${item.level}:${item.createdAt}:${item.content}`
+      if (seen.has(key)) {
+        return false
+      }
+      seen.add(key)
+      return true
+    })
 }
 
 function PasswordField(props: {
@@ -1300,10 +1385,11 @@ function AssistantsChatWorkspace(props: {
       resolvedModel
     const createdAt = new Date().getTime()
     const requestId = `chat-${createdAt}`
+    const userMessageContent = normalizedDraft
     const userMessage: ChatMessage = {
       id: `user-${createdAt}`,
       role: 'user',
-      content: `${normalizedDraft}${buildAttachmentReferenceText(attachments)}`.trim(),
+      content: userMessageContent,
       createdAt,
     }
 
@@ -1329,6 +1415,7 @@ function AssistantsChatWorkspace(props: {
         const response = await sendImageGeneration(
           {
             model: resolvedModel,
+            group: selectedGroup || undefined,
             prompt: normalizedDraft,
             n: 1,
             response_format: 'b64_json',
@@ -1369,7 +1456,10 @@ function AssistantsChatWorkspace(props: {
             ...(systemMessage ? [systemMessage] : []),
             ...history.map((item) => ({
               role: item.role,
-              content: item.content,
+              content:
+                item.id === userMessage.id
+                  ? buildChatAttachmentContent(item.content, attachments)
+                  : item.content,
             })),
           ],
         }, {
@@ -1952,6 +2042,9 @@ function WalletWorkspace(props: {
   const avgLatency = perfMetrics?.avgLatencyMs ?? 0
 
   function formatBillingLabel(item: BillingHistoryData['items'][number]) {
+    if (item.plan_title?.trim()) {
+      return item.plan_title.trim()
+    }
     const trade = String(item.trade_no || '').replace(/SUBWALLETUSR1NO[a-zA-Z0-9_-]*/g, '').trim()
     const payment = String(item.payment_method || '').replace(/^wallet$/i, '').trim()
     return trade || payment || '购买记录'
@@ -2039,7 +2132,7 @@ function WalletWorkspace(props: {
             </div>
             <div className='wallet-overview-grid'>
               <div className='wallet-overview-metric'>
-                <strong>{formatQuota(walletBalance)}</strong>
+                <strong>{formatPrice(walletBalance, 'CNY')}</strong>
                 <span>当前余额</span>
               </div>
               <div className='wallet-overview-metric'>
@@ -2810,6 +2903,12 @@ function CliWorkspace(props: {
       activateProject?: boolean
     } = {}
   ) {
+    const normalizedUpdatedAt = normalizeTimestampMs(details.updatedAt)
+    const normalizedMessages = details.messages.map((message) => ({
+      ...message,
+      createdAt: normalizeTimestampMs(message.createdAt),
+    }))
+
     if (details.projectPath) {
       bindProjectSession(details.projectPath, details.id)
       if (options.activateProject !== false) {
@@ -2821,7 +2920,7 @@ function CliWorkspace(props: {
 
     setSessionMessagesMap((current) => ({
       ...current,
-      [details.id]: details.messages,
+      [details.id]: normalizedMessages,
     }))
     setSessionLogsMap((current) => ({
       ...current,
@@ -2835,7 +2934,7 @@ function CliWorkspace(props: {
                   sessionId: details.id,
                   level: 'status',
                   content: `本次开发共修改 ${details.fileChanges.length} 个文件`,
-                  createdAt: details.updatedAt || Date.now(),
+                  createdAt: normalizedUpdatedAt || Date.now(),
                   files: details.fileChanges,
                 },
               ]
@@ -2943,7 +3042,7 @@ function CliWorkspace(props: {
     const requestProjectPath = projectPath
     const requestProjectKey = normalizeProjectKey(requestProjectPath)
     const currentSessionKey = activeSessionId || `draft-${client}-${Date.now()}`
-    const promptWithAttachments = `${nextPrompt}${buildAttachmentReferenceText(attachments)}`.trim()
+    const promptWithAttachments = `${nextPrompt}${buildCliAttachmentReferenceText(attachments)}`.trim()
     const userMessage = {
       id: `user-${Date.now()}`,
       role: 'user' as const,

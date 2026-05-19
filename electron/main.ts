@@ -834,6 +834,31 @@ function shouldIgnoreClaudeContent(content: unknown) {
   })
 }
 
+function hasClaudeToolContent(content: unknown) {
+  if (!Array.isArray(content) || content.length === 0) {
+    return false
+  }
+
+  return content.some((part) => {
+    if (!part || typeof part !== 'object') {
+      return false
+    }
+
+    const typedPart = part as {
+      type?: string
+      name?: string
+    }
+
+    return (
+      typedPart.type === 'tool_use' ||
+      typedPart.type === 'tool_result' ||
+      typedPart.type === 'progress' ||
+      typedPart.type === 'queue-operation' ||
+      typedPart.name === 'queue-operation'
+    )
+  })
+}
+
 function shouldIgnoreCodexMessage(text: string) {
   const normalized = text.trim()
   return (
@@ -1324,6 +1349,9 @@ function parseClaudeSession(lines: string[]): { messages: CliSessionMessage[]; f
       if (role === 'user' && parsed.toolUseResult) {
         continue
       }
+      if (role === 'user' && hasClaudeToolContent(parsed.message?.content)) {
+        continue
+      }
       if (shouldIgnoreClaudeContent(parsed.message?.content)) {
         continue
       }
@@ -1570,22 +1598,20 @@ async function runCodexPrompt(
   webContents: WebContents,
   input: CliRunRequest
 ): Promise<CliRunResponse> {
-  const args = input.sessionId
-    ? ['exec', 'resume', '--json', '--skip-git-repo-check', input.sessionId, input.prompt]
-    : ['exec', '--json', '-C', input.projectPath, '--skip-git-repo-check', input.prompt]
+  const args = ['exec']
+
+  if (input.fullAccess) {
+    args.push('--sandbox', 'danger-full-access', '--dangerously-bypass-approvals-and-sandbox')
+  }
+
+  if (input.sessionId) {
+    args.push('resume', '--json', '--skip-git-repo-check', input.sessionId, input.prompt)
+  } else {
+    args.push('--json', '-C', input.projectPath, '--skip-git-repo-check', input.prompt)
+  }
 
   if (input.model?.trim()) {
     args.splice(args.length - 1, 0, '--model', input.model.trim())
-  }
-
-  if (input.fullAccess) {
-    args.splice(
-      args.length - 1,
-      0,
-      '--sandbox',
-      'danger-full-access',
-      '--dangerously-bypass-approvals-and-sandbox'
-    )
   }
 
   args.splice(

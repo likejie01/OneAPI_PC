@@ -1,6 +1,7 @@
 import { desktopBridge, desktopEnvelope, desktopRequest } from '../lib/desktop-client'
 import type {
   ApiEnvelope,
+  ChatContentPart,
   ChatCompletionResponse,
   ChatGroupOption,
   ChatModelOption,
@@ -40,7 +41,10 @@ export async function getUserGroups() {
 export async function sendChatCompletion(payload: {
   model: string
   group?: string
-  messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>
+  messages: Array<{
+    role: 'system' | 'user' | 'assistant'
+    content: string | ChatContentPart[]
+  }>
   temperature?: number
 }, options: {
   requestId?: string
@@ -62,6 +66,7 @@ export function stopChatCompletion(requestId: string) {
 
 export async function sendImageGeneration(payload: {
   model: string
+  group?: string
   prompt: string
   n?: number
   size?: string

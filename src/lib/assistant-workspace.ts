@@ -213,32 +213,45 @@ export function buildCliTimeline(input: {
     })
   }
 
-  const timeline = [...entries, ...groupedLogs]
+  const sortedLogs = [...groupedLogs].sort((left, right) => left.startedAt - right.startedAt)
+  const timeline: CliTimelineEntry[] = []
+  let logIndex = 0
+
+  const rank = (item: CliTimelineEntry) => {
+    if (item.kind === 'message' && item.role === 'user') {
+      return 0
+    }
+    if (item.kind === 'log') {
+      return 1
+    }
+    if (item.kind === 'message' && item.role === 'assistant') {
+      return 2
+    }
+    return 3
+  }
+
+  for (const entry of entries.sort((left, right) => left.createdAt - right.createdAt)) {
+    if (entry.kind === 'message' && entry.role === 'assistant') {
+      while (logIndex < sortedLogs.length && sortedLogs[logIndex].startedAt <= entry.createdAt) {
+        timeline.push(sortedLogs[logIndex])
+        logIndex += 1
+      }
+    }
+    timeline.push(entry)
+  }
+
+  while (logIndex < sortedLogs.length) {
+    timeline.push(sortedLogs[logIndex])
+    logIndex += 1
+  }
 
   return timeline.sort((left, right) => {
     const leftTime = left.kind === 'log' ? left.startedAt : left.createdAt
     const rightTime = right.kind === 'log' ? right.startedAt : right.createdAt
-
-    const order = (item: CliTimelineEntry) => {
-      if (item.kind === 'message' && item.role === 'user') {
-        return 0
-      }
-      if (item.kind === 'log') {
-        return 1
-      }
-      if (item.kind === 'message' && item.role === 'assistant') {
-        return 2
-      }
-      return 3
+    if (leftTime !== rightTime) {
+      return leftTime - rightTime
     }
-
-    const leftOrder = order(left)
-    const rightOrder = order(right)
-    if (leftOrder !== rightOrder) {
-      return leftOrder - rightOrder
-    }
-
-    return leftTime - rightTime
+    return rank(left) - rank(right)
   })
 }
 
@@ -254,8 +267,8 @@ function resolvePreview(messages: CliSessionMessage[]) {
 
 function resolveUpdatedAt(messages: CliSessionMessage[], logs: CliLogEntryLike[]) {
   return Math.max(
-    messages.at(-1)?.createdAt || 0,
-    logs.at(-1)?.createdAt || 0
+    toTimelineTimestamp(messages.at(-1)?.createdAt || 0),
+    toTimelineTimestamp(logs.at(-1)?.createdAt || 0)
   )
 }
 

@@ -78,6 +78,25 @@ export interface ChatMessage {
   }
 }
 
+export type ChatContentPart =
+  | {
+      type: 'text'
+      text: string
+    }
+  | {
+      type: 'image_url'
+      image_url: {
+        url: string
+      }
+    }
+  | {
+      type: 'file'
+      file: {
+        filename: string
+        file_data: string
+      }
+    }
+
 export interface ChatModelOption {
   label: string
   value: string
@@ -191,6 +210,7 @@ export interface BillingRecord {
   money: number
   trade_no: string
   payment_method: string
+  plan_title?: string
   create_time: number
   complete_time?: number
   status: 'success' | 'pending' | 'expired'

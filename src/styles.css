@@ -888,11 +888,13 @@ select {
 }
 
 .message-bubble {
-  max-width: min(620px, 74%);
+  width: fit-content;
+  max-width: 100%;
   padding: 10px 12px 9px;
   border-radius: 18px;
   border: 1px solid var(--line);
   box-shadow: 0 8px 20px rgba(36, 56, 76, 0.05);
+  min-width: 0;
 }
 
 .message-bubble.user {
@@ -930,8 +932,10 @@ select {
   margin: 6px 0 8px;
   white-space: pre-wrap;
   word-break: break-word;
+  overflow-wrap: anywhere;
   font-size: 14px;
   line-height: 1.62;
+  min-width: 0;
 }
 
 .message-bubble.image-bubble p {
@@ -1013,8 +1017,9 @@ select {
   flex: 1;
   min-height: 0;
   min-width: 0;
-  width: min(1120px, 100%);
-  margin: 0 auto;
+  width: 100%;
+  max-width: none;
+  margin: 0;
   display: flex;
   flex-direction: column;
 }
@@ -1285,20 +1290,20 @@ select {
 .assistant-topbar {
   position: relative;
   min-height: 48px;
-  margin: 0 auto 8px;
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  align-items: start;
+  margin: 0 0 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 100%;
   flex: 0 0 auto;
-  max-width: 1120px;
+  max-width: none;
+  padding: 0 8px;
 }
 
 .assistant-topbar-tabs {
-  grid-column: 2;
   display: inline-flex;
   align-items: center;
-  justify-self: center;
+  justify-content: center;
   gap: 14px;
   flex-wrap: wrap;
   max-width: 100%;
@@ -1487,10 +1492,10 @@ select {
 
 .cli-log-bubble {
   align-self: flex-start;
-  max-width: min(720px, 82%);
+  width: 100%;
+  max-width: 100%;
   margin: 0;
   background: rgba(23, 49, 74, 0.04);
-  width: fit-content;
 }
 
 .cli-thread .cli-log-bubble {
@@ -1612,6 +1617,7 @@ select {
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .quick-amounts {
@@ -1866,8 +1872,9 @@ select {
 }
 
 .assistant-topbar-actions {
-  grid-column: 3;
-  justify-self: end;
+  position: absolute;
+  top: 0;
+  right: 8px;
   display: flex;
   align-items: center;
   gap: 8px;

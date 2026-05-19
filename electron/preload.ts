@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld('desktopBridge', {
       platform: string
       productName: string
       serverBaseUrl: string
+      iconPath: string
     }>,
   request: (input: DesktopApiRequest) =>
     ipcRenderer.invoke('desktop:api-request', input) as Promise<DesktopApiResponse>,
