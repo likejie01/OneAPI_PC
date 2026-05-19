@@ -679,7 +679,8 @@ const CHAT_SESSIONS_STORAGE_KEY = 'oneapi-desktop-chat-sessions'
 const CHAT_ACTIVE_SESSION_STORAGE_KEY = 'oneapi-desktop-chat-active-session'
 const CHAT_REASONING_STORAGE_KEY = 'oneapi-desktop-chat-reasoning'
 const CHAT_CONTEXT_WINDOW_STORAGE_KEY = 'oneapi-desktop-chat-context-window'
-const PENDING_MESSAGE_LABEL = 'Coding...'
+const CHAT_PENDING_MESSAGE_LABEL = 'Thinking...'
+const CLI_PENDING_MESSAGE_LABEL = 'Coding...'
 const CHAT_CONTEXT_WINDOW_OPTIONS = [
   { label: '10 条', value: 10 },
   { label: '20 条', value: 20 },
@@ -1142,7 +1143,7 @@ function MarkdownMessageContent(props: {
 function PendingMessageContent(props: {
   label?: string
 }) {
-  const { label = PENDING_MESSAGE_LABEL.replace(/\.+$/, '') } = props
+  const { label = CLI_PENDING_MESSAGE_LABEL.replace(/\.+$/, '') } = props
 
   return (
     <div className='pending-message'>
@@ -1724,7 +1725,7 @@ function AssistantsChatWorkspace(props: {
     const pendingAssistantMessage: ChatBubbleMessage = {
       id: pendingAssistantId,
       role: 'assistant',
-      content: PENDING_MESSAGE_LABEL,
+      content: CHAT_PENDING_MESSAGE_LABEL,
       createdAt: createdAt + 1,
       modelLabel: resolvedModelLabel,
       pending: true,
@@ -1921,7 +1922,7 @@ function AssistantsChatWorkspace(props: {
                     <img src={item.imageUrl} alt={item.content || '生成图片'} />
                   </div>
                 ) : (
-                  item.pending ? <PendingMessageContent /> : <MarkdownMessageContent content={item.content} />
+                  item.pending ? <PendingMessageContent label={CHAT_PENDING_MESSAGE_LABEL.replace(/\.+$/, '')} /> : <MarkdownMessageContent content={item.content} />
                 )}
                 <BubbleMeta
                   side={item.role === 'user' ? 'right' : 'left'}
@@ -3556,7 +3557,7 @@ function CliWorkspace(props: {
     }))
     setSessionPartialMap((current) => ({
       ...current,
-      [currentSessionKey]: PENDING_MESSAGE_LABEL,
+      [currentSessionKey]: CLI_PENDING_MESSAGE_LABEL,
     }))
     setPrompt('')
     clearAttachments()
@@ -3687,7 +3688,7 @@ function CliWorkspace(props: {
                       : ''}
                   </span>
                   <MessageAttachmentGallery attachments={'attachments' in item ? item.attachments : undefined} />
-                  {item.kind === 'partial' && item.content === PENDING_MESSAGE_LABEL ? (
+                  {item.kind === 'partial' && item.content === CLI_PENDING_MESSAGE_LABEL ? (
                     <PendingMessageContent />
                   ) : (
                     <MarkdownMessageContent content={item.content} />
