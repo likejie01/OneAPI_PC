@@ -217,6 +217,7 @@ function getAppMeta() {
     platform: process.platform,
     productName: app.name,
     serverBaseUrl: SERVER_BASE_URL,
+    iconPath: APP_ICON_PATH,
   }
 }
 

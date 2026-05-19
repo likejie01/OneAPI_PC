@@ -1251,15 +1251,21 @@ select {
   box-shadow: 0 10px 22px rgba(185, 92, 60, 0.22);
 }
 
-.assistant-mode-float {
-  position: absolute;
-  top: -2px;
-  left: 50%;
-  z-index: 4;
+.assistant-topbar {
+  position: relative;
+  min-height: 38px;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.assistant-topbar-tabs {
   display: inline-flex;
+  align-items: center;
   gap: 14px;
-  padding: 0;
-  transform: translateX(-50%);
+  flex-wrap: wrap;
 }
 
 .assistant-mode-button {
@@ -1782,23 +1788,14 @@ select {
 
 .me-claude-card {
   grid-column: 2;
-  grid-row: 3;
-}
-
-.assistant-topbar {
-  position: relative;
-  min-height: 38px;
-  margin-bottom: 6px;
+  grid-row: 2;
 }
 
 .assistant-topbar-actions {
-  position: absolute;
-  top: -2px;
-  right: 0;
-  z-index: 5;
   display: flex;
   align-items: center;
   gap: 8px;
+  margin-left: auto;
 }
 
 .inline-settings-card {

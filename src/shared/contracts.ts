@@ -220,6 +220,8 @@ export interface UsageStat {
   quota: number
   rpm: number
   tpm: number
+  request_count?: number
+  avg_latency_ms?: number
 }
 
 export interface UsageData {

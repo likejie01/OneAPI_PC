@@ -67,7 +67,7 @@ import {
   getSubscriptionPaymentInfo,
   paySubscription,
 } from './domains/subscriptions'
-import { getUserUsageLogs } from './domains/usage'
+import { getPerfMetricsSummary, getUserUsageLogs } from './domains/usage'
 import {
   getBillingHistory,
   redeemTopupCode,
@@ -1923,13 +1923,14 @@ function WalletWorkspace(props: {
   const [billing, setBilling] = useState<BillingHistoryData | null>(null)
   const [redeemCode, setRedeemCode] = useState('')
   const [usageData, setUsageData] = useState<UsageData | null>(null)
+  const [perfMetrics, setPerfMetrics] = useState<{ requestCount24h: number; avgLatencyMs: number } | null>(null)
 
   const recentBills = billing?.items || []
   const completedBillCount = recentBills.filter((item) => item.status === 'success').length
   const walletBalance = Number(user.remain_balance || 0)
   const tokenBalance = Number(user.quota || 0)
-  const walletExpense = Number(user.used_balance || 0)
   const tokenExpense = Number(user.used_quota || 0)
+  const requestCount24h = perfMetrics?.requestCount24h ?? 0
   const modelSummary = useMemo(
     () => usageModelSummary(usageData?.items || []),
     [usageData?.items]
@@ -1937,11 +1938,24 @@ function WalletWorkspace(props: {
   const totalQuota = modelSummary.reduce((sum, item) => sum + item.quota, 0)
   const topModels = modelSummary.slice(0, 8)
   const maxBillAmount = recentBills.reduce((max, item) => Math.max(max, Number(item.amount || item.money || 0)), 0)
+  const avgTpm = useMemo(() => {
+    const logs = usageData?.items || []
+    const timestamps = logs
+      .map((item) => Number(item.created_at || item.created_time || 0))
+      .filter((value) => value > 0)
+      .sort((left, right) => left - right)
+    if (timestamps.length < 2) {
+      return 0
+    }
+    const timeDiff = (timestamps.at(-1)! - timestamps[0]) / 60000
+    return timeDiff > 0 ? totalQuota / timeDiff : 0
+  }, [totalQuota, usageData?.items])
+  const avgLatency = perfMetrics?.avgLatencyMs ?? 0
 
   function formatBillingLabel(item: BillingHistoryData['items'][number]) {
     const trade = String(item.trade_no || '').replace(/SUBWALLETUSR1NO[a-zA-Z0-9_-]*/g, '').trim()
     const payment = String(item.payment_method || '').replace(/^wallet$/i, '').trim()
-    return trade || payment || '订单'
+    return trade || payment || '购买记录'
   }
 
   const refreshWallet = useCallback(async () => {
@@ -1954,9 +1968,10 @@ function WalletWorkspace(props: {
 
     void (async () => {
       try {
-        const [nextBilling, nextUsageData] = await Promise.all([
+        const [nextBilling, nextUsageData, nextPerfMetrics] = await Promise.all([
           getBillingHistory(),
           getUserUsageLogs(1, 200),
+          getPerfMetricsSummary(24).catch(() => null),
         ])
 
         if (disposed) {
@@ -1965,6 +1980,18 @@ function WalletWorkspace(props: {
 
         setBilling(nextBilling ?? null)
         setUsageData(nextUsageData ?? null)
+        if (nextPerfMetrics?.models?.length) {
+          const requestCount = nextPerfMetrics.models.reduce((sum, item) => sum + Number(item.request_count || 0), 0)
+          const latencyTotal = nextPerfMetrics.models.reduce((sum, item) => {
+            const requestCount = Number(item.request_count || 0)
+            const latency = Number(item.avg_latency_ms || 0)
+            return sum + latency * requestCount
+          }, 0)
+          setPerfMetrics({
+            requestCount24h: requestCount,
+            avgLatencyMs: requestCount > 0 ? Math.round(latencyTotal / requestCount) : 0,
+          })
+        }
       } catch (error) {
         if (!disposed) {
           toast(error instanceof Error ? error.message : '加载钱包信息失败')
@@ -2021,16 +2048,20 @@ function WalletWorkspace(props: {
                 <span>Token 余额</span>
               </div>
               <div className='wallet-overview-metric'>
-                <strong>{formatQuota(walletExpense)}</strong>
-                <span>累计消耗</span>
-              </div>
-              <div className='wallet-overview-metric'>
                 <strong>{formatQuota(tokenExpense)}</strong>
                 <span>Token 消耗</span>
               </div>
               <div className='wallet-overview-metric'>
-                <strong>{billing?.total || 0}</strong>
-                <span>账单条目</span>
+                <strong>{formatQuota(requestCount24h)}</strong>
+                <span>请求数（24 小时）</span>
+              </div>
+              <div className='wallet-overview-metric'>
+                <strong>{formatQuota(avgTpm)}</strong>
+                <span>平均 TPM</span>
+              </div>
+              <div className='wallet-overview-metric'>
+                <strong>{formatQuota(avgLatency)}</strong>
+                <span>平均延迟</span>
               </div>
             </div>
           </div>
@@ -3535,7 +3566,7 @@ function AssistantWorkspace(props: {
   return (
     <section className={`workspace-page assistant-page ${visible ? '' : 'workspace-hidden'}`}>
       <div className='assistant-topbar'>
-        <div className='assistant-mode-float' role='tablist' aria-label='聊天形态切换'>
+        <div className='assistant-topbar-tabs' role='tablist' aria-label='聊天形态切换'>
           {assistantModes.filter((item) => enabledModes.includes(item.key)).map((item) => (
             <button
               key={item.key}
@@ -3926,6 +3957,7 @@ export function App() {
   const [collapsed, setCollapsed] = useState(false)
   const [platformLabel, setPlatformLabel] = useState('Windows')
   const [productName, setProductName] = useState('OneAPI Desktop')
+  const [iconPath, setIconPath] = useState('')
   const { message, setMessage } = useToastState()
   const [cliStatus, setCliStatus] = useState<{ codex: CliStatus; claude: CliStatus } | null>(null)
   const enabledAssistantModes = useMemo(() => {
@@ -3951,6 +3983,7 @@ export function App() {
       .then((meta) => {
         setPlatformLabel(meta.platform === 'darwin' ? 'macOS' : 'Windows')
         setProductName(meta.productName)
+        setIconPath(meta.iconPath)
       })
       .catch(() => undefined)
 
@@ -4045,7 +4078,7 @@ export function App() {
                 }}
                 aria-label={collapsed ? '展开边栏' : 'OneAPI Center'}
               >
-                <img src='/Icon.png' alt='' />
+                {collapsed && iconPath ? <img src={iconPath} alt='' /> : null}
               </button>
               {!collapsed && (
                 <div className='brand-text'>

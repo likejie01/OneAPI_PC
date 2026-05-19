@@ -25,6 +25,7 @@ declare global {
         platform: string
         productName: string
         serverBaseUrl: string
+        iconPath: string
       }>
       request: (input: DesktopApiRequest) => Promise<DesktopApiResponse>
       stopRequest: (requestId: string) => Promise<void>

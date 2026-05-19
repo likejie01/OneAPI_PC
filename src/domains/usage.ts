@@ -20,3 +20,18 @@ export async function getUserUsageStat() {
   })
   return response.data
 }
+
+export async function getPerfMetricsSummary(hours = 24) {
+  const response = await desktopEnvelope<{
+    models?: Array<{
+      model_name: string
+      avg_latency_ms: number
+      request_count: number
+    }>
+  }>({
+    method: 'GET',
+    path: '/api/perf-metrics/summary',
+    query: { hours },
+  })
+  return response.data
+}
