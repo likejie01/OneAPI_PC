@@ -3475,3 +3475,56 @@ textarea,
 :root[data-theme='dark'] .history-group-head span {
   color: var(--muted);
 }
+
+/* Final wallet/subscription/chat polish */
+.message-stream,
+.cli-thread {
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 30px,
+    #000 calc(100% - 30px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 30px,
+    #000 calc(100% - 30px),
+    transparent 100%
+  );
+}
+
+:root[data-theme='dark'] .usage-bar-row {
+  background: rgba(27, 36, 43, 0.88);
+  border-color: rgba(213, 224, 230, 0.1);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.045);
+}
+
+:root[data-theme='dark'] .usage-bar-head strong,
+:root[data-theme='dark'] .pricing-card b {
+  color: var(--text);
+}
+
+:root[data-theme='dark'] .usage-bar-head span,
+:root[data-theme='dark'] .usage-bar-row small {
+  color: rgba(154, 170, 181, 0.86);
+}
+
+:root[data-theme='dark'] .usage-bar-track {
+  background: rgba(213, 224, 230, 0.075);
+}
+
+:root[data-theme='dark'] .usage-bar-fill {
+  background: linear-gradient(90deg, rgba(72, 135, 146, 0.56), rgba(112, 184, 197, 0.42));
+}
+
+:root[data-theme='dark'] .pricing-actions .primary-button {
+  background: linear-gradient(135deg, #315d67, #274953);
+  color: #edf5f7;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
+}
+
+:root[data-theme='dark'] .pricing-actions .primary-button:hover {
+  background: linear-gradient(135deg, #3b6d78, #2f5863);
+}
