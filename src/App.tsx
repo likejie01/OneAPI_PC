@@ -16,6 +16,7 @@ import {
   LogOut,
   Mail,
   MessageSquareText,
+  Moon,
   PanelRightOpen,
   PencilLine,
   Plus,
@@ -24,6 +25,7 @@ import {
   Square,
   Sparkles,
   Star,
+  Sun,
   UserPlus,
   Wallet,
   X,
@@ -116,6 +118,7 @@ import { useAuthStore } from './stores/auth-store'
 type AssistantMode = 'chat' | 'codex' | 'claude'
 type SideTab = 'assistants' | 'subscriptions' | 'wallet' | 'me'
 type HistoryVisibilityTab = 'visible' | 'hidden'
+type ThemeMode = 'light' | 'dark'
 
 type ComposerAttachment = {
   id: string
@@ -2220,13 +2223,11 @@ function AssistantsChatWorkspace(props: {
           className={`panel chat-history-panel ${historyOpen ? 'open' : ''}`}
           tabIndex={historyOpen ? 0 : -1}
         >
-          <div className='panel-header compact'>
-            <div>
-              <span className='eyebrow dark'>历史记录</span>
-              <h2>最近会话</h2>
-            </div>
-            <div className='inline-actions'>
-              <button className='secondary-button tiny' type='button' onClick={createChatSession}>
+        <div className='panel-header compact'>
+          <div>
+          </div>
+          <div className='inline-actions'>
+            <button className='secondary-button tiny' type='button' onClick={createChatSession}>
                 <Plus size={16} />
                 <span>新对话</span>
               </button>
@@ -2348,7 +2349,6 @@ function SubscriptionsWorkspace(props: {
       <article className='panel scroll-panel page-surface'>
         <div className='panel-header compact'>
           <div>
-            <span className='eyebrow dark'>订阅</span>
             <h2>套餐订阅与额度使用</h2>
           </div>
         </div>
@@ -2553,7 +2553,6 @@ function WalletWorkspace(props: {
       <article className='panel scroll-panel page-surface'>
         <div className='panel-header compact'>
           <div>
-            <span className='eyebrow dark'>钱包</span>
             <h2>余额、充值与账单记录</h2>
           </div>
         </div>
@@ -2683,8 +2682,10 @@ function WalletWorkspace(props: {
 function MeWorkspace(props: {
   user: UserProfile
   toast: (message: string) => void
+  themeMode: ThemeMode
+  onToggleTheme: () => void
 }) {
-  const { user, toast } = props
+  const { user, toast, themeMode, onToggleTheme } = props
   const [apiKeys, setApiKeys] = useState<
     Array<{
       id: number
@@ -2809,8 +2810,19 @@ function MeWorkspace(props: {
         <article className='panel scroll-panel page-surface'>
           <div className='panel-header compact'>
             <div>
-              <span className='eyebrow dark'>我的</span>
               <h2>账户与敏感操作</h2>
+            </div>
+            <div className='inline-actions'>
+              <button
+                className='ghost-button tiny theme-toggle-button'
+                type='button'
+                onClick={onToggleTheme}
+                title={themeMode === 'dark' ? '切换到明亮模式' : '切换到暗黑模式'}
+                aria-label={themeMode === 'dark' ? '切换到明亮模式' : '切换到暗黑模式'}
+              >
+                {themeMode === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+                <span>{themeMode === 'dark' ? '明亮' : '暗黑'}</span>
+              </button>
             </div>
           </div>
 
@@ -3881,8 +3893,6 @@ function CliWorkspace(props: {
         >
           <div className='panel-header compact'>
             <div>
-              <span className='eyebrow dark'>历史记录</span>
-              <h2>最近会话</h2>
             </div>
               <div className='inline-actions'>
                 <button className='ghost-button tiny' type='button' onClick={() => void refreshCliState()}>
@@ -4366,7 +4376,10 @@ function LoginScreen(props: {
       <section className='login-hero'>
         <div className='login-copy'>
           <span className='eyebrow'>OneAPI Desktop</span>
-          <h1>统一 AI 客户端工作台</h1>
+          <h1>
+            OneAPI
+            <span>客户端工作台</span>
+          </h1>
           <p>
             一个账号即可使用聊天、助手、订阅、钱包、用量、我的，以及 Codex / Claude
             轻量客户端能力。
@@ -4511,6 +4524,9 @@ export function App() {
   const [assistantMode, setAssistantMode] = useState<AssistantMode>('chat')
   const [sideTab, setSideTab] = useState<SideTab>('assistants')
   const [collapsed, setCollapsed] = useState(false)
+  const [themeMode, setThemeMode] = useState<ThemeMode>(() =>
+    readJsonStorage<ThemeMode>('oneapi-desktop-theme-mode', 'light')
+  )
   const [platformLabel, setPlatformLabel] = useState('Windows')
   const [productName, setProductName] = useState('OneAPI Desktop')
   const [iconPath, setIconPath] = useState('')
@@ -4570,6 +4586,11 @@ export function App() {
       void setDesktopWindowTitle('')
     }
   }, [sideTab])
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = themeMode
+    writeJsonStorage('oneapi-desktop-theme-mode', themeMode)
+  }, [themeMode])
 
   useEffect(() => {
     if (!enabledAssistantModes.includes(assistantMode)) {
@@ -4726,7 +4747,14 @@ export function App() {
             />
             {sideTab === 'subscriptions' && <SubscriptionsWorkspace toast={setMessage} />}
             {sideTab === 'wallet' && <WalletWorkspace user={auth.user} toast={setMessage} />}
-            {sideTab === 'me' && <MeWorkspace user={auth.user} toast={setMessage} />}
+            {sideTab === 'me' && (
+              <MeWorkspace
+                user={auth.user}
+                toast={setMessage}
+                themeMode={themeMode}
+                onToggleTheme={() => setThemeMode((current) => (current === 'dark' ? 'light' : 'dark'))}
+              />
+            )}
             {/* settings removed */}
           </div>
         </main>

@@ -2866,3 +2866,523 @@ textarea:focus {
     padding: 14px;
   }
 }
+
+.assistant-page {
+  padding: 0 12px 12px;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  border-radius: 0;
+}
+
+.assistant-host {
+  background: transparent;
+}
+
+.assistant-topbar {
+  min-height: 52px;
+  margin: 0;
+}
+
+.chat-panel-surface,
+.cli-panel-surface {
+  padding: 0;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  border-radius: 0;
+}
+
+.message-stream,
+.cli-thread {
+  padding: 8px 8px 12px 0;
+}
+
+.full-bleed-page,
+.single-panel-page {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  border-radius: 0;
+}
+
+.page-surface {
+  padding: 4px 8px 0 0;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  border-radius: 0;
+}
+
+.panel-scroll {
+  gap: 14px;
+  padding-top: 0;
+}
+
+.panel-block,
+.settings-card,
+.settings-intro-card,
+.pricing-card,
+.mini-stat,
+.status-card,
+.empty-card,
+.key-reveal,
+.result-block,
+.billing-card,
+.wallet-overview-metric,
+.record-row {
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.72);
+  border-color: rgba(39, 57, 76, 0.08);
+  box-shadow: 0 10px 28px rgba(39, 57, 76, 0.045);
+}
+
+.panel-block,
+.settings-card,
+.settings-intro-card {
+  padding: 16px;
+}
+
+.wallet-grid {
+  grid-template-columns: minmax(320px, 0.78fr) minmax(0, 1.22fr);
+  gap: 14px;
+}
+
+.wallet-overview-card {
+  padding: 18px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.86), rgba(247, 250, 248, 0.72));
+  border: 1px solid rgba(39, 57, 76, 0.08);
+  box-shadow: 0 14px 36px rgba(39, 57, 76, 0.055);
+}
+
+.wallet-overview-head {
+  align-items: center;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(39, 57, 76, 0.07);
+}
+
+.wallet-overview-head h3 {
+  margin: 4px 0 0;
+  font-size: 21px;
+}
+
+.wallet-overview-grid {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0;
+  margin-top: 0;
+}
+
+.wallet-overview-metric {
+  padding: 16px 14px 12px;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  border-right: 1px solid rgba(39, 57, 76, 0.07);
+}
+
+.wallet-overview-metric:last-child {
+  border-right: 0;
+}
+
+.wallet-overview-metric strong {
+  font-size: 22px;
+  letter-spacing: 0;
+}
+
+.wallet-overview-metric span {
+  font-size: 12px;
+}
+
+.billing-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.billing-card {
+  min-height: 76px;
+}
+
+.billing-card-inner {
+  min-height: 76px;
+  padding: 10px 12px;
+}
+
+.me-layout {
+  grid-template-columns: minmax(340px, 0.92fr) minmax(360px, 1.08fr);
+  gap: 14px;
+}
+
+.me-column {
+  gap: 14px;
+}
+
+.me-user-card,
+.me-key-list-card,
+.me-key-create-card,
+.me-claude-card,
+.me-codex-card {
+  margin: 0;
+}
+
+.me-key-create {
+  margin-top: 0;
+}
+
+.inline-settings-card {
+  padding: 16px;
+}
+
+.status-grid-slim .status-button {
+  min-height: 32px;
+  border-radius: 10px;
+}
+
+.record-row {
+  padding: 12px 13px;
+}
+
+.login-copy h1 {
+  max-width: 12ch;
+}
+
+.login-copy h1 span {
+  display: block;
+}
+
+@media (max-width: 1440px) {
+  .wallet-overview-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .wallet-overview-metric:nth-child(3n) {
+    border-right: 0;
+  }
+}
+
+@media (max-width: 1180px) {
+  .assistant-page {
+    padding: 0 8px 10px;
+  }
+
+  .wallet-grid,
+  .me-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .wallet-overview-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .wallet-overview-metric:nth-child(2n) {
+    border-right: 0;
+  }
+}
+
+@media (max-width: 880px) {
+  .assistant-page,
+  .chat-panel-surface,
+  .cli-panel-surface,
+  .page-surface {
+    padding: 0;
+  }
+
+  .wallet-overview-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .wallet-overview-metric {
+    border-right: 0;
+    border-bottom: 1px solid rgba(39, 57, 76, 0.07);
+  }
+
+  .wallet-overview-metric:last-child {
+    border-bottom: 0;
+  }
+}
+
+:root {
+  --bg: #eef3f5;
+  --panel: rgba(255, 255, 255, 0.82);
+  --panel-strong: rgba(255, 255, 255, 0.96);
+  --surface: rgba(255, 255, 255, 0.74);
+  --surface-strong: rgba(255, 255, 255, 0.92);
+  --line: rgba(34, 52, 70, 0.1);
+  --line-strong: rgba(34, 52, 70, 0.16);
+  --text: #172b3c;
+  --muted: #667684;
+  --accent: #286d7c;
+  --accent-soft: rgba(40, 109, 124, 0.12);
+  --accent-strong: #1f5b68;
+  --accent-2: #617883;
+  --success: #2f7c63;
+  --warn: #9b7440;
+  --danger: #b85f52;
+  --shadow: 0 14px 34px rgba(31, 47, 63, 0.08);
+  --bubble-user: rgba(230, 239, 241, 0.94);
+  --bubble-ai: rgba(255, 255, 255, 0.93);
+  --bubble-log: rgba(242, 246, 247, 0.94);
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #12181d;
+  --panel: rgba(27, 34, 40, 0.82);
+  --panel-strong: rgba(34, 42, 49, 0.94);
+  --surface: rgba(31, 39, 46, 0.74);
+  --surface-strong: rgba(38, 47, 55, 0.9);
+  --line: rgba(213, 224, 230, 0.1);
+  --line-strong: rgba(213, 224, 230, 0.16);
+  --text: #e8eef2;
+  --muted: #9aaab5;
+  --accent: #70b8c5;
+  --accent-soft: rgba(112, 184, 197, 0.16);
+  --accent-strong: #9bd1da;
+  --accent-2: #8799a3;
+  --success: #79c7a3;
+  --warn: #d2ad70;
+  --danger: #de8a7e;
+  --shadow: 0 18px 42px rgba(0, 0, 0, 0.24);
+  --bubble-user: rgba(41, 60, 68, 0.94);
+  --bubble-ai: rgba(29, 37, 44, 0.94);
+  --bubble-log: rgba(34, 48, 55, 0.94);
+}
+
+body,
+.shell {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0)),
+    var(--bg);
+  color: var(--text);
+}
+
+:root[data-theme='dark'] body,
+:root[data-theme='dark'] .shell {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0)),
+    var(--bg);
+}
+
+.main-panel {
+  height: calc(100vh - 28px);
+  padding: 0;
+}
+
+.assistant-page {
+  padding: 0;
+}
+
+.assistant-topbar {
+  min-height: 52px;
+  margin: 0;
+  padding: 0 4px;
+}
+
+.assistant-host .workspace-shell {
+  inset: 0;
+}
+
+.sidebar {
+  background: var(--panel);
+  border-color: var(--line);
+  box-shadow: var(--shadow);
+}
+
+.sidebar.collapsed .side-nav {
+  padding-bottom: 32px;
+}
+
+.sidebar.collapsed .side-nav-item:last-child {
+  margin-bottom: 18px;
+}
+
+.side-nav-item {
+  color: var(--muted);
+}
+
+.side-nav-item.active {
+  color: var(--text);
+  background: var(--accent-soft);
+  border-color: rgba(40, 109, 124, 0.14);
+  box-shadow: 0 14px 28px rgba(31, 47, 63, 0.08);
+}
+
+:root[data-theme='dark'] .side-nav-item.active {
+  box-shadow: 0 16px 30px rgba(0, 0, 0, 0.24);
+}
+
+.ghost-button,
+.collapse-button,
+.secondary-button,
+.primary-button,
+input,
+select,
+textarea {
+  border-color: var(--line);
+}
+
+.ghost-button,
+.collapse-button {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: none;
+}
+
+.secondary-button {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.primary-button {
+  background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+}
+
+input,
+select,
+textarea,
+.shell-composer,
+.picker-menu {
+  background: var(--surface-strong);
+  color: var(--text);
+}
+
+.page-surface > .panel-header.compact {
+  margin-bottom: 12px;
+}
+
+.page-surface > .panel-header.compact h2 {
+  margin-top: 0;
+}
+
+.chat-history-panel > .panel-header.compact,
+.cli-history-panel > .panel-header.compact {
+  justify-content: flex-end;
+  min-height: 34px;
+  margin-bottom: 8px;
+}
+
+.chat-history-panel > .panel-header.compact > div:first-child,
+.cli-history-panel > .panel-header.compact > div:first-child {
+  display: none;
+}
+
+.chat-history-panel,
+.cli-history-panel {
+  background: var(--surface-strong);
+  border-color: var(--line);
+  box-shadow: var(--shadow);
+}
+
+.chat-history-panel .secondary-button.tiny {
+  min-height: 30px;
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.history-panel-tabs {
+  margin-bottom: 10px;
+}
+
+.history-group-head strong,
+.session-row-preview {
+  color: var(--text);
+}
+
+.message-bubble {
+  border-radius: 18px;
+  padding: 13px 15px 12px;
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+}
+
+.message-bubble.user {
+  background: var(--bubble-user);
+}
+
+.message-bubble.assistant,
+.message-bubble.system {
+  background: var(--bubble-ai);
+}
+
+.cli-log-bubble,
+.cli-log-bubble.error {
+  background: var(--bubble-log);
+}
+
+.message-role {
+  color: var(--accent-strong);
+}
+
+.markdown-body code {
+  background: rgba(40, 109, 124, 0.1);
+}
+
+.wallet-overview-card {
+  background: var(--surface-strong);
+  border-color: var(--line);
+  box-shadow: var(--shadow);
+}
+
+.wallet-overview-head {
+  border-bottom-color: var(--line);
+}
+
+.wallet-overview-metric {
+  border-right-color: var(--line);
+}
+
+.wallet-overview-metric strong {
+  color: var(--text);
+}
+
+.panel-block,
+.settings-card,
+.settings-intro-card,
+.pricing-card,
+.mini-stat,
+.status-card,
+.empty-card,
+.key-reveal,
+.result-block,
+.billing-card,
+.record-row {
+  background: var(--surface);
+  border-color: var(--line);
+  box-shadow: var(--shadow);
+}
+
+.me-user-card .record-row.highlighted {
+  background: var(--surface);
+}
+
+.record-row.highlighted {
+  background: var(--accent-soft);
+}
+
+.theme-toggle-button {
+  min-height: 34px;
+  border-radius: 12px;
+}
+
+.theme-toggle-button span {
+  font-weight: 650;
+}
+
+.billing-card-fill,
+.usage-bar-fill {
+  background: linear-gradient(90deg, rgba(40, 109, 124, 0.22), rgba(112, 184, 197, 0.18));
+}
+
+.metric-pill,
+.user-pill,
+.chip,
+.tag {
+  background: var(--surface);
+  color: var(--muted);
+}
+
+.metric-pill.success {
+  background: rgba(47, 124, 99, 0.12);
+  color: var(--success);
+}

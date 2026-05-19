@@ -908,14 +908,13 @@ function sanitizeCliUserPrompt(raw: string) {
 
   const policyMarker = '执行策略：'
   const taskMarker = '用户任务：'
-  const attachmentMarker = '\n\n附件引用：'
   let next = normalized
 
   if (next.startsWith(policyMarker) && next.includes(taskMarker)) {
     next = next.slice(next.indexOf(taskMarker) + taskMarker.length).trim()
   }
 
-  const attachmentIndex = next.indexOf(attachmentMarker)
+  const attachmentIndex = next.indexOf('附件引用：')
   if (attachmentIndex >= 0) {
     next = next.slice(0, attachmentIndex).trim()
   }
