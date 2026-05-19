@@ -73,7 +73,7 @@ export async function sendImageGeneration(payload: {
 } = {}) {
   return desktopRequest<ImageGenerationResponse>({
     method: 'POST',
-    path: '/v1/images/generations',
+    path: '/pg/images/generations',
     requestId: options.requestId,
     body: {
       ...payload,

@@ -19,7 +19,6 @@ import {
   PanelRightOpen,
   PencilLine,
   Plus,
-  RefreshCcw,
   RotateCcw,
   Send,
   Square,
@@ -113,6 +112,7 @@ import { useAuthStore } from './stores/auth-store'
 
 type AssistantMode = 'chat' | 'codex' | 'claude'
 type SideTab = 'assistants' | 'subscriptions' | 'wallet' | 'me'
+type HistoryVisibilityTab = 'visible' | 'hidden'
 
 type ComposerAttachment = {
   id: string
@@ -410,12 +410,7 @@ type CliLogEntry = {
   level: 'status' | 'error'
   content: string
   createdAt: number
-  files?: {
-    path: string
-    kind: 'created' | 'modified' | 'deleted' | 'renamed' | 'unknown'
-    content?: string
-    diff?: string
-  }[]
+  files?: CliSessionMessage['fileChanges']
 }
 
 type ComposerActionItem = {
@@ -540,6 +535,14 @@ const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-4-6'
 
 function isImageGenerationModel(value: string) {
   return value.trim().toLowerCase() === 'gpt-image-2'
+}
+
+function resolveUsageTimestamp(item: UsageData['items'][number]) {
+  const raw = Number(item.created_at || item.created_time || 0)
+  if (!raw) {
+    return 0
+  }
+  return raw > 10_000_000_000 ? raw : raw * 1000
 }
 
 function resolveImageMessageSource(item?: { url?: string; b64_json?: string }) {
@@ -788,36 +791,43 @@ function buildSmoothLinePath(points: Array<{ x: number; y: number }>) {
 
 function buildUsageSeriesFromTimeline(items: UsageData['items']) {
   const buckets = new Map<string, Map<string, number>>()
+  const bucketTimes = new Map<string, number>()
+  const timestamps = items
+    .map((item) => resolveUsageTimestamp(item))
+    .filter((value) => value > 0)
+    .sort((left, right) => left - right)
+  const hasMultiDayRange =
+    timestamps.length >= 2 && timestamps[timestamps.length - 1] - timestamps[0] >= 24 * 60 * 60 * 1000
+  const minuteBucketSize = hasMultiDayRange ? 60 : 10
+
   for (const item of items) {
-    const timestamp = Number(item.created_at || item.created_time || 0)
-    const label = timestamp ? dayjs(timestamp > 10_000_000_000 ? timestamp : timestamp * 1000).format('MM-DD') : '未知时间'
+    const timestamp = resolveUsageTimestamp(item)
+    const roundedTimestamp = timestamp
+      ? Math.floor(timestamp / (minuteBucketSize * 60 * 1000)) * minuteBucketSize * 60 * 1000
+      : 0
+    const label = roundedTimestamp
+      ? dayjs(roundedTimestamp).format(hasMultiDayRange ? 'MM-DD HH:mm' : 'HH:mm')
+      : '未知时间'
     const model = item.model_name || item.token_name || '未标注模型'
     if (!buckets.has(label)) {
       buckets.set(label, new Map())
+      bucketTimes.set(label, roundedTimestamp || Number.MAX_SAFE_INTEGER)
     }
     const current = buckets.get(label)!
     current.set(model, (current.get(model) || 0) + Number(item.quota || 0))
   }
 
-  const labels = Array.from(buckets.keys())
-  labels.sort((left, right) => {
-    if (left === '未知时间') {
-      return 1
-    }
-    if (right === '未知时间') {
-      return -1
-    }
-    return left.localeCompare(right)
-  })
-
-  const models = Array.from(
-    new Set(items.map((item) => item.model_name || item.token_name || '未标注模型'))
+  const labels = Array.from(buckets.keys()).sort(
+    (left, right) => (bucketTimes.get(left) || Number.MAX_SAFE_INTEGER) - (bucketTimes.get(right) || Number.MAX_SAFE_INTEGER)
   )
+
+  const models = Array.from(new Set(items.map((item) => item.model_name || item.token_name || '未标注模型')))
 
   return {
     labels,
     models,
     buckets,
+    bucketTimes,
   }
 }
 
@@ -865,7 +875,7 @@ function UsageTrendChart(props: {
         {chart.models.map((model, modelIndex) => {
           const values = chart.labels.map((label) => chart.buckets.get(label)?.get(model) || 0)
           const points = values.map((value, index) => {
-            const x = left + (chartWidth * (index + 0.5)) / Math.max(chart.labels.length, 1)
+            const x = left + (chartWidth * index) / Math.max(chart.labels.length - 1, 1)
             const y = top + chartHeight - (value / maxValue) * chartHeight
             return { x, y }
           })
@@ -883,7 +893,7 @@ function UsageTrendChart(props: {
         })}
 
         {chart.labels.map((label, index) => {
-          const x = left + (chartWidth * (index + 0.5)) / Math.max(chart.labels.length, 1)
+          const x = left + (chartWidth * index) / Math.max(chart.labels.length - 1, 1)
           return (
             <text key={label} x={x} y={height - 14} textAnchor='middle' className='usage-trend-axis'>
               {label}
@@ -1119,10 +1129,7 @@ function AssistantsChatWorkspace(props: {
     () => prioritizeFavoriteModels(filterAssistantModels('chat', withFavoriteFlag(models, favoriteModels))),
     [favoriteModels, models]
   )
-  const chatModeModels = useMemo(
-    () => [{ label: 'gpt-image-2 生图', value: 'gpt-image-2' }, ...compatibleChatModels],
-    [compatibleChatModels]
-  )
+  const chatModeModels = compatibleChatModels
 
   const activeModelLabel = useMemo(
     () =>
@@ -1201,6 +1208,14 @@ function AssistantsChatWorkspace(props: {
     window.addEventListener('pointerdown', handlePointerDown)
     return () => window.removeEventListener('pointerdown', handlePointerDown)
   }, [assistantMenuOpen, historyOpen, modelMenuOpen])
+
+  useEffect(() => {
+    function handleOpenHistory() {
+      setHistoryOpen(true)
+    }
+    window.addEventListener('oneapi:open-assistant-history', handleOpenHistory as EventListener)
+    return () => window.removeEventListener('oneapi:open-assistant-history', handleOpenHistory as EventListener)
+  }, [])
 
   function handleCreateAssistant() {
     if (!assistantName.trim() || !assistantPrompt.trim()) {
@@ -1452,20 +1467,6 @@ function AssistantsChatWorkspace(props: {
     <section className='workspace-page chat-page'>
       <div className={`chat-layout ${historyOpen ? 'history-open' : ''}`}>
         <article className='panel conversation-panel chat-panel-surface'>
-          <div className='workspace-corner-tools'>
-            {!historyOpen && (
-              <button
-                className='ghost-button icon-only'
-                type='button'
-                onClick={() => setHistoryOpen(true)}
-                title='最近会话'
-                aria-label='最近会话'
-              >
-                <PanelRightOpen size={16} />
-              </button>
-            )}
-          </div>
-
           <div className='message-stream'>
             {messages.map((item) => (
               <div
@@ -1539,22 +1540,6 @@ function AssistantsChatWorkspace(props: {
             },
             onPaste: handleAttachmentPaste,
             leftActions: [
-              {
-                key: 'history',
-                node: !historyOpen ? (
-                  <button
-                    className='ghost-button tiny icon-pill-trigger'
-                    type='button'
-                    onClick={() => setHistoryOpen(true)}
-                    title='最近会话'
-                  >
-                    <PanelRightOpen size={16} />
-                    <strong>最近会话</strong>
-                  </button>
-                ) : (
-                  <span className='composer-placeholder' />
-                ),
-              },
               {
                 key: 'assistant',
                 node: (
@@ -1903,45 +1888,23 @@ function SubscriptionsWorkspace(props: {
                     allSubscriptions.map((item) => (
                       <div key={item.subscription.id} className='record-row'>
                         <div>
-                          <strong>订阅 #{item.subscription.id}</strong>
+                          <strong>{plans.find((plan) => plan.plan.id === item.subscription.plan_id)?.plan.title || `订阅 #${item.subscription.id}`}</strong>
                           <span>
                             已用 {formatQuota(item.subscription.amount_used)} / {formatQuota(item.subscription.amount_total)}
                           </span>
+                        </div>
+                        <div className='subscription-progress-inline'>
+                          <div className='usage-bar-track'>
+                            <div
+                              className='usage-bar-fill'
+                              style={{ width: `${percentageOf(item.subscription.amount_used, item.subscription.amount_total)}%` }}
+                            />
+                          </div>
                         </div>
                         <small>{item.subscription.status}</small>
                       </div>
                     ))
                   )}
-                </div>
-              </div>
-
-              <div className='panel-block'>
-                <div className='list-block-header'>
-                  <strong>订阅概览</strong>
-                  <span>当前账户的套餐使用摘要</span>
-                </div>
-                <div className='subrecords'>
-                  <div className='record-row'>
-                    <div>
-                      <strong>生效订阅</strong>
-                      <span>{activeSubscriptions.length > 0 ? '当前存在可用套餐，可优先抵扣。' : '当前没有生效中的订阅。'}</span>
-                    </div>
-                    <small>{activeSubscriptions.length}</small>
-                  </div>
-                  <div className='record-row'>
-                    <div>
-                      <strong>账单偏好</strong>
-                      <span>{subscriptionSelf?.billing_preference || '使用服务端默认配置'}</span>
-                    </div>
-                    <small>计费策略</small>
-                  </div>
-                  <div className='record-row'>
-                    <div>
-                      <strong>钱包支付</strong>
-                      <span>{paymentInfo?.enable_wallet_payment ? '已开启，可直接用钱包购买套餐。' : '未开启钱包购买。'}</span>
-                    </div>
-                    <small>{paymentInfo?.enable_wallet_payment ? '可用' : '关闭'}</small>
-                  </div>
                 </div>
               </div>
             </div>
@@ -1963,14 +1926,23 @@ function WalletWorkspace(props: {
 
   const recentBills = billing?.items || []
   const completedBillCount = recentBills.filter((item) => item.status === 'success').length
-  const walletBalance = Number(user.remain_balance || user.quota || 0)
-  const walletExpense = Number(user.used_balance || user.used_quota || 0)
+  const walletBalance = Number(user.remain_balance || 0)
+  const tokenBalance = Number(user.quota || 0)
+  const walletExpense = Number(user.used_balance || 0)
+  const tokenExpense = Number(user.used_quota || 0)
   const modelSummary = useMemo(
     () => usageModelSummary(usageData?.items || []),
     [usageData?.items]
   )
   const totalQuota = modelSummary.reduce((sum, item) => sum + item.quota, 0)
   const topModels = modelSummary.slice(0, 8)
+  const maxBillAmount = recentBills.reduce((max, item) => Math.max(max, Number(item.amount || item.money || 0)), 0)
+
+  function formatBillingLabel(item: BillingHistoryData['items'][number]) {
+    const trade = String(item.trade_no || '').replace(/SUBWALLETUSR1NO[a-zA-Z0-9_-]*/g, '').trim()
+    const payment = String(item.payment_method || '').replace(/^wallet$/i, '').trim()
+    return trade || payment || '订单'
+  }
 
   const refreshWallet = useCallback(async () => {
     const nextBilling = await getBillingHistory()
@@ -2045,8 +2017,16 @@ function WalletWorkspace(props: {
                 <span>当前余额</span>
               </div>
               <div className='wallet-overview-metric'>
+                <strong>{formatQuota(tokenBalance)}</strong>
+                <span>Token 余额</span>
+              </div>
+              <div className='wallet-overview-metric'>
                 <strong>{formatQuota(walletExpense)}</strong>
                 <span>累计消耗</span>
+              </div>
+              <div className='wallet-overview-metric'>
+                <strong>{formatQuota(tokenExpense)}</strong>
+                <span>Token 消耗</span>
               </div>
               <div className='wallet-overview-metric'>
                 <strong>{billing?.total || 0}</strong>
@@ -2085,14 +2065,19 @@ function WalletWorkspace(props: {
                   <div className='billing-grid'>
                     {(billing?.items || []).map((item, index) => (
                       <div key={String(item.trade_no || index)} className='billing-card'>
-                        <div className='billing-card-fill' style={{ width: `${Math.min(100, Math.max(0, Number(item.amount || 0) * 100))}%` }} />
-                        <div className='billing-card-inner'>
-                          <strong>{String(item.payment_method || '订单')}</strong>
-                          <span>{formatPrice(item.money || item.amount || 0, 'CNY')}</span>
-                          <small>{String(item.trade_no || '无交易号')}</small>
+                          <div
+                            className='billing-card-fill'
+                            style={{
+                              width: `${percentageOf(Number(item.amount || item.money || 0), maxBillAmount || 1)}%`,
+                            }}
+                          />
+                          <div className='billing-card-inner'>
+                            <strong>{formatBillingLabel(item)}</strong>
+                            <span>{formatPrice(item.money || item.amount || 0, 'CNY')}</span>
+                            <small>{item.status === 'success' ? '已完成' : item.status === 'pending' ? '处理中' : '已过期'}</small>
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      ))}
                   </div>
                 )}
               </div>
@@ -2271,9 +2256,8 @@ function MeWorkspace(props: {
 
           <div className='panel-scroll'>
             <div className='content-grid me-layout page-blocks'>
-              <div className='me-left-space'>
-                <div className='panel-block'>
-                  <div className='subrecords'>
+              <div className='panel-block me-user-card'>
+                <div className='subrecords'>
                   <div className='record-row highlighted'>
                     <div>
                       <strong>{user.display_name || user.username}</strong>
@@ -2317,7 +2301,11 @@ function MeWorkspace(props: {
                     <small>请求数 {user.request_count}</small>
                   </div>
                 </div>
+              </div>
 
+              <CliSetupCard client='codex' user={user} toast={toast} className='me-codex-card' />
+
+              <div className='panel-block me-key-create-card'>
                 <div className='subform me-key-create'>
                   <div className='list-block-header'>
                     <strong>新建 Key</strong>
@@ -2346,42 +2334,39 @@ function MeWorkspace(props: {
                     </div>
                   )}
                 </div>
+              </div>
+
+              <div className='panel-block me-key-list-card'>
+                <div className='list-block-header'>
+                  <strong>已有 Key</strong>
                 </div>
-                <div className='panel-block'>
-                  <div className='list-block-header'>
-                    <strong>已有 Key</strong>
-                  </div>
-                  <div className='subrecords'>
-                    {apiKeys.length === 0 ? (
-                      <EmptyState title='当前还没有 API Key' description='验证密码后即可直接新建桌面端专用 Key。' />
-                    ) : (
-                      apiKeys.map((item) => (
-                        <div key={item.id} className='record-row'>
-                          <div>
-                            <strong>{item.name}</strong>
-                            <span>{item.group || 'default'} · 创建于 {formatDateTime(item.created_time)}</span>
-                          </div>
-                          <div className='record-actions'>
-                            <small>{item.status === 1 ? '启用中' : '已停用'}</small>
-                            <button
-                              className='ghost-button'
-                              type='button'
-                              onClick={() => openPasswordGate('view-key', item.id)}
-                            >
-                              查看
-                            </button>
-                          </div>
+                <div className='subrecords'>
+                  {apiKeys.length === 0 ? (
+                    <EmptyState title='当前还没有 API Key' description='验证密码后即可直接新建桌面端专用 Key。' />
+                  ) : (
+                    apiKeys.map((item) => (
+                      <div key={item.id} className='record-row'>
+                        <div>
+                          <strong>{item.name}</strong>
+                          <span>{item.group || 'default'} · 创建于 {formatDateTime(item.created_time)}</span>
                         </div>
-                      ))
-                    )}
-                  </div>
+                        <div className='record-actions'>
+                          <small>{item.status === 1 ? '启用中' : '已停用'}</small>
+                          <button
+                            className='ghost-button'
+                            type='button'
+                            onClick={() => openPasswordGate('view-key', item.id)}
+                          >
+                            查看
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
                 </div>
               </div>
 
-              <div className='me-right-space'>
-                <CliSetupCard client='codex' user={user} toast={toast} />
-                <CliSetupCard client='claude' user={user} toast={toast} />
-              </div>
+              <CliSetupCard client='claude' user={user} toast={toast} className='me-claude-card' />
             </div>
           </div>
         </article>
@@ -2445,6 +2430,7 @@ function CliWorkspace(props: {
   const [hiddenSessionIds, setHiddenSessionIds] = useState<string[]>(() =>
     readJsonStorage<string[]>(`oneapi-desktop-${client}-hidden-sessions`, [])
   )
+  const [historyVisibilityTab, setHistoryVisibilityTab] = useState<HistoryVisibilityTab>('visible')
   const [requestSessionMap, setRequestSessionMap] = useState<
     Record<string, { sessionId: string; projectPath: string }>
   >({})
@@ -2513,14 +2499,14 @@ function CliWorkspace(props: {
     () => recentSessions.filter((item) => hiddenSessionIds.includes(item.id)),
     [hiddenSessionIds, recentSessions]
   )
+  const historySource = historyVisibilityTab === 'hidden' ? hiddenRecentSessions : visibleRecentSessions
   const sessionsByProject = useMemo(() => {
-    const source = visibleRecentSessions
-    return source.reduce<Record<string, CliHistoryEntry[]>>((groups, item) => {
+    return historySource.reduce<Record<string, CliHistoryEntry[]>>((groups, item) => {
       const key = item.projectName || item.projectPath || '未命名项目'
       groups[key] = [...(groups[key] || []), item]
       return groups
     }, {})
-  }, [visibleRecentSessions])
+  }, [historySource])
   const activeTimeline = useMemo(
     () =>
       buildCliTimeline({
@@ -2534,8 +2520,6 @@ function CliWorkspace(props: {
       }),
     [activeLogs, activeMessages, activePartial, selectedModelLabel]
   )
-  const visibleHistoryButton = !historyOpen
-
   function toggleFavoriteModel(value: string) {
     setFavoriteModels((current) => {
       const next = current.includes(value)
@@ -2689,10 +2673,15 @@ function CliWorkspace(props: {
           level: payload.kind === 'error' ? 'error' : 'status',
           content: payload.message,
           createdAt: payload.createdAt,
+          files: payload.files,
         } satisfies CliLogEntry
         const previous = current[targetSessionId] || []
         const lastEntry = previous.at(-1)
-        if (lastEntry?.level === nextEntry.level && lastEntry.content === nextEntry.content) {
+        if (
+          lastEntry?.level === nextEntry.level &&
+          lastEntry.content === nextEntry.content &&
+          JSON.stringify(lastEntry.files || []) === JSON.stringify(nextEntry.files || [])
+        ) {
           return current
         }
         return {
@@ -2735,6 +2724,14 @@ function CliWorkspace(props: {
     window.addEventListener('pointerdown', handlePointerDown)
     return () => window.removeEventListener('pointerdown', handlePointerDown)
   }, [effortMenuOpen, historyOpen, modelMenuOpen])
+
+  useEffect(() => {
+    function handleOpenHistory() {
+      setHistoryOpen(true)
+    }
+    window.addEventListener(`oneapi:open-${client}-history`, handleOpenHistory as EventListener)
+    return () => window.removeEventListener(`oneapi:open-${client}-history`, handleOpenHistory as EventListener)
+  }, [client])
 
   useEffect(() => {
     if (active) {
@@ -2795,6 +2792,24 @@ function CliWorkspace(props: {
     setSessionMessagesMap((current) => ({
       ...current,
       [details.id]: details.messages,
+    }))
+    setSessionLogsMap((current) => ({
+      ...current,
+      [details.id]:
+        current[details.id]?.length
+          ? current[details.id]
+          : details.fileChanges?.length
+            ? [
+                {
+                  id: `${details.id}-summary-log`,
+                  sessionId: details.id,
+                  level: 'status',
+                  content: `本次开发共修改 ${details.fileChanges.length} 个文件`,
+                  createdAt: details.updatedAt || Date.now(),
+                  files: details.fileChanges,
+                },
+              ]
+            : current[details.id] || [],
     }))
     setSessionPartialMap((current) => ({
       ...current,
@@ -3091,22 +3106,6 @@ function CliWorkspace(props: {
             onPaste: handleAttachmentPaste,
             leftActions: [
               {
-                key: 'history',
-                node: visibleHistoryButton ? (
-                  <button
-                    className='ghost-button tiny icon-pill-trigger'
-                    type='button'
-                    onClick={() => setHistoryOpen(true)}
-                    title='最近会话'
-                  >
-                    <PanelRightOpen size={16} />
-                    <strong>最近会话</strong>
-                  </button>
-                ) : (
-                  <span className='composer-placeholder' />
-                ),
-              },
-              {
                 key: 'project',
                 node: (
                   <button
@@ -3117,15 +3116,6 @@ function CliWorkspace(props: {
                   >
                     <FolderOpen size={16} />
                     <strong>{projectName || '选择目录'}</strong>
-                  </button>
-                ),
-              },
-              {
-                key: 'refresh',
-                node: (
-                  <button className='ghost-button tiny icon-pill-trigger' type='button' onClick={() => void refreshCliState(true)} title='刷新环境与历史'>
-                    <RefreshCcw size={16} />
-                    <strong>刷新</strong>
                   </button>
                 ),
               },
@@ -3269,18 +3259,43 @@ function CliWorkspace(props: {
               <span className='eyebrow dark'>历史记录</span>
               <h2>最近会话</h2>
             </div>
-            <div className='inline-actions'>
-              <button className='secondary-button tiny' type='button' onClick={() => setHistoryOpen(false)}>
-                收起
-              </button>
-            </div>
+              <div className='inline-actions'>
+                <button className='ghost-button tiny' type='button' onClick={() => void refreshCliState()}>
+                  刷新
+                </button>
+                <button className='secondary-button tiny' type='button' onClick={() => setHistoryOpen(false)}>
+                  收起
+                </button>
+              </div>
           </div>
 
           <div className='side-pane-scroll'>
+            <div className='history-panel-tabs'>
+              <button
+                className={`ghost-button tiny ${historyVisibilityTab === 'visible' ? 'selected-toggle' : ''}`}
+                type='button'
+                onClick={() => setHistoryVisibilityTab('visible')}
+              >
+                最近会话
+              </button>
+              <button
+                className={`ghost-button tiny ${historyVisibilityTab === 'hidden' ? 'selected-toggle' : ''}`}
+                type='button'
+                onClick={() => setHistoryVisibilityTab('hidden')}
+              >
+                隐藏会话
+              </button>
+            </div>
             {Object.keys(sessionsByProject).length === 0 ? (
               <EmptyState
-                title='当前没有可读取的历史'
-                description={projectPath ? '当前项目还没有本地 CLI 会话记录。' : '使用过本地 CLI 后，会话会显示在这里。'}
+                title={historyVisibilityTab === 'hidden' ? '当前没有隐藏会话' : '当前没有可读取的历史'}
+                description={
+                  historyVisibilityTab === 'hidden'
+                    ? '隐藏后的会话会按项目分组显示在这里。'
+                    : projectPath
+                      ? '当前项目还没有本地 CLI 会话记录。'
+                      : '使用过本地 CLI 后，会话会显示在这里。'
+                }
               />
             ) : (
               <div className='history-project-groups'>
@@ -3312,40 +3327,21 @@ function CliWorkspace(props: {
                             type='button'
                             onClick={(event) => {
                               event.stopPropagation()
-                              hideSession(item.id)
+                              if (historyVisibilityTab === 'hidden') {
+                                unhideSession(item.id)
+                              } else {
+                                hideSession(item.id)
+                              }
                             }}
-                            aria-label='隐藏会话'
+                            aria-label={historyVisibilityTab === 'hidden' ? '显示会话' : '隐藏会话'}
                           >
-                            <EyeOff size={14} />
+                            {historyVisibilityTab === 'hidden' ? <Eye size={14} /> : <EyeOff size={14} />}
                           </button>
                         </div>
                       ))}
                     </div>
                   </div>
                 ))}
-              </div>
-            )}
-            {hiddenRecentSessions.length > 0 && (
-              <div className='history-group'>
-                <div className='history-group-head'>
-                  <strong>隐藏会话</strong>
-                  <span>{hiddenRecentSessions.length} 条</span>
-                </div>
-                <div className='subrecords compact-records'>
-                  {hiddenRecentSessions.map((item: CliHistoryEntry) => (
-                    <div key={item.id} className='record-row action-row session-row'>
-                      <span className='session-row-preview'>{clipText(item.preview || item.title, 74)}</span>
-                      <small>已隐藏</small>
-                      <button
-                        className='ghost-button tiny'
-                        type='button'
-                        onClick={() => unhideSession(item.id)}
-                      >
-                        显示
-                      </button>
-                    </div>
-                  ))}
-                </div>
               </div>
             )}
           </div>
@@ -3376,30 +3372,35 @@ function CliSetupCard(props: {
   client: CliClient
   user: UserProfile
   toast: (message: string) => void
+  className?: string
 }) {
-  const { client, user, toast } = props
+  const { client, user, toast, className } = props
   const [status, setStatus] = useState<CliStatus>(buildEmptyCliStatus(client))
   const [deploying, setDeploying] = useState(false)
   const [deployLog, setDeployLog] = useState<DeployProgressPayload[]>([])
   const [freshCliKey, setFreshCliKey] = useState('')
   const [preset, setPreset] = useState<{ apiKey: string; model: string; baseUrl: string } | null>(null)
 
-  const refreshStatus = useCallback(async (silent = false) => {
-    try {
-      const cliStatusAll = await getCliStatus()
-      const nextStatus = client === 'codex' ? cliStatusAll.codex : cliStatusAll.claude
-      writeCachedCliStatus(nextStatus)
-      setStatus((current) => (sameCliStatus(current, nextStatus) ? current : nextStatus))
-    } catch (error) {
-      if (!silent) {
-        toast(error instanceof Error ? error.message : `${client} 环境检测失败`)
-      }
-    }
-  }, [client, toast])
-
   useEffect(() => {
-    void refreshStatus(true)
-  }, [refreshStatus])
+    let disposed = false
+    void (async () => {
+      try {
+        const cliStatusAll = await getCliStatus()
+        const nextStatus = client === 'codex' ? cliStatusAll.codex : cliStatusAll.claude
+        writeCachedCliStatus(nextStatus)
+        if (!disposed) {
+          setStatus(nextStatus)
+        }
+      } catch {
+        if (!disposed) {
+          setStatus(buildEmptyCliStatus(client))
+        }
+      }
+    })()
+    return () => {
+      disposed = true
+    }
+  }, [client])
 
   useEffect(() => {
     const unsubscribe = onDeployProgress((payload) => {
@@ -3409,12 +3410,17 @@ function CliSetupCard(props: {
       setDeployLog((current) => [...current, payload])
       if (payload.step === 'complete' || payload.status === 'error') {
         setDeploying(false)
-        void refreshStatus(true)
+        void (async () => {
+          const cliStatusAll = await getCliStatus()
+          const nextStatus = client === 'codex' ? cliStatusAll.codex : cliStatusAll.claude
+          writeCachedCliStatus(nextStatus)
+          setStatus((current) => (sameCliStatus(current, nextStatus) ? current : nextStatus))
+        })()
       }
     })
 
     return unsubscribe
-  }, [client, refreshStatus])
+  }, [client])
 
   useEffect(() => {
     let disposed = false
@@ -3465,17 +3471,13 @@ function CliSetupCard(props: {
   }
 
   return (
-    <article className='panel settings-card inline-settings-card'>
+    <article className={`panel settings-card inline-settings-card ${className || ''}`.trim()}>
       <div className='panel-header compact'>
         <div>
           <span className='eyebrow dark'>{client.toUpperCase()}</span>
           <h2>{client === 'codex' ? 'Codex 环境配置' : 'Claude 环境配置'}</h2>
         </div>
         <div className='inline-actions'>
-          <button className='ghost-button tiny' type='button' onClick={() => void refreshStatus()}>
-            <RefreshCcw size={16} />
-            <span>刷新</span>
-          </button>
           <button className='primary-button tiny' type='button' disabled={deploying} onClick={() => void handleDeploy()}>
             <span>{deploying ? '部署中' : '一键部署'}</span>
           </button>
@@ -3526,22 +3528,38 @@ function AssistantWorkspace(props: {
   toast: (message: string) => void
   openSettings: () => void
   visible: boolean
+  enabledModes: AssistantMode[]
 }) {
-  const { mode, setMode, toast, openSettings, visible } = props
+  const { mode, setMode, toast, openSettings, visible, enabledModes } = props
 
   return (
     <section className={`workspace-page assistant-page ${visible ? '' : 'workspace-hidden'}`}>
-      <div className='assistant-mode-float' role='tablist' aria-label='聊天形态切换'>
-        {assistantModes.map((item) => (
+      <div className='assistant-topbar'>
+        <div className='assistant-mode-float' role='tablist' aria-label='聊天形态切换'>
+          {assistantModes.filter((item) => enabledModes.includes(item.key)).map((item) => (
+            <button
+              key={item.key}
+              type='button'
+              className={`assistant-mode-button ${mode === item.key ? 'active' : ''}`}
+              onClick={() => setMode(item.key)}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+        <div className='assistant-topbar-actions'>
           <button
-            key={item.key}
+            className='ghost-button icon-only assistant-history-button'
             type='button'
-            className={`assistant-mode-button ${mode === item.key ? 'active' : ''}`}
-            onClick={() => setMode(item.key)}
+            onClick={() => {
+              window.dispatchEvent(new CustomEvent(mode === 'chat' ? 'oneapi:open-assistant-history' : `oneapi:open-${mode}-history`))
+            }}
+            title='最近会话'
+            aria-label='最近会话'
           >
-            {item.label}
+            <PanelRightOpen size={16} />
           </button>
-        ))}
+        </div>
       </div>
 
       <div className='workspace-host assistant-host'>
@@ -3909,6 +3927,17 @@ export function App() {
   const [platformLabel, setPlatformLabel] = useState('Windows')
   const [productName, setProductName] = useState('OneAPI Desktop')
   const { message, setMessage } = useToastState()
+  const [cliStatus, setCliStatus] = useState<{ codex: CliStatus; claude: CliStatus } | null>(null)
+  const enabledAssistantModes = useMemo(() => {
+    const next: AssistantMode[] = ['chat']
+    if (cliStatus?.codex.installed && cliStatus?.codex.hasConfig) {
+      next.push('codex')
+    }
+    if (cliStatus?.claude.installed && cliStatus?.claude.hasConfig) {
+      next.push('claude')
+    }
+    return next
+  }, [cliStatus])
 
   useEffect(() => {
     setBootstrapping(true)
@@ -3922,6 +3951,13 @@ export function App() {
       .then((meta) => {
         setPlatformLabel(meta.platform === 'darwin' ? 'macOS' : 'Windows')
         setProductName(meta.productName)
+      })
+      .catch(() => undefined)
+
+    getDesktopBridge()
+      .getCliStatus()
+      .then((status) => {
+        setCliStatus(status)
       })
       .catch(() => undefined)
 
@@ -3945,6 +3981,12 @@ export function App() {
       void setDesktopWindowTitle('')
     }
   }, [sideTab])
+
+  useEffect(() => {
+    if (!enabledAssistantModes.includes(assistantMode)) {
+      setAssistantMode(enabledAssistantModes[0] || 'chat')
+    }
+  }, [assistantMode, enabledAssistantModes])
 
   async function handleLogout() {
     const currentUserId = auth.user?.id
@@ -4003,7 +4045,7 @@ export function App() {
                 }}
                 aria-label={collapsed ? '展开边栏' : 'OneAPI Center'}
               >
-                <img src='/Icon.png' alt='OneAPI Center' />
+                <img src='/Icon.png' alt='' />
               </button>
               {!collapsed && (
                 <div className='brand-text'>
@@ -4038,7 +4080,7 @@ export function App() {
                   onClick={() => setSideTab(item.key)}
                   title={item.label}
                 >
-                  {collapsed && <Icon size={18} />}
+                  <Icon size={18} />
                   {!collapsed && (
                     <span>
                       <strong>{item.label}</strong>
@@ -4090,6 +4132,7 @@ export function App() {
               toast={setMessage}
               openSettings={() => setSideTab('me')}
               visible={sideTab === 'assistants'}
+              enabledModes={enabledAssistantModes}
             />
             {sideTab === 'subscriptions' && <SubscriptionsWorkspace toast={setMessage} />}
             {sideTab === 'wallet' && <WalletWorkspace user={auth.user} toast={setMessage} />}

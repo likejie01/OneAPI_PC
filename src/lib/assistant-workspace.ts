@@ -219,11 +219,7 @@ export function buildCliTimeline(input: {
     const leftTime = left.kind === 'log' ? left.startedAt : left.createdAt
     const rightTime = right.kind === 'log' ? right.startedAt : right.createdAt
 
-    if (leftTime !== rightTime) {
-      return leftTime - rightTime
-    }
-
-    const priority = (item: CliTimelineEntry) => {
+    const order = (item: CliTimelineEntry) => {
       if (item.kind === 'message' && item.role === 'user') {
         return 0
       }
@@ -236,7 +232,13 @@ export function buildCliTimeline(input: {
       return 3
     }
 
-    return priority(left) - priority(right)
+    const leftOrder = order(left)
+    const rightOrder = order(right)
+    if (leftOrder !== rightOrder) {
+      return leftOrder - rightOrder
+    }
+
+    return leftTime - rightTime
   })
 }
 
@@ -245,8 +247,9 @@ function normalizeWhitespace(value: string) {
 }
 
 function resolvePreview(messages: CliSessionMessage[]) {
-  const lastMessage = [...messages].reverse().find((item) => item.role === 'user' || item.role === 'assistant')
-  return normalizeWhitespace(lastMessage?.content || '')
+  const lastAssistant = [...messages].reverse().find((item) => item.role === 'assistant')
+  const lastUser = [...messages].reverse().find((item) => item.role === 'user')
+  return normalizeWhitespace(lastUser?.content || lastAssistant?.content || '')
 }
 
 function resolveUpdatedAt(messages: CliSessionMessage[], logs: CliLogEntryLike[]) {

@@ -121,6 +121,7 @@ select {
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
+  padding-left: 4px;
 }
 
 .sidebar.collapsed .sidebar-head {
@@ -132,7 +133,7 @@ select {
 .brand {
   display: flex;
   align-items: center;
-  gap: 0;
+  gap: 10px;
   min-width: 0;
   min-height: 42px;
   padding-left: 8px;
@@ -155,6 +156,12 @@ select {
   font-weight: 700;
   box-shadow: 0 12px 26px rgba(29, 107, 120, 0.26);
   flex-shrink: 0;
+}
+
+.brand-mark img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .brand-name {
@@ -216,10 +223,6 @@ select {
   color: #35556f;
 }
 
-.sidebar.collapsed .collapse-button {
-  align-self: center;
-}
-
 .sidebar.collapsed .side-nav-item {
   justify-content: center;
   align-items: center;
@@ -228,10 +231,6 @@ select {
 .sidebar.collapsed .side-nav-item.active {
   background: transparent;
   box-shadow: none;
-}
-
-.sidebar.collapsed .collapse-button:hover {
-  transform: none;
 }
 
 .sidebar.collapsed .collapsed-logout-button {
@@ -277,7 +276,7 @@ select {
 
 .side-nav-item {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 12px;
   padding: 14px;
   border-radius: 18px;
@@ -852,6 +851,7 @@ select {
   flex-direction: column;
   gap: 10px;
   padding: 0 4px 10px 0;
+  align-items: stretch;
 }
 
 .workspace-corner-tools {
@@ -884,6 +884,10 @@ select {
   background: rgba(201, 110, 75, 0.1);
 }
 
+.cli-thread .message-bubble.user {
+  align-self: flex-end;
+}
+
 .chat-image-result {
   display: flex;
   flex-direction: column;
@@ -900,7 +904,7 @@ select {
   margin: 6px 0 8px;
   white-space: pre-wrap;
   word-break: break-word;
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.62;
 }
 
@@ -1134,7 +1138,7 @@ select {
 }
 
 .status-grid-slim .status-button {
-  min-height: 26px;
+  min-height: 30px;
   padding: 4px 8px;
   justify-content: center;
 }
@@ -1353,11 +1357,15 @@ select {
 
 .message-stream,
 .cli-thread {
-  align-items: flex-start;
+  align-items: stretch;
 }
 
 .cli-thread .message-bubble {
   align-self: flex-start;
+}
+
+.cli-thread .message-bubble.user {
+  align-self: flex-end;
 }
 
 .history-groups {
@@ -1505,7 +1513,16 @@ select {
 }
 
 .workspace-corner-tools {
-  display: none;
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  z-index: 6;
+}
+
+.history-panel-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
 }
 
 .file-preview-modal {
@@ -1717,6 +1734,11 @@ select {
   color: #c9852d;
 }
 
+.subscription-progress-inline {
+  min-width: 120px;
+  flex: 1;
+}
+
 .history-project-groups {
   display: flex;
   flex-direction: column;
@@ -1727,11 +1749,56 @@ select {
   grid-template-columns: 1fr;
 }
 
-.me-left-space,
-.me-right-space {
-  display: flex;
-  flex-direction: column;
+.me-layout {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
+  align-items: start;
+}
+
+.me-row-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.me-user-card {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.me-codex-card {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.me-key-create-card {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.me-key-list-card {
+  grid-column: 1;
+  grid-row: 3;
+}
+
+.me-claude-card {
+  grid-column: 2;
+  grid-row: 3;
+}
+
+.assistant-topbar {
+  position: relative;
+  min-height: 38px;
+  margin-bottom: 6px;
+}
+
+.assistant-topbar-actions {
+  position: absolute;
+  top: -2px;
+  right: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .inline-settings-card {

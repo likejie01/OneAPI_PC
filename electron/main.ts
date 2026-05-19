@@ -786,11 +786,16 @@ function shouldIgnoreClaudeMessage(text: string) {
     normalized.startsWith('<turn_aborted>') ||
     normalized === 'No files found' ||
     normalized.startsWith('File created successfully at:') ||
+    normalized.startsWith('File updated successfully at:') ||
+    normalized.startsWith('File deleted successfully at:') ||
     normalized.startsWith('Updated task #') ||
     normalized.startsWith('Created task #') ||
     normalized.startsWith('[{') ||
     normalized.includes('"tool_use_id"') ||
-    normalized.includes('"tool_result"')
+    normalized.includes('"tool_result"') ||
+    normalized.includes('"toolUseResult"') ||
+    normalized.startsWith('Tool execution') ||
+    normalized.startsWith('Command completed')
   )
 }
 
@@ -1134,6 +1139,28 @@ async function listCodexHistory(limit = 12): Promise<CliHistoryEntry[]> {
     }
   }
 
+  for (const [sessionId, projectPath] of sessionMap.entries()) {
+    if (grouped.has(sessionId)) {
+      continue
+    }
+
+    const details = await getCodexSession(sessionId)
+    if (!details?.messages.length) {
+      continue
+    }
+
+    const lastUser = [...details.messages].reverse().find((item) => item.role === 'user')
+    const preview = normalizeWhitespace(lastUser?.content || details.preview || '')
+    grouped.set(sessionId, {
+      id: sessionId,
+      title: path.basename(projectPath || '') || `Codex 会话 ${sessionId.slice(0, 8)}`,
+      preview,
+      updatedAt: details.updatedAt,
+      projectName: path.basename(projectPath || '') || details.projectName || '未命名项目',
+      projectPath: projectPath || details.projectPath,
+    })
+  }
+
   return [...grouped.values()]
     .sort((left, right) => right.updatedAt - left.updatedAt)
     .slice(0, limit)
@@ -1209,6 +1236,43 @@ async function listClaudeHistory(limit = 12): Promise<CliHistoryEntry[]> {
     }
   }
 
+  const projectsRoot = path.join(os.homedir(), '.claude', 'projects')
+  const files = await walkFiles(
+    projectsRoot,
+    (filePath) => filePath.endsWith('.jsonl')
+  )
+  const recentFiles = (
+    await Promise.all(
+      files.map(async (filePath) => ({
+        filePath,
+        stat: await fs.stat(filePath),
+      }))
+    )
+  )
+    .sort((left, right) => right.stat.mtimeMs - left.stat.mtimeMs)
+    .slice(0, 60)
+
+  for (const file of recentFiles) {
+    const sessionId = path.basename(file.filePath, '.jsonl')
+    if (grouped.has(sessionId)) {
+      continue
+    }
+    const details = await getClaudeSession(sessionId)
+    if (!details?.messages.length) {
+      continue
+    }
+    const lastUser = [...details.messages].reverse().find((item) => item.role === 'user')
+    const preview = normalizeWhitespace(lastUser?.content || details.preview || '')
+    grouped.set(sessionId, {
+      id: sessionId,
+      title: details.projectName || `Claude 会话 ${sessionId.slice(0, 8)}`,
+      preview,
+      updatedAt: details.updatedAt,
+      projectName: details.projectName || '未命名项目',
+      projectPath: details.projectPath,
+    })
+  }
+
   return [...grouped.values()]
     .sort((left, right) => right.updatedAt - left.updatedAt)
     .slice(0, limit)
@@ -1254,6 +1318,9 @@ function parseClaudeSession(lines: string[]): { messages: CliSessionMessage[]; f
 
       const role = parsed.message?.role
       if (role !== 'user' && role !== 'assistant') {
+        continue
+      }
+      if (role === 'user' && parsed.toolUseResult) {
         continue
       }
       if (shouldIgnoreClaudeContent(parsed.message?.content)) {
@@ -1385,6 +1452,7 @@ function createCliProgressEmitter(
       message: string,
       sessionId?: string,
       done = false,
+      files?: CliFileChange[],
     ) {
       const trimmed = message.trim()
       if (!trimmed) {
@@ -1399,13 +1467,14 @@ function createCliProgressEmitter(
         message: trimmed,
         createdAt: Date.now(),
         done,
+        files,
       } satisfies CliProgressPayload)
     },
-    status(message: string, sessionId?: string, done = false) {
-      this.send('status', message, sessionId, done)
+    status(message: string, sessionId?: string, done = false, files?: CliFileChange[]) {
+      this.send('status', message, sessionId, done, files)
     },
-    error(message: string, sessionId?: string, done = false) {
-      this.send('error', message, sessionId, done)
+    error(message: string, sessionId?: string, done = false, files?: CliFileChange[]) {
+      this.send('error', message, sessionId, done, files)
     },
     partial(message: string, sessionId?: string, done = false) {
       if (!message || message === lastPartial) {
@@ -1587,11 +1656,11 @@ async function runCodexPrompt(
   const success = !aborted && result.exitCode === 0 && output.length > 0
 
   if (success) {
-    progress.status('Codex 已完成本次回复。', sessionId, true)
+    progress.status('Codex 已完成本次回复。', sessionId, true, fileChanges)
   } else if (aborted) {
     progress.status('Codex 已停止本次回复。', sessionId, true)
   } else if (result.stderr.trim()) {
-    progress.error(result.stderr.trim(), sessionId, true)
+    progress.error(result.stderr.trim(), sessionId, true, fileChanges)
   }
 
   return {
@@ -1758,11 +1827,11 @@ async function runClaudePrompt(
 
   if (success) {
     progress.partial(output, sessionId, true)
-    progress.status('Claude 已完成本次回复。', sessionId, true)
+    progress.status('Claude 已完成本次回复。', sessionId, true, fileChanges)
   } else if (aborted) {
     progress.status('Claude 已停止本次回复。', sessionId, true)
   } else if (result.stderr.trim()) {
-    progress.error(result.stderr.trim(), sessionId, true)
+    progress.error(result.stderr.trim(), sessionId, true, fileChanges)
   }
 
   return {
