@@ -51,6 +51,7 @@ export interface AuthStatus {
   email_verification?: boolean
   user_agreement_enabled?: boolean
   privacy_policy_enabled?: boolean
+  quota_per_unit?: number
 }
 
 export interface AssistantRecord {

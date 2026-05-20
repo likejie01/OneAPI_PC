@@ -11,11 +11,15 @@ import type {
   DesktopAttachmentSaveRequest,
   DesktopAttachmentSaveResult,
   DesktopFilePreview,
+  DesktopImageEditRequest,
+  DesktopSaveImageRequest,
+  DesktopSaveImageResult,
   CliDeployPreset,
   DeployProgressPayload,
   DesktopApiRequest,
   DesktopApiResponse,
 } from './shared/desktop'
+import type { ImageGenerationResponse } from './shared/contracts'
 
 declare global {
   interface Window {
@@ -27,6 +31,8 @@ declare global {
         serverBaseUrl: string
         iconPath: string
       }>
+      getServerBaseUrl: () => Promise<string>
+      setServerBaseUrl: (value: string) => Promise<{ serverBaseUrl: string }>
       request: (input: DesktopApiRequest) => Promise<DesktopApiResponse>
       stopRequest: (requestId: string) => Promise<void>
       openExternal: (url: string) => Promise<void>
@@ -49,6 +55,8 @@ declare global {
       saveAttachment: (
         input: DesktopAttachmentSaveRequest
       ) => Promise<DesktopAttachmentSaveResult>
+      editImage: (input: DesktopImageEditRequest) => Promise<ImageGenerationResponse>
+      saveImage: (input: DesktopSaveImageRequest) => Promise<DesktopSaveImageResult>
       readFilePreview: (targetPath: string) => Promise<DesktopFilePreview>
       getCliDeployPreset: (client: CliClient) => Promise<CliDeployPreset>
       onDeployProgress: (

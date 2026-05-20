@@ -5,18 +5,19 @@ import {
   buildCliTimeline,
   filterAssistantModels,
   resolveCompatibleModel,
-} from './assistant-workspace'
+} from './assistant-workspace.ts'
 
 test('filterAssistantModels keeps only compatible CLI models', () => {
   const models = [
     { label: 'gpt-5.4', value: 'gpt-5.4' },
     { label: 'gpt-5.3-codex', value: 'gpt-5.3-codex' },
+    { label: 'gpt-image-2', value: 'gpt-image-2' },
     { label: 'claude-sonnet-4-6', value: 'claude-sonnet-4-6' },
   ]
 
   assert.deepEqual(
     filterAssistantModels('codex', models).map((item) => item.value),
-    ['gpt-5.3-codex']
+    ['gpt-5.4', 'gpt-5.3-codex']
   )
   assert.deepEqual(
     filterAssistantModels('claude', models).map((item) => item.value),
@@ -25,6 +26,10 @@ test('filterAssistantModels keeps only compatible CLI models', () => {
   assert.deepEqual(
     filterAssistantModels('chat', models).map((item) => item.value),
     ['gpt-5.4', 'gpt-5.3-codex', 'claude-sonnet-4-6']
+  )
+  assert.deepEqual(
+    filterAssistantModels('draw', models).map((item) => item.value),
+    ['gpt-image-2']
   )
 })
 
@@ -47,7 +52,7 @@ test('buildCliTimeline sorts messages and logs by timestamp', () => {
       { id: 'assistant-1', role: 'assistant', content: 'world', createdAt: 30, modelLabel: 'Codex' },
     ],
     logs: [
-      { id: 'log-1', level: 'status', content: 'running', createdAt: 20_000 },
+      { id: 'log-1', level: 'status', content: 'running', createdAt: 20 },
     ],
   })
 
@@ -67,18 +72,55 @@ test('buildCliTimeline groups adjacent logs from same request', () => {
     ],
   })
 
-  assert.equal(timeline.length, 2)
+  assert.equal(timeline.length, 1)
   assert.deepEqual(timeline[0], {
     id: 'log-1',
     kind: 'log',
-    level: 'status',
-    content: ['step 1', 'step 2'],
-    createdAt: 11000,
-    startedAt: 10000,
+    level: 'error',
+    title: 'step 1',
+    createdAt: 12000000,
+    startedAt: 10000000,
     requestId: 'req-1',
     sessionId: undefined,
-    title: 'step 1',
     files: [],
+    events: [
+      {
+        id: 'log-1',
+        level: 'status',
+        kind: 'status',
+        sourceKind: undefined,
+        message: 'step 1',
+        createdAt: 10000000,
+        detail: undefined,
+        command: undefined,
+        exitCode: undefined,
+        files: [],
+      },
+      {
+        id: 'log-2',
+        level: 'status',
+        kind: 'status',
+        sourceKind: undefined,
+        message: 'step 2',
+        createdAt: 11000000,
+        detail: undefined,
+        command: undefined,
+        exitCode: undefined,
+        files: [],
+      },
+      {
+        id: 'log-3',
+        level: 'error',
+        kind: 'error',
+        sourceKind: undefined,
+        message: 'boom',
+        createdAt: 12000000,
+        detail: undefined,
+        command: undefined,
+        exitCode: undefined,
+        files: [],
+      },
+    ],
   })
 })
 
@@ -89,8 +131,8 @@ test('buildCliTimeline inserts grouped logs before assistant reply of same turn'
       { id: 'assistant-1', role: 'assistant', content: 'done', createdAt: 3, modelLabel: 'Claude' },
     ],
     logs: [
-      { id: 'log-1', requestId: 'req-1', level: 'status', content: 'step 1', createdAt: 2_000 },
-      { id: 'log-2', requestId: 'req-1', level: 'status', content: 'step 2', createdAt: 2_500 },
+      { id: 'log-1', requestId: 'req-1', level: 'status', content: 'step 1', createdAt: 2 },
+      { id: 'log-2', requestId: 'req-1', level: 'status', content: 'step 2', createdAt: 2.5 },
     ],
   })
 

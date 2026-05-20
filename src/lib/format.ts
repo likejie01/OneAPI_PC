@@ -1,5 +1,7 @@
 import dayjs from 'dayjs'
 
+const DEFAULT_QUOTA_PER_UNIT = 500_000
+
 export function formatDateTime(timestamp?: number) {
   if (!timestamp) {
     return '暂无'
@@ -31,6 +33,19 @@ export function formatPrice(value?: number, currency = 'CNY') {
     currency,
     maximumFractionDigits: 2,
   }).format(value)
+}
+
+export function formatQuotaAsUsd(value?: number, quotaPerUnit = DEFAULT_QUOTA_PER_UNIT) {
+  if (value === undefined || value === null) {
+    return '--'
+  }
+  const usd = Number(value) / quotaPerUnit
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: usd >= 1 ? 2 : 4,
+    maximumFractionDigits: usd >= 1 ? 2 : 4,
+  }).format(usd)
 }
 
 export function clipText(value: string, max = 80) {

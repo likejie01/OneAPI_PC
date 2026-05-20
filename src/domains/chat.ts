@@ -1,4 +1,4 @@
-import { desktopBridge, desktopEnvelope, desktopRequest } from '../lib/desktop-client'
+import { desktopBridge, desktopEnvelope, desktopRequest, getStoredDesktopUserId } from '../lib/desktop-client'
 import type {
   ApiEnvelope,
   ChatContentPart,
@@ -88,6 +88,58 @@ export async function sendImageGeneration(payload: {
       stream: false,
     },
   })
+}
+
+export async function sendDirectImageGeneration(payload: {
+  apiKey: string
+  model: string
+  prompt: string
+  n?: number
+  size?: string
+  quality?: string
+  response_format?: 'url' | 'b64_json'
+  style?: string
+}, options: {
+  requestId?: string
+} = {}) {
+  return desktopRequest<ImageGenerationResponse>({
+    method: 'POST',
+    path: '/v1/images/generations',
+    requestId: options.requestId,
+    headers: {
+      Authorization: `Bearer ${payload.apiKey}`,
+    },
+    body: {
+      model: payload.model,
+      prompt: payload.prompt,
+      n: payload.n,
+      size: payload.size,
+      quality: payload.quality,
+      response_format: payload.response_format,
+      style: payload.style,
+    },
+  })
+}
+
+export async function sendImageEdit(payload: {
+  model: string
+  prompt: string
+  imageName: string
+  mimeType?: string
+  dataBase64: string
+}) {
+  return desktopBridge().editImage({
+    ...payload,
+    userId: getStoredDesktopUserId(),
+  })
+}
+
+export async function saveImageToDisk(payload: {
+  suggestedName: string
+  sourceUrl?: string
+  dataBase64?: string
+}) {
+  return desktopBridge().saveImage(payload)
 }
 
 export async function requireEnvelopeData<T>(promise: Promise<ApiEnvelope<T>>) {

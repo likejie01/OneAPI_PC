@@ -1,6 +1,16 @@
 export type ApiMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 export type CliClient = 'codex' | 'claude'
 export type DeployStatus = 'pending' | 'running' | 'success' | 'error'
+export type DeployLogKind = 'info' | 'command' | 'stdout' | 'stderr' | 'result'
+export type CliLogKind =
+  | 'intent'
+  | 'command'
+  | 'stdout'
+  | 'stderr'
+  | 'result'
+  | 'tool'
+  | 'status'
+  | 'error'
 
 export interface DesktopApiRequest {
   method: ApiMethod
@@ -98,10 +108,15 @@ export interface CliProgressPayload {
   requestId: string
   sessionId?: string
   kind: 'status' | 'partial' | 'error'
+  logKind?: CliLogKind
+  sourceKind?: string
   message: string
   createdAt: number
   done?: boolean
   files?: CliFileChange[]
+  detail?: string
+  command?: string
+  exitCode?: number
 }
 
 export interface CliDeployRequest {
@@ -114,10 +129,14 @@ export interface CliDeployRequest {
 export interface DeployProgressPayload {
   jobId: string
   client: CliClient
-  step: 'detect' | 'install' | 'config' | 'test' | 'complete'
+  step: 'detect' | 'node' | 'install' | 'config' | 'test' | 'complete'
   status: DeployStatus
   message: string
+  createdAt: number
+  kind?: DeployLogKind
   detail?: string
+  command?: string
+  exitCode?: number
 }
 
 export interface DesktopAttachmentSaveRequest {
@@ -127,6 +146,25 @@ export interface DesktopAttachmentSaveRequest {
 }
 
 export interface DesktopAttachmentSaveResult {
+  path: string
+}
+
+export interface DesktopImageEditRequest {
+  userId?: string
+  model: string
+  prompt: string
+  imageName: string
+  mimeType?: string
+  dataBase64: string
+}
+
+export interface DesktopSaveImageRequest {
+  suggestedName: string
+  sourceUrl?: string
+  dataBase64?: string
+}
+
+export interface DesktopSaveImageResult {
   path: string
 }
 

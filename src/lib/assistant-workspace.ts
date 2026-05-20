@@ -1,16 +1,34 @@
 import type { ChatModelOption } from '../shared/contracts'
-import type { CliHistoryEntry, CliSessionMessage } from '../shared/desktop'
+import type { CliHistoryEntry, CliLogKind, CliSessionMessage } from '../shared/desktop'
 
-export type AssistantModeKey = 'chat' | 'codex' | 'claude'
+export type AssistantModeKey = 'chat' | 'draw' | 'codex' | 'claude'
 
 export type CliLogEntryLike = {
   id: string
   requestId?: string
   sessionId?: string
   level: 'status' | 'error'
+  logKind?: CliLogKind
+  sourceKind?: string
   content: string
   createdAt: number
   files?: CliFileChange[]
+  detail?: string
+  command?: string
+  exitCode?: number
+}
+
+export type CliTimelineLogEvent = {
+  id: string
+  level: 'status' | 'error'
+  kind: CliLogKind
+  sourceKind?: string
+  message: string
+  createdAt: number
+  files: CliFileChange[]
+  detail?: string
+  command?: string
+  exitCode?: number
 }
 
 export type CliFileChange = {
@@ -35,13 +53,13 @@ export type CliTimelineEntry =
       id: string
       kind: 'log'
       level: 'status' | 'error'
-      content: string[]
+      title: string
       createdAt: number
       startedAt: number
       requestId?: string
       sessionId?: string
-      title: string
       files: CliFileChange[]
+      events: CliTimelineLogEvent[]
     }
   | {
       id: string
@@ -65,11 +83,18 @@ function toTimelineTimestamp(value: number) {
 
 export function isCodexModel(value: string) {
   const normalized = normalizeModelValue(value)
+  if (isImageGenerationModel(normalized)) {
+    return false
+  }
   return normalized.includes('codex') || normalized.startsWith('gpt-')
 }
 
 export function isClaudeModel(value: string) {
   return normalizeModelValue(value).includes('claude')
+}
+
+export function isImageGenerationModel(value: string) {
+  return normalizeModelValue(value) === 'gpt-image-2'
 }
 
 function uniqueModels(items: ChatModelOption[]) {
@@ -99,7 +124,11 @@ export function filterAssistantModels(
     return source.filter((item) => isClaudeModel(item.value))
   }
 
-  return source
+  if (mode === 'draw') {
+    return source.filter((item) => isImageGenerationModel(item.value))
+  }
+
+  return source.filter((item) => !isImageGenerationModel(item.value))
 }
 
 export function resolveCompatibleModel(
@@ -154,15 +183,28 @@ export function buildCliTimeline(input: {
     id: string
     kind: 'log'
     level: 'status' | 'error'
-    content: string[]
+    title: string
     createdAt: number
     startedAt: number
     requestId?: string
     sessionId?: string
-    title: string
     files: CliFileChange[]
+    events: CliTimelineLogEvent[]
   }>>((groups, item) => {
     const normalizedCreatedAt = toTimelineTimestamp(item.createdAt)
+    const eventFiles = mergeLogFiles([...(item.files || [])])
+    const nextEvent: CliTimelineLogEvent = {
+      id: item.id,
+      level: item.level,
+      kind: item.logKind || (item.level === 'error' ? 'error' : 'status'),
+      sourceKind: item.sourceKind,
+      message: item.content,
+      createdAt: normalizedCreatedAt,
+      files: eventFiles,
+      detail: item.detail,
+      command: item.command,
+      exitCode: item.exitCode,
+    }
     const lastGroup = groups.at(-1)
     const sameRequest =
       !!lastGroup &&
@@ -170,11 +212,12 @@ export function buildCliTimeline(input: {
       lastGroup.requestId === item.requestId
 
     if (lastGroup && sameRequest) {
-      if (!lastGroup.content.includes(item.content)) {
-        lastGroup.content.push(item.content)
-      }
       lastGroup.createdAt = Math.max(lastGroup.createdAt, normalizedCreatedAt)
-      lastGroup.files = mergeLogFiles([...lastGroup.files, ...(item.files || [])])
+      lastGroup.files = mergeLogFiles([...lastGroup.files, ...eventFiles])
+      lastGroup.events.push(nextEvent)
+      if (nextEvent.level === 'error') {
+        lastGroup.level = 'error'
+      }
       return groups
     }
 
@@ -182,13 +225,13 @@ export function buildCliTimeline(input: {
       id: item.id,
       kind: 'log',
       level: item.level,
-      content: [item.content],
+      title: item.content,
       createdAt: normalizedCreatedAt,
       startedAt: normalizedCreatedAt,
       requestId: item.requestId,
       sessionId: item.sessionId,
-      title: item.content,
-      files: mergeLogFiles([...(item.files || [])]),
+      files: eventFiles,
+      events: [nextEvent],
     })
     return groups
   }, [])

@@ -11,11 +11,15 @@ import type {
   DesktopAttachmentSaveRequest,
   DesktopAttachmentSaveResult,
   DesktopFilePreview,
+  DesktopImageEditRequest,
+  DesktopSaveImageRequest,
+  DesktopSaveImageResult,
   CliDeployPreset,
   DeployProgressPayload,
   DesktopApiRequest,
   DesktopApiResponse,
 } from '../src/shared/desktop'
+import type { ImageGenerationResponse } from '../src/shared/contracts'
 
 contextBridge.exposeInMainWorld('desktopBridge', {
   getPlatform: () => ipcRenderer.invoke('app:get-platform') as Promise<string>,
@@ -26,6 +30,9 @@ contextBridge.exposeInMainWorld('desktopBridge', {
       serverBaseUrl: string
       iconPath: string
     }>,
+  getServerBaseUrl: () => ipcRenderer.invoke('app:get-server-base-url') as Promise<string>,
+  setServerBaseUrl: (value: string) =>
+    ipcRenderer.invoke('app:set-server-base-url', value) as Promise<{ serverBaseUrl: string }>,
   request: (input: DesktopApiRequest) =>
     ipcRenderer.invoke('desktop:api-request', input) as Promise<DesktopApiResponse>,
   stopRequest: (requestId: string) =>
@@ -70,6 +77,10 @@ contextBridge.exposeInMainWorld('desktopBridge', {
     ipcRenderer.invoke('desktop:deploy-cli', input) as Promise<{ jobId: string }>,
   saveAttachment: (input: DesktopAttachmentSaveRequest) =>
     ipcRenderer.invoke('desktop:save-attachment', input) as Promise<DesktopAttachmentSaveResult>,
+  editImage: (input: DesktopImageEditRequest) =>
+    ipcRenderer.invoke('desktop:image-edit', input) as Promise<ImageGenerationResponse>,
+  saveImage: (input: DesktopSaveImageRequest) =>
+    ipcRenderer.invoke('desktop:save-image', input) as Promise<DesktopSaveImageResult>,
   readFilePreview: (targetPath: string) =>
     ipcRenderer.invoke('desktop:file-preview', targetPath) as Promise<DesktopFilePreview>,
   getCliDeployPreset: (client: CliClient) =>

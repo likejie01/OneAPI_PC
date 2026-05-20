@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { ChangeEvent, ClipboardEvent, ReactNode } from 'react'
+import type { ChangeEvent, ClipboardEvent, Dispatch, DragEvent, ReactNode, SetStateAction } from 'react'
 import {
   Bot,
   ChevronLeft,
   CheckCircle2,
   Copy,
   CreditCard,
+  Download,
   Eye,
   EyeOff,
   FileText,
@@ -19,6 +20,7 @@ import {
   Moon,
   PanelRightOpen,
   PencilLine,
+  Pin,
   Plus,
   RotateCcw,
   Send,
@@ -46,7 +48,16 @@ import {
   sendEmailVerification,
   unwrapEnvelope,
 } from './domains/auth'
-import { getUserGroups, getUserModels, sendChatCompletion, sendImageGeneration, stopChatCompletion } from './domains/chat'
+import {
+  getUserGroups,
+  getUserModels,
+  saveImageToDisk,
+  sendChatCompletion,
+  sendDirectImageGeneration,
+  sendImageEdit,
+  sendImageGeneration,
+  stopChatCompletion,
+} from './domains/chat'
 import {
   deployCli,
   getCliSession,
@@ -61,7 +72,7 @@ import {
   setDesktopWindowTitle,
   stopCliPrompt,
 } from './domains/cli'
-import { createDesktopCliKey, fetchApiKeySecret, getApiKeys } from './domains/keys'
+import { createDesktopCliKey, ensureDesktopServiceKey, fetchApiKeySecret, getApiKeys } from './domains/keys'
 import { generateAccessToken, getSelfProfile, requireSuccess, verifyCurrentPassword } from './domains/profile'
 import {
   getPublicPlans,
@@ -79,6 +90,7 @@ import {
   buildCliTimeline,
   type CliTimelineEntry,
   filterAssistantModels,
+  isImageGenerationModel as isImageGenerationModelOption,
   prioritizeFavoriteModels,
   resolveCompatibleModel,
 } from './lib/assistant-workspace'
@@ -86,7 +98,8 @@ import {
   getCliResumeSessionId,
 } from './lib/cli-session'
 import { clearStoredDesktopUserId, saveStoredDesktopUserId } from './lib/desktop-client'
-import { clipText, formatDateTime, formatPrice, formatQuota } from './lib/format'
+import { resolveCliSetupPeerState } from './lib/desktop-service'
+import { clipText, formatDateTime, formatPrice, formatQuota, formatQuotaAsUsd } from './lib/format'
 import { readJsonStorage, writeJsonStorage } from './lib/storage'
 import dayjs from 'dayjs'
 import ReactMarkdown from 'react-markdown'
@@ -96,6 +109,7 @@ import type {
   AuthStatus,
   BillingHistoryData,
   ChatContentPart,
+  ChatGroupOption,
   ChatMessage,
   ChatModelOption,
   PlanRecord,
@@ -107,6 +121,7 @@ import type {
 import type {
   CliClient,
   CliHistoryEntry,
+  CliLogKind,
   CliProgressPayload,
   CliSessionDetails,
   CliSessionMessage,
@@ -115,7 +130,7 @@ import type {
 } from './shared/desktop'
 import { useAuthStore } from './stores/auth-store'
 
-type AssistantMode = 'chat' | 'codex' | 'claude'
+type AssistantMode = 'chat' | 'draw' | 'codex' | 'claude'
 type SideTab = 'assistants' | 'subscriptions' | 'wallet' | 'me'
 type HistoryVisibilityTab = 'visible' | 'hidden'
 type ThemeMode = 'light' | 'dark'
@@ -133,6 +148,7 @@ type ComposerAttachment = {
 
 const assistantModes: Array<{ key: AssistantMode; label: string }> = [
   { key: 'chat', label: '聊天' },
+  { key: 'draw', label: '生图' },
   { key: 'codex', label: 'Codex' },
   { key: 'claude', label: 'Claude' },
 ]
@@ -433,6 +449,16 @@ function useComposerAttachments(toast: (message: string) => void) {
     await appendFiles(files)
   }, [appendFiles])
 
+  const handleDrop = useCallback(async (event: DragEvent<HTMLDivElement | HTMLTextAreaElement>) => {
+    const files = Array.from(event.dataTransfer.files || [])
+    if (!files.length) {
+      return
+    }
+
+    event.preventDefault()
+    await appendFiles(files)
+  }, [appendFiles])
+
   return {
     attachments,
     inputRef,
@@ -440,6 +466,7 @@ function useComposerAttachments(toast: (message: string) => void) {
     removeAttachment,
     handleInputChange,
     handlePaste,
+    handleDrop,
     openPicker: () => inputRef.current?.click(),
   }
 }
@@ -551,9 +578,14 @@ type CliLogEntry = {
   requestId?: string
   sessionId?: string
   level: 'status' | 'error'
+  logKind?: CliLogKind
+  sourceKind?: string
   content: string
   createdAt: number
   files?: CliSessionMessage['fileChanges']
+  detail?: string
+  command?: string
+  exitCode?: number
 }
 
 type ComposerActionItem = {
@@ -577,6 +609,7 @@ function renderComposer(props: {
   placeholder: string
   onChange: (value: string) => void
   onPaste?: (event: ClipboardEvent<HTMLTextAreaElement>) => void | Promise<void>
+  onDrop?: (event: DragEvent<HTMLDivElement | HTMLTextAreaElement>) => void | Promise<void>
   leftActions: ComposerActionItem[]
   sendButton: React.ReactNode
   fileAssets?: ComposerFileAsset[]
@@ -589,6 +622,7 @@ function renderComposer(props: {
     placeholder,
     onChange,
     onPaste,
+    onDrop,
     leftActions,
     sendButton,
     fileAssets = [],
@@ -605,13 +639,23 @@ function renderComposer(props: {
           onChange={onAttachmentInputChange}
         />
       )}
-      <div className='composer-input-zone'>
+      <div
+        className='composer-input-zone'
+        onDragOver={(event) => {
+          event.preventDefault()
+        }}
+        onDrop={onDrop}
+      >
         <textarea
           ref={textareaRef}
           value={value}
           rows={AUTO_TEXTAREA_MIN_ROWS}
           onChange={(event) => onChange(event.target.value)}
           onPaste={onPaste}
+          onDragOver={(event) => {
+            event.preventDefault()
+          }}
+          onDrop={onDrop}
           onInput={(event) => syncTextareaHeight(event.currentTarget)}
           placeholder={placeholder}
         />
@@ -661,6 +705,13 @@ type ChatSessionRecord = {
   messages: ChatBubbleMessage[]
 }
 
+type DrawSessionRecord = {
+  id: string
+  title: string
+  updatedAt: number
+  messages: ChatBubbleMessage[]
+}
+
 const CLI_REASONING_OPTIONS = [
   { label: '低', value: 'low' },
   { label: '中', value: 'medium' },
@@ -673,14 +724,21 @@ const CLAUDE_REASONING_OPTIONS = [
 ] as const
 
 const DEFAULT_CHAT_MODEL = 'gpt-5.4'
+const DEFAULT_DRAW_MODEL = 'gpt-image-2'
 const DEFAULT_CODEX_MODEL = 'gpt-5.5'
 const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-4-6'
+const DEFAULT_CODEX_BASE_URL = 'https://ai.oneapi.center/v1'
+const DEFAULT_CLAUDE_BASE_URL = 'https://ai.oneapi.center'
 const CHAT_SESSIONS_STORAGE_KEY = 'oneapi-desktop-chat-sessions'
 const CHAT_ACTIVE_SESSION_STORAGE_KEY = 'oneapi-desktop-chat-active-session'
 const CHAT_REASONING_STORAGE_KEY = 'oneapi-desktop-chat-reasoning'
 const CHAT_CONTEXT_WINDOW_STORAGE_KEY = 'oneapi-desktop-chat-context-window'
+const DRAW_SESSIONS_STORAGE_KEY = 'oneapi-desktop-draw-sessions'
+const DRAW_ACTIVE_SESSION_STORAGE_KEY = 'oneapi-desktop-draw-active-session'
 const CHAT_PENDING_MESSAGE_LABEL = 'Thinking...'
 const CLI_PENDING_MESSAGE_LABEL = 'Coding...'
+const DRAW_PENDING_MESSAGE_LABEL = 'Thinking...'
+const DRAW_PENDING_IMAGE_URL = '__oneapi_draw_pending__'
 const CHAT_CONTEXT_WINDOW_OPTIONS = [
   { label: '10 条', value: 10 },
   { label: '20 条', value: 20 },
@@ -691,7 +749,7 @@ const CHAT_CONTEXT_WINDOW_OPTIONS = [
 type ChatContextWindow = (typeof CHAT_CONTEXT_WINDOW_OPTIONS)[number]['value']
 
 function isImageGenerationModel(value: string) {
-  return value.trim().toLowerCase() === 'gpt-image-2'
+  return isImageGenerationModelOption(value)
 }
 
 function normalizeTimestampMs(value: number) {
@@ -848,6 +906,22 @@ function clearVerificationValid(userId: number) {
   window.localStorage.removeItem(getStoredVerificationKey(userId))
 }
 
+function getPendingCliVerificationKey(client: CliClient) {
+  return `oneapi-desktop-${client}-pending-verify`
+}
+
+function markPendingCliVerification(client: CliClient) {
+  window.localStorage.setItem(getPendingCliVerificationKey(client), '1')
+}
+
+function hasPendingCliVerification(client: CliClient) {
+  return window.localStorage.getItem(getPendingCliVerificationKey(client)) === '1'
+}
+
+function clearPendingCliVerification(client: CliClient) {
+  window.localStorage.removeItem(getPendingCliVerificationKey(client))
+}
+
 function buildEmptyCliStatus(client: CliClient): CliStatus {
   return {
     client,
@@ -876,6 +950,10 @@ function writeCachedCliStatus(status: CliStatus) {
 
 function sameCliStatus(left: CliStatus, right: CliStatus) {
   return JSON.stringify(left) === JSON.stringify(right)
+}
+
+function notifyCliStatusChanged(status: CliStatus) {
+  window.dispatchEvent(new CustomEvent('oneapi:cli-status-changed', { detail: status }))
 }
 
 function percentageOf(value: number, total: number) {
@@ -959,23 +1037,31 @@ function buildUsageSeriesFromTimeline(items: UsageData['items']) {
     .map((item) => resolveUsageTimestamp(item))
     .filter((value) => value > 0)
     .sort((left, right) => left - right)
-  const hasMultiDayRange =
-    timestamps.length >= 2 && timestamps[timestamps.length - 1] - timestamps[0] >= 24 * 60 * 60 * 1000
-  const rangeMinutes =
-    timestamps.length >= 2 ? Math.ceil((timestamps[timestamps.length - 1] - timestamps[0]) / 60000) : 0
-  const baseBucketMinutes = hasMultiDayRange ? 60 : 5
-  const targetBuckets = hasMultiDayRange ? 8 : 10
-  const minuteBucketSize = Math.max(
-    baseBucketMinutes,
-    rangeMinutes > 0
-      ? Math.ceil(rangeMinutes / targetBuckets / baseBucketMinutes) * baseBucketMinutes
-      : baseBucketMinutes
-  )
+  const rangeMs = timestamps.length >= 2 ? timestamps[timestamps.length - 1] - timestamps[0] : 0
+  const hasMultiDayRange = rangeMs >= 24 * 60 * 60 * 1000
+  const targetBuckets = hasMultiDayRange ? 8 : 12
+  const bucketCandidatesMs = [
+    30 * 1000,
+    60 * 1000,
+    2 * 60 * 1000,
+    5 * 60 * 1000,
+    10 * 60 * 1000,
+    15 * 60 * 1000,
+    30 * 60 * 1000,
+    60 * 60 * 1000,
+    2 * 60 * 60 * 1000,
+    6 * 60 * 60 * 1000,
+    12 * 60 * 60 * 1000,
+    24 * 60 * 60 * 1000,
+  ]
+  const bucketSizeMs =
+    bucketCandidatesMs.find((candidate) => rangeMs <= 0 || Math.ceil(rangeMs / candidate) <= targetBuckets) ||
+    bucketCandidatesMs[bucketCandidatesMs.length - 1]
 
   for (const item of items) {
     const timestamp = resolveUsageTimestamp(item)
     const bucketKey = timestamp
-      ? Math.floor(timestamp / (minuteBucketSize * 60 * 1000)) * minuteBucketSize * 60 * 1000
+      ? Math.floor(timestamp / bucketSizeMs) * bucketSizeMs
       : 0
     const model = item.model_name || item.token_name || '未标注模型'
     if (!buckets.has(bucketKey)) {
@@ -1153,6 +1239,18 @@ function PendingMessageContent(props: {
   )
 }
 
+function PendingImageContent() {
+  return (
+    <div className='pending-image-card' aria-label='图片生成中'>
+      <div className='pending-image-shimmer' />
+      <div className='pending-image-meta'>
+        <LoaderCircle className='spin' size={14} />
+        <span>{DRAW_PENDING_MESSAGE_LABEL}</span>
+      </div>
+    </div>
+  )
+}
+
 function MessageAttachmentGallery(props: {
   attachments?: Array<{
     id: string
@@ -1248,29 +1346,105 @@ function CliLogBubble(props: {
   } | null
 }) {
   const { item, expanded, onToggle, onOpenFile, onCopy, previewFile } = props
+  const [expandedEventIds, setExpandedEventIds] = useState<string[]>([])
   const uniqueFiles = Array.from(new Map(item.files.map((file) => [file.path, file])).values())
+
+  function toggleEvent(eventId: string) {
+    setExpandedEventIds((current) =>
+      current.includes(eventId)
+        ? current.filter((item) => item !== eventId)
+        : [...current, eventId]
+    )
+  }
 
   return (
     <div className={`message-bubble system cli-log-bubble ${item.level === 'error' ? 'error' : ''}`}>
       <button className='cli-log-card-head' type='button' onClick={onToggle}>
         <span className='message-role'>{item.level === 'error' ? '运行异常' : '运行日志'}</span>
-        <strong>{`已执行 ${item.content.length} 步`}</strong>
+        <strong>{`已执行 ${item.events.length} 步`}</strong>
         <small>{expanded ? '点击收起' : '点击展开'}</small>
       </button>
-      <ul className='cli-log-list'>
-        {(expanded ? item.content : item.content.slice(0, 1)).flatMap((line, index) => {
-          const nodes = [
-            <li key={`${item.id}-${index}`}>{line}</li>,
-          ]
-          if (/\bDONE\b/i.test(line)) {
-            nodes.push(<li key={`${item.id}-${index}-spacer`} className='cli-log-list-spacer' aria-hidden='true' />)
-          }
-          return nodes
+      <div className='cli-log-event-list'>
+        {(expanded ? item.events : item.events.slice(0, 1)).map((eventItem) => {
+          const eventFiles = Array.from(new Map(eventItem.files.map((file) => [file.path, file])).values())
+          const hasExpandableContent =
+            !!eventItem.command?.trim() ||
+            !!eventItem.detail?.trim() ||
+            eventFiles.length > 0
+          const eventExpanded = expandedEventIds.includes(eventItem.id)
+
+          return (
+            <div key={eventItem.id} className={`cli-log-event-row ${eventItem.kind} ${eventItem.level}`}>
+              <div className='cli-log-event-dot' />
+              <div className='cli-log-event-body'>
+                <div className='cli-log-event-head'>
+                  <div className='cli-log-event-copy'>
+                    <strong>{eventItem.message}</strong>
+                    <small>
+                      {[
+                        resolveCliLogKindLabel(eventItem.kind),
+                        formatCliSourceKind(eventItem.sourceKind),
+                        formatCliLogTime(eventItem.createdAt),
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </small>
+                  </div>
+                  {hasExpandableContent ? (
+                    <button className='ghost-button tiny' type='button' onClick={() => toggleEvent(eventItem.id)}>
+                      {eventExpanded ? '收起详情' : '展开详情'}
+                    </button>
+                  ) : null}
+                </div>
+                {eventExpanded && (
+                  <div className='cli-log-event-details'>
+                    {eventItem.command?.trim() ? (
+                      <div className='cli-log-detail-block'>
+                        <span className='cli-log-detail-label'>执行命令</span>
+                        <pre className='cli-log-detail-window'>{eventItem.command}</pre>
+                      </div>
+                    ) : null}
+                    {eventItem.detail?.trim() ? (
+                      <div className='cli-log-detail-block'>
+                        <span className='cli-log-detail-label'>详细信息</span>
+                        <pre className='cli-log-detail-window'>{eventItem.detail}</pre>
+                      </div>
+                    ) : null}
+                    {eventFiles.length > 0 ? (
+                      <div className='cli-log-detail-block'>
+                        <span className='cli-log-detail-label'>相关文件</span>
+                        <div className='cli-log-files inline-expanded'>
+                          {eventFiles.map((fileItem) => (
+                            <button
+                              key={fileItem.path}
+                              className='ghost-button tiny cli-log-file'
+                              type='button'
+                              onClick={() => onOpenFile(eventItem.id, fileItem.path)}
+                              title={fileItem.path}
+                            >
+                              <FileText size={14} />
+                              <span>{fileItem.path.split(/[\\/]/).filter(Boolean).at(-1) || fileItem.path}</span>
+                            </button>
+                          ))}
+                        </div>
+                        {previewFile && previewFile.ownerId === eventItem.id ? (
+                          <div className='inline-file-preview'>
+                            <code className='inline-file-preview-path'>{previewFile.path}</code>
+                            <pre className='inline-file-preview-content'>{previewFile.content}</pre>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+                )}
+              </div>
+            </div>
+          )
         })}
-      </ul>
-      {item.files.length > 0 && (
+      </div>
+      {uniqueFiles.length > 0 && !expanded && (
         <div className='cli-log-files'>
-          {uniqueFiles.slice(0, expanded ? undefined : 4).map((fileItem) => (
+          {uniqueFiles.slice(0, 4).map((fileItem) => (
             <button
               key={fileItem.path}
               className='ghost-button tiny cli-log-file'
@@ -1282,12 +1456,6 @@ function CliLogBubble(props: {
               <span>{fileItem.path.split(/[\\/]/).filter(Boolean).at(-1) || fileItem.path}</span>
             </button>
           ))}
-          {previewFile && previewFile.ownerId === item.id && (
-            <div className='inline-file-preview'>
-              <code className='inline-file-preview-path'>{previewFile.path}</code>
-              <pre className='inline-file-preview-content'>{previewFile.content}</pre>
-            </div>
-          )}
         </div>
       )}
       <BubbleMeta
@@ -1298,7 +1466,7 @@ function CliLogBubble(props: {
             key: 'copy',
             label: '复制',
             icon: Copy,
-            onClick: onCopy,
+            onClick: () => onCopy(),
           },
         ]}
       />
@@ -1346,6 +1514,55 @@ function loadStoredChatSessions() {
     .sort((left, right) => right.updatedAt - left.updatedAt)
 }
 
+function createDefaultDrawSession(): DrawSessionRecord {
+  return {
+    id: `draw-session-${Date.now()}`,
+    title: '新绘图',
+    updatedAt: Date.now(),
+    messages: [],
+  }
+}
+
+function loadStoredDrawSessions() {
+  const sessions = readJsonStorage<DrawSessionRecord[]>(DRAW_SESSIONS_STORAGE_KEY, [])
+  return sessions
+    .map((session) => ({
+      ...session,
+      messages: (session.messages || [])
+        .filter((message) => !message.pending)
+        .sort((left, right) => left.createdAt - right.createdAt),
+    }))
+    .sort((left, right) => right.updatedAt - left.updatedAt)
+}
+
+function orderGroupedEntries<T extends { updatedAt?: number }>(
+  groups: Array<[string, T[]]>,
+  pinnedKeys: string[]
+) {
+  const pinnedIndex = new Map(pinnedKeys.map((key, index) => [key, index]))
+  return [...groups].sort((left, right) => {
+    const leftPinned = pinnedIndex.has(left[0])
+    const rightPinned = pinnedIndex.has(right[0])
+    if (leftPinned && rightPinned) {
+      return (pinnedIndex.get(left[0]) || 0) - (pinnedIndex.get(right[0]) || 0)
+    }
+    if (leftPinned) {
+      return -1
+    }
+    if (rightPinned) {
+      return 1
+    }
+    const leftUpdated = Math.max(...left[1].map((item) => Number(item.updatedAt || 0)), 0)
+    const rightUpdated = Math.max(...right[1].map((item) => Number(item.updatedAt || 0)), 0)
+    return rightUpdated - leftUpdated
+  })
+}
+
+function extractDataUrlBase64(value: string) {
+  const match = value.match(/^data:[^;]+;base64,(.+)$/)
+  return match?.[1] || ''
+}
+
 function mergeCliMessages(left: CliMessage[], right: CliMessage[]) {
   const seen = new Set<string>()
   return [...left, ...right]
@@ -1373,13 +1590,64 @@ function mergeCliLogs(left: CliLogEntry[], right: CliLogEntry[]) {
     }))
     .sort((a, b) => a.createdAt - b.createdAt)
     .filter((item) => {
-      const key = `${item.level}:${item.createdAt}:${item.content}`
+      const key = `${item.level}:${item.logKind || ''}:${item.sourceKind || ''}:${item.createdAt}:${item.content}:${item.command || ''}:${item.detail || ''}`
       if (seen.has(key)) {
         return false
       }
       seen.add(key)
       return true
     })
+}
+
+function formatCliLogTime(timestamp: number) {
+  return dayjs(normalizeTimestampMs(timestamp)).format('HH:mm:ss')
+}
+
+function resolveCliLogKindLabel(kind?: CliLogKind) {
+  switch (kind) {
+    case 'intent':
+      return '意图'
+    case 'command':
+      return '命令'
+    case 'stdout':
+      return '输出'
+    case 'stderr':
+      return '错误输出'
+    case 'result':
+      return '结果'
+    case 'tool':
+      return '工具'
+    case 'error':
+      return '异常'
+    case 'status':
+    default:
+      return '状态'
+  }
+}
+
+function formatCliSourceKind(value?: string) {
+  const normalized = value?.trim()
+  if (!normalized) {
+    return ''
+  }
+  return normalized.replace(/[_\s]+/g, '.')
+}
+
+function serializeCliLogEvent(item: {
+  kind?: CliLogKind
+  sourceKind?: string
+  message: string
+  command?: string
+  detail?: string
+  exitCode?: number
+}) {
+  return [
+    `[${resolveCliLogKindLabel(item.kind)}] ${item.message}`,
+    item.sourceKind ? `sourceKind: ${item.sourceKind}` : '',
+    item.command ? `command:\n${item.command}` : '',
+    item.detail ? `detail:\n${item.detail}` : '',
+    item.exitCode !== undefined ? `exitCode: ${item.exitCode}` : '',
+  ].filter(Boolean).join('\n\n')
 }
 
 function PasswordField(props: {
@@ -1450,6 +1718,13 @@ function AssistantsChatWorkspace(props: {
   const [selectedGroup, setSelectedGroup] = useState('')
   const [sending, setSending] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [hiddenChatSessionIds, setHiddenChatSessionIds] = useState<string[]>(() =>
+    readJsonStorage<string[]>('oneapi-desktop-chat-hidden-sessions', [])
+  )
+  const [pinnedChatGroups, setPinnedChatGroups] = useState<string[]>(() =>
+    readJsonStorage<string[]>('oneapi-desktop-chat-pinned-groups', [])
+  )
+  const [historyVisibilityTab, setHistoryVisibilityTab] = useState<HistoryVisibilityTab>('visible')
   const [assistantMenuOpen, setAssistantMenuOpen] = useState(false)
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
   const [reasoningMenuOpen, setReasoningMenuOpen] = useState(false)
@@ -1473,6 +1748,7 @@ function AssistantsChatWorkspace(props: {
     removeAttachment,
     handleInputChange: handleAttachmentInputChange,
     handlePaste: handleAttachmentPaste,
+    handleDrop: handleAttachmentDrop,
   } = useComposerAttachments(toast)
   const { ref: draftRef, resize: resizeDraft } = useAutosizeTextarea(draft)
   const assistantMenuRef = useRef<HTMLDivElement | null>(null)
@@ -1515,6 +1791,15 @@ function AssistantsChatWorkspace(props: {
       '默认模型',
     [activeAssistant?.model, chatModeModels, selectedModel]
   )
+  const visibleChatSessions = useMemo(
+    () => chatSessions.filter((item) => !hiddenChatSessionIds.includes(item.id)),
+    [chatSessions, hiddenChatSessionIds]
+  )
+  const hiddenChatSessions = useMemo(
+    () => chatSessions.filter((item) => hiddenChatSessionIds.includes(item.id)),
+    [chatSessions, hiddenChatSessionIds]
+  )
+  const historySessions = historyVisibilityTab === 'hidden' ? hiddenChatSessions : visibleChatSessions
 
   useEffect(() => {
     let disposed = false
@@ -1616,6 +1901,14 @@ function AssistantsChatWorkspace(props: {
   useEffect(() => {
     writeJsonStorage(CHAT_CONTEXT_WINDOW_STORAGE_KEY, contextWindow)
   }, [contextWindow])
+
+  useEffect(() => {
+    writeJsonStorage('oneapi-desktop-chat-hidden-sessions', hiddenChatSessionIds)
+  }, [hiddenChatSessionIds])
+
+  useEffect(() => {
+    writeJsonStorage('oneapi-desktop-chat-pinned-groups', pinnedChatGroups)
+  }, [pinnedChatGroups])
 
   useEffect(() => {
     if (!activeSession?.id || hydratedSessionIdRef.current === activeSession.id) {
@@ -1866,6 +2159,26 @@ function AssistantsChatWorkspace(props: {
     }
   }
 
+  function resolveAssistantHistoryGroup(session: ChatSessionRecord) {
+    return assistants.find((item) => item.id === session.assistantId)?.name || '通用助手'
+  }
+
+  function hideChatSession(sessionId: string) {
+    setHiddenChatSessionIds((current) => (current.includes(sessionId) ? current : [...current, sessionId]))
+  }
+
+  function unhideChatSession(sessionId: string) {
+    setHiddenChatSessionIds((current) => current.filter((item) => item !== sessionId))
+  }
+
+  function togglePinnedChatGroup(groupKey: string) {
+    setPinnedChatGroups((current) =>
+      current.includes(groupKey)
+        ? current.filter((item) => item !== groupKey)
+        : [groupKey, ...current]
+    )
+  }
+
   function findReplayPrompt(messageId: string) {
     const targetIndex = messages.findIndex((item) => item.id === messageId)
     if (targetIndex < 0) {
@@ -1976,6 +2289,7 @@ function AssistantsChatWorkspace(props: {
               resizeDraft()
             },
             onPaste: handleAttachmentPaste,
+            onDrop: handleAttachmentDrop,
             leftActions: [
               {
                 key: 'assistant',
@@ -2236,33 +2550,92 @@ function AssistantsChatWorkspace(props: {
           </div>
 
           <div className='side-pane-scroll'>
-            {chatSessions.length === 0 ? (
-              <EmptyState title='当前没有聊天会话' description='发送第一条消息后，会话会出现在这里。' />
+            <div className='history-panel-tabs'>
+              <button
+                className={`ghost-button tiny ${historyVisibilityTab === 'visible' ? 'selected-toggle' : ''}`}
+                type='button'
+                onClick={() => setHistoryVisibilityTab('visible')}
+              >
+                最近会话
+              </button>
+              <button
+                className={`ghost-button tiny ${historyVisibilityTab === 'hidden' ? 'selected-toggle' : ''}`}
+                type='button'
+                onClick={() => setHistoryVisibilityTab('hidden')}
+              >
+                隐藏会话
+              </button>
+            </div>
+            {historySessions.length === 0 ? (
+              <EmptyState
+                title={historyVisibilityTab === 'hidden' ? '当前没有隐藏会话' : '当前没有聊天会话'}
+                description={
+                  historyVisibilityTab === 'hidden'
+                    ? '隐藏后的聊天会话会按助手类型显示在这里。'
+                    : '发送第一条消息后，会话会出现在这里。'
+                }
+              />
             ) : (
               <div className='history-project-groups'>
-                {Object.entries(
-                  chatSessions.reduce<Record<string, ChatSessionRecord[]>>((groups, item) => {
-                    const key = item.group || 'default'
-                    groups[key] = [...(groups[key] || []), item]
-                    return groups
-                  }, {})
+                {orderGroupedEntries(
+                  Object.entries(
+                    historySessions.reduce<Record<string, ChatSessionRecord[]>>((groups, item) => {
+                      const key = resolveAssistantHistoryGroup(item)
+                      groups[key] = [...(groups[key] || []), item]
+                      return groups
+                    }, {})
+                  ),
+                  pinnedChatGroups
                 ).map(([groupKey, items]) => (
                   <div key={groupKey} className='history-group'>
                     <div className='history-group-head'>
                       <strong>{groupKey}</strong>
-                      <span>{items.length} 条</span>
+                      <div className='history-group-head-actions'>
+                        <span>{items.length} 条</span>
+                        <button
+                          className={`ghost-button icon-only tiny history-group-pin ${pinnedChatGroups.includes(groupKey) ? 'active' : ''}`}
+                          type='button'
+                          onClick={() => togglePinnedChatGroup(groupKey)}
+                          aria-label={pinnedChatGroups.includes(groupKey) ? '取消置顶分组' : '置顶分组'}
+                          title={pinnedChatGroups.includes(groupKey) ? '取消置顶' : '置顶'}
+                        >
+                          <Pin size={13} />
+                        </button>
+                      </div>
                     </div>
                     <div className='subrecords compact-records'>
                       {items.map((item) => (
-                        <button
+                        <div
                           key={item.id}
-                          type='button'
                           className={`record-row action-row session-row ${item.id === resolvedActiveSessionId ? 'highlighted' : ''}`}
+                          role='button'
+                          tabIndex={0}
                           onClick={() => handleSelectChatSession(item)}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                              event.preventDefault()
+                              handleSelectChatSession(item)
+                            }
+                          }}
                         >
                           <span className='session-row-preview'>{clipText(item.title, 56)}</span>
                           <small>{formatDateTime(item.updatedAt)}</small>
-                        </button>
+                          <button
+                            className='ghost-button icon-only tiny session-hide-button'
+                            type='button'
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              if (historyVisibilityTab === 'hidden') {
+                                unhideChatSession(item.id)
+                              } else {
+                                hideChatSession(item.id)
+                              }
+                            }}
+                            aria-label={historyVisibilityTab === 'hidden' ? '显示会话' : '隐藏会话'}
+                          >
+                            {historyVisibilityTab === 'hidden' ? <Eye size={14} /> : <EyeOff size={14} />}
+                          </button>
+                        </div>
                       ))}
                     </div>
                   </div>
@@ -2272,6 +2645,461 @@ function AssistantsChatWorkspace(props: {
           </div>
         </aside>
       </div>
+    </section>
+  )
+}
+
+function DrawWorkspace(props: {
+  toast: (message: string) => void
+}) {
+  const { toast } = props
+  const [drawSessions, setDrawSessions] = useState<DrawSessionRecord[]>(() => {
+    const storedSessions = loadStoredDrawSessions()
+    return storedSessions.length ? storedSessions : [createDefaultDrawSession()]
+  })
+  const [activeSessionId, setActiveSessionId] = useState(() => {
+    const storedActiveSessionId = readJsonStorage<string>(DRAW_ACTIVE_SESSION_STORAGE_KEY, '')
+    if (storedActiveSessionId.trim()) {
+      return storedActiveSessionId
+    }
+    const storedSessions = loadStoredDrawSessions()
+    return storedSessions[0]?.id || ''
+  })
+  const [draft, setDraft] = useState('')
+  const [sending, setSending] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [groups, setGroups] = useState<ChatGroupOption[]>([])
+  const [selectedGroup, setSelectedGroup] = useState('')
+  const [previewImage, setPreviewImage] = useState<{
+    src: string
+    name: string
+  } | null>(null)
+  const {
+    attachments,
+    inputRef: attachmentInputRef,
+    clearAttachments,
+    removeAttachment,
+    handleInputChange: handleAttachmentInputChange,
+    handlePaste: handleAttachmentPaste,
+    handleDrop: handleAttachmentDrop,
+  } = useComposerAttachments(toast)
+  const { ref: draftRef, resize: resizeDraft } = useAutosizeTextarea(draft)
+  const historyPanelRef = useRef<HTMLDivElement | null>(null)
+
+  const resolvedActiveSessionId = useMemo(() => {
+    if (activeSessionId && drawSessions.some((item) => item.id === activeSessionId)) {
+      return activeSessionId
+    }
+    return drawSessions[0]?.id || ''
+  }, [activeSessionId, drawSessions])
+  const activeSession = drawSessions.find((item) => item.id === resolvedActiveSessionId) || null
+  const messages = activeSession?.messages || []
+
+  useEffect(() => {
+    writeJsonStorage(DRAW_SESSIONS_STORAGE_KEY, drawSessions)
+  }, [drawSessions])
+
+  useEffect(() => {
+    writeJsonStorage(DRAW_ACTIVE_SESSION_STORAGE_KEY, resolvedActiveSessionId)
+  }, [resolvedActiveSessionId])
+
+  useEffect(() => {
+    let disposed = false
+    void (async () => {
+      try {
+        const nextGroups = await getUserGroups()
+        if (!disposed) {
+          setGroups(nextGroups)
+          setSelectedGroup((current) => current || nextGroups[0]?.value || '')
+        }
+      } catch {
+        if (!disposed) {
+          setGroups([])
+        }
+      }
+    })()
+    return () => {
+      disposed = true
+    }
+  }, [])
+
+  useEffect(() => {
+    function handlePointerDown(event: PointerEvent) {
+      const target = event.target as Node | null
+      if (!target) {
+        return
+      }
+      if (historyOpen && historyPanelRef.current && !historyPanelRef.current.contains(target)) {
+        setHistoryOpen(false)
+      }
+    }
+    window.addEventListener('pointerdown', handlePointerDown)
+    return () => window.removeEventListener('pointerdown', handlePointerDown)
+  }, [historyOpen])
+
+  useEffect(() => {
+    function handleOpenHistory() {
+      setHistoryOpen(true)
+    }
+    window.addEventListener('oneapi:open-draw-history', handleOpenHistory as EventListener)
+    return () => window.removeEventListener('oneapi:open-draw-history', handleOpenHistory as EventListener)
+  }, [])
+
+  function updateDrawSession(sessionId: string, updater: (session: DrawSessionRecord) => DrawSessionRecord) {
+    setDrawSessions((current) =>
+      current.map((item) => (item.id === sessionId ? updater(item) : item)).sort((a, b) => b.updatedAt - a.updatedAt)
+    )
+  }
+
+  function createDrawSession() {
+    const next = createDefaultDrawSession()
+    setDrawSessions((current) => [next, ...current])
+    setActiveSessionId(next.id)
+    setDraft('')
+    clearAttachments()
+    window.setTimeout(() => resizeDraft(), 0)
+  }
+
+  function ensureDrawSession() {
+    if (resolvedActiveSessionId) {
+      return resolvedActiveSessionId
+    }
+    const next = createDefaultDrawSession()
+    setDrawSessions((current) => [next, ...current])
+    setActiveSessionId(next.id)
+    return next.id
+  }
+
+  function replacePendingDrawMessage(sessionId: string, nextMessage: ChatBubbleMessage) {
+    updateDrawSession(sessionId, (session) => {
+      const nextMessages = [...session.messages]
+      const pendingIndex = nextMessages.findIndex((item) => item.pending && item.imageUrl === DRAW_PENDING_IMAGE_URL)
+      if (pendingIndex >= 0) {
+        nextMessages[pendingIndex] = nextMessage
+      } else {
+        nextMessages.push(nextMessage)
+      }
+      return {
+        ...session,
+        title: clipText(nextMessages.find((item) => item.role === 'user')?.content || '新绘图', 32),
+        updatedAt: nextMessage.createdAt,
+        messages: nextMessages,
+      }
+    })
+  }
+
+  function handleSelectDrawSession(session: DrawSessionRecord) {
+    setActiveSessionId(session.id)
+    setHistoryOpen(false)
+    setDraft('')
+    clearAttachments()
+    window.setTimeout(() => resizeDraft(), 0)
+  }
+
+  async function handleDownloadImage(source: string, name: string) {
+    try {
+      const dataBase64 = source.startsWith('data:') ? extractDataUrlBase64(source) : undefined
+      const result = await saveImageToDisk({
+        suggestedName: name || `oneapi-image-${Date.now()}.png`,
+        sourceUrl: source.startsWith('data:') ? undefined : source,
+        dataBase64,
+      })
+      if (result.path) {
+        toast(`已保存到：${result.path}`)
+      }
+    } catch (error) {
+      toast(error instanceof Error ? error.message : '保存图片失败')
+    }
+  }
+
+  async function handleSendDrawMessage() {
+    if (!draft.trim() || sending) {
+      toast('请输入绘图提示词。')
+      return
+    }
+
+    const nextSessionId = ensureDrawSession()
+    const imageAttachment = attachments.find((item) => item.kind === 'image')
+    const now = Date.now()
+    const userMessage: ChatBubbleMessage = {
+      id: `draw-user-${now}`,
+      role: 'user',
+      content: draft.trim(),
+      createdAt: now,
+      attachments: toMessageAttachments(attachments),
+    }
+    const pendingMessage: ChatBubbleMessage = {
+      id: `draw-pending-${now}`,
+      role: 'assistant',
+      content: DRAW_PENDING_MESSAGE_LABEL,
+      createdAt: now + 1,
+      pending: true,
+      imageUrl: DRAW_PENDING_IMAGE_URL,
+      modelLabel: DEFAULT_DRAW_MODEL,
+    }
+
+    updateDrawSession(nextSessionId, (session) => ({
+      ...session,
+      title: clipText(draft.trim(), 32),
+      updatedAt: now + 1,
+      messages: [...session.messages, userMessage, pendingMessage],
+    }))
+
+    const nextDraft = draft.trim()
+    setDraft('')
+    clearAttachments()
+    window.setTimeout(() => resizeDraft(), 0)
+    setSending(true)
+
+    try {
+      const response = imageAttachment
+        ? await sendImageEdit({
+            model: DEFAULT_DRAW_MODEL,
+            prompt: nextDraft,
+            imageName: imageAttachment.name,
+            mimeType: imageAttachment.mimeType,
+            dataBase64: imageAttachment.dataBase64,
+          })
+        : await (async () => {
+            const serviceKey = await ensureDesktopServiceKey({
+              name: 'OneAPI Desktop Internal Key',
+              group: selectedGroup || '',
+              preferredNames: ['桌面端专用 Key', 'CODEX 桌面安装 Key', 'CLAUDE 桌面安装 Key'],
+            })
+            return sendDirectImageGeneration({
+              apiKey: serviceKey.key,
+              model: DEFAULT_DRAW_MODEL,
+              prompt: nextDraft,
+              response_format: 'b64_json',
+            })
+          })()
+
+      const firstImage = response.data?.[0]
+      const imageSource = resolveImageMessageSource(firstImage)
+      if (!imageSource) {
+        throw new Error('模型没有返回可展示的图片。')
+      }
+
+      replacePendingDrawMessage(nextSessionId, {
+        id: `draw-assistant-${Date.now()}`,
+        role: 'assistant',
+        content: firstImage?.revised_prompt?.trim() || nextDraft,
+        createdAt: Date.now(),
+        imageUrl: imageSource,
+        imagePrompt: firstImage?.revised_prompt?.trim() || nextDraft,
+        modelLabel: DEFAULT_DRAW_MODEL,
+      })
+    } catch (error) {
+      replacePendingDrawMessage(nextSessionId, {
+        id: `draw-assistant-error-${Date.now()}`,
+        role: 'assistant',
+        content: error instanceof Error ? error.message : '图片生成失败',
+        createdAt: Date.now(),
+        modelLabel: DEFAULT_DRAW_MODEL,
+      })
+      toast(error instanceof Error ? error.message : '图片生成失败')
+    } finally {
+      setSending(false)
+    }
+  }
+
+  return (
+    <section className='workspace-page chat-page'>
+      <div className={`chat-layout ${historyOpen ? 'history-open' : ''}`}>
+        <article className='panel chat-main-panel chat-panel-surface'>
+          <div className='message-stream'>
+            {messages.length === 0 ? (
+              <EmptyState title='开始绘图' description='输入提示词后，使用 gpt-image-2 直接生图；拖拽或粘贴图片后，会自动走修图接口。' icon={Sparkles} />
+            ) : (
+              messages.map((message) => {
+                const isUser = message.role === 'user'
+                const isPendingImage = message.pending && message.imageUrl === DRAW_PENDING_IMAGE_URL
+                return (
+                  <div
+                    key={message.id}
+                    className={`message-bubble ${isUser ? 'user' : 'assistant'} ${message.pending ? 'streaming-bubble' : ''}`}
+                  >
+                    {!isUser ? <span className='message-role'>{message.modelLabel || DEFAULT_DRAW_MODEL}</span> : null}
+                    <MessageAttachmentGallery attachments={message.attachments} />
+                    {isPendingImage ? (
+                      <PendingImageContent />
+                    ) : message.imageUrl ? (
+                      <div className='generated-image-block'>
+                        <button
+                          type='button'
+                          className='generated-image-button'
+                          onClick={() =>
+                            setPreviewImage({
+                              src: message.imageUrl || '',
+                              name: `${clipText(message.imagePrompt || 'oneapi-image', 24).replace(/[^\w\u4e00-\u9fa5-]+/g, '_') || 'oneapi-image'}.png`,
+                            })
+                          }
+                        >
+                          <img src={message.imageUrl} alt={message.imagePrompt || '生成图片'} className='generated-image' />
+                        </button>
+                        <div className='generated-image-actions'>
+                          <button
+                            className='ghost-button tiny'
+                            type='button'
+                            onClick={() => void handleDownloadImage(message.imageUrl || '', 'oneapi-image.png')}
+                          >
+                            <Download size={14} />
+                            <span>下载图片</span>
+                          </button>
+                        </div>
+                        <MarkdownMessageContent content={message.content} />
+                      </div>
+                    ) : (
+                      <MarkdownMessageContent content={message.content} />
+                    )}
+                    <BubbleMeta
+                      side={isUser ? 'right' : 'left'}
+                      createdAt={message.createdAt}
+                      actions={
+                        message.imageUrl && message.imageUrl !== DRAW_PENDING_IMAGE_URL
+                          ? [
+                              {
+                                key: 'download',
+                                label: '下载图片',
+                                icon: Download,
+                                onClick: () => void handleDownloadImage(message.imageUrl || '', 'oneapi-image.png'),
+                              },
+                            ]
+                          : []
+                      }
+                    />
+                  </div>
+                )
+              })
+            )}
+          </div>
+
+          {renderComposer({
+            inputRef: attachmentInputRef,
+            onAttachmentInputChange: handleAttachmentInputChange,
+            textareaRef: draftRef,
+            value: draft,
+            placeholder: '输入绘图提示词；粘贴、拖拽图片后会自动进入修图模式',
+            onChange: (value) => {
+              setDraft(value)
+              window.setTimeout(() => resizeDraft(), 0)
+            },
+            onPaste: handleAttachmentPaste,
+            onDrop: handleAttachmentDrop,
+            leftActions: [
+              {
+                key: 'group',
+                node: (
+                  <div className='toolbar-picker'>
+                    <button className='ghost-button tiny picker-trigger icon-picker-trigger' type='button' title='当前模型'>
+                      <Sparkles size={16} />
+                      <strong>{DEFAULT_DRAW_MODEL}</strong>
+                    </button>
+                  </div>
+                ),
+              },
+              ...(groups.length
+                ? [{
+                    key: 'draw-group',
+                    node: (
+                      <div className='toolbar-picker'>
+                        <button className='ghost-button tiny picker-trigger icon-picker-trigger' type='button' title='当前分组'>
+                          <FolderOpen size={16} />
+                          <strong>{selectedGroup || groups[0]?.label || 'default'}</strong>
+                        </button>
+                      </div>
+                    ),
+                  }]
+                : []),
+            ],
+            fileAssets: attachments
+              .filter((item) => item.kind === 'image')
+              .slice(0, 1)
+              .map((item) => ({
+                id: item.id,
+                name: item.name,
+                previewUrl: item.previewUrl,
+                kind: item.kind,
+                onRemove: () => removeAttachment(item.id),
+              })),
+            sendButton: (
+              <button
+                className='primary-button icon-only send-button'
+                type='button'
+                onClick={() => void handleSendDrawMessage()}
+                title='发送绘图请求'
+                aria-label='发送绘图请求'
+                disabled={sending}
+              >
+                {sending ? <LoaderCircle className='spin' size={16} /> : <Send size={16} />}
+              </button>
+            ),
+          })}
+        </article>
+
+        <aside
+          ref={historyPanelRef}
+          className={`panel chat-history-panel ${historyOpen ? 'open' : ''}`}
+          tabIndex={historyOpen ? 0 : -1}
+        >
+          <div className='panel-header compact'>
+            <div />
+            <div className='inline-actions'>
+              <button className='secondary-button tiny' type='button' onClick={createDrawSession}>
+                <Plus size={16} />
+                <span>新绘图</span>
+              </button>
+            </div>
+          </div>
+          <div className='side-pane-scroll'>
+            {drawSessions.length === 0 ? (
+              <EmptyState title='当前没有绘图会话' description='生成第一张图片后，会话会显示在这里。' />
+            ) : (
+              <div className='history-project-groups'>
+                <div className='history-group'>
+                  <div className='history-group-head'>
+                    <strong>绘图会话</strong>
+                    <span>{drawSessions.length} 条</span>
+                  </div>
+                  <div className='subrecords compact-records'>
+                    {drawSessions.map((session) => (
+                      <button
+                        key={session.id}
+                        type='button'
+                        className={`record-row action-row session-row ${session.id === resolvedActiveSessionId ? 'highlighted' : ''}`}
+                        onClick={() => handleSelectDrawSession(session)}
+                      >
+                        <span className='session-row-preview'>{clipText(session.title || '新绘图', 56)}</span>
+                        <small>{formatDateTime(session.updatedAt)}</small>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </aside>
+      </div>
+
+      {previewImage && (
+        <div className='modal-mask image-preview-modal-mask' onClick={() => setPreviewImage(null)}>
+          <div className='image-preview-modal' onClick={(event) => event.stopPropagation()}>
+            <div className='image-preview-actions'>
+              <button className='ghost-button tiny' type='button' onClick={() => void handleDownloadImage(previewImage.src, previewImage.name)}>
+                <Download size={14} />
+                <span>下载图片</span>
+              </button>
+              <button className='ghost-button tiny' type='button' onClick={() => setPreviewImage(null)}>
+                <X size={14} />
+                <span>关闭</span>
+              </button>
+            </div>
+            <div className='image-preview-stage'>
+              <img src={previewImage.src} alt={previewImage.name} className='image-preview-full' />
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   )
 }
@@ -2447,14 +3275,23 @@ function WalletWorkspace(props: {
   toast: (message: string) => void
 }) {
   const { user, toast } = props
+  const [quotaPerUnit, setQuotaPerUnit] = useState(500_000)
   const [billing, setBilling] = useState<BillingHistoryData | null>(null)
+  const [walletPlans, setWalletPlans] = useState<PlanRecord[]>([])
+  const [walletSubscriptionSelf, setWalletSubscriptionSelf] = useState<SubscriptionSelfData | null>(null)
   const [redeemCode, setRedeemCode] = useState('')
   const [usageData, setUsageData] = useState<UsageData | null>(null)
   const [perfMetrics, setPerfMetrics] = useState<{ requestCount24h: number; avgLatencyMs: number } | null>(null)
 
-  const recentBills = billing?.items || []
+  const recentBills = useMemo(
+    () =>
+      [...(billing?.items || [])]
+        .sort((left, right) => Number(right.create_time || 0) - Number(left.create_time || 0))
+        .slice(0, 3),
+    [billing?.items]
+  )
   const completedBillCount = recentBills.filter((item) => item.status === 'success').length
-  const walletBalance = Number(user.remain_balance || 0)
+  const walletBalance = Number(user.quota || 0)
   const tokenBalance = Number(user.quota || 0)
   const tokenExpense = Number(user.used_quota || 0)
   const requestCount24h = perfMetrics?.requestCount24h ?? 0
@@ -2464,7 +3301,6 @@ function WalletWorkspace(props: {
   )
   const totalQuota = modelSummary.reduce((sum, item) => sum + item.quota, 0)
   const topModels = modelSummary.slice(0, 8)
-  const maxBillAmount = recentBills.reduce((max, item) => Math.max(max, Number(item.amount || item.money || 0)), 0)
   const avgTpm = useMemo(() => {
     const logs = usageData?.items || []
     const timestamps = logs
@@ -2478,6 +3314,37 @@ function WalletWorkspace(props: {
     return timeDiff > 0 ? totalQuota / timeDiff : 0
   }, [totalQuota, usageData?.items])
   const avgLatency = perfMetrics?.avgLatencyMs ?? 0
+  const subscriptionUsageByTitle = useMemo(() => {
+    const planTitleMap = new Map(walletPlans.map((item) => [item.plan.id, item.plan.title]))
+    const records = walletSubscriptionSelf?.all_subscriptions || []
+    const next = new Map<
+      string,
+      {
+        updatedAt: number
+        percentage: number
+      }
+    >()
+
+    for (const item of records) {
+      const title = planTitleMap.get(item.subscription.plan_id)?.trim()
+      if (!title) {
+        continue
+      }
+
+      const updatedAt = Number(item.subscription.end_time || item.subscription.start_time || item.subscription.id || 0)
+      const current = next.get(title)
+      if (current && current.updatedAt > updatedAt) {
+        continue
+      }
+
+      next.set(title, {
+        updatedAt,
+        percentage: percentageOf(item.subscription.amount_used, item.subscription.amount_total),
+      })
+    }
+
+    return next
+  }, [walletPlans, walletSubscriptionSelf])
 
   function formatBillingLabel(item: BillingHistoryData['items'][number]) {
     if (item.plan_title?.trim()) {
@@ -2488,9 +3355,28 @@ function WalletWorkspace(props: {
     return trade || payment || '购买记录'
   }
 
+  function resolveBillingUsagePercentage(item: BillingHistoryData['items'][number]) {
+    const title = item.plan_title?.trim()
+    if (!title) {
+      return 0
+    }
+    return subscriptionUsageByTitle.get(title)?.percentage || 0
+  }
+
   const refreshWallet = useCallback(async () => {
-    const nextBilling = await getBillingHistory()
+    const [nextBilling, nextPlans, nextSelf, nextStatus] = await Promise.all([
+      getBillingHistory(1, 3),
+      getPublicPlans().catch(() => []),
+      getSelfSubscriptions().catch(() => null),
+      unwrapEnvelope(getAuthStatus()).catch(() => null),
+    ])
     setBilling(nextBilling ?? null)
+    setWalletPlans((nextPlans || []).filter((item) => item.plan.enabled))
+    setWalletSubscriptionSelf(nextSelf)
+    const resolvedQuotaPerUnit = Number(nextStatus?.quota_per_unit || 0)
+    if (resolvedQuotaPerUnit > 0) {
+      setQuotaPerUnit(resolvedQuotaPerUnit)
+    }
   }, [])
 
   useEffect(() => {
@@ -2498,10 +3384,13 @@ function WalletWorkspace(props: {
 
     void (async () => {
       try {
-        const [nextBilling, nextUsageData, nextPerfMetrics] = await Promise.all([
-          getBillingHistory(),
+        const [nextBilling, nextUsageData, nextPerfMetrics, nextPlans, nextSelf, nextStatus] = await Promise.all([
+          getBillingHistory(1, 3),
           getUserUsageLogs(1, 200),
           getPerfMetricsSummary(24).catch(() => null),
+          getPublicPlans().catch(() => []),
+          getSelfSubscriptions().catch(() => null),
+          unwrapEnvelope(getAuthStatus()).catch(() => null),
         ])
 
         if (disposed) {
@@ -2510,6 +3399,12 @@ function WalletWorkspace(props: {
 
         setBilling(nextBilling ?? null)
         setUsageData(nextUsageData ?? null)
+        setWalletPlans((nextPlans || []).filter((item) => item.plan.enabled))
+        setWalletSubscriptionSelf(nextSelf)
+        const resolvedQuotaPerUnit = Number(nextStatus?.quota_per_unit || 0)
+        if (resolvedQuotaPerUnit > 0) {
+          setQuotaPerUnit(resolvedQuotaPerUnit)
+        }
         if (nextPerfMetrics?.models?.length) {
           const requestCount = nextPerfMetrics.models.reduce((sum, item) => sum + Number(item.request_count || 0), 0)
           const latencyTotal = nextPerfMetrics.models.reduce((sum, item) => {
@@ -2569,7 +3464,7 @@ function WalletWorkspace(props: {
             </div>
             <div className='wallet-overview-grid'>
               <div className='wallet-overview-metric'>
-                <strong>{formatPrice(walletBalance, 'CNY')}</strong>
+                <strong>{formatQuotaAsUsd(walletBalance, quotaPerUnit)}</strong>
                 <span>当前余额</span>
               </div>
               <div className='wallet-overview-metric'>
@@ -2623,12 +3518,12 @@ function WalletWorkspace(props: {
                   <EmptyState title='当前没有账单记录' description='充值、兑换或订阅支付后会显示在这里。' />
                 ) : (
                   <div className='billing-grid'>
-                    {(billing?.items || []).map((item, index) => (
+                    {recentBills.map((item, index) => (
                       <div key={String(item.trade_no || index)} className='billing-card'>
                           <div
                             className='billing-card-fill'
                             style={{
-                              width: `${percentageOf(Number(item.amount || item.money || 0), maxBillAmount || 1)}%`,
+                              width: `${resolveBillingUsagePercentage(item)}%`,
                             }}
                           />
                           <div className='billing-card-inner'>
@@ -2705,6 +3600,7 @@ function MeWorkspace(props: {
   const [newKeyName, setNewKeyName] = useState('桌面端专用 Key')
   const [accessToken, setAccessToken] = useState('')
   const [accessTokenVisible, setAccessTokenVisible] = useState(false)
+  const [activeDeployClient, setActiveDeployClient] = useState<CliClient | null>(null)
 
   const refreshMe = useCallback(async () => {
     const nextKeys = await getApiKeys()
@@ -2940,8 +3836,22 @@ function MeWorkspace(props: {
               </div>
 
               <div className='me-column me-column-right'>
-                <CliSetupCard client='claude' user={user} toast={toast} className='me-claude-card' />
-                <CliSetupCard client='codex' user={user} toast={toast} className='me-codex-card' />
+                <CliSetupCard
+                  client='claude'
+                  user={user}
+                  toast={toast}
+                  className='me-claude-card'
+                  activeDeployClient={activeDeployClient}
+                  setActiveDeployClient={setActiveDeployClient}
+                />
+                <CliSetupCard
+                  client='codex'
+                  user={user}
+                  toast={toast}
+                  className='me-codex-card'
+                  activeDeployClient={activeDeployClient}
+                  setActiveDeployClient={setActiveDeployClient}
+                />
               </div>
             </div>
           </div>
@@ -3011,6 +3921,9 @@ function CliWorkspace(props: {
   const [hiddenSessionIds, setHiddenSessionIds] = useState<string[]>(() =>
     readJsonStorage<string[]>(`oneapi-desktop-${client}-hidden-sessions`, [])
   )
+  const [pinnedHistoryGroups, setPinnedHistoryGroups] = useState<string[]>(() =>
+    readJsonStorage<string[]>(`oneapi-desktop-${client}-pinned-groups`, [])
+  )
   const [historyVisibilityTab, setHistoryVisibilityTab] = useState<HistoryVisibilityTab>('visible')
   const [requestSessionMap, setRequestSessionMap] = useState<
     Record<string, { sessionId: string; projectPath: string }>
@@ -3027,6 +3940,7 @@ function CliWorkspace(props: {
     removeAttachment,
     handleInputChange: handleAttachmentInputChange,
     handlePaste: handleAttachmentPaste,
+    handleDrop: handleAttachmentDrop,
   } = useComposerAttachments(toast)
   const { ref: promptRef, resize: resizePrompt } = useAutosizeTextarea(prompt)
   const modelMenuRef = useRef<HTMLDivElement | null>(null)
@@ -3145,6 +4059,10 @@ function CliWorkspace(props: {
   useEffect(() => {
     requestSessionMapRef.current = requestSessionMap
   }, [requestSessionMap])
+
+  useEffect(() => {
+    writeJsonStorage(`oneapi-desktop-${client}-pinned-groups`, pinnedHistoryGroups)
+  }, [client, pinnedHistoryGroups])
 
   useEffect(() => {
     let disposed = false
@@ -3266,15 +4184,25 @@ function CliWorkspace(props: {
           requestId: payload.requestId,
           sessionId: targetSessionId,
           level: payload.kind === 'error' ? 'error' : 'status',
+          logKind: payload.logKind || (payload.kind === 'error' ? 'error' : 'status'),
+          sourceKind: payload.sourceKind,
           content: payload.message,
           createdAt: payload.createdAt,
           files: payload.files,
+          detail: payload.detail,
+          command: payload.command,
+          exitCode: payload.exitCode,
         } satisfies CliLogEntry
         const previous = current[targetSessionId] || []
         const lastEntry = previous.at(-1)
         if (
           lastEntry?.level === nextEntry.level &&
+          lastEntry.logKind === nextEntry.logKind &&
+          lastEntry.sourceKind === nextEntry.sourceKind &&
           lastEntry.content === nextEntry.content &&
+          lastEntry.detail === nextEntry.detail &&
+          lastEntry.command === nextEntry.command &&
+          lastEntry.exitCode === nextEntry.exitCode &&
           JSON.stringify(lastEntry.files || []) === JSON.stringify(nextEntry.files || [])
         ) {
           return current
@@ -3352,6 +4280,14 @@ function CliWorkspace(props: {
     if (!hiddenSessionIds.includes(sessionId)) {
       persistHiddenSessions([...hiddenSessionIds, sessionId])
     }
+  }
+
+  function togglePinnedHistoryGroup(groupKey: string) {
+    setPinnedHistoryGroups((current) =>
+      current.includes(groupKey)
+        ? current.filter((item) => item !== groupKey)
+        : [groupKey, ...current]
+    )
   }
 
   function bindProjectSession(nextProjectPath: string, sessionId: string) {
@@ -3516,26 +4452,38 @@ function CliWorkspace(props: {
     }, 0)
   }
 
-  async function handleRun() {
-    if (!projectPath.trim() || !prompt.trim() || running) {
-      toast('请选择项目目录并输入消息。')
+  const submitCliPrompt = useCallback(async (
+    promptValue: string,
+    options: {
+      targetProjectPath?: string
+      nextAttachments?: ComposerAttachment[]
+      silentValidation?: boolean
+    } = {}
+  ) => {
+    const targetProjectPath = options.targetProjectPath?.trim() || projectPath.trim()
+    const targetAttachments = options.nextAttachments ?? attachments
+    const cleanedPrompt = promptValue.trim()
+
+    if (!targetProjectPath || !cleanedPrompt || running) {
+      if (!options.silentValidation) {
+        toast('请选择项目目录并输入消息。')
+      }
       return
     }
 
-    const nextPrompt = prompt.trim()
     const requestId = `${client}-${Date.now()}`
-    const requestProjectPath = projectPath
+    const requestProjectPath = targetProjectPath
     const requestProjectKey = normalizeProjectKey(requestProjectPath)
     const currentSessionKey = activeSessionId || `draft-${client}-${Date.now()}`
     const promptWithAttachments = buildCliExecutionPrompt(
-      `${nextPrompt}${buildCliAttachmentReferenceText(attachments)}`
+      `${cleanedPrompt}${buildCliAttachmentReferenceText(targetAttachments)}`
     )
     const userMessage = {
       id: `user-${Date.now()}`,
       role: 'user' as const,
-      content: nextPrompt,
+      content: cleanedPrompt,
       createdAt: Date.now(),
-      attachments: toMessageAttachments(attachments),
+      attachments: toMessageAttachments(targetAttachments),
     }
 
     setProjectSessionMap((current) => ({
@@ -3631,7 +4579,61 @@ function CliWorkspace(props: {
       stoppingRunRef.current = false
       setRunning(false)
     }
+  }, [
+    activeSessionId,
+    attachments,
+    clearAttachments,
+    client,
+    compatibleCliModels,
+    preferredCliModel,
+    projectPath,
+    reasoningEffort,
+    refreshCliState,
+    resizePrompt,
+    running,
+    selectedModel,
+    toast,
+    fullAccess,
+    hydrateCliSession,
+  ])
+
+  async function handleRun() {
+    await submitCliPrompt(prompt)
   }
+
+  useEffect(() => {
+    if (!active || running || prompt.trim() || !status.installed || !status.hasConfig) {
+      return
+    }
+    if (!hasPendingCliVerification(client)) {
+      return
+    }
+
+    const verificationProjectPath = projectPath.trim() || status.dataPath.trim()
+    if (!verificationProjectPath) {
+      return
+    }
+
+    clearPendingCliVerification(client)
+    const applyTimer = !projectPath.trim()
+      ? window.setTimeout(() => {
+          applyProjectPath(verificationProjectPath)
+        }, 0)
+      : 0
+    const submitTimer = window.setTimeout(() => {
+      void submitCliPrompt('hello', {
+        targetProjectPath: verificationProjectPath,
+        nextAttachments: [],
+        silentValidation: true,
+      })
+    }, 0)
+    return () => {
+      if (applyTimer) {
+        window.clearTimeout(applyTimer)
+      }
+      window.clearTimeout(submitTimer)
+    }
+  }, [active, client, projectPath, prompt, running, status.dataPath, status.hasConfig, status.installed, submitCliPrompt])
 
   async function handleStopRun() {
     if (!activeRequestIdRef.current) {
@@ -3671,7 +4673,7 @@ function CliWorkspace(props: {
                     expanded={expanded}
                     onToggle={() => setExpandedLogGroupId((current) => (current === item.id ? '' : item.id))}
                     onOpenFile={(ownerId, path) => void handlePreviewFile(ownerId, path)}
-                    onCopy={() => void copyText(item.content.join('\n'))}
+                    onCopy={() => void copyText(item.events.map((eventItem) => serializeCliLogEvent(eventItem)).join('\n\n'))}
                     previewFile={previewFile}
                   />
                 )
@@ -3735,6 +4737,7 @@ function CliWorkspace(props: {
               resizePrompt()
             },
             onPaste: handleAttachmentPaste,
+            onDrop: handleAttachmentDrop,
             fileAssets: attachments.map((item) => ({
               id: item.id,
               name: item.name,
@@ -3932,11 +4935,22 @@ function CliWorkspace(props: {
               />
             ) : (
               <div className='history-project-groups'>
-                {Object.entries(sessionsByProject).map(([projectName, items]) => (
+                {orderGroupedEntries(Object.entries(sessionsByProject), pinnedHistoryGroups).map(([projectName, items]) => (
                   <div key={projectName} className='history-group'>
                     <div className='history-group-head'>
                       <strong>{projectName}</strong>
-                      <span>{items.length} 条</span>
+                      <div className='history-group-head-actions'>
+                        <span>{items.length} 条</span>
+                        <button
+                          className={`ghost-button icon-only tiny history-group-pin ${pinnedHistoryGroups.includes(projectName) ? 'active' : ''}`}
+                          type='button'
+                          onClick={() => togglePinnedHistoryGroup(projectName)}
+                          aria-label={pinnedHistoryGroups.includes(projectName) ? '取消置顶分组' : '置顶分组'}
+                          title={pinnedHistoryGroups.includes(projectName) ? '取消置顶' : '置顶'}
+                        >
+                          <Pin size={13} />
+                        </button>
+                      </div>
                     </div>
                     <div className='subrecords compact-records'>
                       {items.map((item: CliHistoryEntry) => (
@@ -3989,12 +5003,16 @@ function CliSetupCard(props: {
   user: UserProfile
   toast: (message: string) => void
   className?: string
+  activeDeployClient: CliClient | null
+  setActiveDeployClient: Dispatch<SetStateAction<CliClient | null>>
 }) {
-  const { client, user, toast, className } = props
+  const { client, user, toast, className, activeDeployClient, setActiveDeployClient } = props
   const [status, setStatus] = useState<CliStatus>(buildEmptyCliStatus(client))
   const [deploying, setDeploying] = useState(false)
   const [deployLog, setDeployLog] = useState<DeployProgressPayload[]>([])
   const [preset, setPreset] = useState<{ apiKey: string; model: string; baseUrl: string } | null>(null)
+  const timelineRef = useRef<HTMLDivElement | null>(null)
+  const peerState = resolveCliSetupPeerState(client, activeDeployClient)
 
   useEffect(() => {
     let disposed = false
@@ -4006,6 +5024,7 @@ function CliSetupCard(props: {
         if (!disposed) {
           setStatus(nextStatus)
         }
+        notifyCliStatusChanged(nextStatus)
       } catch {
         if (!disposed) {
           setStatus(buildEmptyCliStatus(client))
@@ -4025,11 +5044,16 @@ function CliSetupCard(props: {
       setDeployLog((current) => [...current, payload])
       if (payload.step === 'complete' || payload.status === 'error') {
         setDeploying(false)
+        setActiveDeployClient((current) => (current === client ? null : current))
         void (async () => {
           const cliStatusAll = await getCliStatus()
           const nextStatus = client === 'codex' ? cliStatusAll.codex : cliStatusAll.claude
+          if (nextStatus.installed && nextStatus.hasConfig) {
+            markPendingCliVerification(client)
+          }
           writeCachedCliStatus(nextStatus)
           setStatus((current) => (sameCliStatus(current, nextStatus) ? current : nextStatus))
+          notifyCliStatusChanged(nextStatus)
         })()
       }
     })
@@ -4056,6 +5080,14 @@ function CliSetupCard(props: {
     }
   }, [client])
 
+  useEffect(() => {
+    const element = timelineRef.current
+    if (!element || !deployLog.length) {
+      return
+    }
+    element.scrollTop = element.scrollHeight
+  }, [deployLog])
+
   async function openFolder(targetPath?: string, filePath = false) {
     if (!targetPath) {
       toast('路径不存在。')
@@ -4069,30 +5101,48 @@ function CliSetupCard(props: {
   async function handleDeploy() {
     try {
       setDeploying(true)
+      setActiveDeployClient(client)
       setDeployLog([])
-      const generated = await createDesktopCliKey(`${client.toUpperCase()} 桌面安装 Key`, user.group || '')
+      const generated = await ensureDesktopServiceKey({
+        name: 'OneAPI Desktop Internal Key',
+        group: user.group || '',
+        preferredNames: ['桌面端专用 Key', `${client.toUpperCase()} 桌面安装 Key`],
+      })
       await deployCli({
         client,
         apiKey: preset?.apiKey || generated.key,
-        baseUrl: preset?.baseUrl || 'http://ai.oneapi.center',
+        baseUrl: preset?.baseUrl || (client === 'codex' ? DEFAULT_CODEX_BASE_URL : DEFAULT_CLAUDE_BASE_URL),
         model: preset?.model || (client === 'codex' ? DEFAULT_CODEX_MODEL : DEFAULT_CLAUDE_MODEL),
       })
       toast(`${client} 安装任务已开始。`)
     } catch (error) {
       setDeploying(false)
+      setActiveDeployClient((current) => (current === client ? null : current))
       toast(error instanceof Error ? error.message : '安装初始化失败')
     }
   }
 
   return (
-    <article className={`panel settings-card inline-settings-card ${className || ''}`.trim()}>
+    <article
+      className={[
+        'panel settings-card inline-settings-card',
+        className || '',
+        peerState.isActiveDeploy ? 'deploy-active' : '',
+        peerState.isPeerDeploying ? 'peer-muted' : '',
+      ].join(' ').trim()}
+    >
       <div className='panel-header compact'>
         <div>
           <span className='eyebrow dark'>{client.toUpperCase()}</span>
           <h2>{client === 'codex' ? 'Codex 环境配置' : 'Claude 环境配置'}</h2>
         </div>
         <div className='inline-actions'>
-          <button className='primary-button tiny' type='button' disabled={deploying} onClick={() => void handleDeploy()}>
+          <button
+            className='primary-button tiny'
+            type='button'
+            disabled={deploying || peerState.disableDeployButton}
+            onClick={() => void handleDeploy()}
+          >
             <span>{deploying ? '部署中' : '一键部署'}</span>
           </button>
         </div>
@@ -4110,21 +5160,26 @@ function CliSetupCard(props: {
         </button>
       </div>
 
-      <div className='timeline-list'>
-        {deployLog.length === 0 ? (
+      {!peerState.isPeerDeploying && (
+        <div className='timeline-list deploy-timeline-list' ref={timelineRef}>
+          {deployLog.length === 0 ? (
           <EmptyState title='部署进度会显示在这里' description='包含检测、安装、配置、测试四段结果。' />
         ) : (
           deployLog.map((item, index) => (
             <div key={`${item.jobId}-${item.step}-${index}`} className={`timeline-row ${item.status}`}>
               <div className='timeline-dot' />
-              <div>
+              <div className='timeline-content'>
                 <strong>{item.message}</strong>
-                <span>{maskSecretText(item.detail || item.step)}</span>
+                <span>{formatDateTime(item.createdAt)}</span>
+                {item.command ? <pre className='timeline-code'>{item.command}</pre> : null}
+                {item.detail ? <pre className='timeline-detail'>{maskSecretText(item.detail)}</pre> : null}
+                {typeof item.exitCode === 'number' ? <small>exit code: {item.exitCode}</small> : null}
               </div>
             </div>
           ))
-        )}
-      </div>
+          )}
+        </div>
+      )}
     </article>
   )
 }
@@ -4172,6 +5227,9 @@ function AssistantWorkspace(props: {
       <div className='workspace-host assistant-host'>
         <div className={mode === 'chat' ? 'workspace-shell active' : 'workspace-shell'}>
           <AssistantsChatWorkspace toast={toast} />
+        </div>
+        <div className={mode === 'draw' ? 'workspace-shell active' : 'workspace-shell'}>
+          <DrawWorkspace toast={toast} />
         </div>
         <div className={mode === 'codex' ? 'workspace-shell active' : 'workspace-shell'}>
           <CliWorkspace client='codex' toast={toast} openSettings={openSettings} active={visible && mode === 'codex'} />
@@ -4531,10 +5589,15 @@ export function App() {
   const [platformLabel, setPlatformLabel] = useState('Windows')
   const [productName, setProductName] = useState('OneAPI Desktop')
   const [iconPath, setIconPath] = useState('')
+  const [serverBaseUrl, setServerBaseUrl] = useState('')
+  const [serverBaseUrlDraft, setServerBaseUrlDraft] = useState('')
+  const [serverBaseUrlDialogOpen, setServerBaseUrlDialogOpen] = useState(false)
+  const [rightCtrlHeld, setRightCtrlHeld] = useState(false)
+  const [, setSidebarSecretClicks] = useState(0)
   const { message, setMessage } = useToastState()
   const [cliStatus, setCliStatus] = useState<{ codex: CliStatus; claude: CliStatus } | null>(null)
   const enabledAssistantModes = useMemo(() => {
-    const next: AssistantMode[] = ['chat']
+    const next: AssistantMode[] = ['chat', 'draw']
     if (cliStatus?.codex.installed && cliStatus?.codex.hasConfig) {
       next.push('codex')
     }
@@ -4557,6 +5620,8 @@ export function App() {
         setPlatformLabel(meta.platform === 'darwin' ? 'macOS' : 'Windows')
         setProductName(meta.productName)
         setIconPath(meta.iconPath)
+        setServerBaseUrl(meta.serverBaseUrl)
+        setServerBaseUrlDraft(meta.serverBaseUrl)
       })
       .catch(() => undefined)
 
@@ -4594,6 +5659,63 @@ export function App() {
   }, [themeMode])
 
   useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.code === 'ControlRight') {
+        setRightCtrlHeld(true)
+      }
+    }
+
+    function handleKeyUp(event: KeyboardEvent) {
+      if (event.code === 'ControlRight') {
+        setRightCtrlHeld(false)
+        setSidebarSecretClicks(0)
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    window.addEventListener('keyup', handleKeyUp)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('keyup', handleKeyUp)
+    }
+  }, [])
+
+  async function handleSaveServerBaseUrl() {
+    try {
+      const result = await window.desktopBridge?.setServerBaseUrl(serverBaseUrlDraft.trim())
+      const nextBaseUrl = result?.serverBaseUrl || serverBaseUrlDraft.trim()
+      setServerBaseUrl(nextBaseUrl)
+      setServerBaseUrlDraft(nextBaseUrl)
+      setServerBaseUrlDialogOpen(false)
+      setSidebarSecretClicks(0)
+      clearStoredDesktopUserId()
+      auth.reset()
+      auth.setUser(null)
+      setMessage(`服务地址已切换为 ${nextBaseUrl}，请重新登录。`)
+      window.setTimeout(() => window.location.reload(), 200)
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : '保存服务地址失败')
+    }
+  }
+
+  function handleSidebarSecretClick() {
+    if (!rightCtrlHeld) {
+      setSidebarSecretClicks(0)
+      return
+    }
+
+    setSidebarSecretClicks((current) => {
+      const next = current + 1
+      if (next >= 10) {
+        setServerBaseUrlDialogOpen(true)
+        setServerBaseUrlDraft(serverBaseUrl)
+        return 0
+      }
+      return next
+    })
+  }
+
+  useEffect(() => {
     if (!enabledAssistantModes.includes(assistantMode)) {
       const timer = window.setTimeout(() => {
         setAssistantMode(enabledAssistantModes[0] || 'chat')
@@ -4601,6 +5723,32 @@ export function App() {
       return () => window.clearTimeout(timer)
     }
   }, [assistantMode, enabledAssistantModes])
+
+  useEffect(() => {
+    function handleCliStatusChanged(event: Event) {
+      const customEvent = event as CustomEvent<CliStatus>
+      const detail = customEvent.detail
+      if (!detail) {
+        return
+      }
+
+      setCliStatus((current) => ({
+        codex:
+          detail.client === 'codex'
+            ? detail
+            : current?.codex || buildEmptyCliStatus('codex'),
+        claude:
+          detail.client === 'claude'
+            ? detail
+            : current?.claude || buildEmptyCliStatus('claude'),
+      }))
+    }
+
+    window.addEventListener('oneapi:cli-status-changed', handleCliStatusChanged as EventListener)
+    return () => {
+      window.removeEventListener('oneapi:cli-status-changed', handleCliStatusChanged as EventListener)
+    }
+  }, [])
 
   async function handleLogout() {
     const currentUserId = auth.user?.id
@@ -4707,7 +5855,7 @@ export function App() {
           <div className='sidebar-footer'>
             <div className='sidebar-account'>
               {!collapsed && (
-                <div className='sidebar-user-row'>
+                <div className='sidebar-user-row' onClick={handleSidebarSecretClick}>
                   <span className='user-pill'>{auth.user.username}</span>
                   <span className='user-pill secondary'>{auth.user.display_name || 'Root User'}</span>
                   <button
@@ -4762,6 +5910,33 @@ export function App() {
       </div>
 
       {message && <div className='toast-bar'>{message}</div>}
+
+      {serverBaseUrlDialogOpen && (
+        <div className='modal-mask'>
+          <div className='modal-card'>
+            <div className='panel-header compact'>
+              <div>
+                <span className='eyebrow dark'>高级入口</span>
+                <h2>修改服务地址</h2>
+              </div>
+            </div>
+            <p className='modal-copy'>修改后会立即切换客户端请求基址，并退出当前登录状态。</p>
+            <input
+              value={serverBaseUrlDraft}
+              onChange={(event) => setServerBaseUrlDraft(event.target.value)}
+              placeholder='https://your-server.example.com'
+            />
+            <div className='modal-actions'>
+              <button className='secondary-button' type='button' onClick={() => setServerBaseUrlDialogOpen(false)}>
+                取消
+              </button>
+              <button className='primary-button' type='button' onClick={() => void handleSaveServerBaseUrl()}>
+                保存并重载
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   )
 }

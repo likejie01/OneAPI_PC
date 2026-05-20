@@ -15,8 +15,11 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import process from 'node:process'
+import { shouldUseWindowsCommandShimForPath } from '../src/lib/desktop-service.ts'
 
-const SERVER_BASE_URL = 'http://ai.oneapi.center'
+const DEFAULT_SERVER_BASE_URL = 'https://ai.oneapi.center'
+const DEFAULT_CODEX_BASE_URL = 'https://ai.oneapi.center/v1'
+const DEFAULT_CLAUDE_BASE_URL = 'https://ai.oneapi.center'
 const DEFAULT_CODEX_MODEL = 'gpt-5.5'
 const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-4-6'
 const DESKTOP_PARTITION = 'persist:oneapi-desktop'
@@ -27,9 +30,47 @@ const APP_ICON_PATH = isDev
   ? path.join(path.dirname(__dirname), 'public', 'Icon.png')
   : path.join(path.dirname(__dirname), 'dist', 'Icon.png')
 let mainWindow: BrowserWindow | null = null
+let serverBaseUrl = DEFAULT_SERVER_BASE_URL
 const activeApiRequests = new Map<string, AbortController>()
 const activeCliProcesses = new Map<string, ChildProcess>()
 const stoppedCliRequests = new Set<string>()
+
+function getServerConfigPath() {
+  return path.join(app.getPath('userData'), 'server-base-url.json')
+}
+
+function normalizeServerBaseUrl(value?: string) {
+  const normalized = (value || '').trim()
+  if (!normalized) {
+    return DEFAULT_SERVER_BASE_URL
+  }
+  if (!/^https?:\/\//i.test(normalized)) {
+    throw new Error('服务地址必须以 http:// 或 https:// 开头。')
+  }
+  return normalized.replace(/\/+$/, '')
+}
+
+async function loadServerBaseUrl() {
+  try {
+    const raw = await fs.readFile(getServerConfigPath(), 'utf8')
+    const parsed = JSON.parse(raw) as { serverBaseUrl?: string }
+    serverBaseUrl = normalizeServerBaseUrl(parsed.serverBaseUrl)
+  } catch {
+    serverBaseUrl = DEFAULT_SERVER_BASE_URL
+  }
+}
+
+async function persistServerBaseUrl(nextValue: string) {
+  const normalized = normalizeServerBaseUrl(nextValue)
+  await fs.mkdir(path.dirname(getServerConfigPath()), { recursive: true })
+  await fs.writeFile(
+    getServerConfigPath(),
+    JSON.stringify({ serverBaseUrl: normalized }, null, 2),
+    'utf8'
+  )
+  serverBaseUrl = normalized
+  return normalized
+}
 
 function resolveWorkspaceTitle(projectName?: string) {
   const normalized = projectName?.trim()
@@ -43,6 +84,7 @@ function getDesktopSession() {
 type ApiMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 type CliClient = 'codex' | 'claude'
 type DeployStatus = 'pending' | 'running' | 'success' | 'error'
+type CliLogKind = 'intent' | 'command' | 'stdout' | 'stderr' | 'result' | 'tool' | 'status' | 'error'
 
 interface DesktopApiRequest {
   method: ApiMethod
@@ -133,10 +175,15 @@ interface CliProgressPayload {
   requestId: string
   sessionId?: string
   kind: 'status' | 'partial' | 'error'
+  logKind?: CliLogKind
+  sourceKind?: string
   message: string
   createdAt: number
   done?: boolean
   files?: CliFileChange[]
+  detail?: string
+  command?: string
+  exitCode?: number
 }
 
 interface CliDeployRequest {
@@ -149,16 +196,35 @@ interface CliDeployRequest {
 interface DeployProgressPayload {
   jobId: string
   client: CliClient
-  step: 'detect' | 'install' | 'config' | 'test' | 'complete'
+  step: 'detect' | 'node' | 'install' | 'config' | 'test' | 'complete'
   status: DeployStatus
   message: string
+  createdAt: number
+  kind?: 'info' | 'command' | 'stdout' | 'stderr' | 'result'
   detail?: string
+  command?: string
+  exitCode?: number
 }
 
 interface DesktopAttachmentSaveRequest {
   name: string
   mimeType?: string
   dataBase64: string
+}
+
+interface DesktopImageEditRequest {
+  userId?: string
+  model: string
+  prompt: string
+  imageName: string
+  mimeType?: string
+  dataBase64: string
+}
+
+interface DesktopSaveImageRequest {
+  suggestedName: string
+  sourceUrl?: string
+  dataBase64?: string
 }
 
 const cliConfig = {
@@ -173,6 +239,20 @@ const cliConfig = {
     dataPath: path.join(os.homedir(), '.claude'),
   },
 } satisfies Record<CliClient, { packageName: string; configPath: string; dataPath: string }>
+
+function isCliClient(value: string): value is CliClient {
+  return value === 'codex' || value === 'claude'
+}
+
+interface NodeRuntimeInfo {
+  source: 'system' | 'managed'
+  nodePath: string
+  npmPath: string
+  version: string
+  prefixPath: string
+}
+
+const NODEJS_MIRROR_BASE_URL = 'https://npmmirror.com/mirrors/node'
 
 function createWindow() {
   const appIcon = nativeImage.createFromPath(APP_ICON_PATH)
@@ -216,7 +296,7 @@ function getAppMeta() {
   return {
     platform: process.platform,
     productName: app.name,
-    serverBaseUrl: SERVER_BASE_URL,
+    serverBaseUrl,
     iconPath: APP_ICON_PATH,
   }
 }
@@ -224,7 +304,7 @@ function getAppMeta() {
 function buildUrl(requestPath: string, query?: DesktopApiRequest['query']) {
   const target = requestPath.startsWith('http')
     ? requestPath
-    : `${SERVER_BASE_URL}${requestPath.startsWith('/') ? requestPath : `/${requestPath}`}`
+    : `${serverBaseUrl}${requestPath.startsWith('/') ? requestPath : `/${requestPath}`}`
   const url = new URL(target)
   if (query) {
     for (const [key, value] of Object.entries(query)) {
@@ -234,6 +314,31 @@ function buildUrl(requestPath: string, query?: DesktopApiRequest['query']) {
     }
   }
   return url.toString()
+}
+
+function normalizeCodexBaseUrl(value?: string) {
+  const normalized = (value || '').trim()
+  if (!normalized) {
+    return DEFAULT_CODEX_BASE_URL
+  }
+  if (/^http:\/\/ai\.oneapi\.center\/?v1\/?$/i.test(normalized)) {
+    return DEFAULT_CODEX_BASE_URL
+  }
+  if (/^https:\/\/ai\.oneapi\.center\/?$/i.test(normalized)) {
+    return DEFAULT_CODEX_BASE_URL
+  }
+  return normalized.endsWith('/v1') ? normalized : `${normalized.replace(/\/+$/, '')}/v1`
+}
+
+function normalizeClaudeBaseUrl(value?: string) {
+  const normalized = (value || '').trim()
+  if (!normalized) {
+    return DEFAULT_CLAUDE_BASE_URL
+  }
+  if (/^http:\/\/ai\.oneapi\.center\/?$/i.test(normalized)) {
+    return DEFAULT_CLAUDE_BASE_URL
+  }
+  return normalized.replace(/\/+$/, '')
 }
 
 async function parseResponse(response: Response) {
@@ -303,13 +408,109 @@ function getNpmCommand() {
   return process.platform === 'win32' ? 'npm.cmd' : 'npm'
 }
 
-function shouldUseWindowsCommandShim(command: string) {
-  if (process.platform !== 'win32') {
+function getToolchainRoot() {
+  return path.join(app.getPath('userData'), 'toolchains')
+}
+
+function getManagedNodeRoot() {
+  return path.join(getToolchainRoot(), 'node-runtime')
+}
+
+function getManagedNpmPrefix() {
+  return path.join(getToolchainRoot(), 'npm-global')
+}
+
+function getManagedPrefixBin(prefixPath = getManagedNpmPrefix()) {
+  return process.platform === 'win32' ? prefixPath : path.join(prefixPath, 'bin')
+}
+
+function getManagedCliExecutableCandidates(command: string) {
+  const binRoot = getManagedPrefixBin()
+  if (process.platform === 'win32') {
+    return [
+      path.join(binRoot, `${command}.cmd`),
+      path.join(binRoot, `${command}.exe`),
+      path.join(binRoot, command),
+    ]
+  }
+
+  return [path.join(binRoot, command)]
+}
+
+function getManagedNodeExecutableCandidates() {
+  const root = getManagedNodeRoot()
+  if (process.platform === 'win32') {
+    return [path.join(root, 'node.exe')]
+  }
+
+  return [path.join(root, 'bin', 'node')]
+}
+
+function getManagedNpmExecutableCandidates() {
+  const root = getManagedNodeRoot()
+  if (process.platform === 'win32') {
+    return [path.join(root, 'npm.cmd'), path.join(root, 'npm')]
+  }
+
+  return [path.join(root, 'bin', 'npm')]
+}
+
+async function firstExistingPath(candidates: string[]) {
+  for (const candidate of candidates) {
+    if (await pathExists(candidate)) {
+      return candidate
+    }
+  }
+  return ''
+}
+
+async function clearDirectory(targetPath: string) {
+  await fs.rm(targetPath, { recursive: true, force: true })
+  await fs.mkdir(targetPath, { recursive: true })
+}
+
+async function flattenSingleNestedDirectory(
+  targetPath: string,
+  logger?: ReturnType<typeof createDeployLogger>
+) {
+  const entries = await fs.readdir(targetPath, { withFileTypes: true })
+  const childFiles = entries.filter((entry) => entry.isFile())
+  const childDirs = entries.filter((entry) => entry.isDirectory())
+
+  if (childFiles.length > 0 || childDirs.length !== 1) {
     return false
   }
 
-  const normalized = path.basename(command).toLowerCase()
-  return normalized === 'codex' || normalized === 'claude'
+  const nestedRoot = path.join(targetPath, childDirs[0].name)
+  logger?.info('node', 'running', '检测到 Node.js 压缩包包含顶层目录，正在整理安装结构', nestedRoot)
+
+  const nestedEntries = await fs.readdir(nestedRoot, { withFileTypes: true })
+  for (const entry of nestedEntries) {
+    await fs.rename(path.join(nestedRoot, entry.name), path.join(targetPath, entry.name))
+  }
+
+  await fs.rm(nestedRoot, { recursive: true, force: true })
+  logger?.info('node', 'success', 'Node.js 安装结构整理完成', targetPath)
+  return true
+}
+
+async function describeDirectoryEntries(targetPath: string) {
+  if (!(await pathExists(targetPath))) {
+    return '目录不存在'
+  }
+
+  const entries = await fs.readdir(targetPath, { withFileTypes: true })
+  if (!entries.length) {
+    return '目录为空'
+  }
+
+  return entries
+    .map((entry) => `${entry.isDirectory() ? '[dir]' : '[file]'} ${entry.name}`)
+    .join('\n')
+}
+
+function shouldUseWindowsCommandShim(command: string) {
+  return shouldUseWindowsCommandShimForPath(command, process.platform)
 }
 
 function quoteWindowsCommandArg(arg: string) {
@@ -492,7 +693,7 @@ function runCommand(
   return spawnCommandWithHandlers(command, args, options)
 }
 
-async function locateExecutable(command: string) {
+async function locateSystemExecutable(command: string) {
   const result = await runCommand(getCommandLocator(), [command], {
     timeoutMs: 10000,
   })
@@ -508,6 +709,31 @@ async function locateExecutable(command: string) {
   return firstLine ?? ''
 }
 
+async function locateExecutable(command: string) {
+  if (command === 'node') {
+    const managedNode = await firstExistingPath(getManagedNodeExecutableCandidates())
+    if (managedNode) {
+      return managedNode
+    }
+  }
+
+  if (command === 'npm' || command === 'npm.cmd') {
+    const managedNpm = await firstExistingPath(getManagedNpmExecutableCandidates())
+    if (managedNpm) {
+      return managedNpm
+    }
+  }
+
+  if (isCliClient(command)) {
+    const managedCli = await firstExistingPath(getManagedCliExecutableCandidates(command))
+    if (managedCli) {
+      return managedCli
+    }
+  }
+
+  return locateSystemExecutable(command)
+}
+
 function resolveCliSpawnCommand(command: string, executablePath: string) {
   const normalized = executablePath.trim()
   if (!normalized) {
@@ -518,8 +744,12 @@ function resolveCliSpawnCommand(command: string, executablePath: string) {
 
 async function inspectCli(client: CliClient): Promise<CliStatus> {
   const executablePath = await locateExecutable(client)
+  const managedRuntime = await readManagedNodeRuntime()
   const versionResult = executablePath
-    ? await runCommand(client, ['--version'], { timeoutMs: 15000 })
+    ? await runCommand(executablePath, ['--version'], {
+        timeoutMs: 15000,
+        env: managedRuntime ? buildRuntimeEnv(managedRuntime) : undefined,
+      })
     : null
 
   const version =
@@ -616,6 +846,82 @@ async function readFilePreview(targetPath: string) {
   }
 }
 
+async function requestImageEdit(input: DesktopImageEditRequest) {
+  const headers = new Headers()
+  if (input.userId?.trim()) {
+    headers.set('New-Api-User', input.userId.trim())
+  }
+
+  const formData = new FormData()
+  formData.append('model', input.model)
+  formData.append('prompt', input.prompt)
+  formData.append(
+    'image',
+    new Blob([Buffer.from(input.dataBase64, 'base64')], {
+      type: input.mimeType?.trim() || 'image/png',
+    }),
+    input.imageName || 'image.png'
+  )
+
+  const response = await getDesktopSession().fetch(buildUrl('/v1/images/edits'), {
+    method: 'POST',
+    headers,
+    body: formData,
+  })
+
+  const data = await parseResponse(response)
+  if (!response.ok) {
+    const message =
+      typeof data === 'object' &&
+      data &&
+      'message' in data &&
+      typeof data.message === 'string'
+        ? data.message
+        : `图片编辑失败（${response.status}）`
+    throw new Error(message)
+  }
+
+  return data
+}
+
+async function saveImageToUserPath(input: DesktopSaveImageRequest) {
+  const defaultName = path.basename(input.suggestedName || `oneapi-image-${Date.now()}.png`)
+  const saveResult = await dialog.showSaveDialog({
+    title: '保存图片',
+    defaultPath: path.join(app.getPath('downloads'), defaultName),
+    filters: [
+      { name: 'PNG 图片', extensions: ['png'] },
+      { name: 'JPEG 图片', extensions: ['jpg', 'jpeg'] },
+      { name: 'WEBP 图片', extensions: ['webp'] },
+      { name: '所有文件', extensions: ['*'] },
+    ],
+  })
+
+  if (saveResult.canceled || !saveResult.filePath) {
+    return {
+      path: '',
+    }
+  }
+
+  let buffer: Buffer
+  if (input.dataBase64?.trim()) {
+    buffer = Buffer.from(input.dataBase64.trim(), 'base64')
+  } else if (input.sourceUrl?.trim()) {
+    const response = await getDesktopSession().fetch(input.sourceUrl.trim())
+    if (!response.ok) {
+      throw new Error(`下载图片失败（${response.status}）`)
+    }
+    buffer = Buffer.from(await response.arrayBuffer())
+  } else {
+    throw new Error('缺少可保存的图片数据。')
+  }
+
+  await fs.writeFile(saveResult.filePath, buffer)
+  return {
+    path: saveResult.filePath,
+  }
+}
+
 async function readCurrentCodexConfig() {
   const targetPath = cliConfig.codex.configPath
   const raw = await fs.readFile(targetPath, 'utf8')
@@ -632,7 +938,7 @@ async function readCurrentCodexConfig() {
     client: 'codex' as const,
     apiKey: apiKey?.trim() || '',
     model: model.trim() || DEFAULT_CODEX_MODEL,
-    baseUrl: baseUrl?.trim().replace(/\/v1$/, '') || SERVER_BASE_URL,
+    baseUrl: normalizeCodexBaseUrl(baseUrl),
   }
 }
 
@@ -706,12 +1012,13 @@ function readTomlSectionString(lines: string[], key: string) {
 }
 
 function createCodexProviderSection(apiKey: string, baseUrl: string): TomlSectionBlock {
+  const resolvedBaseUrl = normalizeCodexBaseUrl(baseUrl)
   return {
     header: 'model_providers.oneapi_desktop',
     lines: [
       '[model_providers.oneapi_desktop]',
       'name = "oneapi_desktop"',
-      `base_url = "${baseUrl.endsWith('/v1') ? baseUrl : `${baseUrl}/v1`}"`,
+      `base_url = "${resolvedBaseUrl}"`,
       `api_key = "${apiKey}"`,
       'wire_api = "responses"',
     ],
@@ -754,7 +1061,8 @@ function serializeTomlDocument(preamble: string[], sections: TomlSectionBlock[])
 
 function mergeCodexConfig(raw: string, apiKey: string, model: string, baseUrl: string) {
   const parsed = parseTomlDocument(raw)
-  const nextProviderBlock = createCodexProviderSection(apiKey, baseUrl)
+  const resolvedBaseUrl = normalizeCodexBaseUrl(baseUrl)
+  const nextProviderBlock = createCodexProviderSection(apiKey, resolvedBaseUrl)
   const filteredPreamble = parsed.preamble.filter(
     (line) =>
       !/^\s*model\s*=/.test(line) &&
@@ -788,7 +1096,7 @@ function mergeCodexConfig(raw: string, apiKey: string, model: string, baseUrl: s
       const currentBaseUrl = readTomlSectionString(section.lines, 'base_url')
       if (
         !hasOriginalBackup &&
-        (currentApiKey.trim() !== apiKey.trim() || currentBaseUrl.trim() !== (baseUrl.endsWith('/v1') ? baseUrl : `${baseUrl}/v1`))
+        (currentApiKey.trim() !== apiKey.trim() || currentBaseUrl.trim() !== resolvedBaseUrl)
       ) {
         sections.push(
           renameCodexProviderSection(
@@ -858,7 +1166,7 @@ async function readCurrentClaudeConfig() {
     client: 'claude' as const,
     apiKey: parsed.env?.ANTHROPIC_AUTH_TOKEN?.trim() || '',
     model: parsed.model?.trim() || DEFAULT_CLAUDE_MODEL,
-    baseUrl: parsed.env?.ANTHROPIC_BASE_URL?.trim() || SERVER_BASE_URL,
+    baseUrl: normalizeClaudeBaseUrl(parsed.env?.ANTHROPIC_BASE_URL),
   }
 }
 
@@ -1685,13 +1993,20 @@ function createCliProgressEmitter(
 
   return {
     send(
-      kind: CliProgressPayload['kind'],
-      message: string,
-      sessionId?: string,
-      done = false,
-      files?: CliFileChange[],
+      input: {
+        kind: CliProgressPayload['kind']
+        message: string
+        sessionId?: string
+        done?: boolean
+        files?: CliFileChange[]
+        logKind?: CliLogKind
+        sourceKind?: string
+        detail?: string
+        command?: string
+        exitCode?: number
+      }
     ) {
-      const trimmed = message.trim()
+      const trimmed = input.message.trim()
       if (!trimmed) {
         return
       }
@@ -1699,26 +2014,61 @@ function createCliProgressEmitter(
       webContents.send('desktop:cli-progress', {
         client,
         requestId,
-        sessionId,
-        kind,
+        sessionId: input.sessionId,
+        kind: input.kind,
+        logKind: input.logKind,
+        sourceKind: input.sourceKind,
         message: trimmed,
         createdAt: Date.now(),
-        done,
-        files,
+        done: input.done,
+        files: input.files,
+        detail: input.detail,
+        command: input.command,
+        exitCode: input.exitCode,
       } satisfies CliProgressPayload)
     },
-    status(message: string, sessionId?: string, done = false, files?: CliFileChange[]) {
-      this.send('status', message, sessionId, done, files)
+    status(
+      message: string,
+      sessionId?: string,
+      done = false,
+      files?: CliFileChange[],
+      options: { logKind?: CliLogKind; sourceKind?: string; detail?: string; command?: string; exitCode?: number } = {}
+    ) {
+      this.send({ kind: 'status', message, sessionId, done, files, ...options })
     },
-    error(message: string, sessionId?: string, done = false, files?: CliFileChange[]) {
-      this.send('error', message, sessionId, done, files)
+    error(
+      message: string,
+      sessionId?: string,
+      done = false,
+      files?: CliFileChange[],
+      options: { logKind?: CliLogKind; sourceKind?: string; detail?: string; command?: string; exitCode?: number } = {}
+    ) {
+      this.send({ kind: 'error', message, sessionId, done, files, logKind: options.logKind || 'error', sourceKind: options.sourceKind, detail: options.detail, command: options.command, exitCode: options.exitCode })
     },
     partial(message: string, sessionId?: string, done = false) {
       if (!message || message === lastPartial) {
         return
       }
       lastPartial = message
-      this.send('partial', message, sessionId, done)
+      this.send({ kind: 'partial', message, sessionId, done })
+    },
+    intent(message: string, sessionId?: string, detail?: string, files?: CliFileChange[], sourceKind?: string) {
+      this.status(message, sessionId, false, files, { logKind: 'intent', detail, sourceKind })
+    },
+    tool(message: string, sessionId?: string, detail?: string, files?: CliFileChange[], sourceKind?: string) {
+      this.status(message, sessionId, false, files, { logKind: 'tool', detail, sourceKind })
+    },
+    command(message: string, command: string, sessionId?: string, detail?: string, files?: CliFileChange[], sourceKind?: string) {
+      this.status(message, sessionId, false, files, { logKind: 'command', command, detail, sourceKind })
+    },
+    stdout(message: string, sessionId?: string, detail?: string, sourceKind?: string) {
+      this.status(message, sessionId, false, undefined, { logKind: 'stdout', detail, sourceKind })
+    },
+    stderr(message: string, sessionId?: string, detail?: string, sourceKind?: string) {
+      this.error(message, sessionId, false, undefined, { logKind: 'stderr', detail, sourceKind })
+    },
+    result(message: string, sessionId?: string, exitCode?: number, detail?: string, files?: CliFileChange[], sourceKind?: string) {
+      this.status(message, sessionId, false, files, { logKind: 'result', exitCode, detail, sourceKind })
     },
   }
 }
@@ -1763,6 +2113,89 @@ function parseJsonLine(line: string) {
   } catch {
     return null
   }
+}
+
+function safeStringify(value: unknown) {
+  try {
+    return JSON.stringify(value, null, 2)
+  } catch {
+    return String(value)
+  }
+}
+
+function extractCommandFromUnknown(value: unknown): string {
+  if (!value || typeof value !== 'object') {
+    return ''
+  }
+
+  const source = value as Record<string, unknown>
+  const candidates = ['command', 'cmd', 'shell_command', 'script', 'raw_command']
+  for (const key of candidates) {
+    if (typeof source[key] === 'string' && source[key]?.trim()) {
+      return source[key].trim()
+    }
+  }
+
+  return ''
+}
+
+function extractCliFilesFromUnknown(value: unknown): CliFileChange[] {
+  if (!value || typeof value !== 'object') {
+    return []
+  }
+
+  const source = value as Record<string, unknown>
+  const candidates = ['path', 'filePath', 'target_file', 'file', 'target']
+  for (const key of candidates) {
+    const raw = source[key]
+    if (typeof raw === 'string' && raw.trim()) {
+      return [{
+        path: raw.trim(),
+        kind: 'unknown',
+      }]
+    }
+  }
+
+  return []
+}
+
+function describeCliToolUse(name: string, input: unknown) {
+  const command = extractCommandFromUnknown(input)
+  const files = extractCliFilesFromUnknown(input)
+  const detail = input && typeof input === 'object' ? safeStringify(input) : ''
+  return {
+    message: name ? `正在执行 ${name}` : '正在执行工具调用',
+    command,
+    detail,
+    files,
+  }
+}
+
+function extractToolUseEntries(content: unknown) {
+  if (!Array.isArray(content)) {
+    return []
+  }
+
+  return content.flatMap((part) => {
+    if (!part || typeof part !== 'object') {
+      return []
+    }
+
+    const typedPart = part as {
+      type?: string
+      name?: string
+      input?: unknown
+    }
+
+    if (typedPart.type !== 'tool_use') {
+      return []
+    }
+
+    return [{
+      name: typedPart.name?.trim() || '',
+      input: typedPart.input,
+    }]
+  })
 }
 
 function extractClaudeTextFromMessage(content: unknown) {
@@ -1832,13 +2265,15 @@ async function runCodexPrompt(
   const progress = createCliProgressEmitter(webContents, 'codex', input.requestId)
   let sessionId = input.sessionId
   const executablePath = await locateExecutable('codex')
+  const managedRuntime = await readManagedNodeRuntime()
   const spawnCommand = resolveCliSpawnCommand('codex', executablePath)
 
-  progress.status('Codex 已开始处理当前任务。', sessionId)
+  progress.intent('Codex 已开始处理当前任务。', sessionId, undefined, undefined, 'request.started')
 
   const result = await spawnCommandWithHandlers(spawnCommand, args, {
     cwd: input.projectPath,
     timeoutMs: 15 * 60 * 1000,
+    env: managedRuntime ? buildRuntimeEnv(managedRuntime) : undefined,
     stdinData: input.prompt,
     onSpawn: (child) => {
       activeCliProcesses.set(input.requestId, child)
@@ -1851,26 +2286,57 @@ async function runCodexPrompt(
 
       if (parsed.type === 'thread.started' && typeof parsed.thread_id === 'string') {
         sessionId = parsed.thread_id
-        progress.status('已连接到 Codex 会话。', sessionId)
+        progress.intent('已连接到 Codex 会话。', sessionId, 'thread.started', undefined, 'thread.started')
         return
       }
 
       if (parsed.type === 'turn.started') {
-        progress.status('Codex 正在分析项目并准备执行。', sessionId)
+        progress.intent('Codex 正在分析项目并准备执行。', sessionId, 'turn.started', undefined, 'turn.started')
+        return
+      }
+
+      const payload =
+        typeof parsed.payload === 'object' && parsed.payload
+          ? parsed.payload as Record<string, unknown>
+          : null
+
+      const contentCandidates = [
+        payload?.content,
+        typeof payload?.message === 'object' && payload.message
+          ? (payload.message as { content?: unknown }).content
+          : undefined,
+      ]
+
+      for (const candidate of contentCandidates) {
+        const toolEntries = extractToolUseEntries(candidate)
+        for (const toolEntry of toolEntries) {
+          const described = describeCliToolUse(toolEntry.name, toolEntry.input)
+          const sourceKind = toolEntry.name?.trim() ? `tool_use.${toolEntry.name.trim()}` : 'tool_use'
+          if (described.command) {
+            progress.command(described.message, described.command, sessionId, described.detail, described.files, sourceKind)
+          } else {
+            progress.tool(described.message, sessionId, described.detail, described.files, sourceKind)
+          }
+        }
+      }
+
+      const lineFileChanges = extractCodexFileChanges([line])
+      if (lineFileChanges.length > 0) {
+        progress.result('已记录文件变更', sessionId, undefined, typeof parsed.type === 'string' ? parsed.type : '', lineFileChanges, typeof parsed.type === 'string' ? parsed.type : 'file_change')
         return
       }
 
       if (parsed.type === 'error' && typeof parsed.message === 'string') {
-        progress.error(parsed.message, sessionId)
+        progress.error(parsed.message, sessionId, false, undefined, { logKind: 'error', sourceKind: typeof parsed.type === 'string' ? parsed.type : 'error', detail: typeof parsed.type === 'string' ? parsed.type : '' })
       }
     },
     onStderrLine: (line) => {
       if (line.toLowerCase().includes('warn')) {
-        progress.status(line, sessionId)
+        progress.stderr('Codex 输出了警告信息', sessionId, line, 'stderr.warn')
         return
       }
 
-      progress.error(line, sessionId)
+      progress.stderr('Codex 输出了错误信息', sessionId, line, 'stderr')
     },
   })
   activeCliProcesses.delete(input.requestId)
@@ -1894,11 +2360,17 @@ async function runCodexPrompt(
   const success = !aborted && result.exitCode === 0 && output.length > 0
 
   if (success) {
-    progress.status('Codex 已完成本次回复。', sessionId, true, fileChanges)
+    progress.result('Codex 已完成本次回复。', sessionId, result.exitCode, output, fileChanges, 'turn.completed')
+    progress.status('Codex 已完成本次回复。', sessionId, true, fileChanges, { logKind: 'status', sourceKind: 'turn.completed' })
   } else if (aborted) {
-    progress.status('Codex 已停止本次回复。', sessionId, true)
+    progress.status('Codex 已停止本次回复。', sessionId, true, undefined, { logKind: 'status', sourceKind: 'request.aborted' })
   } else if (result.stderr.trim()) {
-    progress.error(result.stderr.trim(), sessionId, true, fileChanges)
+    progress.error('Codex 执行失败', sessionId, true, fileChanges, {
+      logKind: 'error',
+      sourceKind: 'request.failed',
+      detail: result.stderr.trim(),
+      exitCode: result.exitCode,
+    })
   }
 
   return {
@@ -1947,13 +2419,15 @@ async function runClaudePrompt(
   let partialText = ''
   let finalResult: Record<string, unknown> | null = null
   const executablePath = await locateExecutable('claude')
+  const managedRuntime = await readManagedNodeRuntime()
   const spawnCommand = resolveCliSpawnCommand('claude', executablePath)
 
-  progress.status('Claude 已开始处理当前任务。', sessionId)
+  progress.intent('Claude 已开始处理当前任务。', sessionId, undefined, undefined, 'request.started')
 
   const result = await spawnCommandWithHandlers(spawnCommand, args, {
     cwd: input.projectPath,
     timeoutMs: 15 * 60 * 1000,
+    env: managedRuntime ? buildRuntimeEnv(managedRuntime) : undefined,
     stdinData: input.prompt,
     onSpawn: (child) => {
       activeCliProcesses.set(input.requestId, child)
@@ -1970,17 +2444,17 @@ async function runClaudePrompt(
         sessionId !== parsed.session_id
       ) {
         sessionId = parsed.session_id
-        progress.status('已连接到 Claude 会话。', sessionId)
+        progress.intent('已连接到 Claude 会话。', sessionId, 'session.connected', undefined, 'session.connected')
       }
 
       if (parsed.type === 'system') {
         if (parsed.subtype === 'init') {
-          progress.status('Claude 会话初始化完成。', sessionId)
+          progress.intent('Claude 会话初始化完成。', sessionId, 'system.init', undefined, 'system.init')
           return
         }
 
         if (parsed.subtype === 'hook_started' && typeof parsed.hook_name === 'string') {
-          progress.status(`正在执行 ${parsed.hook_name}`, sessionId)
+          progress.tool(`正在执行 ${parsed.hook_name}`, sessionId, safeStringify(parsed), undefined, `system.hook_started.${parsed.hook_name}`)
         }
         return
       }
@@ -1994,7 +2468,14 @@ async function runClaudePrompt(
           parsedMessage?.content
         )
         if (toolName) {
-          progress.status(`Claude 正在调用 ${toolName}`, sessionId)
+          const toolEntry = extractToolUseEntries(parsedMessage?.content)[0]
+          const described = describeCliToolUse(toolName, toolEntry?.input)
+          const sourceKind = `assistant.tool_use.${toolName}`
+          if (described.command) {
+            progress.command(described.message, described.command, sessionId, described.detail, described.files, sourceKind)
+          } else {
+            progress.tool(described.message, sessionId, described.detail, described.files, sourceKind)
+          }
         }
         return
       }
@@ -2008,7 +2489,13 @@ async function runClaudePrompt(
         ) {
           const block = event.content_block as Record<string, unknown>
           if (block.type === 'tool_use' && typeof block.name === 'string') {
-            progress.status(`Claude 正在调用 ${block.name}`, sessionId)
+            const described = describeCliToolUse(block.name, block.input)
+            const sourceKind = `stream.tool_use.${block.name}`
+            if (described.command) {
+              progress.command(described.message, described.command, sessionId, described.detail, described.files, sourceKind)
+            } else {
+              progress.tool(described.message, sessionId, described.detail, described.files, sourceKind)
+            }
           }
         }
 
@@ -2031,7 +2518,7 @@ async function runClaudePrompt(
       }
     },
     onStderrLine: (line) => {
-      progress.error(line, sessionId)
+      progress.stderr('Claude 输出了错误信息', sessionId, line, 'stderr')
     },
   })
   activeCliProcesses.delete(input.requestId)
@@ -2066,11 +2553,17 @@ async function runClaudePrompt(
 
   if (success) {
     progress.partial(output, sessionId, true)
-    progress.status('Claude 已完成本次回复。', sessionId, true, fileChanges)
+    progress.result('Claude 已完成本次回复。', sessionId, result.exitCode, output, fileChanges, 'result')
+    progress.status('Claude 已完成本次回复。', sessionId, true, fileChanges, { logKind: 'status', sourceKind: 'result' })
   } else if (aborted) {
-    progress.status('Claude 已停止本次回复。', sessionId, true)
+    progress.status('Claude 已停止本次回复。', sessionId, true, undefined, { logKind: 'status', sourceKind: 'request.aborted' })
   } else if (result.stderr.trim()) {
-    progress.error(result.stderr.trim(), sessionId, true, fileChanges)
+    progress.error('Claude 执行失败', sessionId, true, fileChanges, {
+      logKind: 'error',
+      sourceKind: 'request.failed',
+      detail: result.stderr.trim(),
+      exitCode: result.exitCode,
+    })
   }
 
   return {
@@ -2101,7 +2594,7 @@ async function writeCodexConfig(request: CliDeployRequest) {
       raw,
       resolveDesktopCliKeyRecord(request.apiKey),
       request.model?.trim() || 'gpt-5.5',
-      request.baseUrl?.trim() || SERVER_BASE_URL
+      normalizeCodexBaseUrl(request.baseUrl)
     ),
     'utf8'
   )
@@ -2127,7 +2620,7 @@ async function writeClaudeConfig(request: CliDeployRequest) {
   const env = {
     ...currentEnv,
     ANTHROPIC_AUTH_TOKEN: resolveDesktopCliKeyRecord(request.apiKey),
-    ANTHROPIC_BASE_URL: request.baseUrl?.trim() || SERVER_BASE_URL,
+    ANTHROPIC_BASE_URL: normalizeClaudeBaseUrl(request.baseUrl),
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
     API_TIMEOUT_MS: '600000',
     ONEAPI_ORIGINAL_ANTHROPIC_AUTH_TOKEN:
@@ -2165,81 +2658,377 @@ async function backupIfNeeded(filePath: string) {
 function sendDeployProgress(webContents: WebContents, payload: DeployProgressPayload) {
   webContents.send('desktop:deploy-progress', {
     ...payload,
+    createdAt: payload.createdAt || Date.now(),
     detail: maskSensitiveText(payload.detail),
+    command: maskSensitiveText(payload.command),
   })
 }
 
-async function installCliPackage(client: CliClient) {
-  return runCommand(
-    getNpmCommand(),
-    ['install', '-g', '--registry=https://registry.npmmirror.com', cliConfig[client].packageName],
+function createDeployLogger(
+  webContents: WebContents,
+  jobId: string,
+  client: CliClient
+) {
+  return {
+    emit(
+      step: DeployProgressPayload['step'],
+      status: DeployStatus,
+      message: string,
+      options: {
+        kind?: DeployProgressPayload['kind']
+        detail?: string
+        command?: string
+        exitCode?: number
+      } = {}
+    ) {
+      sendDeployProgress(webContents, {
+        jobId,
+        client,
+        step,
+        status,
+        message,
+        createdAt: Date.now(),
+        ...options,
+      })
+    },
+    info(
+      step: DeployProgressPayload['step'],
+      status: DeployStatus,
+      message: string,
+      detail?: string
+    ) {
+      this.emit(step, status, message, { kind: 'info', detail })
+    },
+    command(
+      step: DeployProgressPayload['step'],
+      command: string,
+      args: string[],
+      cwd?: string
+    ) {
+      const rendered = [command, ...args].join(' ')
+      this.emit(step, 'running', '执行命令', {
+        kind: 'command',
+        command: cwd ? `${rendered}\n[cwd] ${cwd}` : rendered,
+      })
+    },
+    stdout(step: DeployProgressPayload['step'], line: string) {
+      this.emit(step, 'running', 'stdout', {
+        kind: 'stdout',
+        detail: line,
+      })
+    },
+    stderr(step: DeployProgressPayload['step'], line: string) {
+      this.emit(step, 'running', 'stderr', {
+        kind: 'stderr',
+        detail: line,
+      })
+    },
+    result(
+      step: DeployProgressPayload['step'],
+      exitCode: number,
+      stdout: string,
+      stderr: string
+    ) {
+      const detailParts = [
+        stdout.trim() ? `stdout:\n${stdout.trim()}` : '',
+        stderr.trim() ? `stderr:\n${stderr.trim()}` : '',
+      ].filter(Boolean)
+
+      this.emit(step, exitCode === 0 ? 'success' : 'error', exitCode === 0 ? '命令执行完成' : '命令执行失败', {
+        kind: 'result',
+        exitCode,
+        detail: detailParts.join('\n\n'),
+      })
+    },
+  }
+}
+
+async function runLoggedCommand(
+  logger: ReturnType<typeof createDeployLogger>,
+  step: DeployProgressPayload['step'],
+  command: string,
+  args: string[],
+  options: {
+    cwd?: string
+    timeoutMs?: number
+    env?: NodeJS.ProcessEnv
+    stdinData?: string
+  } = {}
+) {
+  logger.command(step, command, args, options.cwd)
+  const result = await spawnCommandWithHandlers(command, args, {
+    ...options,
+    onStdoutLine: (line) => logger.stdout(step, line),
+    onStderrLine: (line) => logger.stderr(step, line),
+  })
+  logger.result(step, result.exitCode, result.stdout, result.stderr)
+  return result
+}
+
+function buildNodeDownloadUrl(version: string) {
+  const normalizedVersion = version.startsWith('v') ? version : `v${version}`
+
+  if (process.platform === 'win32') {
+    const arch = process.arch === 'arm64' ? 'arm64' : 'x64'
+    return `${NODEJS_MIRROR_BASE_URL}/${normalizedVersion}/node-${normalizedVersion}-win-${arch}.zip`
+  }
+
+  if (process.platform === 'darwin') {
+    const arch = process.arch === 'arm64' ? 'arm64' : 'x64'
+    return `${NODEJS_MIRROR_BASE_URL}/${normalizedVersion}/node-${normalizedVersion}-darwin-${arch}.tar.gz`
+  }
+
+  throw new Error(`当前平台暂未实现 Node.js 自动安装：${process.platform}`)
+}
+
+async function resolveLatestLtsNodeVersion() {
+  const response = await fetch(`${NODEJS_MIRROR_BASE_URL}/index.json`)
+  if (!response.ok) {
+    throw new Error(`获取 Node.js 版本列表失败：${response.status}`)
+  }
+
+  const versions = (await response.json()) as Array<{
+    version?: string
+    lts?: string | false
+  }>
+
+  const latestLts = versions.find((item) => typeof item.lts === 'string' && item.version)
+  if (!latestLts?.version) {
+    throw new Error('未找到可用的 Node.js LTS 版本')
+  }
+
+  return latestLts.version
+}
+
+async function installManagedNodeRuntime(
+  logger: ReturnType<typeof createDeployLogger>
+) {
+  const version = await resolveLatestLtsNodeVersion()
+  const archiveUrl = buildNodeDownloadUrl(version)
+  const downloadDir = path.join(getToolchainRoot(), 'downloads')
+  const archiveName = path.basename(new URL(archiveUrl).pathname)
+  const archivePath = path.join(downloadDir, archiveName)
+  const extractRoot = getManagedNodeRoot()
+
+  await fs.mkdir(downloadDir, { recursive: true })
+  await clearDirectory(extractRoot)
+
+  logger.info('node', 'running', `准备下载 Node.js ${version}`, archiveUrl)
+  const response = await fetch(archiveUrl)
+  if (!response.ok) {
+    throw new Error(`下载 Node.js 失败：${response.status}`)
+  }
+  const archiveBuffer = Buffer.from(await response.arrayBuffer())
+  await fs.writeFile(archivePath, archiveBuffer)
+  logger.info('node', 'success', `Node.js 安装包下载完成`, `${archivePath}\n${archiveBuffer.length} bytes`)
+
+  if (process.platform === 'win32') {
+    const extractCommand = 'powershell.exe'
+    const extractArgs = [
+      '-NoProfile',
+      '-Command',
+      `Expand-Archive -LiteralPath '${archivePath.replace(/'/g, "''")}' -DestinationPath '${extractRoot.replace(/'/g, "''")}' -Force`,
+    ]
+    const extractResult = await runLoggedCommand(logger, 'node', extractCommand, extractArgs, {
+      timeoutMs: 10 * 60 * 1000,
+    })
+    if (extractResult.exitCode !== 0) {
+      throw new Error(extractResult.stderr || extractResult.stdout || '解压 Node.js 安装包失败')
+    }
+    await flattenSingleNestedDirectory(extractRoot, logger)
+  } else {
+    const extractResult = await runLoggedCommand(
+      logger,
+      'node',
+      'tar',
+      ['-xzf', archivePath, '-C', extractRoot, '--strip-components=1'],
+      {
+        timeoutMs: 10 * 60 * 1000,
+      }
+    )
+    if (extractResult.exitCode !== 0) {
+      throw new Error(extractResult.stderr || extractResult.stdout || '解压 Node.js 安装包失败')
+    }
+  }
+
+  const managedNodePath = await firstExistingPath(getManagedNodeExecutableCandidates())
+  const managedNpmPath = await firstExistingPath(getManagedNpmExecutableCandidates())
+  if (!managedNodePath || !managedNpmPath) {
+    const extractLayout = await describeDirectoryEntries(extractRoot)
+    throw new Error(`Node.js 安装完成，但未找到 node/npm 可执行文件\n${extractLayout}`)
+  }
+
+  const nodeVersionResult = await runLoggedCommand(logger, 'node', managedNodePath, ['--version'], {
+    timeoutMs: 15000,
+  })
+  const npmVersionResult = await runLoggedCommand(logger, 'node', managedNpmPath, ['--version'], {
+    timeoutMs: 15000,
+  })
+  if (nodeVersionResult.exitCode !== 0 || npmVersionResult.exitCode !== 0) {
+    throw new Error(
+      `Node.js 安装后校验失败\nnode:\n${nodeVersionResult.stderr || nodeVersionResult.stdout}\n\nnpm:\n${npmVersionResult.stderr || npmVersionResult.stdout}`
+    )
+  }
+
+  return {
+    source: 'managed' as const,
+    nodePath: managedNodePath,
+    npmPath: managedNpmPath,
+    version,
+    prefixPath: getManagedNpmPrefix(),
+  }
+}
+
+async function ensureNodeRuntime(
+  logger: ReturnType<typeof createDeployLogger>
+): Promise<NodeRuntimeInfo> {
+  const systemNodePath = await locateSystemExecutable('node')
+  const systemNpmPath = await locateSystemExecutable(getNpmCommand())
+  if (systemNodePath && systemNpmPath) {
+    const versionResult = await runLoggedCommand(logger, 'node', systemNodePath, ['--version'])
+    const npmVersionResult = await runLoggedCommand(logger, 'node', systemNpmPath, ['--version'])
+    if (versionResult.exitCode === 0 && npmVersionResult.exitCode === 0) {
+      const version =
+        versionResult.stdout.split(/\r?\n/).map((item) => item.trim()).find(Boolean) || ''
+      logger.info('node', 'success', `已检测到系统 Node.js ${version || '未知版本'}`, systemNodePath)
+      return {
+        source: 'system',
+        nodePath: systemNodePath,
+        npmPath: systemNpmPath,
+        version,
+        prefixPath: getManagedNpmPrefix(),
+      }
+    }
+  }
+
+  const managedNodePath = await firstExistingPath(getManagedNodeExecutableCandidates())
+  const managedNpmPath = await firstExistingPath(getManagedNpmExecutableCandidates())
+  if (managedNodePath && managedNpmPath) {
+    const versionResult = await runLoggedCommand(logger, 'node', managedNodePath, ['--version'])
+    const npmVersionResult = await runLoggedCommand(logger, 'node', managedNpmPath, ['--version'])
+    if (versionResult.exitCode === 0 && npmVersionResult.exitCode === 0) {
+      const version =
+        versionResult.stdout.split(/\r?\n/).map((item) => item.trim()).find(Boolean) || ''
+      logger.info('node', 'success', `已检测到内置 Node.js ${version || '未知版本'}`, managedNodePath)
+      return {
+        source: 'managed',
+        nodePath: managedNodePath,
+        npmPath: managedNpmPath,
+        version,
+        prefixPath: getManagedNpmPrefix(),
+      }
+    }
+  }
+
+  logger.info('node', 'running', '当前系统未检测到可用 Node.js，开始安装内置 Node.js')
+  return installManagedNodeRuntime(logger)
+}
+
+function buildRuntimeEnv(runtime: NodeRuntimeInfo) {
+  const nodeDir = path.dirname(runtime.nodePath)
+  const prefixBin = getManagedPrefixBin(runtime.prefixPath)
+  const pathSegments = [prefixBin, nodeDir, process.env.PATH || ''].filter(Boolean)
+
+  return {
+    ...process.env,
+    PATH: pathSegments.join(process.platform === 'win32' ? ';' : ':'),
+    npm_config_registry: 'https://registry.npmmirror.com',
+    npm_config_prefix: runtime.prefixPath,
+    npm_config_cache: path.join(getToolchainRoot(), 'npm-cache'),
+  }
+}
+
+async function readManagedNodeRuntime() {
+  const nodePath = await firstExistingPath(getManagedNodeExecutableCandidates())
+  const npmPath = await firstExistingPath(getManagedNpmExecutableCandidates())
+  if (!nodePath || !npmPath) {
+    return null
+  }
+
+  const versionResult = await runCommand(nodePath, ['--version'], { timeoutMs: 15000 })
+  const version =
+    versionResult.stdout.split(/\r?\n/).map((item) => item.trim()).find(Boolean) || ''
+
+  return {
+    source: 'managed' as const,
+    nodePath,
+    npmPath,
+    version,
+    prefixPath: getManagedNpmPrefix(),
+  }
+}
+
+async function installCliPackage(
+  client: CliClient,
+  runtime: NodeRuntimeInfo,
+  logger: ReturnType<typeof createDeployLogger>
+) {
+  await fs.mkdir(runtime.prefixPath, { recursive: true })
+  return runLoggedCommand(
+    logger,
+    'install',
+    runtime.npmPath,
+    ['install', '-g', '--prefix', runtime.prefixPath, cliConfig[client].packageName],
     {
       timeoutMs: 10 * 60 * 1000,
+      env: buildRuntimeEnv(runtime),
     }
   )
 }
 
 async function deployCli(webContents: WebContents, request: CliDeployRequest, jobId: string) {
   const client = request.client
+  const logger = createDeployLogger(webContents, jobId, client)
 
-  sendDeployProgress(webContents, {
-    jobId,
-    client,
-    step: 'detect',
-    status: 'running',
-    message: `正在检测 ${client} 环境`,
-  })
+  logger.info('detect', 'running', `正在检测 ${client} 与 Node.js 环境`)
+  let runtime: NodeRuntimeInfo
+  try {
+    runtime = await ensureNodeRuntime(logger)
+  } catch (error) {
+    logger.info(
+      'node',
+      'error',
+      'Node.js 环境准备失败',
+      error instanceof Error ? error.message : String(error)
+    )
+    return
+  }
+
+  logger.info(
+    'node',
+    'success',
+    `Node.js 环境已就绪（${runtime.source === 'system' ? '系统' : '内置'}）`,
+    `${runtime.nodePath}\n${runtime.version || '未知版本'}`
+  )
 
   const detected = await inspectCli(client)
-  sendDeployProgress(webContents, {
-    jobId,
-    client,
-    step: 'detect',
-    status: 'success',
-    message: detected.installed
+  logger.info(
+    'detect',
+    'success',
+    detected.installed
       ? `已检测到 ${client}，版本 ${detected.version || '未知'}`
       : `未检测到 ${client}，准备安装`,
-    detail: detected.executablePath,
-  })
+    detected.executablePath || '未找到可执行文件'
+  )
 
   if (!detected.installed) {
-    sendDeployProgress(webContents, {
-      jobId,
-      client,
-      step: 'install',
-      status: 'running',
-      message: `正在通过国内镜像安装 ${client}`,
-    })
+    logger.info('install', 'running', `正在通过国内镜像安装 ${client}`)
 
-    const installResult = await installCliPackage(client)
+    const installResult = await installCliPackage(client, runtime, logger)
     if (installResult.exitCode !== 0) {
-      sendDeployProgress(webContents, {
-        jobId,
-        client,
-        step: 'install',
-        status: 'error',
-        message: `${client} 安装失败`,
-        detail: installResult.stderr || installResult.stdout,
-      })
+      logger.info(
+        'install',
+        'error',
+        `${client} 安装失败`,
+        installResult.stderr || installResult.stdout
+      )
       return
     }
 
-    sendDeployProgress(webContents, {
-      jobId,
-      client,
-      step: 'install',
-      status: 'success',
-      message: `${client} 安装完成`,
-    })
+    logger.info('install', 'success', `${client} 安装完成`)
   }
 
-  sendDeployProgress(webContents, {
-    jobId,
-    client,
-    step: 'config',
-    status: 'running',
-    message: `正在写入 ${client} 配置`,
-  })
+  logger.info('config', 'running', `正在写入 ${client} 配置`)
 
   try {
     if (client === 'codex') {
@@ -2250,33 +3039,18 @@ async function deployCli(webContents: WebContents, request: CliDeployRequest, jo
 
     await fs.mkdir(cliConfig[client].dataPath, { recursive: true })
 
-    sendDeployProgress(webContents, {
-      jobId,
-      client,
-      step: 'config',
-      status: 'success',
-      message: `${client} 配置写入完成`,
-      detail: cliConfig[client].configPath,
-    })
+    logger.info('config', 'success', `${client} 配置写入完成`, cliConfig[client].configPath)
   } catch (error) {
-    sendDeployProgress(webContents, {
-      jobId,
-      client,
-      step: 'config',
-      status: 'error',
-      message: `${client} 配置失败`,
-      detail: error instanceof Error ? error.message : String(error),
-    })
+    logger.info(
+      'config',
+      'error',
+      `${client} 配置失败`,
+      error instanceof Error ? error.message : String(error)
+    )
     return
   }
 
-  sendDeployProgress(webContents, {
-    jobId,
-    client,
-    step: 'test',
-    status: 'running',
-    message: `正在验证 ${client} 连接`,
-  })
+  logger.info('test', 'running', `正在验证 ${client} 连接`)
 
   const testProjectPath = path.join(os.homedir())
   const testResult =
@@ -2285,52 +3059,34 @@ async function deployCli(webContents: WebContents, request: CliDeployRequest, jo
           client,
           requestId: `${jobId}-test`,
           projectPath: testProjectPath,
-          prompt: '只回复：连接测试成功',
+          prompt: 'hello',
         })
       : await runClaudePrompt(webContents, {
           client,
           requestId: `${jobId}-test`,
           projectPath: testProjectPath,
-          prompt: '只回复：连接测试成功',
+          prompt: 'hello',
         })
 
   if (!testResult.success) {
-    sendDeployProgress(webContents, {
-      jobId,
-      client,
-      step: 'test',
-      status: 'error',
-      message: `${client} 测试失败`,
-      detail: testResult.error || testResult.raw,
-    })
+    logger.info('test', 'error', `${client} 测试失败`, testResult.error || testResult.raw)
     return
   }
 
-  sendDeployProgress(webContents, {
-    jobId,
-    client,
-    step: 'test',
-    status: 'success',
-    message: `${client} 测试通过`,
-    detail: testResult.output,
-  })
+  logger.info('test', 'success', `${client} 测试通过`, testResult.output)
 
-  sendDeployProgress(webContents, {
-    jobId,
-    client,
-    step: 'complete',
-    status: 'success',
-    message: `${client} 已可直接使用`,
-  })
+  logger.info('complete', 'success', `${client} 已可直接使用`)
 }
 
 app.whenReady().then(() => {
-  createWindow()
+  return loadServerBaseUrl().then(() => {
+    createWindow()
 
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow()
-    }
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) {
+        createWindow()
+      }
+    })
   })
 })
 
@@ -2342,6 +3098,13 @@ app.on('window-all-closed', () => {
 
 ipcMain.handle('app:get-platform', () => process.platform)
 ipcMain.handle('app:get-meta', () => getAppMeta())
+ipcMain.handle('app:get-server-base-url', () => serverBaseUrl)
+ipcMain.handle('app:set-server-base-url', async (_event, nextValue: string) => {
+  const normalized = await persistServerBaseUrl(nextValue)
+  return {
+    serverBaseUrl: normalized,
+  }
+})
 ipcMain.handle('desktop:api-request', async (_event, request: DesktopApiRequest) =>
   requestApi(request)
 )
@@ -2421,4 +3184,10 @@ ipcMain.handle('desktop:cli-deploy-preset', async (_event, client: CliClient) =>
 })
 ipcMain.handle('desktop:save-attachment', async (_event, input: DesktopAttachmentSaveRequest) => {
   return saveDesktopAttachment(input)
+})
+ipcMain.handle('desktop:image-edit', async (_event, input: DesktopImageEditRequest) => {
+  return requestImageEdit(input)
+})
+ipcMain.handle('desktop:save-image', async (_event, input: DesktopSaveImageRequest) => {
+  return saveImageToUserPath(input)
 })

@@ -9,8 +9,8 @@
     "dev:electron": "concurrently -k \"npm:dev\" \"npm:electron\"",
     "electron": "wait-on tcp:5173 && electron .",
     "build": "tsc -b && vite build",
-    "build:win": "cross-env-shell ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ \"npm run build && electron-builder --win nsis portable\"",
-    "test": "node --test --experimental-strip-types src/lib/cli-session.test.ts",
+    "build:win": "cross-env-shell ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ \"npm run build && electron-builder --win nsis portable && node scripts/patch-win-icons.mjs\"",
+    "test": "node --test --experimental-strip-types src/lib/*.test.ts",
     "lint": "eslint .",
     "preview": "vite preview"
   },
@@ -43,6 +43,8 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.6.0",
+    "png-to-ico": "^3.0.1",
+    "rcedit": "^5.0.2",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.59.2",
     "vite": "^8.0.12",
@@ -78,7 +80,10 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
+      "createStartMenuShortcut": true,
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico"
     }
   }
 }

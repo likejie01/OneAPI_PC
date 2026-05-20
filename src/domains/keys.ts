@@ -1,4 +1,5 @@
 import { desktopEnvelope } from '../lib/desktop-client'
+import { selectReusableDesktopApiKey } from '../lib/desktop-service'
 import type { ApiEnvelope, ApiKeyFormInput, ApiKeyPageData } from '../shared/contracts'
 
 export async function getApiKeys(page = 1, size = 10) {
@@ -78,6 +79,35 @@ export async function createDesktopCliKey(name: string, group: string) {
   return {
     id: target.id,
     key: secret,
+  }
+}
+
+export async function ensureDesktopServiceKey(options: {
+  name?: string
+  group?: string
+  preferredNames?: string[]
+}) {
+  const name = options.name?.trim() || 'OneAPI Desktop Internal Key'
+  const group = options.group?.trim() || ''
+  const keys = (await getApiKeys(1, 100))?.items ?? []
+  const target = selectReusableDesktopApiKey(keys, {
+    group,
+    preferredNames: [name, ...(options.preferredNames || [])],
+  })
+
+  if (target) {
+    const secret = await fetchApiKeySecret(target.id)
+    return {
+      id: target.id,
+      key: secret,
+      reused: true,
+    }
+  }
+
+  const created = await createDesktopCliKey(name, group)
+  return {
+    ...created,
+    reused: false,
   }
 }
 
