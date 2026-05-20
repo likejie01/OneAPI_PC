@@ -1,5 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
+  AssistantHistoryScope,
+  AssistantHistorySnapshotEntry,
   CliClient,
   CliDeployRequest,
   CliHistoryEntry,
@@ -40,6 +42,16 @@ contextBridge.exposeInMainWorld('desktopBridge', {
   openExternal: (url: string) => ipcRenderer.invoke('desktop:open-external', url) as Promise<void>,
   openPath: (targetPath: string) =>
     ipcRenderer.invoke('desktop:open-path', targetPath) as Promise<void>,
+  openAssistantHistoryFolder: (scope: AssistantHistoryScope, sessionId: string) =>
+    ipcRenderer.invoke('desktop:open-assistant-history-folder', {
+      scope,
+      sessionId,
+    }) as Promise<void>,
+  syncAssistantHistory: (scope: AssistantHistoryScope, entries: AssistantHistorySnapshotEntry[]) =>
+    ipcRenderer.invoke('desktop:sync-assistant-history', {
+      scope,
+      entries,
+    }) as Promise<void>,
   pickProjectDirectory: () =>
     ipcRenderer.invoke('desktop:pick-project') as Promise<string>,
   getCliStatus: () =>
@@ -57,6 +69,11 @@ contextBridge.exposeInMainWorld('desktopBridge', {
       client,
       sessionId,
     }) as Promise<CliSessionDetails | null>,
+  openCliSessionFolder: (client: CliClient, sessionId: string) =>
+    ipcRenderer.invoke('desktop:open-cli-session-folder', {
+      client,
+      sessionId,
+    }) as Promise<void>,
   runCliPrompt: (input: CliRunRequest) =>
     ipcRenderer.invoke('desktop:run-cli', input) as Promise<CliRunResponse>,
   stopCliPrompt: (requestId: string) =>

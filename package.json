@@ -9,7 +9,7 @@
     "dev:electron": "concurrently -k \"npm:dev\" \"npm:electron\"",
     "electron": "wait-on tcp:5173 && electron .",
     "build": "tsc -b && vite build",
-    "build:win": "cross-env-shell ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ \"npm run build && electron-builder --win nsis portable && node scripts/patch-win-icons.mjs\"",
+    "build:win": "cross-env-shell ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ \"node scripts/prepare-win-icons.mjs && npm run build && electron-builder --win nsis portable && node scripts/finalize-win-release.mjs\"",
     "test": "node --test --experimental-strip-types src/lib/*.test.ts",
     "lint": "eslint .",
     "preview": "vite preview"
@@ -76,14 +76,19 @@
         "portable"
       ]
     },
+    "afterPack": "scripts/electron-builder-after-pack.cjs",
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
+      "artifactName": "OneAPI_PC_Setup-1-0.${ext}",
       "installerIcon": "build/icon.ico",
       "uninstallerIcon": "build/icon.ico",
       "installerHeaderIcon": "build/icon.ico"
+    },
+    "portable": {
+      "artifactName": "OneAPI_PC-1-0.${ext}"
     }
   }
 }

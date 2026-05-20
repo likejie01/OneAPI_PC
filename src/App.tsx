@@ -1,16 +1,22 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { ChangeEvent, ClipboardEvent, Dispatch, DragEvent, ReactNode, SetStateAction } from 'react'
+import type { ChangeEvent, ClipboardEvent, Dispatch, DragEvent, MouseEvent, ReactNode, SetStateAction } from 'react'
 import {
   Bot,
+  ChevronDown,
   ChevronLeft,
+  ChevronUp,
+  ChevronsDown,
+  ChevronsUp,
   CheckCircle2,
   Copy,
   CreditCard,
+  Crop,
   Download,
   Eye,
   EyeOff,
   FileText,
   FolderOpen,
+  Shuffle,
   KeyRound,
   LoaderCircle,
   LockKeyhole,
@@ -26,6 +32,7 @@ import {
   Send,
   Square,
   Sparkles,
+  SlidersHorizontal,
   Star,
   Sun,
   UserPlus,
@@ -52,10 +59,10 @@ import {
   getUserGroups,
   getUserModels,
   saveImageToDisk,
-  sendChatCompletion,
   sendDirectImageGeneration,
   sendImageEdit,
   sendImageGeneration,
+  streamChatCompletion,
   stopChatCompletion,
 } from './domains/chat'
 import {
@@ -64,6 +71,8 @@ import {
   getCliDeployPreset,
   getCliStatus,
   listCliHistory,
+  openAssistantHistoryFolder,
+  openCliSessionFolder,
   onCliProgress,
   onDeployProgress,
   pickProjectDirectory,
@@ -71,6 +80,7 @@ import {
   runCliPrompt,
   setDesktopWindowTitle,
   stopCliPrompt,
+  syncAssistantHistory,
 } from './domains/cli'
 import { createDesktopCliKey, ensureDesktopServiceKey, fetchApiKeySecret, getApiKeys } from './domains/keys'
 import { generateAccessToken, getSelfProfile, requireSuccess, verifyCurrentPassword } from './domains/profile'
@@ -109,7 +119,6 @@ import type {
   AuthStatus,
   BillingHistoryData,
   ChatContentPart,
-  ChatGroupOption,
   ChatMessage,
   ChatModelOption,
   PlanRecord,
@@ -147,8 +156,8 @@ type ComposerAttachment = {
 }
 
 const assistantModes: Array<{ key: AssistantMode; label: string }> = [
-  { key: 'chat', label: '聊天' },
-  { key: 'draw', label: '生图' },
+  { key: 'chat', label: 'Chat' },
+  { key: 'draw', label: 'Image' },
   { key: 'codex', label: 'Codex' },
   { key: 'claude', label: 'Claude' },
 ]
@@ -159,10 +168,10 @@ const primarySideTabs: Array<{
   icon: typeof Sparkles
   desc: string
 }> = [
-  { key: 'assistants', label: '助手', icon: Sparkles, desc: '提示词助手与聊天形态' },
-  { key: 'subscriptions', label: '订阅', icon: CreditCard, desc: '套餐购买、订阅状态和额度' },
-  { key: 'wallet', label: '钱包', icon: Wallet, desc: '余额、支付入口与账单记录' },
-  { key: 'me', label: '我的', icon: KeyRound, desc: '个人信息、Key 与安全操作' },
+  { key: 'assistants', label: 'AIChat', icon: Sparkles, desc: '提示词助手与聊天形态' },
+  { key: 'subscriptions', label: '套餐订阅', icon: CreditCard, desc: '套餐购买、订阅状态和额度' },
+  { key: 'wallet', label: '用量账单', icon: Wallet, desc: '余额、支付入口与账单记录' },
+  { key: 'me', label: '环境部署', icon: KeyRound, desc: '个人信息、Key 与安全操作' },
 ]
 
 function getDesktopBridge() {
@@ -489,35 +498,6 @@ function toAssistantSystemMessage(assistant: AssistantRecord | null) {
   }
 }
 
-function toMessageText(content: unknown) {
-  if (typeof content === 'string' && content.trim()) {
-    return content
-  }
-
-  if (Array.isArray(content)) {
-    const joined = content
-      .map((item) => {
-        if (typeof item === 'string') {
-          return item
-        }
-
-        if (typeof item === 'object' && item && 'text' in item && typeof item.text === 'string') {
-          return item.text
-        }
-
-        return ''
-      })
-      .filter(Boolean)
-      .join('\n')
-
-    if (joined.trim()) {
-      return joined
-    }
-  }
-
-  return '模型未返回内容。'
-}
-
 function maskSecretText(value?: string) {
   if (!value) {
     return ''
@@ -695,6 +675,155 @@ function renderComposer(props: {
   )
 }
 
+function useAutoFollowScroll(
+  containerRef: React.RefObject<HTMLDivElement | null>,
+  dependencies: readonly unknown[]
+) {
+  const shouldFollowRef = useRef(true)
+
+  useEffect(() => {
+    const node = containerRef.current
+    if (!node) {
+      return
+    }
+
+    const handleScroll = () => {
+      const remaining = node.scrollHeight - node.scrollTop - node.clientHeight
+      shouldFollowRef.current = remaining <= 48
+    }
+
+    handleScroll()
+    node.addEventListener('scroll', handleScroll, { passive: true })
+    return () => node.removeEventListener('scroll', handleScroll)
+  }, [containerRef])
+
+  useLayoutEffect(() => {
+    const node = containerRef.current
+    if (!node || !shouldFollowRef.current) {
+      return
+    }
+    node.scrollTop = node.scrollHeight
+  }, [containerRef, ...dependencies])
+}
+
+function findClosestConversationBubble(
+  container: HTMLDivElement | null,
+  selector = '.message-bubble'
+) {
+  if (!container) {
+    return null
+  }
+
+  const nodes = Array.from(container.querySelectorAll<HTMLElement>(selector))
+  if (!nodes.length) {
+    return null
+  }
+
+  const containerRect = container.getBoundingClientRect()
+  const centerY = containerRect.top + containerRect.height / 2
+
+  const intersected = nodes.find((node) => {
+    const rect = node.getBoundingClientRect()
+    return rect.top <= centerY && rect.bottom >= centerY
+  })
+  if (intersected) {
+    return intersected
+  }
+
+  return nodes.reduce<{ node: HTMLElement | null; distance: number }>(
+    (closest, node) => {
+      const rect = node.getBoundingClientRect()
+      const nodeCenterY = rect.top + rect.height / 2
+      const distance = Math.abs(nodeCenterY - centerY)
+      if (!closest.node || distance < closest.distance) {
+        return { node, distance }
+      }
+      return closest
+    },
+    { node: null, distance: Number.POSITIVE_INFINITY }
+  ).node
+}
+
+function scrollBubbleIntoView(
+  container: HTMLDivElement | null,
+  selector: string,
+  position: 'current-top' | 'current-bottom' | 'session-top' | 'session-bottom'
+) {
+  if (!container) {
+    return
+  }
+
+  if (position === 'session-top') {
+    container.scrollTo({ top: 0, behavior: 'smooth' })
+    return
+  }
+
+  if (position === 'session-bottom') {
+    container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' })
+    return
+  }
+
+  const bubble = findClosestConversationBubble(container, selector)
+  if (!bubble) {
+    return
+  }
+
+  const nextTop =
+    position === 'current-top'
+      ? Math.max(bubble.offsetTop - 8, 0)
+      : Math.max(bubble.offsetTop + bubble.offsetHeight - container.clientHeight + 8, 0)
+
+  container.scrollTo({ top: nextTop, behavior: 'smooth' })
+}
+
+function ConversationScrollDock(props: {
+  containerRef: React.RefObject<HTMLDivElement | null>
+  itemSelector?: string
+}) {
+  const { containerRef, itemSelector = '.message-bubble' } = props
+
+  return (
+    <div className='conversation-scroll-dock' aria-label='会话导航'>
+      <button
+        className='conversation-scroll-button'
+        type='button'
+        title='会话顶部'
+        aria-label='会话顶部'
+        onClick={() => scrollBubbleIntoView(containerRef.current, itemSelector, 'session-top')}
+      >
+        <ChevronsUp size={16} />
+      </button>
+      <button
+        className='conversation-scroll-button'
+        type='button'
+        title='当前顶部'
+        aria-label='当前顶部'
+        onClick={() => scrollBubbleIntoView(containerRef.current, itemSelector, 'current-top')}
+      >
+        <ChevronUp size={16} />
+      </button>
+      <button
+        className='conversation-scroll-button'
+        type='button'
+        title='当前底部'
+        aria-label='当前底部'
+        onClick={() => scrollBubbleIntoView(containerRef.current, itemSelector, 'current-bottom')}
+      >
+        <ChevronDown size={16} />
+      </button>
+      <button
+        className='conversation-scroll-button'
+        type='button'
+        title='会话底部'
+        aria-label='会话底部'
+        onClick={() => scrollBubbleIntoView(containerRef.current, itemSelector, 'session-bottom')}
+      >
+        <ChevronsDown size={16} />
+      </button>
+    </div>
+  )
+}
+
 type ChatSessionRecord = {
   id: string
   title: string
@@ -744,6 +873,15 @@ const CHAT_CONTEXT_WINDOW_OPTIONS = [
   { label: '20 条', value: 20 },
   { label: '30 条', value: 30 },
   { label: '全部', value: 'all' as const },
+] as const
+const DRAW_SIZE_OPTIONS = [
+  { label: '方图', value: '1024x1024' },
+  { label: '竖图', value: '1024x1536' },
+  { label: '横图', value: '1536x1024' },
+] as const
+const DRAW_QUALITY_OPTIONS = [
+  { label: '标准', value: 'medium' },
+  { label: '高清', value: 'high' },
 ] as const
 
 type ChatContextWindow = (typeof CHAT_CONTEXT_WINDOW_OPTIONS)[number]['value']
@@ -1251,6 +1389,75 @@ function PendingImageContent() {
   )
 }
 
+type SessionContextMenuState = {
+  x: number
+  y: number
+  title: string
+  items: Array<{
+    key: string
+    label: string
+    onSelect: () => void | Promise<void>
+  }>
+}
+
+function SessionContextMenu(props: {
+  menu: SessionContextMenuState | null
+  onClose: () => void
+}) {
+  const { menu, onClose } = props
+
+  useEffect(() => {
+    if (!menu) {
+      return
+    }
+
+    function handleClose() {
+      onClose()
+    }
+
+    window.addEventListener('pointerdown', handleClose)
+    window.addEventListener('resize', handleClose)
+    window.addEventListener('scroll', handleClose, true)
+    return () => {
+      window.removeEventListener('pointerdown', handleClose)
+      window.removeEventListener('resize', handleClose)
+      window.removeEventListener('scroll', handleClose, true)
+    }
+  }, [menu, onClose])
+
+  if (!menu) {
+    return null
+  }
+
+  return (
+    <div
+      className='session-context-menu'
+      style={{
+        left: Math.max(12, menu.x),
+        top: Math.max(12, menu.y),
+      }}
+      role='menu'
+      aria-label={`${menu.title} 会话操作`}
+      onPointerDown={(event) => event.stopPropagation()}
+    >
+      {menu.items.map((item) => (
+        <button
+          key={item.key}
+          className='session-context-menu-item'
+          type='button'
+          role='menuitem'
+          onClick={() => {
+            onClose()
+            void item.onSelect()
+          }}
+        >
+          {item.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 function MessageAttachmentGallery(props: {
   attachments?: Array<{
     id: string
@@ -1725,6 +1932,7 @@ function AssistantsChatWorkspace(props: {
     readJsonStorage<string[]>('oneapi-desktop-chat-pinned-groups', [])
   )
   const [historyVisibilityTab, setHistoryVisibilityTab] = useState<HistoryVisibilityTab>('visible')
+  const [sessionContextMenu, setSessionContextMenu] = useState<SessionContextMenuState | null>(null)
   const [assistantMenuOpen, setAssistantMenuOpen] = useState(false)
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
   const [reasoningMenuOpen, setReasoningMenuOpen] = useState(false)
@@ -1756,8 +1964,10 @@ function AssistantsChatWorkspace(props: {
   const reasoningMenuRef = useRef<HTMLDivElement | null>(null)
   const contextMenuRef = useRef<HTMLDivElement | null>(null)
   const historyPanelRef = useRef<HTMLDivElement | null>(null)
+  const messageStreamRef = useRef<HTMLDivElement | null>(null)
   const hydratedSessionIdRef = useRef('')
   const pendingRequestIdRef = useRef('')
+  const pendingStreamAbortRef = useRef<AbortController | null>(null)
   const stoppingRef = useRef(false)
 
   const activeAssistant = useMemo(
@@ -1800,6 +2010,8 @@ function AssistantsChatWorkspace(props: {
     [chatSessions, hiddenChatSessionIds]
   )
   const historySessions = historyVisibilityTab === 'hidden' ? hiddenChatSessions : visibleChatSessions
+
+  useAutoFollowScroll(messageStreamRef, [messages, sending])
 
   useEffect(() => {
     let disposed = false
@@ -1893,6 +2105,18 @@ function AssistantsChatWorkspace(props: {
   useEffect(() => {
     writeJsonStorage(CHAT_ACTIVE_SESSION_STORAGE_KEY, resolvedActiveSessionId)
   }, [resolvedActiveSessionId])
+
+  useEffect(() => {
+    void syncAssistantHistory(
+      'chat',
+      chatSessions.map((session) => ({
+        id: session.id,
+        title: session.title,
+        updatedAt: session.updatedAt,
+        data: JSON.stringify(session),
+      }))
+    )
+  }, [chatSessions])
 
   useEffect(() => {
     writeJsonStorage(CHAT_REASONING_STORAGE_KEY, reasoningEffort)
@@ -2042,6 +2266,8 @@ function AssistantsChatWorkspace(props: {
     clearAttachments()
     window.setTimeout(() => resizeDraft(), 0)
     setSending(true)
+    let streamedAssistantText = ''
+    let streamedUsageData: ChatMessage['usage'] | undefined
 
     try {
       if (isImageGenerationModel(resolvedModel)) {
@@ -2082,24 +2308,52 @@ function AssistantsChatWorkspace(props: {
         }))
       } else {
         const systemMessage = toAssistantSystemMessage(activeAssistant)
-        const response = await sendChatCompletion({
-          model: resolvedModel,
-          group: selectedGroup || undefined,
-          temperature: activeAssistant?.temperature ?? 0.7,
-          reasoningEffort,
-          messages: [
-            ...(systemMessage ? [systemMessage] : []),
-            ...requestHistory.map((item) => ({
-              role: item.role,
-              content:
-                item.id === userMessage.id
-                  ? buildChatAttachmentContent(item.content, attachments)
-                  : item.content,
-            })),
-          ],
-        }, {
-          requestId,
-        })
+        const abortController = new AbortController()
+        pendingStreamAbortRef.current = abortController
+
+        await streamChatCompletion(
+          {
+            model: resolvedModel,
+            group: selectedGroup || undefined,
+            temperature: activeAssistant?.temperature ?? 0.7,
+            reasoningEffort,
+            messages: [
+              ...(systemMessage ? [systemMessage] : []),
+              ...requestHistory.map((item) => ({
+                role: item.role,
+                content:
+                  item.id === userMessage.id
+                    ? buildChatAttachmentContent(item.content, attachments)
+                    : item.content,
+              })),
+            ],
+          },
+          {
+            signal: abortController.signal,
+            onDelta: (text) => {
+              streamedAssistantText += text
+              syncActiveSession((session) => ({
+                ...session,
+                assistantId: activeAssistant?.id || session.assistantId,
+                model: resolvedModel,
+                group: selectedGroup,
+                updatedAt: Date.now(),
+                messages: session.messages.map((item) =>
+                  item.id === pendingAssistantId
+                    ? {
+                        ...item,
+                        content: streamedAssistantText || CHAT_PENDING_MESSAGE_LABEL,
+                        createdAt: Date.now(),
+                      }
+                    : item
+                ),
+              }))
+            },
+            onDone: (usage) => {
+              streamedUsageData = usage
+            },
+          }
+        )
 
         syncActiveSession((session) => ({
           ...session,
@@ -2112,9 +2366,9 @@ function AssistantsChatWorkspace(props: {
               ? {
                   id: `assistant-${Date.now()}`,
                   role: 'assistant',
-                  content: toMessageText(response.choices?.[0]?.message?.content),
+                  content: streamedAssistantText.trim() || CHAT_PENDING_MESSAGE_LABEL,
                   createdAt: Date.now(),
-                  usage: response.usage,
+                  usage: streamedUsageData,
                   modelLabel: resolvedModelLabel,
                 }
               : item
@@ -2122,15 +2376,31 @@ function AssistantsChatWorkspace(props: {
         }))
       }
     } catch (error) {
+      const resolvedPartialText = streamedAssistantText.trim()
       syncActiveSession((session) => ({
         ...session,
-        messages: session.messages.filter((item) => item.id !== pendingAssistantId),
+        updatedAt: Date.now(),
+        messages: resolvedPartialText
+          ? session.messages.map((item) =>
+              item.id === pendingAssistantId
+                ? {
+                    id: `assistant-${Date.now()}`,
+                    role: 'assistant',
+                    content: resolvedPartialText,
+                    createdAt: Date.now(),
+                    usage: streamedUsageData,
+                    modelLabel: resolvedModelLabel,
+                  }
+                : item
+            )
+          : session.messages.filter((item) => item.id !== pendingAssistantId),
       }))
       if (!stoppingRef.current && !isAbortError(error)) {
         toast(error instanceof Error ? error.message : '聊天请求失败')
       }
     } finally {
       pendingRequestIdRef.current = ''
+      pendingStreamAbortRef.current = null
       stoppingRef.current = false
       setSending(false)
     }
@@ -2143,6 +2413,7 @@ function AssistantsChatWorkspace(props: {
 
     stoppingRef.current = true
     try {
+      pendingStreamAbortRef.current?.abort()
       await stopChatCompletion(pendingRequestIdRef.current)
       toast('已停止当前回复。')
     } catch (error) {
@@ -2212,70 +2483,128 @@ function AssistantsChatWorkspace(props: {
     setHistoryOpen(false)
   }
 
+  function renameChatSession(sessionId: string) {
+    const target = chatSessions.find((item) => item.id === sessionId)
+    if (!target) {
+      return
+    }
+    const nextTitle = window.prompt('输入新的会话名称', target.title)?.trim()
+    if (!nextTitle) {
+      return
+    }
+    setChatSessions((current) =>
+      current.map((item) =>
+        item.id === sessionId
+          ? {
+              ...item,
+              title: nextTitle,
+              updatedAt: Math.max(Date.now(), item.updatedAt),
+            }
+          : item
+      )
+    )
+  }
+
+  function openChatSessionFolder(sessionId: string) {
+    void openAssistantHistoryFolder('chat', sessionId).catch((error) => {
+      toast(error instanceof Error ? error.message : '打开会话目录失败')
+    })
+  }
+
+  function handleChatSessionContextMenu(event: MouseEvent, session: ChatSessionRecord) {
+    event.preventDefault()
+    setSessionContextMenu({
+      x: event.clientX,
+      y: event.clientY,
+      title: session.title,
+      items: [
+        {
+          key: 'rename',
+          label: '重命名',
+          onSelect: () => renameChatSession(session.id),
+        },
+        {
+          key: 'open-folder',
+          label: '打开文件夹',
+          onSelect: () => openChatSessionFolder(session.id),
+        },
+      ],
+    })
+  }
+
   return (
     <section className='workspace-page chat-page'>
       <div className={`chat-layout ${historyOpen ? 'history-open' : ''}`}>
         <article className='panel conversation-panel chat-panel-surface'>
-          <div className='message-stream'>
-            {messages.map((item) => (
-              <div
-                key={item.id}
-                className={`message-bubble ${item.role} ${item.imageUrl ? 'image-bubble' : ''} ${item.pending ? 'streaming-bubble' : ''}`}
-              >
-                <span className='message-role'>
-                  {item.role === 'assistant'
-                    ? item.modelLabel || activeModelLabel
-                    : item.role === 'system'
-                      ? '系统'
-                      : ''}
-                </span>
-                <MessageAttachmentGallery attachments={item.attachments} />
-                {item.imageUrl ? (
-                  <div className='chat-image-result'>
-                    <img src={item.imageUrl} alt={item.content || '生成图片'} />
-                  </div>
-                ) : (
-                  item.pending ? <PendingMessageContent label={CHAT_PENDING_MESSAGE_LABEL.replace(/\.+$/, '')} /> : <MarkdownMessageContent content={item.content} />
-                )}
-                <BubbleMeta
-                  side={item.role === 'user' ? 'right' : 'left'}
-                  createdAt={item.createdAt}
-                  actions={
-                    item.role === 'system'
-                      ? [
-                          {
-                            key: 'copy',
-                            label: '复制',
-                            icon: Copy,
-                            onClick: () => void copyText(item.content),
-                          },
-                        ]
-                      : [
-                          {
-                            key: 'copy',
-                            label: '复制',
-                            icon: Copy,
-                            onClick: () => void copyText(item.content),
-                          },
-                          {
-                            key: 'replay',
-                            label: '重发',
-                            icon: RotateCcw,
-                            disabled: sending,
-                            onClick: () => {
-                              const replayPrompt = findReplayPrompt(item.id)
-                              if (!replayPrompt) {
-                                toast('未找到可重新发送的提问。')
-                                return
-                              }
-                              void handleSendMessage(replayPrompt)
-                            },
-                          },
-                        ]
-                  }
+          <div className='conversation-scroll-region'>
+            <div ref={messageStreamRef} className='message-stream'>
+              {messages.length === 0 ? (
+                <EmptyState
+                  title='开始聊天'
+                  description='输入问题、粘贴图片或拖拽文件后，即可开始新的助手会话。'
+                  icon={Sparkles}
                 />
-              </div>
-            ))}
+              ) : messages.map((item) => (
+                <div
+                  key={item.id}
+                  className={`message-bubble ${item.role} ${item.imageUrl ? 'image-bubble' : ''} ${item.pending ? 'streaming-bubble' : ''}`}
+                >
+                  <span className='message-role'>
+                    {item.role === 'assistant'
+                      ? item.modelLabel || activeModelLabel
+                      : item.role === 'system'
+                        ? '系统'
+                        : ''}
+                  </span>
+                  <MessageAttachmentGallery attachments={item.attachments} />
+                  {item.imageUrl ? (
+                    <div className='chat-image-result'>
+                      <img src={item.imageUrl} alt={item.content || '生成图片'} />
+                    </div>
+                  ) : (
+                    item.pending ? <PendingMessageContent label={CHAT_PENDING_MESSAGE_LABEL.replace(/\.+$/, '')} /> : <MarkdownMessageContent content={item.content} />
+                  )}
+                  <BubbleMeta
+                    side={item.role === 'user' ? 'right' : 'left'}
+                    createdAt={item.createdAt}
+                    actions={
+                      item.role === 'system'
+                        ? [
+                            {
+                              key: 'copy',
+                              label: '复制',
+                              icon: Copy,
+                              onClick: () => void copyText(item.content),
+                            },
+                          ]
+                        : [
+                            {
+                              key: 'copy',
+                              label: '复制',
+                              icon: Copy,
+                              onClick: () => void copyText(item.content),
+                            },
+                            {
+                              key: 'replay',
+                              label: '重发',
+                              icon: RotateCcw,
+                              disabled: sending,
+                              onClick: () => {
+                                const replayPrompt = findReplayPrompt(item.id)
+                                if (!replayPrompt) {
+                                  toast('未找到可重新发送的提问。')
+                                  return
+                                }
+                                void handleSendMessage(replayPrompt)
+                              },
+                            },
+                          ]
+                    }
+                  />
+                </div>
+              ))}
+            </div>
+            <ConversationScrollDock containerRef={messageStreamRef} />
           </div>
 
           {renderComposer({
@@ -2610,6 +2939,7 @@ function AssistantsChatWorkspace(props: {
                           className={`record-row action-row session-row ${item.id === resolvedActiveSessionId ? 'highlighted' : ''}`}
                           role='button'
                           tabIndex={0}
+                          onContextMenu={(event) => handleChatSessionContextMenu(event, item)}
                           onClick={() => handleSelectChatSession(item)}
                           onKeyDown={(event) => {
                             if (event.key === 'Enter' || event.key === ' ') {
@@ -2645,6 +2975,7 @@ function AssistantsChatWorkspace(props: {
           </div>
         </aside>
       </div>
+      <SessionContextMenu menu={sessionContextMenu} onClose={() => setSessionContextMenu(null)} />
     </section>
   )
 }
@@ -2668,8 +2999,11 @@ function DrawWorkspace(props: {
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
-  const [groups, setGroups] = useState<ChatGroupOption[]>([])
   const [selectedGroup, setSelectedGroup] = useState('')
+  const [drawSize, setDrawSize] = useState<(typeof DRAW_SIZE_OPTIONS)[number]['value']>('1024x1024')
+  const [drawQuality, setDrawQuality] = useState<(typeof DRAW_QUALITY_OPTIONS)[number]['value']>('high')
+  const [drawRandomSeed, setDrawRandomSeed] = useState(true)
+  const [sessionContextMenu, setSessionContextMenu] = useState<SessionContextMenuState | null>(null)
   const [previewImage, setPreviewImage] = useState<{
     src: string
     name: string
@@ -2685,6 +3019,7 @@ function DrawWorkspace(props: {
   } = useComposerAttachments(toast)
   const { ref: draftRef, resize: resizeDraft } = useAutosizeTextarea(draft)
   const historyPanelRef = useRef<HTMLDivElement | null>(null)
+  const messageStreamRef = useRef<HTMLDivElement | null>(null)
 
   const resolvedActiveSessionId = useMemo(() => {
     if (activeSessionId && drawSessions.some((item) => item.id === activeSessionId)) {
@@ -2694,6 +3029,12 @@ function DrawWorkspace(props: {
   }, [activeSessionId, drawSessions])
   const activeSession = drawSessions.find((item) => item.id === resolvedActiveSessionId) || null
   const messages = activeSession?.messages || []
+  const drawSizeLabel =
+    DRAW_SIZE_OPTIONS.find((item) => item.value === drawSize)?.label || drawSize
+  const drawQualityLabel =
+    DRAW_QUALITY_OPTIONS.find((item) => item.value === drawQuality)?.label || drawQuality
+
+  useAutoFollowScroll(messageStreamRef, [messages, sending])
 
   useEffect(() => {
     writeJsonStorage(DRAW_SESSIONS_STORAGE_KEY, drawSessions)
@@ -2704,18 +3045,27 @@ function DrawWorkspace(props: {
   }, [resolvedActiveSessionId])
 
   useEffect(() => {
+    void syncAssistantHistory(
+      'draw',
+      drawSessions.map((session) => ({
+        id: session.id,
+        title: session.title,
+        updatedAt: session.updatedAt,
+        data: JSON.stringify(session),
+      }))
+    )
+  }, [drawSessions])
+
+  useEffect(() => {
     let disposed = false
     void (async () => {
       try {
         const nextGroups = await getUserGroups()
         if (!disposed) {
-          setGroups(nextGroups)
           setSelectedGroup((current) => current || nextGroups[0]?.value || '')
         }
       } catch {
-        if (!disposed) {
-          setGroups([])
-        }
+        /* empty */
       }
     })()
     return () => {
@@ -2796,6 +3146,55 @@ function DrawWorkspace(props: {
     window.setTimeout(() => resizeDraft(), 0)
   }
 
+  function renameDrawSession(sessionId: string) {
+    const target = drawSessions.find((item) => item.id === sessionId)
+    if (!target) {
+      return
+    }
+    const nextTitle = window.prompt('输入新的会话名称', target.title || '新绘图')?.trim()
+    if (!nextTitle) {
+      return
+    }
+    setDrawSessions((current) =>
+      current.map((item) =>
+        item.id === sessionId
+          ? {
+              ...item,
+              title: nextTitle,
+              updatedAt: Math.max(Date.now(), item.updatedAt),
+            }
+          : item
+      )
+    )
+  }
+
+  function openDrawSessionFolder(sessionId: string) {
+    void openAssistantHistoryFolder('draw', sessionId).catch((error) => {
+      toast(error instanceof Error ? error.message : '打开会话目录失败')
+    })
+  }
+
+  function handleDrawSessionContextMenu(event: MouseEvent, session: DrawSessionRecord) {
+    event.preventDefault()
+    setSessionContextMenu({
+      x: event.clientX,
+      y: event.clientY,
+      title: session.title || '新绘图',
+      items: [
+        {
+          key: 'rename',
+          label: '重命名',
+          onSelect: () => renameDrawSession(session.id),
+        },
+        {
+          key: 'open-folder',
+          label: '打开文件夹',
+          onSelect: () => openDrawSessionFolder(session.id),
+        },
+      ],
+    })
+  }
+
   async function handleDownloadImage(source: string, name: string) {
     try {
       const dataBase64 = source.startsWith('data:') ? extractDataUrlBase64(source) : undefined
@@ -2859,6 +3258,8 @@ function DrawWorkspace(props: {
             imageName: imageAttachment.name,
             mimeType: imageAttachment.mimeType,
             dataBase64: imageAttachment.dataBase64,
+            size: drawSize,
+            quality: drawQuality,
           })
         : await (async () => {
             const serviceKey = await ensureDesktopServiceKey({
@@ -2870,6 +3271,9 @@ function DrawWorkspace(props: {
               apiKey: serviceKey.key,
               model: DEFAULT_DRAW_MODEL,
               prompt: nextDraft,
+              size: drawSize,
+              quality: drawQuality,
+              seed: drawRandomSeed ? undefined : 1,
               response_format: 'b64_json',
             })
           })()
@@ -2907,71 +3311,74 @@ function DrawWorkspace(props: {
     <section className='workspace-page chat-page'>
       <div className={`chat-layout ${historyOpen ? 'history-open' : ''}`}>
         <article className='panel chat-main-panel chat-panel-surface'>
-          <div className='message-stream'>
-            {messages.length === 0 ? (
-              <EmptyState title='开始绘图' description='输入提示词后，使用 gpt-image-2 直接生图；拖拽或粘贴图片后，会自动走修图接口。' icon={Sparkles} />
-            ) : (
-              messages.map((message) => {
-                const isUser = message.role === 'user'
-                const isPendingImage = message.pending && message.imageUrl === DRAW_PENDING_IMAGE_URL
-                return (
-                  <div
-                    key={message.id}
-                    className={`message-bubble ${isUser ? 'user' : 'assistant'} ${message.pending ? 'streaming-bubble' : ''}`}
-                  >
-                    {!isUser ? <span className='message-role'>{message.modelLabel || DEFAULT_DRAW_MODEL}</span> : null}
-                    <MessageAttachmentGallery attachments={message.attachments} />
-                    {isPendingImage ? (
-                      <PendingImageContent />
-                    ) : message.imageUrl ? (
-                      <div className='generated-image-block'>
-                        <button
-                          type='button'
-                          className='generated-image-button'
-                          onClick={() =>
-                            setPreviewImage({
-                              src: message.imageUrl || '',
-                              name: `${clipText(message.imagePrompt || 'oneapi-image', 24).replace(/[^\w\u4e00-\u9fa5-]+/g, '_') || 'oneapi-image'}.png`,
-                            })
-                          }
-                        >
-                          <img src={message.imageUrl} alt={message.imagePrompt || '生成图片'} className='generated-image' />
-                        </button>
-                        <div className='generated-image-actions'>
+          <div className='conversation-scroll-region'>
+            <div ref={messageStreamRef} className='message-stream'>
+              {messages.length === 0 ? (
+                <EmptyState title='开始绘图' description='输入提示词后，使用 gpt-image-2 直接生图；拖拽或粘贴图片后，会自动走修图接口。' icon={Sparkles} />
+              ) : (
+                messages.map((message) => {
+                  const isUser = message.role === 'user'
+                  const isPendingImage = message.pending && message.imageUrl === DRAW_PENDING_IMAGE_URL
+                  return (
+                    <div
+                      key={message.id}
+                      className={`message-bubble ${isUser ? 'user' : 'assistant'} ${message.pending ? 'streaming-bubble' : ''}`}
+                    >
+                      {!isUser ? <span className='message-role'>{message.modelLabel || DEFAULT_DRAW_MODEL}</span> : null}
+                      <MessageAttachmentGallery attachments={message.attachments} />
+                      {isPendingImage ? (
+                        <PendingImageContent />
+                      ) : message.imageUrl ? (
+                        <div className='generated-image-block'>
                           <button
-                            className='ghost-button tiny'
                             type='button'
-                            onClick={() => void handleDownloadImage(message.imageUrl || '', 'oneapi-image.png')}
+                            className='generated-image-button'
+                            onClick={() =>
+                              setPreviewImage({
+                                src: message.imageUrl || '',
+                                name: `${clipText(message.imagePrompt || 'oneapi-image', 24).replace(/[^\w\u4e00-\u9fa5-]+/g, '_') || 'oneapi-image'}.png`,
+                              })
+                            }
                           >
-                            <Download size={14} />
-                            <span>下载图片</span>
+                            <img src={message.imageUrl} alt={message.imagePrompt || '生成图片'} className='generated-image' />
                           </button>
+                          <div className='generated-image-actions'>
+                            <button
+                              className='ghost-button tiny'
+                              type='button'
+                              onClick={() => void handleDownloadImage(message.imageUrl || '', 'oneapi-image.png')}
+                            >
+                              <Download size={14} />
+                              <span>下载图片</span>
+                            </button>
+                          </div>
+                          <MarkdownMessageContent content={message.content} />
                         </div>
+                      ) : (
                         <MarkdownMessageContent content={message.content} />
-                      </div>
-                    ) : (
-                      <MarkdownMessageContent content={message.content} />
-                    )}
-                    <BubbleMeta
-                      side={isUser ? 'right' : 'left'}
-                      createdAt={message.createdAt}
-                      actions={
-                        message.imageUrl && message.imageUrl !== DRAW_PENDING_IMAGE_URL
-                          ? [
-                              {
-                                key: 'download',
-                                label: '下载图片',
-                                icon: Download,
-                                onClick: () => void handleDownloadImage(message.imageUrl || '', 'oneapi-image.png'),
-                              },
-                            ]
-                          : []
-                      }
-                    />
-                  </div>
-                )
-              })
-            )}
+                      )}
+                      <BubbleMeta
+                        side={isUser ? 'right' : 'left'}
+                        createdAt={message.createdAt}
+                        actions={
+                          message.imageUrl && message.imageUrl !== DRAW_PENDING_IMAGE_URL
+                            ? [
+                                {
+                                  key: 'download',
+                                  label: '下载图片',
+                                  icon: Download,
+                                  onClick: () => void handleDownloadImage(message.imageUrl || '', 'oneapi-image.png'),
+                                },
+                              ]
+                            : []
+                        }
+                      />
+                    </div>
+                  )
+                })
+              )}
+            </div>
+            <ConversationScrollDock containerRef={messageStreamRef} />
           </div>
 
           {renderComposer({
@@ -2998,19 +3405,58 @@ function DrawWorkspace(props: {
                   </div>
                 ),
               },
-              ...(groups.length
-                ? [{
-                    key: 'draw-group',
-                    node: (
-                      <div className='toolbar-picker'>
-                        <button className='ghost-button tiny picker-trigger icon-picker-trigger' type='button' title='当前分组'>
-                          <FolderOpen size={16} />
-                          <strong>{selectedGroup || groups[0]?.label || 'default'}</strong>
-                        </button>
-                      </div>
-                    ),
-                  }]
-                : []),
+              {
+                key: 'draw-size',
+                node: (
+                  <button
+                    className='ghost-button icon-only tiny toolbar-icon-button'
+                    type='button'
+                    title={`图片尺寸：${drawSizeLabel}`}
+                    aria-label={`图片尺寸：${drawSizeLabel}`}
+                    onClick={() =>
+                      setDrawSize((current) => {
+                        const currentIndex = DRAW_SIZE_OPTIONS.findIndex((item) => item.value === current)
+                        return DRAW_SIZE_OPTIONS[(currentIndex + 1) % DRAW_SIZE_OPTIONS.length]?.value || '1024x1024'
+                      })
+                    }
+                  >
+                    <Crop size={16} />
+                  </button>
+                ),
+              },
+              {
+                key: 'draw-quality',
+                node: (
+                  <button
+                    className='ghost-button icon-only tiny toolbar-icon-button'
+                    type='button'
+                    title={`图片质量：${drawQualityLabel}`}
+                    aria-label={`图片质量：${drawQualityLabel}`}
+                    onClick={() =>
+                      setDrawQuality((current) => {
+                        const currentIndex = DRAW_QUALITY_OPTIONS.findIndex((item) => item.value === current)
+                        return DRAW_QUALITY_OPTIONS[(currentIndex + 1) % DRAW_QUALITY_OPTIONS.length]?.value || 'high'
+                      })
+                    }
+                  >
+                    <SlidersHorizontal size={16} />
+                  </button>
+                ),
+              },
+              {
+                key: 'draw-random',
+                node: (
+                  <button
+                    className={`ghost-button icon-only tiny toolbar-icon-button ${drawRandomSeed ? 'active' : ''}`}
+                    type='button'
+                    title={`随机种子：${drawRandomSeed ? '开启' : '固定'}`}
+                    aria-label={`随机种子：${drawRandomSeed ? '开启' : '固定'}`}
+                    onClick={() => setDrawRandomSeed((current) => !current)}
+                  >
+                    <Shuffle size={16} />
+                  </button>
+                ),
+              },
             ],
             fileAssets: attachments
               .filter((item) => item.kind === 'image')
@@ -3067,6 +3513,7 @@ function DrawWorkspace(props: {
                         key={session.id}
                         type='button'
                         className={`record-row action-row session-row ${session.id === resolvedActiveSessionId ? 'highlighted' : ''}`}
+                        onContextMenu={(event) => handleDrawSessionContextMenu(event, session)}
                         onClick={() => handleSelectDrawSession(session)}
                       >
                         <span className='session-row-preview'>{clipText(session.title || '新绘图', 56)}</span>
@@ -3100,6 +3547,7 @@ function DrawWorkspace(props: {
           </div>
         </div>
       )}
+      <SessionContextMenu menu={sessionContextMenu} onClose={() => setSessionContextMenu(null)} />
     </section>
   )
 }
@@ -3178,7 +3626,7 @@ function SubscriptionsWorkspace(props: {
       <article className='panel scroll-panel page-surface'>
         <div className='panel-header compact'>
           <div>
-            <h2>套餐订阅与额度使用</h2>
+            <h2>套餐订阅</h2>
           </div>
         </div>
 
@@ -3449,7 +3897,7 @@ function WalletWorkspace(props: {
       <article className='panel scroll-panel page-surface'>
         <div className='panel-header compact'>
           <div>
-            <h2>余额、充值与账单记录</h2>
+            <h2>余额与账单记录</h2>
           </div>
         </div>
 
@@ -3580,8 +4028,9 @@ function MeWorkspace(props: {
   toast: (message: string) => void
   themeMode: ThemeMode
   onToggleTheme: () => void
+  visible: boolean
 }) {
-  const { user, toast, themeMode, onToggleTheme } = props
+  const { user, toast, themeMode, onToggleTheme, visible } = props
   const [apiKeys, setApiKeys] = useState<
     Array<{
       id: number
@@ -3703,11 +4152,11 @@ function MeWorkspace(props: {
 
   return (
     <>
-      <section className='workspace-page full-bleed-page'>
+      <section className={`workspace-page full-bleed-page ${visible ? '' : 'workspace-hidden'}`}>
         <article className='panel scroll-panel page-surface'>
           <div className='panel-header compact'>
             <div>
-              <h2>账户与敏感操作</h2>
+              <h2>账户与部署</h2>
             </div>
             <div className='inline-actions'>
               <button
@@ -3781,24 +4230,28 @@ function MeWorkspace(props: {
                     {apiKeys.length === 0 ? (
                       <EmptyState title='当前还没有 API Key' description='验证密码后即可直接新建桌面端专用 Key。' />
                     ) : (
-                      apiKeys.map((item) => (
-                        <div key={item.id} className='record-row'>
-                          <div>
-                            <strong>{item.name}</strong>
-                            <span>{item.group || 'default'} · 创建于 {formatDateTime(item.created_time)}</span>
+                      <div className='me-key-grid'>
+                        {apiKeys.map((item) => (
+                          <div key={item.id} className='record-row me-key-record'>
+                            <div>
+                              <strong>{item.name}</strong>
+                              <span>{item.group || 'default'} · 创建于 {formatDateTime(item.created_time)}</span>
+                            </div>
+                            <div className='record-actions'>
+                              <small>{item.status === 1 ? '启用中' : '已停用'}</small>
+                              <button
+                                className='ghost-button icon-only'
+                                type='button'
+                                title='查看 Key'
+                                aria-label='查看 Key'
+                                onClick={() => openPasswordGate('view-key', item.id)}
+                              >
+                                <Eye size={15} />
+                              </button>
+                            </div>
                           </div>
-                          <div className='record-actions'>
-                            <small>{item.status === 1 ? '启用中' : '已停用'}</small>
-                            <button
-                              className='ghost-button'
-                              type='button'
-                              onClick={() => openPasswordGate('view-key', item.id)}
-                            >
-                              查看
-                            </button>
-                          </div>
-                        </div>
-                      ))
+                        ))}
+                      </div>
                     )}
                   </div>
                 </div>
@@ -3921,10 +4374,14 @@ function CliWorkspace(props: {
   const [hiddenSessionIds, setHiddenSessionIds] = useState<string[]>(() =>
     readJsonStorage<string[]>(`oneapi-desktop-${client}-hidden-sessions`, [])
   )
+  const [historyTitleOverrides, setHistoryTitleOverrides] = useState<Record<string, string>>(() =>
+    readJsonStorage<Record<string, string>>(`oneapi-desktop-${client}-history-title-overrides`, {})
+  )
   const [pinnedHistoryGroups, setPinnedHistoryGroups] = useState<string[]>(() =>
     readJsonStorage<string[]>(`oneapi-desktop-${client}-pinned-groups`, [])
   )
   const [historyVisibilityTab, setHistoryVisibilityTab] = useState<HistoryVisibilityTab>('visible')
+  const [sessionContextMenu, setSessionContextMenu] = useState<SessionContextMenuState | null>(null)
   const [requestSessionMap, setRequestSessionMap] = useState<
     Record<string, { sessionId: string; projectPath: string }>
   >({})
@@ -3946,6 +4403,7 @@ function CliWorkspace(props: {
   const modelMenuRef = useRef<HTMLDivElement | null>(null)
   const effortMenuRef = useRef<HTMLDivElement | null>(null)
   const historyPanelRef = useRef<HTMLDivElement | null>(null)
+  const threadRef = useRef<HTMLDivElement | null>(null)
   const requestSessionMapRef = useRef(requestSessionMap)
   const activeRequestIdRef = useRef('')
   const stoppingRunRef = useRef(false)
@@ -3984,8 +4442,12 @@ function CliWorkspace(props: {
         sessionMessagesMap,
         sessionLogsMap,
         sessionProjectPathMap,
-      }),
-    [history, sessionLogsMap, sessionMessagesMap, sessionProjectPathMap]
+      }).map((item) => ({
+        ...item,
+        title: historyTitleOverrides[item.id] || item.title,
+        preview: historyTitleOverrides[item.id] || item.preview,
+      })),
+    [history, historyTitleOverrides, sessionLogsMap, sessionMessagesMap, sessionProjectPathMap]
   )
   const visibleRecentSessions = useMemo(
     () => recentSessions.filter((item) => !hiddenSessionIds.includes(item.id)),
@@ -4016,6 +4478,7 @@ function CliWorkspace(props: {
       }),
     [activeLogs, activeMessages, activePartial, selectedModelLabel]
   )
+  useAutoFollowScroll(threadRef, [activeTimeline, running, activePartial])
   const latestAssistantMessageId = useMemo(
     () => [...activeMessages].reverse().find((item) => item.role === 'assistant')?.id || '',
     [activeMessages]
@@ -4063,6 +4526,10 @@ function CliWorkspace(props: {
   useEffect(() => {
     writeJsonStorage(`oneapi-desktop-${client}-pinned-groups`, pinnedHistoryGroups)
   }, [client, pinnedHistoryGroups])
+
+  useEffect(() => {
+    writeJsonStorage(`oneapi-desktop-${client}-history-title-overrides`, historyTitleOverrides)
+  }, [client, historyTitleOverrides])
 
   useEffect(() => {
     let disposed = false
@@ -4412,6 +4879,46 @@ function CliWorkspace(props: {
     }
   }
 
+  function renameHistorySession(sessionId: string) {
+    const currentTitle =
+      historyTitleOverrides[sessionId] ||
+      recentSessions.find((item) => item.id === sessionId)?.title ||
+      recentSessions.find((item) => item.id === sessionId)?.preview ||
+      '新会话'
+    const nextTitle = window.prompt('输入新的会话名称', currentTitle)?.trim()
+    if (!nextTitle) {
+      return
+    }
+    setHistoryTitleOverrides((current) => ({
+      ...current,
+      [sessionId]: nextTitle,
+    }))
+  }
+
+  function handleHistorySessionContextMenu(event: MouseEvent, item: CliHistoryEntry) {
+    event.preventDefault()
+    setSessionContextMenu({
+      x: event.clientX,
+      y: event.clientY,
+      title: item.title || item.preview || '会话',
+      items: [
+        {
+          key: 'rename',
+          label: '重命名',
+          onSelect: () => renameHistorySession(item.id),
+        },
+        {
+          key: 'open-folder',
+          label: '打开文件夹',
+          onSelect: () =>
+            openCliSessionFolder(client, item.id).catch((error) => {
+              toast(error instanceof Error ? error.message : '打开会话目录失败')
+            }),
+        },
+      ],
+    })
+  }
+
   async function copyText(content: string) {
     try {
       await navigator.clipboard.writeText(content)
@@ -4662,68 +5169,80 @@ function CliWorkspace(props: {
             </div>
           )}
 
-          <div className='cli-thread'>
-            {activeTimeline.map((item) => {
-              if (item.kind === 'log') {
-                const expanded = expandedLogGroupId === item.id
-                return (
-                  <CliLogBubble
-                    key={item.id}
-                    item={item}
-                    expanded={expanded}
-                    onToggle={() => setExpandedLogGroupId((current) => (current === item.id ? '' : item.id))}
-                    onOpenFile={(ownerId, path) => void handlePreviewFile(ownerId, path)}
-                    onCopy={() => void copyText(item.events.map((eventItem) => serializeCliLogEvent(eventItem)).join('\n\n'))}
-                    previewFile={previewFile}
-                  />
-                )
-              }
-
-              return (
-                <div
-                  key={item.id}
-                  className={`message-bubble ${item.role} ${item.kind === 'partial' ? 'streaming-bubble' : ''}`}
-                >
-                  <span className='message-role'>
-                    {item.role === 'assistant'
-                      ? item.modelLabel || selectedModelLabel
-                      : ''}
-                  </span>
-                  <MessageAttachmentGallery attachments={'attachments' in item ? item.attachments : undefined} />
-                  {item.kind === 'partial' && item.content === CLI_PENDING_MESSAGE_LABEL ? (
-                    <PendingMessageContent />
-                  ) : (
-                    <MarkdownMessageContent content={item.content} />
-                  )}
-                  {'fileChanges' in item && item.role === 'assistant' ? (
-                    <MessageFileChangeLinks
-                      ownerId={item.id}
-                      files={item.fileChanges}
-                      previewFile={previewFile}
+          <div className='conversation-scroll-region'>
+            <div ref={threadRef} className='cli-thread'>
+              {activeTimeline.length === 0 ? (
+                <EmptyState
+                  title={`开始 ${client === 'codex' ? 'Codex' : 'Claude'} 会话`}
+                  description='选择项目后输入任务，执行日志会显示在回复上方，完成后可从最近会话再次进入。'
+                  icon={Bot}
+                />
+              ) : activeTimeline.map((item) => {
+                if (item.kind === 'log') {
+                  const expanded = expandedLogGroupId === item.id
+                  return (
+                    <CliLogBubble
+                      key={item.id}
+                      item={item}
+                      expanded={expanded}
+                      onToggle={() => setExpandedLogGroupId((current) => (current === item.id ? '' : item.id))}
                       onOpenFile={(ownerId, path) => void handlePreviewFile(ownerId, path)}
+                      onCopy={() => void copyText(item.events.map((eventItem) => serializeCliLogEvent(eventItem)).join('\n\n'))}
+                      previewFile={previewFile}
                     />
-                  ) : null}
-                  <BubbleMeta
-                    side={item.role === 'user' ? 'right' : 'left'}
-                    createdAt={item.createdAt}
-                    actions={[
-                      {
-                        key: 'copy',
-                        label: '复制',
-                        icon: Copy,
-                        onClick: () => void copyText(item.content),
-                      },
-                      {
-                        key: 'edit',
-                        label: '编辑',
-                        icon: PencilLine,
-                        onClick: () => loadPromptForEdit(item.content),
-                      },
-                    ]}
-                  />
-                </div>
-              )
-            })}
+                  )
+                }
+
+                return (
+                  <div
+                    key={item.id}
+                    className={`message-bubble ${item.role} ${item.kind === 'partial' ? 'streaming-bubble' : ''}`}
+                  >
+                    <span className='message-role'>
+                      {item.role === 'assistant'
+                        ? item.modelLabel || selectedModelLabel
+                        : ''}
+                    </span>
+                    <MessageAttachmentGallery attachments={'attachments' in item ? item.attachments : undefined} />
+                    {item.kind === 'partial' && item.content === CLI_PENDING_MESSAGE_LABEL ? (
+                      <PendingMessageContent />
+                    ) : (
+                      <MarkdownMessageContent content={item.content} />
+                    )}
+                    {'fileChanges' in item && item.role === 'assistant' ? (
+                      <MessageFileChangeLinks
+                        ownerId={item.id}
+                        files={item.fileChanges}
+                        previewFile={previewFile}
+                        onOpenFile={(ownerId, path) => void handlePreviewFile(ownerId, path)}
+                      />
+                    ) : null}
+                    <BubbleMeta
+                      side={item.role === 'user' ? 'right' : 'left'}
+                      createdAt={item.createdAt}
+                      actions={[
+                        {
+                          key: 'copy',
+                          label: '复制',
+                          icon: Copy,
+                          onClick: () => void copyText(item.content),
+                        },
+                        {
+                          key: 'edit',
+                          label: '编辑',
+                          icon: PencilLine,
+                          onClick: () => loadPromptForEdit(item.content),
+                        },
+                      ]}
+                    />
+                  </div>
+                )
+              })}
+            </div>
+            <ConversationScrollDock
+              containerRef={threadRef}
+              itemSelector='.message-bubble, .cli-log-bubble'
+            />
           </div>
 
           {renderComposer({
@@ -4959,6 +5478,7 @@ function CliWorkspace(props: {
                           className={`record-row action-row session-row ${item.id === activeSessionId ? 'highlighted' : ''}`}
                           role='button'
                           tabIndex={0}
+                          onContextMenu={(event) => handleHistorySessionContextMenu(event, item)}
                           onClick={() => void handleOpenHistory(item)}
                           onKeyDown={(event) => {
                             if (event.key === 'Enter' || event.key === ' ') {
@@ -4994,6 +5514,7 @@ function CliWorkspace(props: {
           </div>
         </aside>
       </div>
+      <SessionContextMenu menu={sessionContextMenu} onClose={() => setSessionContextMenu(null)} />
     </section>
   )
 }
@@ -5896,14 +6417,13 @@ export function App() {
             />
             {sideTab === 'subscriptions' && <SubscriptionsWorkspace toast={setMessage} />}
             {sideTab === 'wallet' && <WalletWorkspace user={auth.user} toast={setMessage} />}
-            {sideTab === 'me' && (
-              <MeWorkspace
-                user={auth.user}
-                toast={setMessage}
-                themeMode={themeMode}
-                onToggleTheme={() => setThemeMode((current) => (current === 'dark' ? 'light' : 'dark'))}
-              />
-            )}
+            <MeWorkspace
+              user={auth.user}
+              toast={setMessage}
+              themeMode={themeMode}
+              onToggleTheme={() => setThemeMode((current) => (current === 'dark' ? 'light' : 'dark'))}
+              visible={sideTab === 'me'}
+            />
             {/* settings removed */}
           </div>
         </main>

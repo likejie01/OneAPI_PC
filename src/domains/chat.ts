@@ -63,6 +63,129 @@ export async function sendChatCompletion(payload: {
   })
 }
 
+function resolveStreamDeltaText(data: unknown) {
+  if (typeof data !== 'object' || !data) {
+    return ''
+  }
+
+  if ('choices' in data && Array.isArray((data as { choices?: unknown[] }).choices)) {
+    const delta = ((data as { choices: Array<{ delta?: { content?: unknown } }> }).choices[0]?.delta?.content)
+    if (typeof delta === 'string') {
+      return delta
+    }
+    if (Array.isArray(delta)) {
+      return delta
+        .map((item) => {
+          if (typeof item === 'object' && item && 'text' in item && typeof item.text === 'string') {
+            return item.text
+          }
+          return ''
+        })
+        .join('')
+    }
+  }
+
+  return ''
+}
+
+export async function streamChatCompletion(
+  payload: {
+    model: string
+    group?: string
+    reasoningEffort?: string
+    messages: Array<{
+      role: 'system' | 'user' | 'assistant'
+      content: string | ChatContentPart[]
+    }>
+    temperature?: number
+  },
+  handlers: {
+    signal: AbortSignal
+    onDelta: (text: string) => void
+    onDone?: (usage?: ChatCompletionResponse['usage']) => void
+  }
+) {
+  const { reasoningEffort, ...rest } = payload
+  const serverBaseUrl = await desktopBridge().getServerBaseUrl()
+  const userId = getStoredDesktopUserId()
+  const response = await fetch(`${serverBaseUrl}/pg/chat/completions`, {
+    method: 'POST',
+    credentials: 'include',
+    signal: handlers.signal,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(userId ? { 'New-Api-User': userId } : {}),
+    },
+    body: JSON.stringify({
+      ...rest,
+      reasoning_effort: reasoningEffort,
+      stream: true,
+    }),
+  })
+
+  if (!response.ok) {
+    const text = await response.text()
+    let message = `请求失败（${response.status}）`
+    try {
+      const parsed = JSON.parse(text) as { message?: string; error?: { message?: string } }
+      message = parsed.message || parsed.error?.message || message
+    } catch {
+      if (text.trim()) {
+        message = text.trim()
+      }
+    }
+    throw new Error(message)
+  }
+
+  const reader = response.body?.getReader()
+  if (!reader) {
+    throw new Error('当前环境不支持流式响应。')
+  }
+
+  const decoder = new TextDecoder('utf-8')
+  let buffer = ''
+  let usage: ChatCompletionResponse['usage'] | undefined
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) {
+      break
+    }
+
+    buffer += decoder.decode(value, { stream: true })
+    const events = buffer.split('\n\n')
+    buffer = events.pop() || ''
+
+    for (const rawEvent of events) {
+      const dataLines = rawEvent
+        .split('\n')
+        .filter((line) => line.startsWith('data:'))
+        .map((line) => line.slice(5).trim())
+
+      for (const line of dataLines) {
+        if (!line || line === '[DONE]') {
+          continue
+        }
+
+        try {
+          const parsed = JSON.parse(line) as ChatCompletionResponse & { usage?: ChatCompletionResponse['usage'] }
+          const deltaText = resolveStreamDeltaText(parsed)
+          if (deltaText) {
+            handlers.onDelta(deltaText)
+          }
+          if (parsed.usage) {
+            usage = parsed.usage
+          }
+        } catch {
+          continue
+        }
+      }
+    }
+  }
+
+  handlers.onDone?.(usage)
+}
+
 export function stopChatCompletion(requestId: string) {
   return desktopBridge().stopRequest(requestId)
 }
@@ -97,6 +220,7 @@ export async function sendDirectImageGeneration(payload: {
   n?: number
   size?: string
   quality?: string
+  seed?: number
   response_format?: 'url' | 'b64_json'
   style?: string
 }, options: {
@@ -115,6 +239,7 @@ export async function sendDirectImageGeneration(payload: {
       n: payload.n,
       size: payload.size,
       quality: payload.quality,
+      seed: payload.seed,
       response_format: payload.response_format,
       style: payload.style,
     },
@@ -127,6 +252,8 @@ export async function sendImageEdit(payload: {
   imageName: string
   mimeType?: string
   dataBase64: string
+  size?: string
+  quality?: string
 }) {
   return desktopBridge().editImage({
     ...payload,

@@ -1,5 +1,7 @@
 import { desktopBridge } from '../lib/desktop-client'
 import type {
+  AssistantHistoryScope,
+  AssistantHistorySnapshotEntry,
   CliClient,
   CliDeployRequest,
   CliProgressPayload,
@@ -18,6 +20,18 @@ export function listCliHistory(client: CliClient, limit = 10) {
 
 export function getCliSession(client: CliClient, sessionId: string): Promise<CliSessionDetails | null> {
   return desktopBridge().getCliSession(client, sessionId)
+}
+
+export function openCliSessionFolder(client: CliClient, sessionId: string) {
+  return desktopBridge().openCliSessionFolder(client, sessionId)
+}
+
+export function openAssistantHistoryFolder(scope: AssistantHistoryScope, sessionId: string) {
+  return desktopBridge().openAssistantHistoryFolder(scope, sessionId)
+}
+
+export function syncAssistantHistory(scope: AssistantHistoryScope, entries: AssistantHistorySnapshotEntry[]) {
+  return desktopBridge().syncAssistantHistory(scope, entries)
 }
 
 export function pickProjectDirectory() {

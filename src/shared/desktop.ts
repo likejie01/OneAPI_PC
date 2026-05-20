@@ -1,5 +1,6 @@
 export type ApiMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 export type CliClient = 'codex' | 'claude'
+export type AssistantHistoryScope = 'chat' | 'draw'
 export type DeployStatus = 'pending' | 'running' | 'success' | 'error'
 export type DeployLogKind = 'info' | 'command' | 'stdout' | 'stderr' | 'result'
 export type CliLogKind =
@@ -156,6 +157,8 @@ export interface DesktopImageEditRequest {
   imageName: string
   mimeType?: string
   dataBase64: string
+  size?: string
+  quality?: string
 }
 
 export interface DesktopSaveImageRequest {
@@ -179,4 +182,11 @@ export interface CliDeployPreset {
   apiKey: string
   model: string
   baseUrl: string
+}
+
+export interface AssistantHistorySnapshotEntry {
+  id: string
+  title: string
+  updatedAt: number
+  data: string
 }

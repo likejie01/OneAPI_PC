@@ -1,8 +1,10 @@
 import {
   app,
   BrowserWindow,
+  clipboard,
   dialog,
   ipcMain,
+  Menu,
   nativeImage,
   session,
   shell,
@@ -37,6 +39,14 @@ const stoppedCliRequests = new Set<string>()
 
 function getServerConfigPath() {
   return path.join(app.getPath('userData'), 'server-base-url.json')
+}
+
+function getAssistantHistoryRoot(scope: AssistantHistoryScope) {
+  return path.join(app.getPath('userData'), 'assistant-history', scope)
+}
+
+function getAssistantHistorySessionDirectory(scope: AssistantHistoryScope, sessionId: string) {
+  return path.join(getAssistantHistoryRoot(scope), sessionId)
 }
 
 function normalizeServerBaseUrl(value?: string) {
@@ -83,6 +93,7 @@ function getDesktopSession() {
 
 type ApiMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 type CliClient = 'codex' | 'claude'
+type AssistantHistoryScope = 'chat' | 'draw'
 type DeployStatus = 'pending' | 'running' | 'success' | 'error'
 type CliLogKind = 'intent' | 'command' | 'stdout' | 'stderr' | 'result' | 'tool' | 'status' | 'error'
 
@@ -219,6 +230,15 @@ interface DesktopImageEditRequest {
   imageName: string
   mimeType?: string
   dataBase64: string
+  size?: string
+  quality?: string
+}
+
+interface AssistantHistorySnapshotEntry {
+  id: string
+  title: string
+  updatedAt: number
+  data: string
 }
 
 interface DesktopSaveImageRequest {
@@ -248,6 +268,7 @@ interface NodeRuntimeInfo {
   source: 'system' | 'managed'
   nodePath: string
   npmPath: string
+  npmCliPath: string
   version: string
   prefixPath: string
 }
@@ -283,6 +304,7 @@ function createWindow() {
     shell.openExternal(url)
     return { action: 'deny' }
   })
+  attachContextMenu(win)
 
   mainWindow = win
   win.on('closed', () => {
@@ -298,6 +320,118 @@ function getAppMeta() {
     productName: app.name,
     serverBaseUrl,
     iconPath: APP_ICON_PATH,
+  }
+}
+
+function attachContextMenu(win: BrowserWindow) {
+  win.webContents.on('context-menu', (_event, params) => {
+    const template: Electron.MenuItemConstructorOptions[] = []
+    const hasSelection = params.selectionText.trim().length > 0
+    const hasLink = params.linkURL.trim().length > 0
+    const hasImage = params.mediaType === 'image' && params.srcURL.trim().length > 0
+
+    if (params.isEditable) {
+      template.push(
+        { label: '撤销', role: 'undo', enabled: params.editFlags.canUndo },
+        { label: '重做', role: 'redo', enabled: params.editFlags.canRedo },
+        { type: 'separator' },
+        { label: '剪切', role: 'cut', enabled: params.editFlags.canCut },
+        { label: '复制', role: 'copy', enabled: params.editFlags.canCopy },
+        { label: '粘贴', role: 'paste', enabled: params.editFlags.canPaste },
+        { type: 'separator' },
+        { label: '全选', role: 'selectAll' }
+      )
+    } else {
+      if (hasSelection) {
+        template.push({ label: '复制', role: 'copy' })
+      }
+      template.push({
+        label: '全选',
+        click: () => {
+          void selectBubbleContentsAtPoint(win, params.x, params.y)
+        },
+      })
+    }
+
+    if (hasLink) {
+      if (template.length) {
+        template.push({ type: 'separator' })
+      }
+      template.push(
+        {
+          label: '打开链接',
+          click: () => {
+            void shell.openExternal(params.linkURL)
+          },
+        },
+        {
+          label: '复制链接',
+          click: () => clipboard.writeText(params.linkURL),
+        }
+      )
+    }
+
+    if (hasImage) {
+      if (template.length) {
+        template.push({ type: 'separator' })
+      }
+      template.push(
+        {
+          label: '打开图片',
+          click: () => {
+            void shell.openExternal(params.srcURL)
+          },
+        },
+        {
+          label: '复制图片地址',
+          click: () => clipboard.writeText(params.srcURL),
+        }
+      )
+    }
+
+    while (template.length && template.at(-1)?.type === 'separator') {
+      template.pop()
+    }
+
+    if (!template.length) {
+      return
+    }
+
+    Menu.buildFromTemplate(template).popup({ window: win })
+  })
+}
+
+async function selectBubbleContentsAtPoint(win: BrowserWindow, x: number, y: number) {
+  try {
+    const selectedBubble = await win.webContents.executeJavaScript(
+      `
+      (() => {
+        const target = document.elementFromPoint(${x}, ${y});
+        const bubble = target instanceof HTMLElement
+          ? target.closest('.message-bubble, .cli-log-bubble')
+          : null;
+        if (!bubble) {
+          return false;
+        }
+        const selection = window.getSelection();
+        if (!selection) {
+          return false;
+        }
+        const range = document.createRange();
+        range.selectNodeContents(bubble);
+        selection.removeAllRanges();
+        selection.addRange(range);
+        return true;
+      })()
+      `,
+      true
+    )
+
+    if (!selectedBubble) {
+      win.webContents.selectAll()
+    }
+  } catch {
+    win.webContents.selectAll()
   }
 }
 
@@ -455,6 +589,18 @@ function getManagedNpmExecutableCandidates() {
   return [path.join(root, 'bin', 'npm')]
 }
 
+function getNpmCliScriptCandidates(nodePath: string) {
+  const nodeDir = path.dirname(nodePath)
+  if (process.platform === 'win32') {
+    return [path.join(nodeDir, 'node_modules', 'npm', 'bin', 'npm-cli.js')]
+  }
+
+  return [
+    path.join(nodeDir, '..', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+    path.join(nodeDir, 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+  ]
+}
+
 async function firstExistingPath(candidates: string[]) {
   for (const candidate of candidates) {
     if (await pathExists(candidate)) {
@@ -462,6 +608,27 @@ async function firstExistingPath(candidates: string[]) {
     }
   }
   return ''
+}
+
+async function resolveNpmCliScriptPath(nodePath: string) {
+  if (!nodePath) {
+    return ''
+  }
+  return firstExistingPath(getNpmCliScriptCandidates(nodePath))
+}
+
+function buildNpmInvocation(runtime: NodeRuntimeInfo, args: string[]) {
+  if (runtime.npmCliPath) {
+    return {
+      command: runtime.nodePath,
+      args: [runtime.npmCliPath, ...args],
+    }
+  }
+
+  return {
+    command: runtime.npmPath,
+    args,
+  }
 }
 
 async function clearDirectory(targetPath: string) {
@@ -581,16 +748,26 @@ function spawnCommandWithHandlers(
     stderr: string
     exitCode: number
   }>((resolve) => {
-    const child = spawn(spawnCommand, spawnArgs, {
-      cwd: options.cwd,
-      env: { ...process.env, ...options.env },
-      shell: false,
-      windowsHide: true,
-    })
-    options.onSpawn?.(child)
-
     let stdout = ''
     let stderr = ''
+    let child: ChildProcess
+    try {
+      child = spawn(spawnCommand, spawnArgs, {
+        cwd: options.cwd,
+        env: { ...process.env, ...options.env },
+        shell: false,
+        windowsHide: true,
+      })
+    } catch (error) {
+      resolve({
+        stdout,
+        stderr: `${stderr}\n${error instanceof Error ? error.message : String(error)}`.trim(),
+        exitCode: -1,
+      })
+      return
+    }
+    options.onSpawn?.(child)
+
     let settled = false
     const stdoutConsumer = createLineConsumer(options.onStdoutLine)
     const stderrConsumer = createLineConsumer(options.onStderrLine)
@@ -602,20 +779,20 @@ function spawnCommandWithHandlers(
 
     try {
       if (typeof options.stdinData === 'string') {
-        child.stdin.end(options.stdinData)
+        child.stdin?.end(options.stdinData)
       } else {
-        child.stdin.end()
+        child.stdin?.end()
       }
     } catch {
       /* empty */
     }
 
-    child.stdout.on('data', (chunk) => {
+    child.stdout?.on('data', (chunk) => {
       stdout += chunk.toString()
       stdoutConsumer.push(chunk)
     })
 
-    child.stderr.on('data', (chunk) => {
+    child.stderr?.on('data', (chunk) => {
       stderr += chunk.toString()
       stderrConsumer.push(chunk)
     })
@@ -855,6 +1032,12 @@ async function requestImageEdit(input: DesktopImageEditRequest) {
   const formData = new FormData()
   formData.append('model', input.model)
   formData.append('prompt', input.prompt)
+  if (input.size?.trim()) {
+    formData.append('size', input.size.trim())
+  }
+  if (input.quality?.trim()) {
+    formData.append('quality', input.quality.trim())
+  }
   formData.append(
     'image',
     new Blob([Buffer.from(input.dataBase64, 'base64')], {
@@ -882,6 +1065,86 @@ async function requestImageEdit(input: DesktopImageEditRequest) {
   }
 
   return data
+}
+
+async function syncAssistantHistory(
+  scope: AssistantHistoryScope,
+  entries: AssistantHistorySnapshotEntry[]
+) {
+  const root = getAssistantHistoryRoot(scope)
+  await fs.mkdir(root, { recursive: true })
+
+  const normalizedEntries = entries.filter((item) => item.id.trim())
+  const validIds = new Set(normalizedEntries.map((item) => item.id))
+  const existingEntries = await fs.readdir(root, { withFileTypes: true }).catch(() => [])
+
+  await Promise.all(
+    existingEntries.map(async (item) => {
+      if (!item.isDirectory() || validIds.has(item.name)) {
+        return
+      }
+      await fs.rm(path.join(root, item.name), { recursive: true, force: true })
+    })
+  )
+
+  await Promise.all(
+    normalizedEntries.map(async (item) => {
+      const sessionDirectory = getAssistantHistorySessionDirectory(scope, item.id)
+      await fs.mkdir(sessionDirectory, { recursive: true })
+      await fs.writeFile(
+        path.join(sessionDirectory, 'session.json'),
+        JSON.stringify(
+          {
+            id: item.id,
+            title: item.title,
+            updatedAt: item.updatedAt,
+            data: JSON.parse(item.data),
+          },
+          null,
+          2
+        ),
+        'utf8'
+      )
+    })
+  )
+}
+
+async function openAssistantHistoryFolder(scope: AssistantHistoryScope, sessionId: string) {
+  const sessionDirectory = getAssistantHistorySessionDirectory(scope, sessionId)
+  if (!(await pathExists(sessionDirectory))) {
+    throw new Error('当前会话还没有对应的本地记录目录。')
+  }
+
+  const error = await shell.openPath(sessionDirectory)
+  if (error) {
+    throw new Error(error)
+  }
+}
+
+async function openCliSessionFolder(client: CliClient, sessionId: string) {
+  const sessionFilePath =
+    client === 'codex'
+      ? await getLatestCodexSessionFile(sessionId)
+      : await getClaudeSessionFile(sessionId)
+
+  if (sessionFilePath) {
+    const error = await shell.openPath(path.dirname(sessionFilePath))
+    if (error) {
+      throw new Error(error)
+    }
+    return
+  }
+
+  const details = client === 'codex' ? await getCodexSession(sessionId) : await getClaudeSession(sessionId)
+  if (details?.projectPath) {
+    const error = await shell.openPath(details.projectPath)
+    if (error) {
+      throw new Error(error)
+    }
+    return
+  }
+
+  throw new Error('当前会话没有可打开的目录。')
 }
 
 async function saveImageToUserPath(input: DesktopSaveImageRequest) {
@@ -1035,6 +1298,22 @@ function createCodexWindowsSection(): TomlSectionBlock {
   }
 }
 
+function getCodexBundledMarketplaceSourcePath() {
+  return `\\\\?\\${path.join(os.homedir(), '.codex', '.tmp', 'bundled-marketplaces', 'openai-bundled')}`
+}
+
+function createCodexMarketplaceSection(): TomlSectionBlock {
+  return {
+    header: 'marketplaces.openai-bundled',
+    lines: [
+      '[marketplaces.openai-bundled]',
+      `last_updated = "${new Date().toISOString()}"`,
+      'source_type = "local"',
+      `source = '${getCodexBundledMarketplaceSourcePath()}'`,
+    ],
+  }
+}
+
 function renameCodexProviderSection(block: TomlSectionBlock, nextHeader: string, nextName: string): TomlSectionBlock {
   return {
     header: nextHeader,
@@ -1132,6 +1411,10 @@ function mergeCodexConfig(raw: string, apiKey: string, model: string, baseUrl: s
 
   if (!sections.some((section) => section.header === 'windows')) {
     sections.push(createCodexWindowsSection())
+  }
+
+  if (!sections.some((section) => section.header === 'marketplaces.openai-bundled')) {
+    sections.push(createCodexMarketplaceSection())
   }
 
   return serializeTomlDocument(nextPreamble, sections)
@@ -2264,6 +2547,7 @@ async function runCodexPrompt(
 
   const progress = createCliProgressEmitter(webContents, 'codex', input.requestId)
   let sessionId = input.sessionId
+  let partialText = ''
   const executablePath = await locateExecutable('codex')
   const managedRuntime = await readManagedNodeRuntime()
   const spawnCommand = resolveCliSpawnCommand('codex', executablePath)
@@ -2299,6 +2583,14 @@ async function runCodexPrompt(
         typeof parsed.payload === 'object' && parsed.payload
           ? parsed.payload as Record<string, unknown>
           : null
+
+      if (parsed.type === 'response_item' && payload?.type === 'message' && payload.role === 'assistant') {
+        const assistantText = contentPartsToText(payload.content)
+        if (assistantText.trim() && !shouldIgnoreCodexMessage(assistantText)) {
+          partialText = assistantText
+          progress.partial(partialText, sessionId)
+        }
+      }
 
       const contentCandidates = [
         payload?.content,
@@ -2360,6 +2652,7 @@ async function runCodexPrompt(
   const success = !aborted && result.exitCode === 0 && output.length > 0
 
   if (success) {
+    progress.partial(output, sessionId, true)
     progress.result('Codex 已完成本次回复。', sessionId, result.exitCode, output, fileChanges, 'turn.completed')
     progress.status('Codex 已完成本次回复。', sessionId, true, fileChanges, { logKind: 'status', sourceKind: 'turn.completed' })
   } else if (aborted) {
@@ -2595,6 +2888,30 @@ async function writeCodexConfig(request: CliDeployRequest) {
       resolveDesktopCliKeyRecord(request.apiKey),
       request.model?.trim() || 'gpt-5.5',
       normalizeCodexBaseUrl(request.baseUrl)
+    ),
+    'utf8'
+  )
+
+  const authPath = path.join(cliConfig.codex.dataPath, 'auth.json')
+  const authRaw = (await pathExists(authPath)) ? await fs.readFile(authPath, 'utf8') : ''
+  let currentAuth: Record<string, unknown> = {}
+  if (authRaw.trim()) {
+    try {
+      currentAuth = JSON.parse(authRaw) as Record<string, unknown>
+    } catch {
+      await backupIfNeeded(authPath)
+    }
+  }
+  await fs.writeFile(
+    authPath,
+    JSON.stringify(
+      {
+        ...currentAuth,
+        auth_mode: 'apikey',
+        OPENAI_API_KEY: resolveDesktopCliKeyRecord(request.apiKey),
+      },
+      null,
+      2
     ),
     'utf8'
   )
@@ -2853,15 +3170,25 @@ async function installManagedNodeRuntime(
 
   const managedNodePath = await firstExistingPath(getManagedNodeExecutableCandidates())
   const managedNpmPath = await firstExistingPath(getManagedNpmExecutableCandidates())
+  const managedNpmCliPath = managedNodePath ? await resolveNpmCliScriptPath(managedNodePath) : ''
   if (!managedNodePath || !managedNpmPath) {
     const extractLayout = await describeDirectoryEntries(extractRoot)
     throw new Error(`Node.js 安装完成，但未找到 node/npm 可执行文件\n${extractLayout}`)
   }
 
+  const runtime: NodeRuntimeInfo = {
+    source: 'managed',
+    nodePath: managedNodePath,
+    npmPath: managedNpmPath,
+    npmCliPath: managedNpmCliPath,
+    version,
+    prefixPath: getManagedNpmPrefix(),
+  }
+
   const nodeVersionResult = await runLoggedCommand(logger, 'node', managedNodePath, ['--version'], {
     timeoutMs: 15000,
   })
-  const npmVersionResult = await runLoggedCommand(logger, 'node', managedNpmPath, ['--version'], {
+  const npmVersionResult = await runLoggedNpmCommand(logger, 'node', runtime, ['--version'], {
     timeoutMs: 15000,
   })
   if (nodeVersionResult.exitCode !== 0 || npmVersionResult.exitCode !== 0) {
@@ -2870,13 +3197,7 @@ async function installManagedNodeRuntime(
     )
   }
 
-  return {
-    source: 'managed' as const,
-    nodePath: managedNodePath,
-    npmPath: managedNpmPath,
-    version,
-    prefixPath: getManagedNpmPrefix(),
-  }
+  return runtime
 }
 
 async function ensureNodeRuntime(
@@ -2885,18 +3206,23 @@ async function ensureNodeRuntime(
   const systemNodePath = await locateSystemExecutable('node')
   const systemNpmPath = await locateSystemExecutable(getNpmCommand())
   if (systemNodePath && systemNpmPath) {
+    const systemRuntime: NodeRuntimeInfo = {
+      source: 'system',
+      nodePath: systemNodePath,
+      npmPath: systemNpmPath,
+      npmCliPath: await resolveNpmCliScriptPath(systemNodePath),
+      version: '',
+      prefixPath: getManagedNpmPrefix(),
+    }
     const versionResult = await runLoggedCommand(logger, 'node', systemNodePath, ['--version'])
-    const npmVersionResult = await runLoggedCommand(logger, 'node', systemNpmPath, ['--version'])
+    const npmVersionResult = await runLoggedNpmCommand(logger, 'node', systemRuntime, ['--version'])
     if (versionResult.exitCode === 0 && npmVersionResult.exitCode === 0) {
       const version =
         versionResult.stdout.split(/\r?\n/).map((item) => item.trim()).find(Boolean) || ''
       logger.info('node', 'success', `已检测到系统 Node.js ${version || '未知版本'}`, systemNodePath)
       return {
-        source: 'system',
-        nodePath: systemNodePath,
-        npmPath: systemNpmPath,
+        ...systemRuntime,
         version,
-        prefixPath: getManagedNpmPrefix(),
       }
     }
   }
@@ -2904,18 +3230,23 @@ async function ensureNodeRuntime(
   const managedNodePath = await firstExistingPath(getManagedNodeExecutableCandidates())
   const managedNpmPath = await firstExistingPath(getManagedNpmExecutableCandidates())
   if (managedNodePath && managedNpmPath) {
+    const managedRuntime: NodeRuntimeInfo = {
+      source: 'managed',
+      nodePath: managedNodePath,
+      npmPath: managedNpmPath,
+      npmCliPath: await resolveNpmCliScriptPath(managedNodePath),
+      version: '',
+      prefixPath: getManagedNpmPrefix(),
+    }
     const versionResult = await runLoggedCommand(logger, 'node', managedNodePath, ['--version'])
-    const npmVersionResult = await runLoggedCommand(logger, 'node', managedNpmPath, ['--version'])
+    const npmVersionResult = await runLoggedNpmCommand(logger, 'node', managedRuntime, ['--version'])
     if (versionResult.exitCode === 0 && npmVersionResult.exitCode === 0) {
       const version =
         versionResult.stdout.split(/\r?\n/).map((item) => item.trim()).find(Boolean) || ''
       logger.info('node', 'success', `已检测到内置 Node.js ${version || '未知版本'}`, managedNodePath)
       return {
-        source: 'managed',
-        nodePath: managedNodePath,
-        npmPath: managedNpmPath,
+        ...managedRuntime,
         version,
-        prefixPath: getManagedNpmPrefix(),
       }
     }
   }
@@ -2944,6 +3275,7 @@ async function readManagedNodeRuntime() {
   if (!nodePath || !npmPath) {
     return null
   }
+  const npmCliPath = await resolveNpmCliScriptPath(nodePath)
 
   const versionResult = await runCommand(nodePath, ['--version'], { timeoutMs: 15000 })
   const version =
@@ -2953,9 +3285,29 @@ async function readManagedNodeRuntime() {
     source: 'managed' as const,
     nodePath,
     npmPath,
+    npmCliPath,
     version,
     prefixPath: getManagedNpmPrefix(),
   }
+}
+
+async function runLoggedNpmCommand(
+  logger: ReturnType<typeof createDeployLogger>,
+  step: DeployProgressPayload['step'],
+  runtime: NodeRuntimeInfo,
+  args: string[],
+  options: {
+    cwd?: string
+    timeoutMs?: number
+    env?: NodeJS.ProcessEnv
+    stdinData?: string
+  } = {}
+) {
+  const invocation = buildNpmInvocation(runtime, args)
+  if (runtime.npmCliPath) {
+    logger.info(step, 'running', '使用 node + npm-cli.js 执行 npm 命令', runtime.npmCliPath)
+  }
+  return runLoggedCommand(logger, step, invocation.command, invocation.args, options)
 }
 
 async function installCliPackage(
@@ -2964,10 +3316,10 @@ async function installCliPackage(
   logger: ReturnType<typeof createDeployLogger>
 ) {
   await fs.mkdir(runtime.prefixPath, { recursive: true })
-  return runLoggedCommand(
+  return runLoggedNpmCommand(
     logger,
     'install',
-    runtime.npmPath,
+    runtime,
     ['install', '-g', '--prefix', runtime.prefixPath, cliConfig[client].packageName],
     {
       timeoutMs: 10 * 60 * 1000,
@@ -3126,6 +3478,18 @@ ipcMain.handle('desktop:open-path', async (_event, targetPath: string) => {
     throw new Error(error)
   }
 })
+ipcMain.handle(
+  'desktop:open-assistant-history-folder',
+  async (_event, input: { scope: AssistantHistoryScope; sessionId: string }) => {
+    return openAssistantHistoryFolder(input.scope, input.sessionId)
+  }
+)
+ipcMain.handle(
+  'desktop:sync-assistant-history',
+  async (_event, input: { scope: AssistantHistoryScope; entries: AssistantHistorySnapshotEntry[] }) => {
+    return syncAssistantHistory(input.scope, input.entries)
+  }
+)
 ipcMain.handle('desktop:pick-project', async () => {
   const result = await dialog.showOpenDialog({
     properties: ['openDirectory'],
@@ -3157,6 +3521,12 @@ ipcMain.handle(
     return input.client === 'codex'
       ? getCodexSession(input.sessionId)
       : getClaudeSession(input.sessionId)
+  }
+)
+ipcMain.handle(
+  'desktop:open-cli-session-folder',
+  async (_event, input: { client: CliClient; sessionId: string }) => {
+    return openCliSessionFolder(input.client, input.sessionId)
   }
 )
 ipcMain.handle('desktop:run-cli', async (event, request: CliRunRequest) => {

@@ -1,5 +1,7 @@
 export {}
 import type {
+  AssistantHistoryScope,
+  AssistantHistorySnapshotEntry,
   CliClient,
   CliDeployRequest,
   CliHistoryEntry,
@@ -37,6 +39,8 @@ declare global {
       stopRequest: (requestId: string) => Promise<void>
       openExternal: (url: string) => Promise<void>
       openPath: (targetPath: string) => Promise<void>
+      openAssistantHistoryFolder: (scope: AssistantHistoryScope, sessionId: string) => Promise<void>
+      syncAssistantHistory: (scope: AssistantHistoryScope, entries: AssistantHistorySnapshotEntry[]) => Promise<void>
       pickProjectDirectory: () => Promise<string>
       getCliStatus: () => Promise<{
         codex: CliStatus
@@ -44,6 +48,7 @@ declare global {
       }>
       listCliHistory: (client: CliClient, limit?: number) => Promise<CliHistoryEntry[]>
       getCliSession: (client: CliClient, sessionId: string) => Promise<CliSessionDetails | null>
+      openCliSessionFolder: (client: CliClient, sessionId: string) => Promise<void>
       runCliPrompt: (input: CliRunRequest) => Promise<CliRunResponse>
       stopCliPrompt: (requestId: string) => Promise<void>
       onCliProgress: (
