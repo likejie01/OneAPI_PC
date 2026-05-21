@@ -264,19 +264,6 @@ export function buildCliTimeline(input: {
   const timeline: CliTimelineEntry[] = []
   let logIndex = 0
 
-  const rank = (item: CliTimelineEntry) => {
-    if (item.kind === 'message' && item.role === 'user') {
-      return 0
-    }
-    if (item.kind === 'log') {
-      return 1
-    }
-    if (item.kind === 'message' && item.role === 'assistant') {
-      return 2
-    }
-    return 3
-  }
-
   for (const entry of entries.sort((left, right) => left.createdAt - right.createdAt)) {
     if (entry.kind === 'message' && entry.role === 'assistant') {
       while (logIndex < sortedLogs.length && sortedLogs[logIndex].startedAt <= entry.createdAt) {
@@ -292,14 +279,7 @@ export function buildCliTimeline(input: {
     logIndex += 1
   }
 
-  return timeline.sort((left, right) => {
-    const leftTime = left.kind === 'log' ? left.startedAt : left.createdAt
-    const rightTime = right.kind === 'log' ? right.startedAt : right.createdAt
-    if (leftTime !== rightTime) {
-      return leftTime - rightTime
-    }
-    return rank(left) - rank(right)
-  })
+  return timeline
 }
 
 function normalizeWhitespace(value: string) {

@@ -20,6 +20,9 @@ import type {
   DeployProgressPayload,
   DesktopApiRequest,
   DesktopApiResponse,
+  DesktopChatStreamPayload,
+  DesktopChatStreamRequest,
+  DesktopDeleteCliMessageRequest,
 } from './shared/desktop'
 import type { ImageGenerationResponse } from './shared/contracts'
 
@@ -35,7 +38,9 @@ declare global {
       }>
       getServerBaseUrl: () => Promise<string>
       setServerBaseUrl: (value: string) => Promise<{ serverBaseUrl: string }>
+      resetServerBaseUrl: () => Promise<{ serverBaseUrl: string }>
       request: (input: DesktopApiRequest) => Promise<DesktopApiResponse>
+      streamChatCompletion: (input: DesktopChatStreamRequest) => Promise<void>
       stopRequest: (requestId: string) => Promise<void>
       openExternal: (url: string) => Promise<void>
       openPath: (targetPath: string) => Promise<void>
@@ -48,6 +53,7 @@ declare global {
       }>
       listCliHistory: (client: CliClient, limit?: number) => Promise<CliHistoryEntry[]>
       getCliSession: (client: CliClient, sessionId: string) => Promise<CliSessionDetails | null>
+      deleteCliMessage: (input: DesktopDeleteCliMessageRequest) => Promise<CliSessionDetails | null>
       openCliSessionFolder: (client: CliClient, sessionId: string) => Promise<void>
       runCliPrompt: (input: CliRunRequest) => Promise<CliRunResponse>
       stopCliPrompt: (requestId: string) => Promise<void>
@@ -56,6 +62,7 @@ declare global {
       ) => () => void
       openFiles: (paths: string[]) => Promise<void>
       setWindowTitle: (projectName?: string) => Promise<void>
+      setThemeMode: (mode: 'light' | 'dark') => Promise<void>
       deployCli: (input: CliDeployRequest) => Promise<{ jobId: string }>
       saveAttachment: (
         input: DesktopAttachmentSaveRequest
@@ -66,6 +73,9 @@ declare global {
       getCliDeployPreset: (client: CliClient) => Promise<CliDeployPreset>
       onDeployProgress: (
         listener: (payload: DeployProgressPayload) => void
+      ) => () => void
+      onChatStream: (
+        listener: (payload: DesktopChatStreamPayload) => void
       ) => () => void
     }
   }

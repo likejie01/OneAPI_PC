@@ -142,6 +142,24 @@ test('buildCliTimeline inserts grouped logs before assistant reply of same turn'
   )
 })
 
+test('buildCliTimeline keeps grouped logs after the user bubble even when log timestamps skew earlier', () => {
+  const timeline = buildCliTimeline({
+    messages: [
+      { id: 'user-1', role: 'user', content: 'hello', createdAt: 100 },
+      { id: 'assistant-1', role: 'assistant', content: 'done', createdAt: 300, modelLabel: 'Claude' },
+    ],
+    logs: [
+      { id: 'log-1', requestId: 'req-1', level: 'status', content: 'step 1', createdAt: 90 },
+      { id: 'log-2', requestId: 'req-1', level: 'status', content: 'step 2', createdAt: 120 },
+    ],
+  })
+
+  assert.deepEqual(
+    timeline.map((item) => item.id),
+    ['user-1', 'log-1', 'assistant-1']
+  )
+})
+
 test('buildCliRecentSessions prefers live session snapshots', () => {
   const items = buildCliRecentSessions({
     history: [

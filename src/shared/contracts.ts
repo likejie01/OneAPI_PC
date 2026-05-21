@@ -71,6 +71,7 @@ export interface ChatMessage {
   content: string
   createdAt: number
   pending?: boolean
+  reasoningContent?: string
   imageUrl?: string
   imagePrompt?: string
   attachments?: Array<{

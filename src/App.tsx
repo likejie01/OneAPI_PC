@@ -35,6 +35,7 @@ import {
   SlidersHorizontal,
   Star,
   Sun,
+  Trash2,
   UserPlus,
   Wallet,
   X,
@@ -66,6 +67,7 @@ import {
   stopChatCompletion,
 } from './domains/chat'
 import {
+  deleteCliMessage,
   deployCli,
   getCliSession,
   getCliDeployPreset,
@@ -107,7 +109,7 @@ import {
 import {
   getCliResumeSessionId,
 } from './lib/cli-session'
-import { clearStoredDesktopUserId, saveStoredDesktopUserId } from './lib/desktop-client'
+import { AUTH_EXPIRED_EVENT, clearStoredDesktopUserId, saveStoredDesktopUserId } from './lib/desktop-client'
 import { resolveCliSetupPeerState } from './lib/desktop-service'
 import { clipText, formatDateTime, formatPrice, formatQuota, formatQuotaAsUsd } from './lib/format'
 import { readJsonStorage, writeJsonStorage } from './lib/storage'
@@ -345,6 +347,18 @@ function isInlinePreviewableFile(targetPath: string) {
   return /\.(txt|md|markdown|json|ya?ml|toml|ini|conf|cfg|log|csv|ts|tsx|js|jsx|mjs|cjs|css|scss|less|html|htm|xml|vue|py|java|kt|kts|go|rs|rb|php|swift|sh|bash|zsh|ps1|sql|c|cc|cpp|h|hpp)$/i.test(normalized)
 }
 
+function isImagePreviewableFile(targetPath: string) {
+  return /\.(png|jpe?g|gif|webp|bmp|svg|ico)$/i.test(targetPath.trim().toLowerCase())
+}
+
+function isMarkdownPreviewableFile(targetPath: string) {
+  return /\.(md|markdown)$/i.test(targetPath.trim().toLowerCase())
+}
+
+function isEmbeddedPreviewableFile(targetPath: string) {
+  return /\.(pdf)$/i.test(targetPath.trim().toLowerCase())
+}
+
 function useComposerAttachments(toast: (message: string) => void) {
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([])
   const inputRef = useRef<HTMLInputElement | null>(null)
@@ -576,8 +590,10 @@ type ComposerActionItem = {
 type ComposerFileAsset = {
   id: string
   name: string
+  filePath: string
   previewUrl?: string
   kind: 'image' | 'file'
+  onPreview?: () => void
   onRemove?: () => void
 }
 
@@ -643,14 +659,21 @@ function renderComposer(props: {
           <div className='composer-asset-strip'>
             {fileAssets.map((item) => (
               <div key={item.id} className='composer-asset-card'>
-                <div className='composer-asset-thumb'>
-                  {item.kind === 'image' && item.previewUrl ? (
-                    <img src={item.previewUrl} alt={item.name} />
-                  ) : (
-                    <FileText size={14} />
-                  )}
-                </div>
-                <span className='composer-asset-name' title={item.name}>{item.name}</span>
+                <button
+                  type='button'
+                  className='composer-asset-preview'
+                  onClick={item.onPreview}
+                  title={item.filePath}
+                >
+                  <div className='composer-asset-thumb'>
+                    {item.kind === 'image' && item.previewUrl ? (
+                      <img src={item.previewUrl} alt={item.name} />
+                    ) : (
+                      <FileText size={14} />
+                    )}
+                  </div>
+                  <span className='composer-asset-name' title={item.name}>{item.name}</span>
+                </button>
                 {item.onRemove && (
                   <button className='composer-asset-remove' type='button' onClick={item.onRemove} aria-label='移除附件'>
                     <X size={12} />
@@ -852,10 +875,11 @@ const CLAUDE_REASONING_OPTIONS = [
   { label: '极限', value: 'max' },
 ] as const
 
-const DEFAULT_CHAT_MODEL = 'gpt-5.4'
+const DEFAULT_CHAT_MODEL = 'gpt-5.5'
 const DEFAULT_DRAW_MODEL = 'gpt-image-2'
 const DEFAULT_CODEX_MODEL = 'gpt-5.5'
-const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-4-6'
+const DEFAULT_CLAUDE_MODEL = 'claude-opus-4-7'
+const DEFAULT_SERVER_BASE_URL = 'https://ai.oneapi.center'
 const DEFAULT_CODEX_BASE_URL = 'https://ai.oneapi.center/v1'
 const DEFAULT_CLAUDE_BASE_URL = 'https://ai.oneapi.center'
 const CHAT_SESSIONS_STORAGE_KEY = 'oneapi-desktop-chat-sessions'
@@ -929,6 +953,32 @@ type BubbleActionConfig = {
   disabled?: boolean
 }
 
+type AttachmentPreviewState =
+  | {
+      mode: 'image'
+      path: string
+      name: string
+      src: string
+    }
+  | {
+      mode: 'iframe'
+      path: string
+      name: string
+      src: string
+    }
+  | {
+      mode: 'markdown'
+      path: string
+      name: string
+      content: string
+    }
+  | {
+      mode: 'text'
+      path: string
+      name: string
+      content: string
+    }
+
 function resolvePreferredModel(
   options: ChatModelOption[],
   preferred: string,
@@ -972,52 +1022,56 @@ function BubbleMeta(props: {
   side: 'left' | 'right'
   createdAt: number
   actions: BubbleActionConfig[]
+  extra?: ReactNode
 }) {
-  const { side, createdAt, actions } = props
+  const { side, createdAt, actions, extra } = props
 
   return (
     <div className={`message-meta ${side}`}>
-      {side === 'right' && (
-        <div className='bubble-actions'>
-          {actions.map((action) => {
-            const Icon = action.icon
-            return (
-              <button
-                key={action.key}
-                className='bubble-action'
-                type='button'
-                onClick={action.onClick}
-                title={action.label}
-                aria-label={action.label}
-                disabled={action.disabled}
-              >
-                <Icon size={14} />
-              </button>
-            )
-          })}
-        </div>
-      )}
-      <small>{formatDateTime(createdAt)}</small>
-      {side === 'left' && (
-        <div className='bubble-actions'>
-          {actions.map((action) => {
-            const Icon = action.icon
-            return (
-              <button
-                key={action.key}
-                className='bubble-action'
-                type='button'
-                onClick={action.onClick}
-                title={action.label}
-                aria-label={action.label}
-                disabled={action.disabled}
-              >
-                <Icon size={14} />
-              </button>
-            )
-          })}
-        </div>
-      )}
+      <div className='message-meta-main'>
+        {side === 'right' && (
+          <div className='bubble-actions'>
+            {actions.map((action) => {
+              const Icon = action.icon
+              return (
+                <button
+                  key={action.key}
+                  className='bubble-action'
+                  type='button'
+                  onClick={action.onClick}
+                  title={action.label}
+                  aria-label={action.label}
+                  disabled={action.disabled}
+                >
+                  <Icon size={14} />
+                </button>
+              )
+            })}
+          </div>
+        )}
+        <small>{formatDateTime(createdAt)}</small>
+        {side === 'left' && (
+          <div className='bubble-actions'>
+            {actions.map((action) => {
+              const Icon = action.icon
+              return (
+                <button
+                  key={action.key}
+                  className='bubble-action'
+                  type='button'
+                  onClick={action.onClick}
+                  title={action.label}
+                  aria-label={action.label}
+                  disabled={action.disabled}
+                >
+                  <Icon size={14} />
+                </button>
+              )
+            })}
+          </div>
+        )}
+      </div>
+      {extra ? <div className='message-meta-extra'>{extra}</div> : null}
     </div>
   )
 }
@@ -1099,6 +1153,26 @@ function percentageOf(value: number, total: number) {
     return 0
   }
   return Math.max(0, Math.min(100, (value / total) * 100))
+}
+
+function formatUsageSummary(usage?: ChatMessage['usage']) {
+  if (!usage) {
+    return ''
+  }
+
+  const total = Number(usage.total_tokens || 0)
+  const prompt = Number(usage.prompt_tokens || 0)
+  const completion = Number(usage.completion_tokens || 0)
+
+  if (total > 0) {
+    return `Tokens ${total}${prompt || completion ? ` · 输入 ${prompt} · 输出 ${completion}` : ''}`
+  }
+
+  if (prompt > 0 || completion > 0) {
+    return `输入 ${prompt} · 输出 ${completion}`
+  }
+
+  return ''
 }
 
 function usageModelSummary(items: UsageData['items']) {
@@ -1377,6 +1451,28 @@ function PendingMessageContent(props: {
   )
 }
 
+function ReasoningMessageContent(props: {
+  content: string
+  pending?: boolean
+}) {
+  const { content, pending = false } = props
+  if (!content.trim()) {
+    return null
+  }
+
+  return (
+    <details className={`reasoning-card ${pending ? 'pending' : ''}`} open={pending}>
+      <summary>
+        <span>Thinking</span>
+        {pending ? <LoaderCircle className='spin' size={12} /> : null}
+      </summary>
+      <div className='reasoning-card-body'>
+        <MarkdownMessageContent content={content} />
+      </div>
+    </details>
+  )
+}
+
 function PendingImageContent() {
   return (
     <div className='pending-image-card' aria-label='图片生成中'>
@@ -1398,6 +1494,51 @@ type SessionContextMenuState = {
     label: string
     onSelect: () => void | Promise<void>
   }>
+}
+
+type SessionRenameDraft = {
+  id: string
+  value: string
+} | null
+
+function SessionTitleEditor(props: {
+  editing: boolean
+  value: string
+  displayValue: string
+  maxLength: number
+  onChange: (value: string) => void
+  onCommit: () => void
+  onCancel: () => void
+}) {
+  const { editing, value, displayValue, maxLength, onChange, onCommit, onCancel } = props
+
+  if (!editing) {
+    return <span className='session-row-preview'>{clipText(displayValue, maxLength)}</span>
+  }
+
+  return (
+    <input
+      className='session-rename-input'
+      value={value}
+      autoFocus
+      onFocus={(event) => event.currentTarget.select()}
+      onPointerDown={(event) => event.stopPropagation()}
+      onClick={(event) => event.stopPropagation()}
+      onChange={(event) => onChange(event.target.value)}
+      onBlur={onCommit}
+      onKeyDown={(event) => {
+        event.stopPropagation()
+        if (event.key === 'Enter') {
+          event.preventDefault()
+          onCommit()
+        }
+        if (event.key === 'Escape') {
+          event.preventDefault()
+          onCancel()
+        }
+      }}
+    />
+  )
 }
 
 function SessionContextMenu(props: {
@@ -1458,6 +1599,104 @@ function SessionContextMenu(props: {
   )
 }
 
+function AttachmentPreviewModal(props: {
+  preview: AttachmentPreviewState | null
+  onClose: () => void
+}) {
+  const { preview, onClose } = props
+  if (!preview) {
+    return null
+  }
+
+  let previewContent: ReactNode
+  if (preview.mode === 'image') {
+    previewContent = <img src={preview.src} alt={preview.name} className='image-preview-full' />
+  } else if (preview.mode === 'iframe') {
+    previewContent = <iframe src={preview.src} title={preview.name} className='attachment-preview-frame' />
+  } else if (preview.mode === 'markdown') {
+    previewContent = (
+      <div className='attachment-preview-text markdown-body attachment-preview-scroll'>
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>{preview.content}</ReactMarkdown>
+      </div>
+    )
+  } else {
+    previewContent = <pre className='attachment-preview-text attachment-preview-scroll'>{preview.content}</pre>
+  }
+
+  return (
+    <div className='modal-mask image-preview-modal-mask' onClick={onClose}>
+      <div className='image-preview-modal attachment-preview-modal' onClick={(event) => event.stopPropagation()}>
+        <div className='image-preview-actions'>
+          <div className='attachment-preview-title-block'>
+            <strong>{preview.name}</strong>
+            <span title={preview.path}>{preview.path}</span>
+          </div>
+          <button className='ghost-button tiny' type='button' onClick={onClose}>
+            <X size={14} />
+            <span>关闭</span>
+          </button>
+        </div>
+        <div className='image-preview-stage attachment-preview-stage'>
+          {previewContent}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function useAttachmentPreview(toast: (message: string) => void) {
+  const [preview, setPreview] = useState<AttachmentPreviewState | null>(null)
+
+  const openPreview = useCallback(async (targetPath: string) => {
+    if (!targetPath.trim()) {
+      return
+    }
+
+    try {
+      if (isImagePreviewableFile(targetPath)) {
+        setPreview({
+          mode: 'image',
+          path: targetPath,
+          name: targetPath.split(/[\\/]/).filter(Boolean).at(-1) || targetPath,
+          src: toRenderableFileUrl(targetPath),
+        })
+        return
+      }
+
+      if (isEmbeddedPreviewableFile(targetPath)) {
+        setPreview({
+          mode: 'iframe',
+          path: targetPath,
+          name: targetPath.split(/[\\/]/).filter(Boolean).at(-1) || targetPath,
+          src: toRenderableFileUrl(targetPath),
+        })
+        return
+      }
+
+      if (isInlinePreviewableFile(targetPath)) {
+        const details = await readDesktopFilePreview(targetPath)
+        setPreview({
+          mode: isMarkdownPreviewableFile(targetPath) ? 'markdown' : 'text',
+          path: details.path,
+          name: details.name,
+          content: details.content,
+        })
+        return
+      }
+
+      await openDesktopTarget(targetPath)
+    } catch (error) {
+      toast(error instanceof Error ? error.message : '附件预览失败')
+    }
+  }, [toast])
+
+  return {
+    preview,
+    setPreview,
+    openPreview,
+  }
+}
+
 function MessageAttachmentGallery(props: {
   attachments?: Array<{
     id: string
@@ -1465,8 +1704,9 @@ function MessageAttachmentGallery(props: {
     filePath: string
     kind: 'image' | 'file'
   }>
+  onPreview?: (targetPath: string) => void
 }) {
-  const { attachments = [] } = props
+  const { attachments = [], onPreview } = props
   if (!attachments.length) {
     return null
   }
@@ -1478,8 +1718,8 @@ function MessageAttachmentGallery(props: {
           key={item.id}
           type='button'
           className='message-attachment-card'
-          onClick={() => void openDesktopTarget(item.filePath)}
-          title={`打开附件：${item.filePath}`}
+          onClick={() => onPreview ? void onPreview(item.filePath) : void openDesktopTarget(item.filePath)}
+          title={`预览附件：${item.filePath}`}
         >
           <div className='message-attachment-thumb'>
             {item.kind === 'image' ? (
@@ -1543,6 +1783,8 @@ function CliLogBubble(props: {
   item: Extract<CliTimelineEntry, { kind: 'log' }>
   expanded: boolean
   onToggle: () => void
+  expandedEventIds: string[]
+  onToggleEvent: (eventId: string) => void
   onOpenFile: (ownerId: string, path: string) => void
   onCopy: () => void
   previewFile?: {
@@ -1552,17 +1794,8 @@ function CliLogBubble(props: {
     content: string
   } | null
 }) {
-  const { item, expanded, onToggle, onOpenFile, onCopy, previewFile } = props
-  const [expandedEventIds, setExpandedEventIds] = useState<string[]>([])
+  const { item, expanded, onToggle, expandedEventIds, onToggleEvent, onOpenFile, onCopy, previewFile } = props
   const uniqueFiles = Array.from(new Map(item.files.map((file) => [file.path, file])).values())
-
-  function toggleEvent(eventId: string) {
-    setExpandedEventIds((current) =>
-      current.includes(eventId)
-        ? current.filter((item) => item !== eventId)
-        : [...current, eventId]
-    )
-  }
 
   return (
     <div className={`message-bubble system cli-log-bubble ${item.level === 'error' ? 'error' : ''}`}>
@@ -1598,8 +1831,17 @@ function CliLogBubble(props: {
                     </small>
                   </div>
                   {hasExpandableContent ? (
-                    <button className='ghost-button tiny' type='button' onClick={() => toggleEvent(eventItem.id)}>
-                      {eventExpanded ? '收起详情' : '展开详情'}
+                    <button
+                      className='cli-log-inline-toggle'
+                      type='button'
+                      title={eventExpanded ? '收起详情' : '展开详情'}
+                      aria-label={eventExpanded ? '收起详情' : '展开详情'}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        onToggleEvent(eventItem.id)
+                      }}
+                    >
+                      {eventExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
                     </button>
                   ) : null}
                 </div>
@@ -1613,7 +1855,6 @@ function CliLogBubble(props: {
                     ) : null}
                     {eventItem.detail?.trim() ? (
                       <div className='cli-log-detail-block'>
-                        <span className='cli-log-detail-label'>详细信息</span>
                         <pre className='cli-log-detail-window'>{eventItem.detail}</pre>
                       </div>
                     ) : null}
@@ -1813,7 +2054,7 @@ function formatCliLogTime(timestamp: number) {
 function resolveCliLogKindLabel(kind?: CliLogKind) {
   switch (kind) {
     case 'intent':
-      return '意图'
+      return ''
     case 'command':
       return '命令'
     case 'stdout':
@@ -1848,8 +2089,9 @@ function serializeCliLogEvent(item: {
   detail?: string
   exitCode?: number
 }) {
+  const kindLabel = resolveCliLogKindLabel(item.kind)
   return [
-    `[${resolveCliLogKindLabel(item.kind)}] ${item.message}`,
+    kindLabel ? `[${kindLabel}] ${item.message}` : item.message,
     item.sourceKind ? `sourceKind: ${item.sourceKind}` : '',
     item.command ? `command:\n${item.command}` : '',
     item.detail ? `detail:\n${item.detail}` : '',
@@ -1933,6 +2175,7 @@ function AssistantsChatWorkspace(props: {
   )
   const [historyVisibilityTab, setHistoryVisibilityTab] = useState<HistoryVisibilityTab>('visible')
   const [sessionContextMenu, setSessionContextMenu] = useState<SessionContextMenuState | null>(null)
+  const [renamingChatSession, setRenamingChatSession] = useState<SessionRenameDraft>(null)
   const [assistantMenuOpen, setAssistantMenuOpen] = useState(false)
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
   const [reasoningMenuOpen, setReasoningMenuOpen] = useState(false)
@@ -1958,6 +2201,7 @@ function AssistantsChatWorkspace(props: {
     handlePaste: handleAttachmentPaste,
     handleDrop: handleAttachmentDrop,
   } = useComposerAttachments(toast)
+  const { preview: attachmentPreview, setPreview: setAttachmentPreview, openPreview: openAttachmentPreview } = useAttachmentPreview(toast)
   const { ref: draftRef, resize: resizeDraft } = useAutosizeTextarea(draft)
   const assistantMenuRef = useRef<HTMLDivElement | null>(null)
   const modelMenuRef = useRef<HTMLDivElement | null>(null)
@@ -1969,6 +2213,8 @@ function AssistantsChatWorkspace(props: {
   const pendingRequestIdRef = useRef('')
   const pendingStreamAbortRef = useRef<AbortController | null>(null)
   const stoppingRef = useRef(false)
+  const persistChatSessionsTimerRef = useRef<number | null>(null)
+  const persistChatHistoryTimerRef = useRef<number | null>(null)
 
   const activeAssistant = useMemo(
     () => assistants.find((item) => item.id === activeAssistantId) ?? assistants[0] ?? null,
@@ -2099,7 +2345,21 @@ function AssistantsChatWorkspace(props: {
   }, [])
 
   useEffect(() => {
-    writeJsonStorage(CHAT_SESSIONS_STORAGE_KEY, chatSessions)
+    const hasPending = chatSessions.some((session) => session.messages.some((item) => item.pending))
+    if (persistChatSessionsTimerRef.current) {
+      window.clearTimeout(persistChatSessionsTimerRef.current)
+    }
+    persistChatSessionsTimerRef.current = window.setTimeout(() => {
+      writeJsonStorage(CHAT_SESSIONS_STORAGE_KEY, chatSessions)
+      persistChatSessionsTimerRef.current = null
+    }, hasPending ? 220 : 0)
+
+    return () => {
+      if (persistChatSessionsTimerRef.current) {
+        window.clearTimeout(persistChatSessionsTimerRef.current)
+        persistChatSessionsTimerRef.current = null
+      }
+    }
   }, [chatSessions])
 
   useEffect(() => {
@@ -2107,15 +2367,29 @@ function AssistantsChatWorkspace(props: {
   }, [resolvedActiveSessionId])
 
   useEffect(() => {
-    void syncAssistantHistory(
-      'chat',
-      chatSessions.map((session) => ({
-        id: session.id,
-        title: session.title,
-        updatedAt: session.updatedAt,
-        data: JSON.stringify(session),
-      }))
-    )
+    const hasPending = chatSessions.some((session) => session.messages.some((item) => item.pending))
+    if (persistChatHistoryTimerRef.current) {
+      window.clearTimeout(persistChatHistoryTimerRef.current)
+    }
+    persistChatHistoryTimerRef.current = window.setTimeout(() => {
+      void syncAssistantHistory(
+        'chat',
+        chatSessions.map((session) => ({
+          id: session.id,
+          title: session.title,
+          updatedAt: session.updatedAt,
+          data: JSON.stringify(session),
+        }))
+      )
+      persistChatHistoryTimerRef.current = null
+    }, hasPending ? 360 : 0)
+
+    return () => {
+      if (persistChatHistoryTimerRef.current) {
+        window.clearTimeout(persistChatHistoryTimerRef.current)
+        persistChatHistoryTimerRef.current = null
+      }
+    }
   }, [chatSessions])
 
   useEffect(() => {
@@ -2267,6 +2541,7 @@ function AssistantsChatWorkspace(props: {
     window.setTimeout(() => resizeDraft(), 0)
     setSending(true)
     let streamedAssistantText = ''
+    let streamedReasoningText = ''
     let streamedUsageData: ChatMessage['usage'] | undefined
 
     try {
@@ -2329,6 +2604,7 @@ function AssistantsChatWorkspace(props: {
             ],
           },
           {
+            requestId,
             signal: abortController.signal,
             onDelta: (text) => {
               streamedAssistantText += text
@@ -2343,6 +2619,27 @@ function AssistantsChatWorkspace(props: {
                     ? {
                         ...item,
                         content: streamedAssistantText || CHAT_PENDING_MESSAGE_LABEL,
+                        reasoningContent: streamedReasoningText || undefined,
+                        createdAt: Date.now(),
+                      }
+                    : item
+                ),
+              }))
+            },
+            onReasoningDelta: (text) => {
+              streamedReasoningText += text
+              syncActiveSession((session) => ({
+                ...session,
+                assistantId: activeAssistant?.id || session.assistantId,
+                model: resolvedModel,
+                group: selectedGroup,
+                updatedAt: Date.now(),
+                messages: session.messages.map((item) =>
+                  item.id === pendingAssistantId
+                    ? {
+                        ...item,
+                        content: streamedAssistantText || CHAT_PENDING_MESSAGE_LABEL,
+                        reasoningContent: streamedReasoningText || undefined,
                         createdAt: Date.now(),
                       }
                     : item
@@ -2368,6 +2665,7 @@ function AssistantsChatWorkspace(props: {
                   role: 'assistant',
                   content: streamedAssistantText.trim() || CHAT_PENDING_MESSAGE_LABEL,
                   createdAt: Date.now(),
+                  reasoningContent: streamedReasoningText.trim() || undefined,
                   usage: streamedUsageData,
                   modelLabel: resolvedModelLabel,
                 }
@@ -2388,6 +2686,7 @@ function AssistantsChatWorkspace(props: {
                     role: 'assistant',
                     content: resolvedPartialText,
                     createdAt: Date.now(),
+                    reasoningContent: streamedReasoningText.trim() || undefined,
                     usage: streamedUsageData,
                     modelLabel: resolvedModelLabel,
                   }
@@ -2428,6 +2727,14 @@ function AssistantsChatWorkspace(props: {
     } catch {
       toast('复制失败，请检查系统剪贴板权限。')
     }
+  }
+
+  function deleteChatMessage(messageId: string) {
+    syncActiveSession((session) => ({
+      ...session,
+      updatedAt: Date.now(),
+      messages: session.messages.filter((item) => item.id !== messageId),
+    }))
   }
 
   function resolveAssistantHistoryGroup(session: ChatSessionRecord) {
@@ -2488,7 +2795,19 @@ function AssistantsChatWorkspace(props: {
     if (!target) {
       return
     }
-    const nextTitle = window.prompt('输入新的会话名称', target.title)?.trim()
+    setRenamingChatSession({
+      id: sessionId,
+      value: target.title,
+    })
+  }
+
+  function commitChatSessionRename(sessionId: string) {
+    if (renamingChatSession?.id !== sessionId) {
+      return
+    }
+
+    const nextTitle = renamingChatSession.value.trim()
+    setRenamingChatSession(null)
     if (!nextTitle) {
       return
     }
@@ -2556,17 +2875,21 @@ function AssistantsChatWorkspace(props: {
                         ? '系统'
                         : ''}
                   </span>
-                  <MessageAttachmentGallery attachments={item.attachments} />
+                  <MessageAttachmentGallery attachments={item.attachments} onPreview={openAttachmentPreview} />
+                  <ReasoningMessageContent content={item.reasoningContent || ''} pending={!!item.pending} />
                   {item.imageUrl ? (
                     <div className='chat-image-result'>
                       <img src={item.imageUrl} alt={item.content || '生成图片'} />
                     </div>
                   ) : (
-                    item.pending ? <PendingMessageContent label={CHAT_PENDING_MESSAGE_LABEL.replace(/\.+$/, '')} /> : <MarkdownMessageContent content={item.content} />
+                    item.pending && (!item.content.trim() || item.content === CHAT_PENDING_MESSAGE_LABEL)
+                      ? <PendingMessageContent label={CHAT_PENDING_MESSAGE_LABEL.replace(/\.+$/, '')} />
+                      : <MarkdownMessageContent content={item.content} />
                   )}
                   <BubbleMeta
                     side={item.role === 'user' ? 'right' : 'left'}
                     createdAt={item.createdAt}
+                    extra={item.role === 'assistant' ? <span className='message-usage'>{formatUsageSummary(item.usage)}</span> : null}
                     actions={
                       item.role === 'system'
                         ? [
@@ -2576,6 +2899,12 @@ function AssistantsChatWorkspace(props: {
                               icon: Copy,
                               onClick: () => void copyText(item.content),
                             },
+                            {
+                              key: 'delete',
+                              label: '删除',
+                              icon: Trash2,
+                              onClick: () => deleteChatMessage(item.id),
+                            },
                           ]
                         : [
                             {
@@ -2583,6 +2912,12 @@ function AssistantsChatWorkspace(props: {
                               label: '复制',
                               icon: Copy,
                               onClick: () => void copyText(item.content),
+                            },
+                            {
+                              key: 'delete',
+                              label: '删除',
+                              icon: Trash2,
+                              onClick: () => deleteChatMessage(item.id),
                             },
                             {
                               key: 'replay',
@@ -2739,7 +3074,6 @@ function AssistantsChatWorkspace(props: {
                                   <Star size={13} />
                                 </button>
                               </div>
-                              <span>{item.value}</span>
                             </button>
                           ))}
                         </div>
@@ -2771,7 +3105,6 @@ function AssistantsChatWorkspace(props: {
                       <div className='picker-menu model-menu'>
                         <div className='picker-menu-head'>
                           <strong>思考长度</strong>
-                          <span>控制聊天请求的推理强度</span>
                         </div>
                         <div className='picker-menu-list'>
                           {CLI_REASONING_OPTIONS.map((item) => (
@@ -2785,7 +3118,6 @@ function AssistantsChatWorkspace(props: {
                               }}
                             >
                               <strong>{item.label}</strong>
-                              <span>{item.value}</span>
                             </button>
                           ))}
                         </div>
@@ -2816,8 +3148,7 @@ function AssistantsChatWorkspace(props: {
                     {contextMenuOpen && (
                       <div className='picker-menu model-menu'>
                         <div className='picker-menu-head'>
-                          <strong>上下文长度</strong>
-                          <span>选择最近多少条记录参与聊天</span>
+                          <strong>上下文</strong>
                         </div>
                         <div className='picker-menu-list'>
                           {CHAT_CONTEXT_WINDOW_OPTIONS.map((item) => (
@@ -2831,7 +3162,6 @@ function AssistantsChatWorkspace(props: {
                               }}
                             >
                               <strong>{item.label}</strong>
-                              <span>{item.value === 'all' ? '全部历史消息' : `最近 ${item.value} 条消息`}</span>
                             </button>
                           ))}
                         </div>
@@ -2844,8 +3174,10 @@ function AssistantsChatWorkspace(props: {
             fileAssets: attachments.map((item) => ({
               id: item.id,
               name: item.name,
+              filePath: item.filePath,
               previewUrl: item.previewUrl,
               kind: item.kind,
+              onPreview: () => void openAttachmentPreview(item.filePath),
               onRemove: () => removeAttachment(item.id),
             })),
             sendButton: (
@@ -2940,15 +3272,30 @@ function AssistantsChatWorkspace(props: {
                           role='button'
                           tabIndex={0}
                           onContextMenu={(event) => handleChatSessionContextMenu(event, item)}
-                          onClick={() => handleSelectChatSession(item)}
+                          onClick={() => {
+                            if (renamingChatSession?.id !== item.id) {
+                              handleSelectChatSession(item)
+                            }
+                          }}
                           onKeyDown={(event) => {
+                            if (renamingChatSession?.id === item.id) {
+                              return
+                            }
                             if (event.key === 'Enter' || event.key === ' ') {
                               event.preventDefault()
                               handleSelectChatSession(item)
                             }
                           }}
                         >
-                          <span className='session-row-preview'>{clipText(item.title, 56)}</span>
+                          <SessionTitleEditor
+                            editing={renamingChatSession?.id === item.id}
+                            value={renamingChatSession?.id === item.id ? renamingChatSession.value : ''}
+                            displayValue={item.title}
+                            maxLength={56}
+                            onChange={(value) => setRenamingChatSession({ id: item.id, value })}
+                            onCommit={() => commitChatSessionRename(item.id)}
+                            onCancel={() => setRenamingChatSession(null)}
+                          />
                           <small>{formatDateTime(item.updatedAt)}</small>
                           <button
                             className='ghost-button icon-only tiny session-hide-button'
@@ -2975,6 +3322,7 @@ function AssistantsChatWorkspace(props: {
           </div>
         </aside>
       </div>
+      <AttachmentPreviewModal preview={attachmentPreview} onClose={() => setAttachmentPreview(null)} />
       <SessionContextMenu menu={sessionContextMenu} onClose={() => setSessionContextMenu(null)} />
     </section>
   )
@@ -3003,7 +3351,10 @@ function DrawWorkspace(props: {
   const [drawSize, setDrawSize] = useState<(typeof DRAW_SIZE_OPTIONS)[number]['value']>('1024x1024')
   const [drawQuality, setDrawQuality] = useState<(typeof DRAW_QUALITY_OPTIONS)[number]['value']>('high')
   const [drawRandomSeed, setDrawRandomSeed] = useState(true)
+  const [drawSizeMenuOpen, setDrawSizeMenuOpen] = useState(false)
+  const [drawQualityMenuOpen, setDrawQualityMenuOpen] = useState(false)
   const [sessionContextMenu, setSessionContextMenu] = useState<SessionContextMenuState | null>(null)
+  const [renamingDrawSession, setRenamingDrawSession] = useState<SessionRenameDraft>(null)
   const [previewImage, setPreviewImage] = useState<{
     src: string
     name: string
@@ -3017,9 +3368,12 @@ function DrawWorkspace(props: {
     handlePaste: handleAttachmentPaste,
     handleDrop: handleAttachmentDrop,
   } = useComposerAttachments(toast)
+  const { preview: attachmentPreview, setPreview: setAttachmentPreview, openPreview: openAttachmentPreview } = useAttachmentPreview(toast)
   const { ref: draftRef, resize: resizeDraft } = useAutosizeTextarea(draft)
   const historyPanelRef = useRef<HTMLDivElement | null>(null)
   const messageStreamRef = useRef<HTMLDivElement | null>(null)
+  const drawSizeMenuRef = useRef<HTMLDivElement | null>(null)
+  const drawQualityMenuRef = useRef<HTMLDivElement | null>(null)
 
   const resolvedActiveSessionId = useMemo(() => {
     if (activeSessionId && drawSessions.some((item) => item.id === activeSessionId)) {
@@ -3082,10 +3436,16 @@ function DrawWorkspace(props: {
       if (historyOpen && historyPanelRef.current && !historyPanelRef.current.contains(target)) {
         setHistoryOpen(false)
       }
+      if (drawSizeMenuOpen && drawSizeMenuRef.current && !drawSizeMenuRef.current.contains(target)) {
+        setDrawSizeMenuOpen(false)
+      }
+      if (drawQualityMenuOpen && drawQualityMenuRef.current && !drawQualityMenuRef.current.contains(target)) {
+        setDrawQualityMenuOpen(false)
+      }
     }
     window.addEventListener('pointerdown', handlePointerDown)
     return () => window.removeEventListener('pointerdown', handlePointerDown)
-  }, [historyOpen])
+  }, [drawQualityMenuOpen, drawSizeMenuOpen, historyOpen])
 
   useEffect(() => {
     function handleOpenHistory() {
@@ -3151,7 +3511,19 @@ function DrawWorkspace(props: {
     if (!target) {
       return
     }
-    const nextTitle = window.prompt('输入新的会话名称', target.title || '新绘图')?.trim()
+    setRenamingDrawSession({
+      id: sessionId,
+      value: target.title || '新绘图',
+    })
+  }
+
+  function commitDrawSessionRename(sessionId: string) {
+    if (renamingDrawSession?.id !== sessionId) {
+      return
+    }
+
+    const nextTitle = renamingDrawSession.value.trim()
+    setRenamingDrawSession(null)
     if (!nextTitle) {
       return
     }
@@ -3195,6 +3567,15 @@ function DrawWorkspace(props: {
     })
   }
 
+  async function copyText(content: string) {
+    try {
+      await navigator.clipboard.writeText(content)
+      toast('已复制到剪贴板。')
+    } catch {
+      toast('复制失败，请检查系统剪贴板权限。')
+    }
+  }
+
   async function handleDownloadImage(source: string, name: string) {
     try {
       const dataBase64 = source.startsWith('data:') ? extractDataUrlBase64(source) : undefined
@@ -3209,6 +3590,14 @@ function DrawWorkspace(props: {
     } catch (error) {
       toast(error instanceof Error ? error.message : '保存图片失败')
     }
+  }
+
+  function deleteDrawMessage(messageId: string) {
+    updateDrawSession(resolvedActiveSessionId, (session) => ({
+      ...session,
+      updatedAt: Date.now(),
+      messages: session.messages.filter((item) => item.id !== messageId),
+    }))
   }
 
   async function handleSendDrawMessage() {
@@ -3325,7 +3714,7 @@ function DrawWorkspace(props: {
                       className={`message-bubble ${isUser ? 'user' : 'assistant'} ${message.pending ? 'streaming-bubble' : ''}`}
                     >
                       {!isUser ? <span className='message-role'>{message.modelLabel || DEFAULT_DRAW_MODEL}</span> : null}
-                      <MessageAttachmentGallery attachments={message.attachments} />
+                      <MessageAttachmentGallery attachments={message.attachments} onPreview={openAttachmentPreview} />
                       {isPendingImage ? (
                         <PendingImageContent />
                       ) : message.imageUrl ? (
@@ -3360,8 +3749,20 @@ function DrawWorkspace(props: {
                       <BubbleMeta
                         side={isUser ? 'right' : 'left'}
                         createdAt={message.createdAt}
-                        actions={
-                          message.imageUrl && message.imageUrl !== DRAW_PENDING_IMAGE_URL
+                        actions={[
+                          {
+                            key: 'copy',
+                            label: '复制',
+                            icon: Copy,
+                            onClick: () => void copyText(message.content),
+                          },
+                          {
+                            key: 'delete',
+                            label: '删除',
+                            icon: Trash2,
+                            onClick: () => deleteDrawMessage(message.id),
+                          },
+                          ...(message.imageUrl && message.imageUrl !== DRAW_PENDING_IMAGE_URL
                             ? [
                                 {
                                   key: 'download',
@@ -3370,8 +3771,8 @@ function DrawWorkspace(props: {
                                   onClick: () => void handleDownloadImage(message.imageUrl || '', 'oneapi-image.png'),
                                 },
                               ]
-                            : []
-                        }
+                            : []),
+                        ]}
                       />
                     </div>
                   )
@@ -3408,39 +3809,85 @@ function DrawWorkspace(props: {
               {
                 key: 'draw-size',
                 node: (
-                  <button
-                    className='ghost-button icon-only tiny toolbar-icon-button'
-                    type='button'
-                    title={`图片尺寸：${drawSizeLabel}`}
-                    aria-label={`图片尺寸：${drawSizeLabel}`}
-                    onClick={() =>
-                      setDrawSize((current) => {
-                        const currentIndex = DRAW_SIZE_OPTIONS.findIndex((item) => item.value === current)
-                        return DRAW_SIZE_OPTIONS[(currentIndex + 1) % DRAW_SIZE_OPTIONS.length]?.value || '1024x1024'
-                      })
-                    }
-                  >
-                    <Crop size={16} />
-                  </button>
+                  <div className='toolbar-picker' ref={drawSizeMenuRef}>
+                    <button
+                      className={`ghost-button icon-only tiny toolbar-icon-button ${drawSizeMenuOpen ? 'selected-toggle' : ''}`}
+                      type='button'
+                      title={`图片尺寸：${drawSizeLabel}`}
+                      aria-label={`图片尺寸：${drawSizeLabel}`}
+                      aria-expanded={drawSizeMenuOpen}
+                      onClick={() => {
+                        setDrawQualityMenuOpen(false)
+                        setDrawSizeMenuOpen((current) => !current)
+                      }}
+                    >
+                      <Crop size={16} />
+                    </button>
+                    {drawSizeMenuOpen && (
+                      <div className='picker-menu image-config-menu'>
+                        <div className='picker-menu-head'>
+                          <strong>尺寸</strong>
+                        </div>
+                        <div className='picker-menu-list'>
+                          {DRAW_SIZE_OPTIONS.map((item) => (
+                            <button
+                              key={item.value}
+                              type='button'
+                              className={`picker-option ${item.value === drawSize ? 'active' : ''}`}
+                              onClick={() => {
+                                setDrawSize(item.value)
+                                setDrawSizeMenuOpen(false)
+                              }}
+                            >
+                              <strong>{`${item.label} · ${item.value}`}</strong>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 ),
               },
               {
                 key: 'draw-quality',
                 node: (
-                  <button
-                    className='ghost-button icon-only tiny toolbar-icon-button'
-                    type='button'
-                    title={`图片质量：${drawQualityLabel}`}
-                    aria-label={`图片质量：${drawQualityLabel}`}
-                    onClick={() =>
-                      setDrawQuality((current) => {
-                        const currentIndex = DRAW_QUALITY_OPTIONS.findIndex((item) => item.value === current)
-                        return DRAW_QUALITY_OPTIONS[(currentIndex + 1) % DRAW_QUALITY_OPTIONS.length]?.value || 'high'
-                      })
-                    }
-                  >
-                    <SlidersHorizontal size={16} />
-                  </button>
+                  <div className='toolbar-picker' ref={drawQualityMenuRef}>
+                    <button
+                      className={`ghost-button icon-only tiny toolbar-icon-button ${drawQualityMenuOpen ? 'selected-toggle' : ''}`}
+                      type='button'
+                      title={`图片质量：${drawQualityLabel}`}
+                      aria-label={`图片质量：${drawQualityLabel}`}
+                      aria-expanded={drawQualityMenuOpen}
+                      onClick={() => {
+                        setDrawSizeMenuOpen(false)
+                        setDrawQualityMenuOpen((current) => !current)
+                      }}
+                    >
+                      <SlidersHorizontal size={16} />
+                    </button>
+                    {drawQualityMenuOpen && (
+                      <div className='picker-menu image-config-menu'>
+                        <div className='picker-menu-head'>
+                          <strong>质量</strong>
+                        </div>
+                        <div className='picker-menu-list'>
+                          {DRAW_QUALITY_OPTIONS.map((item) => (
+                            <button
+                              key={item.value}
+                              type='button'
+                              className={`picker-option ${item.value === drawQuality ? 'active' : ''}`}
+                              onClick={() => {
+                                setDrawQuality(item.value)
+                                setDrawQualityMenuOpen(false)
+                              }}
+                            >
+                              <strong>{`${item.label} · ${item.value}`}</strong>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 ),
               },
               {
@@ -3464,8 +3911,10 @@ function DrawWorkspace(props: {
               .map((item) => ({
                 id: item.id,
                 name: item.name,
+                filePath: item.filePath,
                 previewUrl: item.previewUrl,
                 kind: item.kind,
+                onPreview: () => void openAttachmentPreview(item.filePath),
                 onRemove: () => removeAttachment(item.id),
               })),
             sendButton: (
@@ -3509,16 +3958,38 @@ function DrawWorkspace(props: {
                   </div>
                   <div className='subrecords compact-records'>
                     {drawSessions.map((session) => (
-                      <button
+                      <div
                         key={session.id}
-                        type='button'
                         className={`record-row action-row session-row ${session.id === resolvedActiveSessionId ? 'highlighted' : ''}`}
+                        role='button'
+                        tabIndex={0}
                         onContextMenu={(event) => handleDrawSessionContextMenu(event, session)}
-                        onClick={() => handleSelectDrawSession(session)}
+                        onClick={() => {
+                          if (renamingDrawSession?.id !== session.id) {
+                            handleSelectDrawSession(session)
+                          }
+                        }}
+                        onKeyDown={(event) => {
+                          if (renamingDrawSession?.id === session.id) {
+                            return
+                          }
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault()
+                            handleSelectDrawSession(session)
+                          }
+                        }}
                       >
-                        <span className='session-row-preview'>{clipText(session.title || '新绘图', 56)}</span>
+                        <SessionTitleEditor
+                          editing={renamingDrawSession?.id === session.id}
+                          value={renamingDrawSession?.id === session.id ? renamingDrawSession.value : ''}
+                          displayValue={session.title || '新绘图'}
+                          maxLength={56}
+                          onChange={(value) => setRenamingDrawSession({ id: session.id, value })}
+                          onCommit={() => commitDrawSessionRename(session.id)}
+                          onCancel={() => setRenamingDrawSession(null)}
+                        />
                         <small>{formatDateTime(session.updatedAt)}</small>
-                      </button>
+                      </div>
                     ))}
                   </div>
                 </div>
@@ -3547,6 +4018,7 @@ function DrawWorkspace(props: {
           </div>
         </div>
       )}
+      <AttachmentPreviewModal preview={attachmentPreview} onClose={() => setAttachmentPreview(null)} />
       <SessionContextMenu menu={sessionContextMenu} onClose={() => setSessionContextMenu(null)} />
     </section>
   )
@@ -4364,7 +4836,8 @@ function CliWorkspace(props: {
   const [sessionMessagesMap, setSessionMessagesMap] = useState<Record<string, CliMessage[]>>({})
   const [sessionLogsMap, setSessionLogsMap] = useState<Record<string, CliLogEntry[]>>({})
   const [sessionPartialMap, setSessionPartialMap] = useState<Record<string, string>>({})
-  const [expandedLogGroupId, setExpandedLogGroupId] = useState('')
+  const [expandedLogGroupIds, setExpandedLogGroupIds] = useState<string[]>([])
+  const [expandedLogEventMap, setExpandedLogEventMap] = useState<Record<string, string[]>>({})
   const [previewFile, setPreviewFile] = useState<{
     ownerId: string
     path: string
@@ -4382,6 +4855,7 @@ function CliWorkspace(props: {
   )
   const [historyVisibilityTab, setHistoryVisibilityTab] = useState<HistoryVisibilityTab>('visible')
   const [sessionContextMenu, setSessionContextMenu] = useState<SessionContextMenuState | null>(null)
+  const [renamingHistorySession, setRenamingHistorySession] = useState<SessionRenameDraft>(null)
   const [requestSessionMap, setRequestSessionMap] = useState<
     Record<string, { sessionId: string; projectPath: string }>
   >({})
@@ -4399,6 +4873,7 @@ function CliWorkspace(props: {
     handlePaste: handleAttachmentPaste,
     handleDrop: handleAttachmentDrop,
   } = useComposerAttachments(toast)
+  const { preview: attachmentPreview, setPreview: setAttachmentPreview, openPreview: openAttachmentPreview } = useAttachmentPreview(toast)
   const { ref: promptRef, resize: resizePrompt } = useAutosizeTextarea(prompt)
   const modelMenuRef = useRef<HTMLDivElement | null>(null)
   const effortMenuRef = useRef<HTMLDivElement | null>(null)
@@ -4487,7 +4962,7 @@ function CliWorkspace(props: {
   useEffect(() => {
     if (!running && latestAssistantMessageId) {
       const timer = window.setTimeout(() => {
-        setExpandedLogGroupId('')
+        setExpandedLogGroupIds([])
       }, 0)
       return () => window.clearTimeout(timer)
     }
@@ -4692,6 +5167,12 @@ function CliWorkspace(props: {
   }, [client])
 
   useEffect(() => {
+    setExpandedLogGroupIds([])
+    setExpandedLogEventMap({})
+    setPreviewFile(null)
+  }, [activeSessionId])
+
+  useEffect(() => {
     function handlePointerDown(event: PointerEvent) {
       const target = event.target as Node | null
       if (!target) {
@@ -4770,6 +5251,26 @@ function CliWorkspace(props: {
       ...current,
       [nextProjectKey]: sessionId,
     }))
+  }
+
+  function toggleLogGroup(groupId: string) {
+    setExpandedLogGroupIds((current) =>
+      current.includes(groupId)
+        ? current.filter((item) => item !== groupId)
+        : [...current, groupId]
+    )
+  }
+
+  function toggleLogEvent(groupId: string, eventId: string) {
+    setExpandedLogEventMap((current) => {
+      const currentGroup = current[groupId] || []
+      return {
+        ...current,
+        [groupId]: currentGroup.includes(eventId)
+          ? currentGroup.filter((item) => item !== eventId)
+          : [...currentGroup, eventId],
+      }
+    })
   }
 
   function hydrateCliSession(
@@ -4885,7 +5386,19 @@ function CliWorkspace(props: {
       recentSessions.find((item) => item.id === sessionId)?.title ||
       recentSessions.find((item) => item.id === sessionId)?.preview ||
       '新会话'
-    const nextTitle = window.prompt('输入新的会话名称', currentTitle)?.trim()
+    setRenamingHistorySession({
+      id: sessionId,
+      value: currentTitle,
+    })
+  }
+
+  function commitHistorySessionRename(sessionId: string) {
+    if (renamingHistorySession?.id !== sessionId) {
+      return
+    }
+
+    const nextTitle = renamingHistorySession.value.trim()
+    setRenamingHistorySession(null)
     if (!nextTitle) {
       return
     }
@@ -4925,6 +5438,51 @@ function CliWorkspace(props: {
       toast('已复制到剪贴板。')
     } catch {
       toast('复制失败，请检查系统剪贴板权限。')
+    }
+  }
+
+  async function handleDeleteCliMessage(message: CliMessage) {
+    const sessionId = activeSessionId
+    const resumeSessionId = getCliResumeSessionId(sessionId)
+
+    if (!sessionId || !resumeSessionId) {
+      setSessionMessagesMap((current) => ({
+        ...current,
+        [sessionId || '']: (current[sessionId || ''] || []).filter((item) => item.id !== message.id),
+      }))
+      toast('当前消息仅从本地草稿中移除，尚未写入真实会话文件。')
+      return
+    }
+
+    if (!message.sourceFilePath || !message.sourceLineNumber) {
+      toast('当前消息还没有稳定的源文件定位信息，暂时不能删除。')
+      return
+    }
+
+    try {
+      const details = await deleteCliMessage(client, resumeSessionId, {
+        id: message.id,
+        role: message.role,
+        content: message.content,
+        createdAt: message.createdAt,
+        sourceFilePath: message.sourceFilePath,
+        sourceLineNumber: message.sourceLineNumber,
+        sourceTimestamp: message.sourceTimestamp,
+      })
+
+      if (details) {
+        hydrateCliSession(details, { activateProject: false })
+      } else {
+        setSessionMessagesMap((current) => ({
+          ...current,
+          [sessionId]: (current[sessionId] || []).filter((item) => item.id !== message.id),
+        }))
+      }
+
+      await refreshCliState(true)
+      toast('已删除该条会话消息。')
+    } catch (error) {
+      toast(error instanceof Error ? error.message : '删除消息失败')
     }
   }
 
@@ -5179,13 +5737,15 @@ function CliWorkspace(props: {
                 />
               ) : activeTimeline.map((item) => {
                 if (item.kind === 'log') {
-                  const expanded = expandedLogGroupId === item.id
+                  const expanded = expandedLogGroupIds.includes(item.id)
                   return (
                     <CliLogBubble
                       key={item.id}
                       item={item}
                       expanded={expanded}
-                      onToggle={() => setExpandedLogGroupId((current) => (current === item.id ? '' : item.id))}
+                      onToggle={() => toggleLogGroup(item.id)}
+                      expandedEventIds={expandedLogEventMap[item.id] || []}
+                      onToggleEvent={(eventId) => toggleLogEvent(item.id, eventId)}
                       onOpenFile={(ownerId, path) => void handlePreviewFile(ownerId, path)}
                       onCopy={() => void copyText(item.events.map((eventItem) => serializeCliLogEvent(eventItem)).join('\n\n'))}
                       previewFile={previewFile}
@@ -5203,7 +5763,10 @@ function CliWorkspace(props: {
                         ? item.modelLabel || selectedModelLabel
                         : ''}
                     </span>
-                    <MessageAttachmentGallery attachments={'attachments' in item ? item.attachments : undefined} />
+                    <MessageAttachmentGallery
+                      attachments={'attachments' in item ? item.attachments : undefined}
+                      onPreview={openAttachmentPreview}
+                    />
                     {item.kind === 'partial' && item.content === CLI_PENDING_MESSAGE_LABEL ? (
                       <PendingMessageContent />
                     ) : (
@@ -5226,6 +5789,13 @@ function CliWorkspace(props: {
                           label: '复制',
                           icon: Copy,
                           onClick: () => void copyText(item.content),
+                        },
+                        {
+                          key: 'delete',
+                          label: '删除',
+                          icon: Trash2,
+                          onClick: () => void handleDeleteCliMessage(item),
+                          disabled: running || item.kind === 'partial',
                         },
                         {
                           key: 'edit',
@@ -5260,8 +5830,10 @@ function CliWorkspace(props: {
             fileAssets: attachments.map((item) => ({
               id: item.id,
               name: item.name,
+              filePath: item.filePath,
               previewUrl: item.previewUrl,
               kind: item.kind,
+              onPreview: () => void openAttachmentPreview(item.filePath),
               onRemove: () => removeAttachment(item.id),
             })),
             leftActions: [
@@ -5341,7 +5913,6 @@ function CliWorkspace(props: {
                                   <Star size={13} />
                                 </button>
                               </div>
-                              <span>{item.value}</span>
                             </button>
                           ))}
                         </div>
@@ -5371,7 +5942,6 @@ function CliWorkspace(props: {
                       <div className='picker-menu model-menu'>
                         <div className='picker-menu-head'>
                           <strong>思考长度</strong>
-                          <span>控制当前 CLI 对话的推理强度</span>
                         </div>
                         <div className='picker-menu-list'>
                           {reasoningOptions.map((item) => (
@@ -5385,7 +5955,6 @@ function CliWorkspace(props: {
                               }}
                             >
                               <strong>{item.label}</strong>
-                              <span>{item.value}</span>
                             </button>
                           ))}
                         </div>
@@ -5418,8 +5987,8 @@ function CliWorkspace(props: {
             <div>
             </div>
               <div className='inline-actions'>
-                <button className='ghost-button tiny' type='button' onClick={() => void refreshCliState()}>
-                  刷新
+                <button className='ghost-button icon-only tiny' type='button' onClick={() => void refreshCliState()} title='刷新最近会话' aria-label='刷新最近会话'>
+                  <RotateCcw size={14} />
                 </button>
               </div>
           </div>
@@ -5479,15 +6048,30 @@ function CliWorkspace(props: {
                           role='button'
                           tabIndex={0}
                           onContextMenu={(event) => handleHistorySessionContextMenu(event, item)}
-                          onClick={() => void handleOpenHistory(item)}
+                          onClick={() => {
+                            if (renamingHistorySession?.id !== item.id) {
+                              void handleOpenHistory(item)
+                            }
+                          }}
                           onKeyDown={(event) => {
+                            if (renamingHistorySession?.id === item.id) {
+                              return
+                            }
                             if (event.key === 'Enter' || event.key === ' ') {
                               event.preventDefault()
                               void handleOpenHistory(item)
                             }
                           }}
                         >
-                          <span className='session-row-preview'>{clipText(item.preview || item.title, 74)}</span>
+                          <SessionTitleEditor
+                            editing={renamingHistorySession?.id === item.id}
+                            value={renamingHistorySession?.id === item.id ? renamingHistorySession.value : ''}
+                            displayValue={item.preview || item.title}
+                            maxLength={74}
+                            onChange={(value) => setRenamingHistorySession({ id: item.id, value })}
+                            onCommit={() => commitHistorySessionRename(item.id)}
+                            onCancel={() => setRenamingHistorySession(null)}
+                          />
                           <small>{formatDateTime(item.updatedAt)}</small>
                           <button
                             className='ghost-button icon-only tiny session-hide-button'
@@ -5514,6 +6098,7 @@ function CliWorkspace(props: {
           </div>
         </aside>
       </div>
+      <AttachmentPreviewModal preview={attachmentPreview} onClose={() => setAttachmentPreview(null)} />
       <SessionContextMenu menu={sessionContextMenu} onClose={() => setSessionContextMenu(null)} />
     </section>
   )
@@ -5844,6 +6429,18 @@ function LoginScreen(props: {
       onLoginSuccess(nextUser)
       toast('登录成功。')
     } catch (error) {
+      try {
+        const currentServerBaseUrl = await window.desktopBridge?.getServerBaseUrl()
+        const normalizedCurrent = currentServerBaseUrl?.trim().replace(/\/+$/, '') || ''
+        if (normalizedCurrent && normalizedCurrent !== DEFAULT_SERVER_BASE_URL) {
+          await window.desktopBridge?.resetServerBaseUrl()
+          toast('检测到异常的自定义服务地址，已自动恢复官方地址，请重新登录。')
+          window.setTimeout(() => window.location.reload(), 200)
+          return
+        }
+      } catch {
+        /* ignore auto-reset failure and keep original login error */
+      }
       toast(error instanceof Error ? error.message : '登录失败')
     } finally {
       setSubmitting(false)
@@ -6175,8 +6772,25 @@ export function App() {
   }, [sideTab])
 
   useEffect(() => {
+    function handleAuthExpired(event: Event) {
+      const detail = (event as CustomEvent<{ message?: string }>).detail
+      clearStoredDesktopUserId()
+      useAuthStore.getState().reset()
+      setUser(null)
+      setBootstrapping(false)
+      setMessage(detail?.message || '登录态已失效，请重新登录。')
+    }
+
+    window.addEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired as EventListener)
+    return () => {
+      window.removeEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired as EventListener)
+    }
+  }, [setBootstrapping, setUser])
+
+  useEffect(() => {
     document.documentElement.dataset.theme = themeMode
     writeJsonStorage('oneapi-desktop-theme-mode', themeMode)
+    void getDesktopBridge().setThemeMode(themeMode).catch(() => undefined)
   }, [themeMode])
 
   useEffect(() => {

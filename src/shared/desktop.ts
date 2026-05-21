@@ -3,6 +3,7 @@ export type CliClient = 'codex' | 'claude'
 export type AssistantHistoryScope = 'chat' | 'draw'
 export type DeployStatus = 'pending' | 'running' | 'success' | 'error'
 export type DeployLogKind = 'info' | 'command' | 'stdout' | 'stderr' | 'result'
+import type { ChatCompletionResponse, ChatContentPart } from './contracts'
 export type CliLogKind =
   | 'intent'
   | 'command'
@@ -29,6 +30,28 @@ export interface DesktopApiResponse {
   data: unknown
 }
 
+export interface DesktopChatStreamRequest {
+  requestId: string
+  userId?: string
+  model: string
+  group?: string
+  reasoningEffort?: string
+  messages: Array<{
+    role: 'system' | 'user' | 'assistant'
+    content: string | ChatContentPart[]
+  }>
+  temperature?: number
+}
+
+export interface DesktopChatStreamPayload {
+  requestId: string
+  type: 'delta' | 'reasoning' | 'done' | 'error'
+  text?: string
+  message?: string
+  status?: number
+  usage?: ChatCompletionResponse['usage']
+}
+
 export interface CliHistoryEntry {
   id: string
   title: string
@@ -44,6 +67,9 @@ export interface CliSessionMessage {
   content: string
   createdAt: number
   modelLabel?: string
+  sourceFilePath?: string
+  sourceLineNumber?: number
+  sourceTimestamp?: string | number
   attachments?: Array<{
     id: string
     name: string
@@ -182,6 +208,15 @@ export interface CliDeployPreset {
   apiKey: string
   model: string
   baseUrl: string
+}
+
+export interface DesktopDeleteCliMessageRequest {
+  client: CliClient
+  sessionId: string
+  message: Pick<
+    CliSessionMessage,
+    'id' | 'role' | 'content' | 'createdAt' | 'sourceFilePath' | 'sourceLineNumber' | 'sourceTimestamp'
+  >
 }
 
 export interface AssistantHistorySnapshotEntry {

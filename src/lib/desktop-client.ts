@@ -2,6 +2,7 @@ import type { DesktopApiRequest } from '../shared/desktop'
 import type { ApiEnvelope } from '../shared/contracts'
 
 const DESKTOP_USER_ID_KEY = 'uid'
+export const AUTH_EXPIRED_EVENT = 'oneapi:auth-expired'
 
 function getBridge() {
   if (!window.desktopBridge) {
@@ -79,11 +80,39 @@ function getResponseErrorMessage(data: unknown, status: number) {
   return `请求失败（${status}）`
 }
 
+function isAuthExpiredMessage(message: string) {
+  const normalized = message.toLowerCase()
+  return (
+    message.includes('未登录且未提供 access token') ||
+    message.includes('access token 无效') ||
+    normalized.includes('not logged in and no access token provided') ||
+    normalized.includes('access token invalid')
+  )
+}
+
+export function notifyDesktopAuthExpiredIfNeeded(status: number, message: string) {
+  if (status !== 401 && !isAuthExpiredMessage(message)) {
+    return
+  }
+
+  clearStoredDesktopUserId()
+  window.dispatchEvent(
+    new CustomEvent(AUTH_EXPIRED_EVENT, {
+      detail: {
+        message,
+        status,
+      },
+    })
+  )
+}
+
 export async function desktopRequest<T>(input: DesktopApiRequest) {
   const response = await getBridge().request(withDesktopAuthHeaders(input))
 
   if (!response.ok) {
-    throw new Error(getResponseErrorMessage(response.data, response.status))
+    const message = getResponseErrorMessage(response.data, response.status)
+    notifyDesktopAuthExpiredIfNeeded(response.status, message)
+    throw new Error(message)
   }
 
   return response.data as T
@@ -94,7 +123,9 @@ export async function desktopEnvelope<T>(input: DesktopApiRequest) {
   const data = response.data as ApiEnvelope<T>
 
   if (!response.ok) {
-    throw new Error(getResponseErrorMessage(response.data, response.status))
+    const message = getResponseErrorMessage(response.data, response.status)
+    notifyDesktopAuthExpiredIfNeeded(response.status, message)
+    throw new Error(message)
   }
 
   return data

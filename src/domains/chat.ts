@@ -1,4 +1,10 @@
-import { desktopBridge, desktopEnvelope, desktopRequest, getStoredDesktopUserId } from '../lib/desktop-client'
+import {
+  desktopBridge,
+  desktopEnvelope,
+  desktopRequest,
+  getStoredDesktopUserId,
+  notifyDesktopAuthExpiredIfNeeded,
+} from '../lib/desktop-client'
 import type {
   ApiEnvelope,
   ChatContentPart,
@@ -63,31 +69,6 @@ export async function sendChatCompletion(payload: {
   })
 }
 
-function resolveStreamDeltaText(data: unknown) {
-  if (typeof data !== 'object' || !data) {
-    return ''
-  }
-
-  if ('choices' in data && Array.isArray((data as { choices?: unknown[] }).choices)) {
-    const delta = ((data as { choices: Array<{ delta?: { content?: unknown } }> }).choices[0]?.delta?.content)
-    if (typeof delta === 'string') {
-      return delta
-    }
-    if (Array.isArray(delta)) {
-      return delta
-        .map((item) => {
-          if (typeof item === 'object' && item && 'text' in item && typeof item.text === 'string') {
-            return item.text
-          }
-          return ''
-        })
-        .join('')
-    }
-  }
-
-  return ''
-}
-
 export async function streamChatCompletion(
   payload: {
     model: string
@@ -100,90 +81,90 @@ export async function streamChatCompletion(
     temperature?: number
   },
   handlers: {
+    requestId?: string
     signal: AbortSignal
     onDelta: (text: string) => void
+    onReasoningDelta?: (text: string) => void
     onDone?: (usage?: ChatCompletionResponse['usage']) => void
   }
 ) {
   const { reasoningEffort, ...rest } = payload
-  const serverBaseUrl = await desktopBridge().getServerBaseUrl()
+  const bridge = desktopBridge()
+  const requestId =
+    handlers.requestId ||
+    (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `chat-stream-${Date.now()}`)
   const userId = getStoredDesktopUserId()
-  const response = await fetch(`${serverBaseUrl}/pg/chat/completions`, {
-    method: 'POST',
-    credentials: 'include',
-    signal: handlers.signal,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(userId ? { 'New-Api-User': userId } : {}),
-    },
-    body: JSON.stringify({
-      ...rest,
-      reasoning_effort: reasoningEffort,
-      stream: true,
-    }),
+  await new Promise<void>((resolve, reject) => {
+    let settled = false
+
+    const cleanup = () => {
+      unsubscribe()
+      handlers.signal.removeEventListener('abort', handleAbort)
+    }
+
+    const finish = (callback: () => void) => {
+      if (settled) {
+        return
+      }
+      settled = true
+      cleanup()
+      callback()
+    }
+
+    const handleAbort = () => {
+      void bridge.stopRequest(requestId).catch(() => undefined)
+      finish(() => reject(new DOMException('请求已取消', 'AbortError')))
+    }
+
+    const unsubscribe = bridge.onChatStream((event) => {
+      if (event.requestId !== requestId) {
+        return
+      }
+
+      if (event.type === 'delta' && event.text) {
+        handlers.onDelta(event.text)
+        return
+      }
+
+      if (event.type === 'reasoning' && event.text) {
+        handlers.onReasoningDelta?.(event.text)
+        return
+      }
+
+      if (event.type === 'error') {
+        notifyDesktopAuthExpiredIfNeeded(event.status ?? 0, event.message || '聊天请求失败')
+        finish(() => reject(new Error(event.message || '聊天请求失败')))
+        return
+      }
+
+      if (event.type === 'done') {
+        finish(() => {
+          handlers.onDone?.(event.usage)
+          resolve()
+        })
+      }
+    })
+
+    if (handlers.signal.aborted) {
+      handleAbort()
+      return
+    }
+
+    handlers.signal.addEventListener('abort', handleAbort, { once: true })
+
+    void bridge
+      .streamChatCompletion({
+        requestId,
+        userId,
+        ...rest,
+        reasoningEffort,
+      })
+      .catch((error) => {
+        finish(() => reject(error instanceof Error ? error : new Error('聊天请求失败')))
+      })
   })
-
-  if (!response.ok) {
-    const text = await response.text()
-    let message = `请求失败（${response.status}）`
-    try {
-      const parsed = JSON.parse(text) as { message?: string; error?: { message?: string } }
-      message = parsed.message || parsed.error?.message || message
-    } catch {
-      if (text.trim()) {
-        message = text.trim()
-      }
-    }
-    throw new Error(message)
-  }
-
-  const reader = response.body?.getReader()
-  if (!reader) {
-    throw new Error('当前环境不支持流式响应。')
-  }
-
-  const decoder = new TextDecoder('utf-8')
-  let buffer = ''
-  let usage: ChatCompletionResponse['usage'] | undefined
-
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) {
-      break
-    }
-
-    buffer += decoder.decode(value, { stream: true })
-    const events = buffer.split('\n\n')
-    buffer = events.pop() || ''
-
-    for (const rawEvent of events) {
-      const dataLines = rawEvent
-        .split('\n')
-        .filter((line) => line.startsWith('data:'))
-        .map((line) => line.slice(5).trim())
-
-      for (const line of dataLines) {
-        if (!line || line === '[DONE]') {
-          continue
-        }
-
-        try {
-          const parsed = JSON.parse(line) as ChatCompletionResponse & { usage?: ChatCompletionResponse['usage'] }
-          const deltaText = resolveStreamDeltaText(parsed)
-          if (deltaText) {
-            handlers.onDelta(deltaText)
-          }
-          if (parsed.usage) {
-            usage = parsed.usage
-          }
-        } catch {
-          continue
-        }
-      }
-    }
-  }
-
-  handlers.onDone?.(usage)
 }
 
 export function stopChatCompletion(requestId: string) {

@@ -7,6 +7,8 @@ import type {
   CliProgressPayload,
   CliRunRequest,
   CliSessionDetails,
+  CliSessionMessage,
+  DesktopDeleteCliMessageRequest,
   DeployProgressPayload,
 } from '../shared/desktop'
 
@@ -20,6 +22,21 @@ export function listCliHistory(client: CliClient, limit = 10) {
 
 export function getCliSession(client: CliClient, sessionId: string): Promise<CliSessionDetails | null> {
   return desktopBridge().getCliSession(client, sessionId)
+}
+
+export function deleteCliMessage(
+  client: CliClient,
+  sessionId: string,
+  message: Pick<
+    CliSessionMessage,
+    'id' | 'role' | 'content' | 'createdAt' | 'sourceFilePath' | 'sourceLineNumber' | 'sourceTimestamp'
+  >
+): Promise<CliSessionDetails | null> {
+  return desktopBridge().deleteCliMessage({
+    client,
+    sessionId,
+    message,
+  } satisfies DesktopDeleteCliMessageRequest)
 }
 
 export function openCliSessionFolder(client: CliClient, sessionId: string) {

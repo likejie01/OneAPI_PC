@@ -6,24 +6,33 @@ import {
   ipcMain,
   Menu,
   nativeImage,
+  nativeTheme,
   session,
   shell,
+  Tray,
   type WebContents,
 } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { spawn, type ChildProcess } from 'node:child_process'
-import { promises as fs } from 'node:fs'
+import { createReadStream, createWriteStream, promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import readline from 'node:readline'
 import { fileURLToPath } from 'node:url'
 import process from 'node:process'
+import type { ChatCompletionResponse } from '../src/shared/contracts'
+import type {
+  DesktopChatStreamPayload,
+  DesktopChatStreamRequest,
+  DesktopDeleteCliMessageRequest,
+} from '../src/shared/desktop'
 import { shouldUseWindowsCommandShimForPath } from '../src/lib/desktop-service.ts'
 
 const DEFAULT_SERVER_BASE_URL = 'https://ai.oneapi.center'
 const DEFAULT_CODEX_BASE_URL = 'https://ai.oneapi.center/v1'
 const DEFAULT_CLAUDE_BASE_URL = 'https://ai.oneapi.center'
 const DEFAULT_CODEX_MODEL = 'gpt-5.5'
-const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-4-6'
+const DEFAULT_CLAUDE_MODEL = 'claude-opus-4-7'
 const DESKTOP_PARTITION = 'persist:oneapi-desktop'
 const isDev = !!process.env.VITE_DEV_SERVER_URL
 const __filename = fileURLToPath(import.meta.url)
@@ -32,10 +41,19 @@ const APP_ICON_PATH = isDev
   ? path.join(path.dirname(__dirname), 'public', 'Icon.png')
   : path.join(path.dirname(__dirname), 'dist', 'Icon.png')
 let mainWindow: BrowserWindow | null = null
+let appTray: Tray | null = null
+let isQuitting = false
 let serverBaseUrl = DEFAULT_SERVER_BASE_URL
 const activeApiRequests = new Map<string, AbortController>()
 const activeCliProcesses = new Map<string, ChildProcess>()
 const stoppedCliRequests = new Set<string>()
+type ThemeMode = 'light' | 'dark'
+
+function applyThemeMode(mode: ThemeMode) {
+  nativeTheme.themeSource = mode
+  const backgroundColor = mode === 'dark' ? '#12181d' : '#eef3f5'
+  mainWindow?.setBackgroundColor(backgroundColor)
+}
 
 function getServerConfigPath() {
   return path.join(app.getPath('userData'), 'server-base-url.json')
@@ -128,6 +146,9 @@ interface CliSessionMessage {
   content: string
   createdAt: number
   modelLabel?: string
+  sourceFilePath?: string
+  sourceLineNumber?: number
+  sourceTimestamp?: string | number
   fileChanges?: CliFileChange[]
 }
 
@@ -275,6 +296,57 @@ interface NodeRuntimeInfo {
 
 const NODEJS_MIRROR_BASE_URL = 'https://npmmirror.com/mirrors/node'
 
+function buildTrayIcon() {
+  const icon = nativeImage.createFromPath(APP_ICON_PATH)
+  if (icon.isEmpty()) {
+    return icon
+  }
+  return icon.resize({ width: 18, height: 18 })
+}
+
+function restoreMainWindow() {
+  if (!mainWindow) {
+    createWindow()
+    return
+  }
+
+  if (mainWindow.isMinimized()) {
+    mainWindow.restore()
+  }
+  mainWindow.show()
+  mainWindow.focus()
+}
+
+function ensureTray() {
+  if (appTray) {
+    return appTray
+  }
+
+  appTray = new Tray(buildTrayIcon())
+  appTray.setToolTip('OneAPI Center')
+  appTray.setContextMenu(
+    Menu.buildFromTemplate([
+      {
+        label: '显示主窗口',
+        click: () => restoreMainWindow(),
+      },
+      {
+        type: 'separator',
+      },
+      {
+        label: '退出',
+        click: () => {
+          isQuitting = true
+          app.quit()
+        },
+      },
+    ])
+  )
+  appTray.on('click', () => restoreMainWindow())
+  appTray.on('double-click', () => restoreMainWindow())
+  return appTray
+}
+
 function createWindow() {
   const appIcon = nativeImage.createFromPath(APP_ICON_PATH)
   const win = new BrowserWindow({
@@ -283,7 +355,7 @@ function createWindow() {
     minWidth: 1240,
     minHeight: 780,
     title: resolveWorkspaceTitle(),
-    backgroundColor: '#f3f2ed',
+    backgroundColor: '#eef3f5',
     icon: appIcon,
     autoHideMenuBar: true,
     webPreferences: {
@@ -293,6 +365,10 @@ function createWindow() {
       partition: DESKTOP_PARTITION,
     },
   })
+
+  mainWindow = win
+  ensureTray()
+  applyThemeMode('light')
 
   if (isDev && process.env.VITE_DEV_SERVER_URL) {
     win.loadURL(process.env.VITE_DEV_SERVER_URL)
@@ -305,8 +381,13 @@ function createWindow() {
     return { action: 'deny' }
   })
   attachContextMenu(win)
-
-  mainWindow = win
+  win.on('close', (event) => {
+    if (isQuitting) {
+      return
+    }
+    event.preventDefault()
+    win.hide()
+  })
   win.on('closed', () => {
     if (mainWindow === win) {
       mainWindow = null
@@ -482,6 +563,219 @@ async function parseResponse(response: Response) {
   }
   const text = await response.text()
   return text.length > 0 ? text : null
+}
+
+function getResponseErrorMessage(data: unknown, status: number, fallback?: string) {
+  if (typeof data === 'object' && data) {
+    if ('message' in data && typeof data.message === 'string') {
+      return data.message
+    }
+
+    if (
+      'error' in data &&
+      typeof data.error === 'object' &&
+      data.error &&
+      'message' in data.error &&
+      typeof data.error.message === 'string'
+    ) {
+      return data.error.message
+    }
+  }
+
+  if (typeof data === 'string' && data.trim()) {
+    return data.trim()
+  }
+
+  return fallback || `请求失败（${status}）`
+}
+
+function resolveStreamDeltaText(data: unknown) {
+  if (typeof data !== 'object' || !data) {
+    return ''
+  }
+
+  if ('choices' in data && Array.isArray((data as { choices?: unknown[] }).choices)) {
+    const delta = ((data as { choices: Array<{ delta?: { content?: unknown } }> }).choices[0]?.delta?.content)
+    if (typeof delta === 'string') {
+      return delta
+    }
+    if (Array.isArray(delta)) {
+      return delta
+        .map((item) => {
+          if (typeof item === 'object' && item && 'text' in item && typeof item.text === 'string') {
+            return item.text
+          }
+          return ''
+        })
+        .join('')
+    }
+  }
+
+  return ''
+}
+
+function resolveStreamReasoningText(data: unknown) {
+  if (typeof data !== 'object' || !data) {
+    return ''
+  }
+
+  if ('choices' in data && Array.isArray((data as { choices?: unknown[] }).choices)) {
+    const delta = ((data as {
+      choices: Array<{
+        delta?: {
+          reasoning_content?: unknown
+          reasoning?: unknown
+        }
+      }>
+    }).choices[0]?.delta)
+
+    if (typeof delta?.reasoning_content === 'string') {
+      return delta.reasoning_content
+    }
+
+    if (typeof delta?.reasoning === 'string') {
+      return delta.reasoning
+    }
+
+    if (Array.isArray(delta?.reasoning_content)) {
+      return delta.reasoning_content
+        .map((item) => {
+          if (typeof item === 'string') {
+            return item
+          }
+          if (typeof item === 'object' && item && 'text' in item && typeof item.text === 'string') {
+            return item.text
+          }
+          return ''
+        })
+        .join('')
+    }
+  }
+
+  return ''
+}
+
+function emitChatStream(sender: WebContents, payload: DesktopChatStreamPayload) {
+  sender.send('desktop:chat-stream', payload)
+}
+
+async function requestChatStream(sender: WebContents, input: DesktopChatStreamRequest) {
+  const controller = new AbortController()
+  activeApiRequests.set(input.requestId, controller)
+
+  try {
+    const response = await getDesktopSession().fetch(buildUrl('/pg/chat/completions'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(input.userId ? { 'New-Api-User': input.userId } : {}),
+      },
+      body: JSON.stringify({
+        model: input.model,
+        group: input.group,
+        reasoning_effort: input.reasoningEffort,
+        messages: input.messages,
+        temperature: input.temperature,
+        stream: true,
+      }),
+      signal: controller.signal,
+    })
+
+    if (!response.ok) {
+      const data = await parseResponse(response)
+      emitChatStream(sender, {
+        requestId: input.requestId,
+        type: 'error',
+        status: response.status,
+        message: getResponseErrorMessage(data, response.status),
+      })
+      return
+    }
+
+    const reader = response.body?.getReader()
+    if (!reader) {
+      emitChatStream(sender, {
+        requestId: input.requestId,
+        type: 'error',
+        message: '当前环境不支持流式响应。',
+      })
+      return
+    }
+
+    const decoder = new TextDecoder('utf-8')
+    let buffer = ''
+    let usage: ChatCompletionResponse['usage'] | undefined
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) {
+        break
+      }
+
+      buffer += decoder.decode(value, { stream: true })
+      const events = buffer.split('\n\n')
+      buffer = events.pop() || ''
+
+      for (const rawEvent of events) {
+        const dataLines = rawEvent
+          .split('\n')
+          .filter((line) => line.startsWith('data:'))
+          .map((line) => line.slice(5).trim())
+
+        for (const line of dataLines) {
+          if (!line || line === '[DONE]') {
+            continue
+          }
+
+          try {
+            const parsed = JSON.parse(line) as ChatCompletionResponse & {
+              usage?: ChatCompletionResponse['usage']
+            }
+            const deltaText = resolveStreamDeltaText(parsed)
+            const reasoningText = resolveStreamReasoningText(parsed)
+            if (deltaText) {
+              emitChatStream(sender, {
+                requestId: input.requestId,
+                type: 'delta',
+                text: deltaText,
+              })
+            }
+            if (reasoningText) {
+              emitChatStream(sender, {
+                requestId: input.requestId,
+                type: 'reasoning',
+                text: reasoningText,
+              })
+            }
+            if (parsed.usage) {
+              usage = parsed.usage
+            }
+          } catch {
+            continue
+          }
+        }
+      }
+    }
+
+    emitChatStream(sender, {
+      requestId: input.requestId,
+      type: 'done',
+      usage,
+    })
+  } catch (error) {
+    emitChatStream(sender, {
+      requestId: input.requestId,
+      type: 'error',
+      status: controller.signal.aborted ? 499 : 500,
+      message: controller.signal.aborted
+        ? '请求已取消'
+        : error instanceof Error
+          ? error.message
+          : '聊天请求失败',
+    })
+  } finally {
+    activeApiRequests.delete(input.requestId)
+  }
 }
 
 async function requestApi(input: DesktopApiRequest): Promise<DesktopApiResponse> {
@@ -1194,7 +1488,7 @@ async function readCurrentCodexConfig() {
   const providerSection =
     parsed.sections.find((section) => section.header === `model_providers.${provider}`) ||
     parsed.sections.find((section) => section.header === 'model_providers.oneapi_desktop')
-  const apiKey = providerSection ? readTomlSectionString(providerSection.lines, 'api_key') : ''
+  const apiKey = providerSection ? readCodexProviderToken(providerSection.lines) : ''
   const baseUrl = providerSection ? readTomlSectionString(providerSection.lines, 'base_url') : ''
 
   return {
@@ -1203,6 +1497,13 @@ async function readCurrentCodexConfig() {
     model: model.trim() || DEFAULT_CODEX_MODEL,
     baseUrl: normalizeCodexBaseUrl(baseUrl),
   }
+}
+
+type ClaudeSettingsDocument = {
+  env?: Record<string, string>
+  model?: string
+  permissions?: Record<string, unknown>
+  [key: string]: unknown
 }
 
 type TomlSectionBlock = {
@@ -1274,6 +1575,13 @@ function readTomlSectionString(lines: string[], key: string) {
   return ''
 }
 
+function readCodexProviderToken(lines: string[]) {
+  return (
+    readTomlSectionString(lines, 'experimental_bearer_token') ||
+    readTomlSectionString(lines, 'api_key')
+  )
+}
+
 function createCodexProviderSection(apiKey: string, baseUrl: string): TomlSectionBlock {
   const resolvedBaseUrl = normalizeCodexBaseUrl(baseUrl)
   return {
@@ -1282,7 +1590,7 @@ function createCodexProviderSection(apiKey: string, baseUrl: string): TomlSectio
       '[model_providers.oneapi_desktop]',
       'name = "oneapi_desktop"',
       `base_url = "${resolvedBaseUrl}"`,
-      `api_key = "${apiKey}"`,
+      `experimental_bearer_token = "${apiKey}"`,
       'wire_api = "responses"',
     ],
   }
@@ -1338,6 +1646,14 @@ function serializeTomlDocument(preamble: string[], sections: TomlSectionBlock[])
   return `${blocks.join('\n\n').replace(/\n{3,}/g, '\n\n')}\n`
 }
 
+function isCodexProviderDifferent(section: TomlSectionBlock, apiKey: string, baseUrl: string) {
+  return (
+    readCodexProviderToken(section.lines).trim() !== apiKey.trim() ||
+    normalizeCodexBaseUrl(readTomlSectionString(section.lines, 'base_url')) !==
+      normalizeCodexBaseUrl(baseUrl)
+  )
+}
+
 function mergeCodexConfig(raw: string, apiKey: string, model: string, baseUrl: string) {
   const parsed = parseTomlDocument(raw)
   const resolvedBaseUrl = normalizeCodexBaseUrl(baseUrl)
@@ -1346,13 +1662,15 @@ function mergeCodexConfig(raw: string, apiKey: string, model: string, baseUrl: s
     (line) =>
       !/^\s*model\s*=/.test(line) &&
       !/^\s*model_provider\s*=/.test(line) &&
-      !/^\s*model_reasoning_effort\s*=/.test(line)
+      !/^\s*model_reasoning_effort\s*=/.test(line) &&
+      !/^\s*cli_auth_credentials_store\s*=/.test(line)
   )
 
   const nextPreamble = [
     `model = "${model}"`,
     'model_provider = "oneapi_desktop"',
     'model_reasoning_effort = "high"',
+    'cli_auth_credentials_store = "file"',
     '',
     ...filteredPreamble,
   ]
@@ -1361,29 +1679,57 @@ function mergeCodexConfig(raw: string, apiKey: string, model: string, baseUrl: s
   const existingOneApiDesktop = parsed.sections.find(
     (section) => section.header === 'model_providers.oneapi_desktop'
   )
-  const hasOriginalBackup = parsed.sections.some(
+  const existingOriginalBackup = parsed.sections.find(
     (section) => section.header === 'model_providers.oneapi_desktop_original'
   )
+  const shouldInsertBackup =
+    !!existingOneApiDesktop &&
+    !existingOriginalBackup &&
+    isCodexProviderDifferent(existingOneApiDesktop, apiKey, resolvedBaseUrl)
   let insertedProvider = false
+  let insertedBackup = false
+  let insertedWindows = false
+  let insertedMarketplace = false
 
   for (const section of parsed.sections) {
     if (section.header === 'model_providers.oneapi_desktop') {
-      sections.push(nextProviderBlock)
-      insertedProvider = true
-
-      const currentApiKey = readTomlSectionString(section.lines, 'api_key')
-      const currentBaseUrl = readTomlSectionString(section.lines, 'base_url')
-      if (
-        !hasOriginalBackup &&
-        (currentApiKey.trim() !== apiKey.trim() || currentBaseUrl.trim() !== resolvedBaseUrl)
-      ) {
-        sections.push(
-          renameCodexProviderSection(
-            section,
-            'model_providers.oneapi_desktop_original',
-            'oneapi_desktop_original'
+      if (!insertedProvider) {
+        sections.push(nextProviderBlock)
+        insertedProvider = true
+        if (shouldInsertBackup && existingOneApiDesktop && !insertedBackup) {
+          sections.push(
+            renameCodexProviderSection(
+              existingOneApiDesktop,
+              'model_providers.oneapi_desktop_original',
+              'oneapi_desktop_original'
+            )
           )
-        )
+          insertedBackup = true
+        }
+      }
+      continue
+    }
+
+    if (section.header === 'model_providers.oneapi_desktop_original') {
+      if (!insertedBackup) {
+        sections.push(section)
+        insertedBackup = true
+      }
+      continue
+    }
+
+    if (section.header === 'windows') {
+      if (!insertedWindows) {
+        sections.push(section)
+        insertedWindows = true
+      }
+      continue
+    }
+
+    if (section.header === 'marketplaces.openai-bundled') {
+      if (!insertedMarketplace) {
+        sections.push(createCodexMarketplaceSection())
+        insertedMarketplace = true
       }
       continue
     }
@@ -1391,6 +1737,16 @@ function mergeCodexConfig(raw: string, apiKey: string, model: string, baseUrl: s
     if (!insertedProvider && section.header.startsWith('model_providers.')) {
       sections.push(nextProviderBlock)
       insertedProvider = true
+      if (shouldInsertBackup && existingOneApiDesktop && !insertedBackup) {
+        sections.push(
+          renameCodexProviderSection(
+            existingOneApiDesktop,
+            'model_providers.oneapi_desktop_original',
+            'oneapi_desktop_original'
+          )
+        )
+        insertedBackup = true
+      }
     }
 
     sections.push(section)
@@ -1398,22 +1754,23 @@ function mergeCodexConfig(raw: string, apiKey: string, model: string, baseUrl: s
 
   if (!insertedProvider) {
     sections.push(nextProviderBlock)
-    if (existingOneApiDesktop && !hasOriginalBackup) {
-      sections.push(
-        renameCodexProviderSection(
-          existingOneApiDesktop,
-          'model_providers.oneapi_desktop_original',
-          'oneapi_desktop_original'
-        )
-      )
-    }
   }
 
-  if (!sections.some((section) => section.header === 'windows')) {
+  if (shouldInsertBackup && existingOneApiDesktop && !insertedBackup) {
+    sections.push(
+      renameCodexProviderSection(
+        existingOneApiDesktop,
+        'model_providers.oneapi_desktop_original',
+        'oneapi_desktop_original'
+      )
+    )
+  }
+
+  if (!insertedWindows) {
     sections.push(createCodexWindowsSection())
   }
 
-  if (!sections.some((section) => section.header === 'marketplaces.openai-bundled')) {
+  if (!insertedMarketplace) {
     sections.push(createCodexMarketplaceSection())
   }
 
@@ -1439,18 +1796,146 @@ function maskSensitiveText(value?: string) {
 
 async function readCurrentClaudeConfig() {
   const targetPath = cliConfig.claude.configPath
-  const raw = await fs.readFile(targetPath, 'utf8')
-  const parsed = JSON.parse(raw) as {
-    env?: Record<string, string>
-    model?: string
-  }
+  const parsed = await readResolvedClaudeSettingsDocument(targetPath)
 
   return {
     client: 'claude' as const,
-    apiKey: parsed.env?.ANTHROPIC_AUTH_TOKEN?.trim() || '',
+    apiKey: pickClaudeApiKey(parsed.env),
     model: parsed.model?.trim() || DEFAULT_CLAUDE_MODEL,
     baseUrl: normalizeClaudeBaseUrl(parsed.env?.ANTHROPIC_BASE_URL),
   }
+}
+
+async function readCurrentClaudeSettingsDocument(targetPath = cliConfig.claude.configPath) {
+  const raw = await fs.readFile(targetPath, 'utf8')
+  return JSON.parse(raw) as ClaudeSettingsDocument
+}
+
+async function readClaudeAuthDocument(targetPath = path.join(cliConfig.claude.dataPath, 'auth.json')) {
+  const raw = await fs.readFile(targetPath, 'utf8')
+  return JSON.parse(raw) as Record<string, unknown>
+}
+
+function pickClaudeApiKey(env?: Record<string, string>) {
+  return env?.ANTHROPIC_AUTH_TOKEN?.trim() || env?.ANTHROPIC_API_KEY?.trim() || ''
+}
+
+function pickClaudeApiKeyFromUnknown(input: unknown) {
+  if (!input || typeof input !== 'object') {
+    return ''
+  }
+
+  const source = input as Record<string, unknown>
+  return (
+    (typeof source.ANTHROPIC_AUTH_TOKEN === 'string' && source.ANTHROPIC_AUTH_TOKEN.trim()) ||
+    (typeof source.ANTHROPIC_API_KEY === 'string' && source.ANTHROPIC_API_KEY.trim()) ||
+    ''
+  )
+}
+
+async function resolveClaudeFallbackApiKey() {
+  const claudeAuth = await readClaudeAuthDocument().catch(() => null)
+  const fromClaudeAuth = pickClaudeApiKeyFromUnknown(claudeAuth)
+  if (fromClaudeAuth) {
+    return resolveDesktopCliKeyRecord(fromClaudeAuth)
+  }
+
+  const codexAuthPath = path.join(cliConfig.codex.dataPath, 'auth.json')
+  const codexAuthRaw = await fs.readFile(codexAuthPath, 'utf8').catch(() => '')
+  if (codexAuthRaw.trim()) {
+    try {
+      const parsed = JSON.parse(codexAuthRaw) as Record<string, unknown>
+      const token =
+        (typeof parsed.OPENAI_API_KEY === 'string' && parsed.OPENAI_API_KEY.trim()) ||
+        (typeof parsed.ANTHROPIC_AUTH_TOKEN === 'string' && parsed.ANTHROPIC_AUTH_TOKEN.trim()) ||
+        ''
+      if (token) {
+        return resolveDesktopCliKeyRecord(token)
+      }
+    } catch {
+      /* ignore invalid codex auth backup */
+    }
+  }
+
+  const codexRaw = await fs.readFile(cliConfig.codex.configPath, 'utf8').catch(() => '')
+  if (codexRaw.trim()) {
+    const parsedToml = parseTomlDocument(codexRaw)
+    const provider = readTomlTopLevelString(parsedToml.preamble, 'model_provider') || 'oneapi_desktop'
+    const providerSection =
+      parsedToml.sections.find((section) => section.header === `model_providers.${provider}`) ||
+      parsedToml.sections.find((section) => section.header === 'model_providers.oneapi_desktop')
+    const token = providerSection ? readCodexProviderToken(providerSection.lines).trim() : ''
+    if (token) {
+      return resolveDesktopCliKeyRecord(token)
+    }
+  }
+
+  return ''
+}
+
+async function readResolvedClaudeSettingsDocument(targetPath = cliConfig.claude.configPath) {
+  const parsed = await readCurrentClaudeSettingsDocument(targetPath).catch(() => ({} as ClaudeSettingsDocument))
+  const currentEnv = (typeof parsed.env === 'object' && parsed.env ? parsed.env : {}) as Record<string, string>
+  const currentKey = pickClaudeApiKey(currentEnv)
+  if (currentKey) {
+    return {
+      ...parsed,
+      env: {
+        ...currentEnv,
+        ANTHROPIC_API_KEY: resolveDesktopCliKeyRecord(currentKey),
+        ANTHROPIC_AUTH_TOKEN: resolveDesktopCliKeyRecord(currentKey),
+      },
+    } satisfies ClaudeSettingsDocument
+  }
+
+  const fallbackKey = await resolveClaudeFallbackApiKey()
+  if (!fallbackKey) {
+    return {
+      ...parsed,
+      env: currentEnv,
+    } satisfies ClaudeSettingsDocument
+  }
+
+  const nextDocument: ClaudeSettingsDocument = {
+    ...parsed,
+    env: {
+      ...currentEnv,
+      ANTHROPIC_API_KEY: fallbackKey,
+      ANTHROPIC_AUTH_TOKEN: fallbackKey,
+    },
+  }
+
+  await fs.mkdir(path.dirname(targetPath), { recursive: true })
+  await fs.writeFile(targetPath, JSON.stringify(nextDocument, null, 2), 'utf8')
+  return nextDocument
+}
+
+function buildClaudeCliEnv(
+  runtime: NodeRuntimeInfo | null,
+  settings?: ClaudeSettingsDocument | null
+) {
+  const baseEnv: NodeJS.ProcessEnv = runtime ? buildRuntimeEnv(runtime) : { ...process.env }
+  const nextEnv = { ...baseEnv }
+  const configEnv = settings?.env || {}
+
+  for (const [key, value] of Object.entries(configEnv)) {
+    if (typeof value === 'string' && value.trim()) {
+      nextEnv[key] = value
+    }
+  }
+
+  const apiKey = pickClaudeApiKey(configEnv)
+  if (apiKey) {
+    const normalizedKey = resolveDesktopCliKeyRecord(apiKey)
+    nextEnv.ANTHROPIC_API_KEY = normalizedKey
+    nextEnv.ANTHROPIC_AUTH_TOKEN = normalizedKey
+  }
+
+  if (configEnv.ANTHROPIC_BASE_URL?.trim()) {
+    nextEnv.ANTHROPIC_BASE_URL = normalizeClaudeBaseUrl(configEnv.ANTHROPIC_BASE_URL)
+  }
+
+  return nextEnv
 }
 
 async function readJsonLines(filePath: string) {
@@ -1463,6 +1948,240 @@ async function readJsonLines(filePath: string) {
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean)
+}
+
+async function rewriteJsonLinesFile(
+  filePath: string,
+  shouldKeepLine: (line: string, lineNumber: number) => boolean | Promise<boolean>
+) {
+  const tempPath = `${filePath}.${Date.now()}.tmp`
+  const reader = readline.createInterface({
+    input: createReadStream(filePath, { encoding: 'utf8' }),
+    crlfDelay: Infinity,
+  })
+  const writer = createWriteStream(tempPath, { encoding: 'utf8' })
+
+  try {
+    let lineNumber = 0
+    for await (const line of reader) {
+      lineNumber += 1
+      if (await shouldKeepLine(line, lineNumber)) {
+        writer.write(`${line}\n`)
+      }
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      const handleError = (error: Error) => reject(error)
+      writer.once('error', handleError)
+      writer.end(() => {
+        writer.off('error', handleError)
+        resolve()
+      })
+    })
+    await fs.rename(tempPath, filePath)
+  } catch (error) {
+    writer.destroy()
+    await fs.rm(tempPath, { force: true }).catch(() => undefined)
+    throw error
+  } finally {
+    reader.close()
+  }
+}
+
+function isMatchingCodexMessageLine(
+  line: string,
+  input: DesktopDeleteCliMessageRequest['message']
+) {
+  try {
+    const parsed = JSON.parse(line) as {
+      type?: string
+      timestamp?: string
+      payload?: {
+        type?: string
+        role?: string
+        phase?: string
+        content?: unknown
+      }
+    }
+
+    if (parsed.type !== 'response_item' || parsed.payload?.type !== 'message') {
+      return false
+    }
+
+    const role = parsed.payload.role
+    if (role !== input.role) {
+      return false
+    }
+
+    if (role === 'assistant' && parsed.payload.phase !== 'final_answer') {
+      return false
+    }
+
+    if (role === 'user' && typeof parsed.payload.phase === 'string' && parsed.payload.phase !== 'input') {
+      return false
+    }
+
+    const rawContent = contentPartsToText(parsed.payload.content)
+    const content = role === 'user' ? sanitizeCliUserPrompt(rawContent) : rawContent
+    return content === input.content && toEpochSeconds(parsed.timestamp) * 1000 === input.createdAt
+  } catch {
+    return false
+  }
+}
+
+function isMatchingClaudeMessageLine(
+  line: string,
+  input: DesktopDeleteCliMessageRequest['message']
+) {
+  try {
+    const parsed = JSON.parse(line) as {
+      type?: string
+      timestamp?: string
+      message?: {
+        role?: string
+        content?: unknown
+      }
+      toolUseResult?: unknown
+    }
+
+    if (parsed.type !== 'user' && parsed.type !== 'assistant') {
+      return false
+    }
+
+    const role = parsed.message?.role
+    if (role !== input.role) {
+      return false
+    }
+
+    if (role === 'user' && parsed.toolUseResult) {
+      return false
+    }
+    if (role === 'user' && hasClaudeToolContent(parsed.message?.content)) {
+      return false
+    }
+    if (shouldIgnoreClaudeContent(parsed.message?.content)) {
+      return false
+    }
+
+    const rawContent = contentPartsToText(parsed.message?.content)
+    const content = role === 'user' ? sanitizeCliUserPrompt(rawContent) : rawContent
+    if (shouldIgnoreClaudeMessage(content)) {
+      return false
+    }
+
+    return content === input.content && toEpochSeconds(parsed.timestamp) * 1000 === input.createdAt
+  } catch {
+    return false
+  }
+}
+
+async function deleteCliHistoryEntry(input: DesktopDeleteCliMessageRequest['message'], client: CliClient, sessionId: string) {
+  if (input.role !== 'user') {
+    return
+  }
+
+  const historyFilePath =
+    client === 'codex'
+      ? path.join(os.homedir(), '.codex', 'history.jsonl')
+      : path.join(os.homedir(), '.claude', 'history.jsonl')
+
+  if (!(await pathExists(historyFilePath))) {
+    return
+  }
+
+  let deleted = false
+  await rewriteJsonLinesFile(historyFilePath, (line) => {
+    if (deleted) {
+      return true
+    }
+
+    try {
+      const parsed = JSON.parse(line) as {
+        session_id?: string
+        text?: string
+        ts?: number
+        sessionId?: string
+        display?: string
+        timestamp?: number
+      }
+
+      if (client === 'codex') {
+        const matches =
+          parsed.session_id === sessionId &&
+          sanitizeCliUserPrompt(parsed.text || '') === input.content &&
+          Math.abs((Number(parsed.ts) || 0) * 1000 - input.createdAt) <= 1000
+
+        if (matches) {
+          deleted = true
+          return false
+        }
+        return true
+      }
+
+      const matches =
+        parsed.sessionId === sessionId &&
+        sanitizeCliUserPrompt(parsed.display || '') === input.content &&
+        Math.abs((Number(parsed.timestamp) || 0) - input.createdAt) <= 1000
+
+      if (matches) {
+        deleted = true
+        return false
+      }
+      return true
+    } catch {
+      return true
+    }
+  })
+}
+
+async function deleteCliMessage(input: DesktopDeleteCliMessageRequest) {
+  const filePath =
+    input.message.sourceFilePath?.trim() ||
+    (input.client === 'codex'
+      ? await getLatestCodexSessionFile(input.sessionId)
+      : await getClaudeSessionFile(input.sessionId))
+
+  if (!filePath) {
+    throw new Error('未找到对应的会话文件。')
+  }
+
+  const explicitLineNumber = Number(input.message.sourceLineNumber || 0)
+  let deleted = false
+
+  await rewriteJsonLinesFile(filePath, (line, lineNumber) => {
+    if (explicitLineNumber > 0) {
+      if (lineNumber === explicitLineNumber) {
+        deleted = true
+        return false
+      }
+      return true
+    }
+
+    if (deleted) {
+      return true
+    }
+
+    const matches =
+      input.client === 'codex'
+        ? isMatchingCodexMessageLine(line, input.message)
+        : isMatchingClaudeMessageLine(line, input.message)
+
+    if (matches) {
+      deleted = true
+      return false
+    }
+
+    return true
+  })
+
+  if (!deleted) {
+    throw new Error('未能在原始会话文件中定位这条消息。')
+  }
+
+  await deleteCliHistoryEntry(input.message, input.client, input.sessionId)
+  return input.client === 'codex'
+    ? getCodexSession(input.sessionId)
+    : getClaudeSession(input.sessionId)
 }
 
 async function walkFiles(root: string, matcher: (filePath: string) => boolean) {
@@ -1853,7 +2572,7 @@ function parseCodexSession(lines: string[]): { messages: CliSessionMessage[]; fi
   const messages: CliSessionMessage[] = []
   const fileChanges: CliFileChange[] = []
 
-  for (const line of lines) {
+  for (const [index, line] of lines.entries()) {
     try {
       const parsed = JSON.parse(line) as {
         type?: string
@@ -1913,6 +2632,8 @@ function parseCodexSession(lines: string[]): { messages: CliSessionMessage[]; fi
           content,
           createdAt: toEpochSeconds(parsed.timestamp),
           modelLabel: role === 'assistant' ? 'Codex' : undefined,
+          sourceLineNumber: index + 1,
+          sourceTimestamp: parsed.timestamp,
         })
       }
     } catch {
@@ -2021,6 +2742,7 @@ async function getCodexSession(sessionId: string): Promise<CliSessionDetails | n
     projectPath,
     messages: parsedSession.messages.map((message) => ({
       ...message,
+      sourceFilePath: filePath,
       fileChanges: message.role === 'assistant' ? parsedSession.fileChanges : undefined,
     })),
     fileChanges: parsedSession.fileChanges,
@@ -2115,7 +2837,7 @@ function parseClaudeSession(lines: string[]): { messages: CliSessionMessage[]; f
   const messages: CliSessionMessage[] = []
   const fileChanges: CliFileChange[] = []
 
-  for (const line of lines) {
+  for (const [index, line] of lines.entries()) {
     try {
       const parsed = JSON.parse(line) as {
         type?: string
@@ -2179,6 +2901,8 @@ function parseClaudeSession(lines: string[]): { messages: CliSessionMessage[]; f
         content,
         createdAt: toEpochSeconds(parsed.timestamp),
         modelLabel: role === 'assistant' ? parsed.message?.model || 'Claude' : undefined,
+        sourceLineNumber: index + 1,
+        sourceTimestamp: parsed.timestamp,
       })
     } catch {
       continue
@@ -2222,6 +2946,7 @@ async function getClaudeSession(sessionId: string): Promise<CliSessionDetails | 
     projectPath,
     messages: parsedSession.messages.map((message) => ({
       ...message,
+      sourceFilePath: filePath,
       fileChanges: message.role === 'assistant' ? parsedSession.fileChanges : undefined,
     })),
     fileChanges: parsedSession.fileChanges,
@@ -2713,6 +3438,7 @@ async function runClaudePrompt(
   let finalResult: Record<string, unknown> | null = null
   const executablePath = await locateExecutable('claude')
   const managedRuntime = await readManagedNodeRuntime()
+  const claudeSettings = await readResolvedClaudeSettingsDocument().catch(() => null)
   const spawnCommand = resolveCliSpawnCommand('claude', executablePath)
 
   progress.intent('Claude 已开始处理当前任务。', sessionId, undefined, undefined, 'request.started')
@@ -2720,7 +3446,7 @@ async function runClaudePrompt(
   const result = await spawnCommandWithHandlers(spawnCommand, args, {
     cwd: input.projectPath,
     timeoutMs: 15 * 60 * 1000,
-    env: managedRuntime ? buildRuntimeEnv(managedRuntime) : undefined,
+    env: buildClaudeCliEnv(managedRuntime, claudeSettings),
     stdinData: input.prompt,
     onSpawn: (child) => {
       activeCliProcesses.set(input.requestId, child)
@@ -2876,7 +3602,7 @@ async function runClaudePrompt(
 
 async function writeCodexConfig(request: CliDeployRequest) {
   const targetPath = cliConfig.codex.configPath
-  await fs.mkdir(path.dirname(targetPath), { recursive: true })
+  await fs.mkdir(cliConfig.codex.dataPath, { recursive: true })
   const raw = (await pathExists(targetPath)) ? await fs.readFile(targetPath, 'utf8') : ''
   if (raw) {
     await backupIfNeeded(targetPath)
@@ -2919,6 +3645,7 @@ async function writeCodexConfig(request: CliDeployRequest) {
 
 async function writeClaudeConfig(request: CliDeployRequest) {
   const targetPath = cliConfig.claude.configPath
+  const authPath = path.join(cliConfig.claude.dataPath, 'auth.json')
   await fs.mkdir(path.dirname(targetPath), { recursive: true })
   const raw = (await pathExists(targetPath)) ? await fs.readFile(targetPath, 'utf8') : '{}'
   let current: Record<string, unknown>
@@ -2934,14 +3661,25 @@ async function writeClaudeConfig(request: CliDeployRequest) {
     ? current.env
     : {}) as Record<string, string>
 
+  const resolvedApiKey = resolveDesktopCliKeyRecord(request.apiKey)
+  const resolvedBaseUrl = normalizeClaudeBaseUrl(request.baseUrl)
+  const resolvedModel = request.model?.trim() || DEFAULT_CLAUDE_MODEL
+
   const env = {
     ...currentEnv,
-    ANTHROPIC_AUTH_TOKEN: resolveDesktopCliKeyRecord(request.apiKey),
-    ANTHROPIC_BASE_URL: normalizeClaudeBaseUrl(request.baseUrl),
+    ANTHROPIC_AUTH_TOKEN: resolvedApiKey,
+    ANTHROPIC_API_KEY: resolvedApiKey,
+    ANTHROPIC_BASE_URL: resolvedBaseUrl,
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
     API_TIMEOUT_MS: '600000',
     ONEAPI_ORIGINAL_ANTHROPIC_AUTH_TOKEN:
-      typeof currentEnv.ANTHROPIC_AUTH_TOKEN === 'string' ? currentEnv.ANTHROPIC_AUTH_TOKEN : undefined,
+      typeof currentEnv.ANTHROPIC_AUTH_TOKEN === 'string'
+        ? currentEnv.ANTHROPIC_AUTH_TOKEN
+        : typeof currentEnv.ANTHROPIC_API_KEY === 'string'
+          ? currentEnv.ANTHROPIC_API_KEY
+          : undefined,
+    ONEAPI_ORIGINAL_ANTHROPIC_API_KEY:
+      typeof currentEnv.ANTHROPIC_API_KEY === 'string' ? currentEnv.ANTHROPIC_API_KEY : undefined,
     ONEAPI_ORIGINAL_ANTHROPIC_BASE_URL:
       typeof currentEnv.ANTHROPIC_BASE_URL === 'string' ? currentEnv.ANTHROPIC_BASE_URL : undefined,
   }
@@ -2949,7 +3687,7 @@ async function writeClaudeConfig(request: CliDeployRequest) {
   const nextConfig = {
     ...current,
     env,
-    model: request.model?.trim() || 'claude-sonnet-4-6',
+    model: resolvedModel,
     permissions:
       typeof current.permissions === 'object' && current.permissions
         ? current.permissions
@@ -2957,6 +3695,33 @@ async function writeClaudeConfig(request: CliDeployRequest) {
   }
 
   await fs.writeFile(targetPath, JSON.stringify(nextConfig, null, 2), 'utf8')
+  await fs.writeFile(
+    authPath,
+    JSON.stringify(
+      {
+        auth_mode: 'apikey',
+        ANTHROPIC_API_KEY: resolvedApiKey,
+        ANTHROPIC_AUTH_TOKEN: resolvedApiKey,
+        ANTHROPIC_BASE_URL: resolvedBaseUrl,
+        model: resolvedModel,
+      },
+      null,
+      2
+    ),
+    'utf8'
+  )
+
+  const written = await readResolvedClaudeSettingsDocument(targetPath)
+  const writtenKey = resolveDesktopCliKeyRecord(pickClaudeApiKey(written.env))
+  const writtenBaseUrl = normalizeClaudeBaseUrl(written.env?.ANTHROPIC_BASE_URL)
+  const writtenModel = written.model?.trim() || DEFAULT_CLAUDE_MODEL
+  if (
+    writtenKey !== resolvedApiKey ||
+    writtenBaseUrl !== resolvedBaseUrl ||
+    writtenModel !== resolvedModel
+  ) {
+    throw new Error('Claude 配置写入后校验失败。')
+  }
 }
 
 async function backupIfNeeded(filePath: string) {
@@ -3435,6 +4200,10 @@ app.whenReady().then(() => {
     createWindow()
 
     app.on('activate', () => {
+      if (mainWindow) {
+        restoreMainWindow()
+        return
+      }
       if (BrowserWindow.getAllWindows().length === 0) {
         createWindow()
       }
@@ -3442,8 +4211,12 @@ app.whenReady().then(() => {
   })
 })
 
+app.on('before-quit', () => {
+  isQuitting = true
+})
+
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
+  if (process.platform !== 'darwin' && isQuitting) {
     app.quit()
   }
 })
@@ -3457,9 +4230,18 @@ ipcMain.handle('app:set-server-base-url', async (_event, nextValue: string) => {
     serverBaseUrl: normalized,
   }
 })
+ipcMain.handle('app:reset-server-base-url', async () => {
+  const normalized = await persistServerBaseUrl(DEFAULT_SERVER_BASE_URL)
+  return {
+    serverBaseUrl: normalized,
+  }
+})
 ipcMain.handle('desktop:api-request', async (_event, request: DesktopApiRequest) =>
   requestApi(request)
 )
+ipcMain.handle('desktop:chat-stream', async (event, request: DesktopChatStreamRequest) => {
+  await requestChatStream(event.sender, request)
+})
 ipcMain.handle('desktop:stop-api-request', async (_event, requestId: string) => {
   activeApiRequests.get(requestId)?.abort()
   activeApiRequests.delete(requestId)
@@ -3523,6 +4305,9 @@ ipcMain.handle(
       : getClaudeSession(input.sessionId)
   }
 )
+ipcMain.handle('desktop:delete-cli-message', async (_event, input: DesktopDeleteCliMessageRequest) => {
+  return deleteCliMessage(input)
+})
 ipcMain.handle(
   'desktop:open-cli-session-folder',
   async (_event, input: { client: CliClient; sessionId: string }) => {
@@ -3541,6 +4326,9 @@ ipcMain.handle('desktop:stop-cli', async (_event, requestId: string) => {
 ipcMain.handle('desktop:set-window-title', async (_event, projectName?: string) => {
   const targetWindow = BrowserWindow.getFocusedWindow() ?? mainWindow
   targetWindow?.setTitle(resolveWorkspaceTitle(projectName))
+})
+ipcMain.handle('app:set-theme-mode', async (_event, mode: ThemeMode) => {
+  applyThemeMode(mode)
 })
 ipcMain.handle('desktop:deploy-cli', async (event, request: CliDeployRequest) => {
   const jobId = randomUUID()

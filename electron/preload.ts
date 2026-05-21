@@ -20,6 +20,9 @@ import type {
   DeployProgressPayload,
   DesktopApiRequest,
   DesktopApiResponse,
+  DesktopChatStreamPayload,
+  DesktopChatStreamRequest,
+  DesktopDeleteCliMessageRequest,
 } from '../src/shared/desktop'
 import type { ImageGenerationResponse } from '../src/shared/contracts'
 
@@ -35,8 +38,12 @@ contextBridge.exposeInMainWorld('desktopBridge', {
   getServerBaseUrl: () => ipcRenderer.invoke('app:get-server-base-url') as Promise<string>,
   setServerBaseUrl: (value: string) =>
     ipcRenderer.invoke('app:set-server-base-url', value) as Promise<{ serverBaseUrl: string }>,
+  resetServerBaseUrl: () =>
+    ipcRenderer.invoke('app:reset-server-base-url') as Promise<{ serverBaseUrl: string }>,
   request: (input: DesktopApiRequest) =>
     ipcRenderer.invoke('desktop:api-request', input) as Promise<DesktopApiResponse>,
+  streamChatCompletion: (input: DesktopChatStreamRequest) =>
+    ipcRenderer.invoke('desktop:chat-stream', input) as Promise<void>,
   stopRequest: (requestId: string) =>
     ipcRenderer.invoke('desktop:stop-api-request', requestId) as Promise<void>,
   openExternal: (url: string) => ipcRenderer.invoke('desktop:open-external', url) as Promise<void>,
@@ -69,6 +76,8 @@ contextBridge.exposeInMainWorld('desktopBridge', {
       client,
       sessionId,
     }) as Promise<CliSessionDetails | null>,
+  deleteCliMessage: (input: DesktopDeleteCliMessageRequest) =>
+    ipcRenderer.invoke('desktop:delete-cli-message', input) as Promise<CliSessionDetails | null>,
   openCliSessionFolder: (client: CliClient, sessionId: string) =>
     ipcRenderer.invoke('desktop:open-cli-session-folder', {
       client,
@@ -90,6 +99,8 @@ contextBridge.exposeInMainWorld('desktopBridge', {
     ipcRenderer.invoke('desktop:open-files', paths) as Promise<void>,
   setWindowTitle: (projectName?: string) =>
     ipcRenderer.invoke('desktop:set-window-title', projectName) as Promise<void>,
+  setThemeMode: (mode: 'light' | 'dark') =>
+    ipcRenderer.invoke('app:set-theme-mode', mode) as Promise<void>,
   deployCli: (input: CliDeployRequest) =>
     ipcRenderer.invoke('desktop:deploy-cli', input) as Promise<{ jobId: string }>,
   saveAttachment: (input: DesktopAttachmentSaveRequest) =>
@@ -105,6 +116,14 @@ contextBridge.exposeInMainWorld('desktopBridge', {
   onDeployProgress: (listener: (payload: DeployProgressPayload) => void) => {
     const channel = 'desktop:deploy-progress'
     const wrapped = (_event: unknown, payload: DeployProgressPayload) => listener(payload)
+    ipcRenderer.on(channel, wrapped)
+    return () => {
+      ipcRenderer.removeListener(channel, wrapped)
+    }
+  },
+  onChatStream: (listener: (payload: DesktopChatStreamPayload) => void) => {
+    const channel = 'desktop:chat-stream'
+    const wrapped = (_event: unknown, payload: DesktopChatStreamPayload) => listener(payload)
     ipcRenderer.on(channel, wrapped)
     return () => {
       ipcRenderer.removeListener(channel, wrapped)
