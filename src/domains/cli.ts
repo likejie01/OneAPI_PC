@@ -8,6 +8,7 @@ import type {
   CliRunRequest,
   CliSessionDetails,
   CliSessionMessage,
+  CliExtensionEntry,
   DesktopDeleteCliMessageRequest,
   DeployProgressPayload,
 } from '../shared/desktop'
@@ -81,6 +82,10 @@ export function readDesktopFilePreview(targetPath: string) {
 
 export function getCliDeployPreset(client: CliClient) {
   return desktopBridge().getCliDeployPreset(client)
+}
+
+export function listCliExtensions(client: CliClient) {
+  return desktopBridge().listCliExtensions(client) as Promise<CliExtensionEntry[]>
 }
 
 export function onDeployProgress(listener: (payload: DeployProgressPayload) => void) {

@@ -17,6 +17,7 @@ import type {
   DesktopSaveImageRequest,
   DesktopSaveImageResult,
   CliDeployPreset,
+  CliExtensionEntry,
   DeployProgressPayload,
   DesktopApiRequest,
   DesktopApiResponse,
@@ -84,6 +85,7 @@ declare global {
       saveImage: (input: DesktopSaveImageRequest) => Promise<DesktopSaveImageResult>
       readFilePreview: (targetPath: string) => Promise<DesktopFilePreview>
       getCliDeployPreset: (client: CliClient) => Promise<CliDeployPreset>
+      listCliExtensions: (client: CliClient) => Promise<CliExtensionEntry[]>
       onDeployProgress: (
         listener: (payload: DeployProgressPayload) => void
       ) => () => void

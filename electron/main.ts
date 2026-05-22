@@ -23,11 +23,13 @@ import { fileURLToPath } from 'node:url'
 import process from 'node:process'
 import type { ChatCompletionResponse } from '../src/shared/contracts'
 import type {
+  CliExtensionEntry,
   DesktopChatStreamPayload,
   DesktopChatStreamRequest,
   DesktopDeleteCliMessageRequest,
 } from '../src/shared/desktop'
 import { parseDesktopChatStreamDataLine } from '../src/lib/chat-reasoning.ts'
+import { parseMarkdownFrontmatterMeta } from '../src/lib/cli-extensions.ts'
 import { resolveCliProbeResult, shouldUseWindowsCommandShimForPath } from '../src/lib/desktop-service.ts'
 
 const DEFAULT_SERVER_BASE_URL = 'https://ai.oneapi.center'
@@ -192,6 +194,18 @@ interface CliStatus {
   hasConfig: boolean
   hasDataDirectory: boolean
   brokenInstallation?: boolean
+}
+
+interface ClaudeInstalledPluginsDocument {
+  version?: number
+  plugins?: Record<string, Array<{
+    scope?: string
+    installPath?: string
+    version?: string
+    installedAt?: string
+    lastUpdated?: string
+    gitCommitSha?: string
+  }>>
 }
 
 interface CliRunRequest {
@@ -1925,6 +1939,178 @@ function buildClaudeCliEnv(
   }
 
   return nextEnv
+}
+
+function normalizeCliExtensionId(
+  client: 'codex' | 'claude',
+  kind: 'skill' | 'command' | 'plugin',
+  name: string,
+  targetPath: string
+) {
+  return `${client}:${kind}:${name.trim().toLowerCase()}:${targetPath.trim().toLowerCase()}`
+}
+
+async function listCodexSkills(): Promise<CliExtensionEntry[]> {
+  const skillsRoot = path.join(cliConfig.codex.dataPath, 'skills')
+  const files = await walkFiles(skillsRoot, (filePath) => path.basename(filePath).toUpperCase() === 'SKILL.MD')
+  const entries = await Promise.all(
+    files.map(async (filePath) => {
+      const raw = await fs.readFile(filePath, 'utf8').catch(() => '')
+      const meta = parseMarkdownFrontmatterMeta(raw)
+      const relativePath = path.relative(skillsRoot, filePath)
+      const skillRoot = path.dirname(filePath)
+      const fallbackName = relativePath.split(/[\\/]/).filter(Boolean).at(-2) || path.basename(skillRoot)
+      return {
+        id: normalizeCliExtensionId('codex', 'skill', meta.name || fallbackName, skillRoot),
+        client: 'codex' as const,
+        kind: 'skill' as const,
+        name: meta.name || fallbackName,
+        description: meta.description,
+        path: skillRoot,
+        source: relativePath.startsWith('.system') ? 'system' : 'user',
+      } satisfies CliExtensionEntry
+    })
+  )
+
+  return entries.sort((left, right) => left.name.localeCompare(right.name))
+}
+
+async function readPluginManifest(targetPath: string) {
+  const raw = await fs.readFile(targetPath, 'utf8').catch(() => '')
+  if (!raw.trim()) {
+    return null
+  }
+
+  try {
+    return JSON.parse(raw) as Record<string, unknown>
+  } catch {
+    return null
+  }
+}
+
+async function listCodexPlugins(): Promise<CliExtensionEntry[]> {
+  const pluginsRoot = path.join(cliConfig.codex.dataPath, 'plugins')
+  const manifestPaths = await walkFiles(
+    pluginsRoot,
+    (filePath) =>
+      path.basename(filePath).toLowerCase() === 'plugin.json' &&
+      filePath.toLowerCase().includes(`${path.sep}.codex-plugin${path.sep}`.toLowerCase())
+  )
+
+  const entries = await Promise.all(
+    manifestPaths.map(async (manifestPath) => {
+      const manifest = await readPluginManifest(manifestPath)
+      const installRoot = path.dirname(path.dirname(manifestPath))
+      const interfaceSection =
+        manifest && typeof manifest.interface === 'object' && manifest.interface
+          ? (manifest.interface as Record<string, unknown>)
+          : null
+      const manifestName =
+        (interfaceSection && typeof interfaceSection.displayName === 'string' && interfaceSection.displayName.trim()) ||
+        (manifest && typeof manifest.name === 'string' && manifest.name.trim()) ||
+        path.basename(installRoot)
+      const description =
+        (interfaceSection && typeof interfaceSection.shortDescription === 'string' && interfaceSection.shortDescription.trim()) ||
+        (manifest && typeof manifest.description === 'string' && manifest.description.trim()) ||
+        ''
+      const relativeRoot = path.relative(pluginsRoot, installRoot)
+      const source = relativeRoot.split(/[\\/]/).filter(Boolean).slice(0, 2).join(' / ')
+      return {
+        id: normalizeCliExtensionId('codex', 'plugin', manifestName, installRoot),
+        client: 'codex' as const,
+        kind: 'plugin' as const,
+        name: manifestName,
+        description,
+        path: installRoot,
+        source: source || 'plugin',
+      } satisfies CliExtensionEntry
+    })
+  )
+
+  const unique = new Map<string, CliExtensionEntry>()
+  for (const item of entries) {
+    if (!unique.has(item.id)) {
+      unique.set(item.id, item)
+    }
+  }
+  return [...unique.values()].sort((left, right) => left.name.localeCompare(right.name))
+}
+
+async function listClaudeCommands(): Promise<CliExtensionEntry[]> {
+  const commandsRoot = path.join(cliConfig.claude.dataPath, 'commands')
+  const files = await walkFiles(commandsRoot, (filePath) => path.extname(filePath).toLowerCase() === '.md')
+  const entries = await Promise.all(
+    files.map(async (filePath) => {
+      const raw = await fs.readFile(filePath, 'utf8').catch(() => '')
+      const meta = parseMarkdownFrontmatterMeta(raw)
+      const commandName = meta.name || path.basename(filePath, path.extname(filePath))
+      return {
+        id: normalizeCliExtensionId('claude', 'command', commandName, filePath),
+        client: 'claude' as const,
+        kind: 'command' as const,
+        name: commandName,
+        description: meta.description,
+        path: filePath,
+        source: 'user',
+      } satisfies CliExtensionEntry
+    })
+  )
+
+  return entries.sort((left, right) => left.name.localeCompare(right.name))
+}
+
+async function listClaudePlugins(): Promise<CliExtensionEntry[]> {
+  const registryPath = path.join(cliConfig.claude.dataPath, 'plugins', 'installed_plugins.json')
+  const raw = await fs.readFile(registryPath, 'utf8').catch(() => '')
+  if (!raw.trim()) {
+    return []
+  }
+
+  let parsed: ClaudeInstalledPluginsDocument
+  try {
+    parsed = JSON.parse(raw) as ClaudeInstalledPluginsDocument
+  } catch {
+    return []
+  }
+
+  const pluginGroups = parsed.plugins || {}
+  const entries = await Promise.all(
+    Object.entries(pluginGroups).flatMap(([pluginKey, installs]) =>
+      installs.map(async (installInfo, index) => {
+        const installRoot = installInfo.installPath?.trim() || ''
+        if (!installRoot) {
+          return null
+        }
+
+        const manifestPath = path.join(installRoot, '.claude-plugin', 'plugin.json')
+        const manifest = await readPluginManifest(manifestPath)
+        const manifestName =
+          (manifest && typeof manifest.name === 'string' && manifest.name.trim()) ||
+          pluginKey.split('@')[0] ||
+          path.basename(installRoot)
+        const description =
+          (manifest && typeof manifest.description === 'string' && manifest.description.trim()) || ''
+        return {
+          id: normalizeCliExtensionId('claude', 'plugin', `${pluginKey}:${index}`, installRoot),
+          client: 'claude' as const,
+          kind: 'plugin' as const,
+          name: manifestName,
+          description,
+          path: installRoot,
+          source: pluginKey,
+        } satisfies CliExtensionEntry
+      })
+    )
+  )
+
+  const filteredEntries: CliExtensionEntry[] = entries.filter((item) => item !== null)
+  return filteredEntries.sort((left, right) => left.name.localeCompare(right.name))
+}
+
+async function listCliExtensions(client: CliClient): Promise<CliExtensionEntry[]> {
+  return client === 'codex'
+    ? [...await listCodexSkills(), ...await listCodexPlugins()]
+    : [...await listClaudeCommands(), ...await listClaudePlugins()]
 }
 
 async function readJsonLines(filePath: string) {
@@ -4828,6 +5014,9 @@ ipcMain.handle('desktop:cli-deploy-preset', async (_event, client: CliClient) =>
   return client === 'codex'
     ? readCurrentCodexConfig()
     : readCurrentClaudeConfig()
+})
+ipcMain.handle('desktop:list-cli-extensions', async (_event, client: CliClient) => {
+  return listCliExtensions(client)
 })
 ipcMain.handle('desktop:save-attachment', async (_event, input: DesktopAttachmentSaveRequest) => {
   return saveDesktopAttachment(input)

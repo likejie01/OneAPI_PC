@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, ClipboardEvent, Dispatch, DragEvent, MouseEvent, PointerEvent as ReactPointerEvent, ReactNode, SetStateAction } from 'react'
 import {
+  Blocks,
   Bot,
   ChevronDown,
   ChevronLeft,
@@ -73,6 +74,7 @@ import {
   getCliSession,
   getCliDeployPreset,
   getCliStatus,
+  listCliExtensions,
   listCliHistory,
   openAssistantHistoryFolder,
   openCliSessionFolder,
@@ -112,6 +114,7 @@ import {
 } from './lib/cli-session'
 import { AUTH_EXPIRED_EVENT, clearStoredDesktopUserId, saveStoredDesktopUserId } from './lib/desktop-client'
 import { deriveDesktopChatDisplayState, normalizeStoredDesktopChatMessage } from './lib/chat-reasoning'
+import { buildCliExtensionInsertText } from './lib/cli-extensions'
 import { resolveCliSetupPeerState } from './lib/desktop-service'
 import { clipText, formatDateTime, formatPrice, formatQuota, formatQuotaAsUsd } from './lib/format'
 import { readJsonStorage, writeJsonStorage } from './lib/storage'
@@ -131,6 +134,7 @@ import type {
 } from './shared/contracts'
 import type {
   CliClient,
+  CliExtensionEntry,
   CliHistoryEntry,
   CliLogKind,
   CliProgressPayload,
@@ -343,6 +347,19 @@ async function openDesktopTarget(targetPath: string) {
     /* fall through and try opening parent path */
   }
   await window.desktopBridge?.openPath(targetPath)
+}
+
+async function openDesktopFolder(targetPath: string, treatAsFile = false) {
+  const normalized = targetPath.trim()
+  if (!normalized) {
+    return
+  }
+
+  const resolvedPath = treatAsFile
+    ? normalized.replace(/[/\\][^/\\]+$/, '') || normalized
+    : normalized
+
+  await window.desktopBridge?.openPath(resolvedPath)
 }
 
 function isInlinePreviewableFile(targetPath: string) {
@@ -1494,6 +1511,45 @@ type SessionContextMenuState = {
   }>
 }
 
+type MessageAttachmentItem = {
+  id: string
+  name: string
+  filePath: string
+  kind: 'image' | 'file'
+}
+
+function showAttachmentContextMenu(
+  event: MouseEvent,
+  attachment: MessageAttachmentItem,
+  setMenu: Dispatch<SetStateAction<SessionContextMenuState | null>>,
+  onPreview?: (targetPath: string) => void
+) {
+  event.preventDefault()
+  setMenu({
+    x: event.clientX,
+    y: event.clientY,
+    title: attachment.name,
+    items: [
+      {
+        key: 'preview',
+        label: '预览',
+        onSelect: () => {
+          if (onPreview) {
+            onPreview(attachment.filePath)
+            return
+          }
+          return openDesktopTarget(attachment.filePath)
+        },
+      },
+      {
+        key: 'open-folder',
+        label: '打开文件夹',
+        onSelect: () => openDesktopFolder(attachment.filePath, true),
+      },
+    ],
+  })
+}
+
 type SessionRenameDraft = {
   id: string
   value: string
@@ -1645,6 +1701,110 @@ function AttachmentPreviewModal(props: {
   )
 }
 
+function getCliExtensionKindLabel(item: CliExtensionEntry) {
+  if (item.kind === 'skill') {
+    return '技能'
+  }
+  if (item.kind === 'command') {
+    return '命令'
+  }
+  return '插件'
+}
+
+function CliExtensionPalette(props: {
+  client: CliClient
+  loading: boolean
+  extensions: CliExtensionEntry[]
+  searchValue: string
+  onSearchChange: (value: string) => void
+  onInsert: (item: CliExtensionEntry) => void
+  onCopyName: (item: CliExtensionEntry) => void
+  onOpenPath: (item: CliExtensionEntry) => void
+  onRefresh: () => void
+}) {
+  const {
+    client,
+    loading,
+    extensions,
+    searchValue,
+    onSearchChange,
+    onInsert,
+    onCopyName,
+    onOpenPath,
+    onRefresh,
+  } = props
+
+  const normalizedSearch = searchValue.trim().toLowerCase()
+  const filtered = extensions.filter((item) => {
+    if (!normalizedSearch) {
+      return true
+    }
+    return [
+      item.name,
+      item.description,
+      item.source || '',
+      item.path,
+    ].some((value) => value.toLowerCase().includes(normalizedSearch))
+  })
+  const usageHint =
+    client === 'codex'
+      ? '技能可直接点名插入；插件由 Codex 按上下文自动调用。'
+      : '命令会插入为 /Command；插件由 Claude 按上下文自动调用。'
+
+  return (
+    <div className='picker-menu cli-extension-menu'>
+      <div className='picker-menu-head cli-extension-menu-head'>
+        <div>
+          <strong>{client === 'codex' ? 'Codex 技能与插件' : 'Claude 命令与插件'}</strong>
+          <span>{usageHint}</span>
+        </div>
+        <button className='ghost-button tiny' type='button' onClick={onRefresh}>
+          刷新
+        </button>
+      </div>
+      <input
+        className='cli-extension-search'
+        value={searchValue}
+        placeholder='搜索名称、描述或路径'
+        onChange={(event) => onSearchChange(event.target.value)}
+      />
+      <div className='cli-extension-list'>
+        {loading ? (
+          <div className='cli-extension-empty'>正在读取本机扩展...</div>
+        ) : filtered.length === 0 ? (
+          <div className='cli-extension-empty'>未找到匹配的技能、命令或插件。</div>
+        ) : filtered.map((item) => {
+          const insertText = buildCliExtensionInsertText(item)
+          return (
+            <div key={item.id} className='cli-extension-card'>
+              <div className='cli-extension-card-head'>
+                <strong>{item.name}</strong>
+                <span>{getCliExtensionKindLabel(item)}</span>
+              </div>
+              <p className='cli-extension-desc'>{item.description || '未提供描述'}</p>
+              <code className='cli-extension-path' title={item.path}>{item.path}</code>
+              {item.source ? <span className='cli-extension-source'>{item.source}</span> : null}
+              <div className='cli-extension-actions'>
+                {insertText ? (
+                  <button className='secondary-button tiny' type='button' onClick={() => onInsert(item)}>
+                    插入
+                  </button>
+                ) : null}
+                <button className='ghost-button tiny' type='button' onClick={() => onCopyName(item)}>
+                  复制名称
+                </button>
+                <button className='ghost-button tiny' type='button' onClick={() => onOpenPath(item)}>
+                  打开目录
+                </button>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 function useAttachmentPreview(toast: (message: string) => void) {
   const [preview, setPreview] = useState<AttachmentPreviewState | null>(null)
 
@@ -1699,15 +1859,11 @@ function useAttachmentPreview(toast: (message: string) => void) {
 }
 
 function MessageAttachmentGallery(props: {
-  attachments?: Array<{
-    id: string
-    name: string
-    filePath: string
-    kind: 'image' | 'file'
-  }>
+  attachments?: MessageAttachmentItem[]
   onPreview?: (targetPath: string) => void
+  onAttachmentContextMenu?: (event: MouseEvent, item: MessageAttachmentItem) => void
 }) {
-  const { attachments = [], onPreview } = props
+  const { attachments = [], onPreview, onAttachmentContextMenu } = props
   if (!attachments.length) {
     return null
   }
@@ -1720,6 +1876,7 @@ function MessageAttachmentGallery(props: {
           type='button'
           className='message-attachment-card'
           onClick={() => onPreview ? void onPreview(item.filePath) : void openDesktopTarget(item.filePath)}
+          onContextMenu={(event) => onAttachmentContextMenu?.(event, item)}
           title={`预览附件：${item.filePath}`}
         >
           <div className='message-attachment-thumb'>
@@ -2898,7 +3055,13 @@ function AssistantsChatWorkspace(props: {
                         ? '系统'
                         : ''}
                   </span>
-                  <MessageAttachmentGallery attachments={item.attachments} onPreview={openAttachmentPreview} />
+                  <MessageAttachmentGallery
+                    attachments={item.attachments}
+                    onPreview={openAttachmentPreview}
+                    onAttachmentContextMenu={(event, attachment) =>
+                      showAttachmentContextMenu(event, attachment, setSessionContextMenu, openAttachmentPreview)
+                    }
+                  />
                   <ReasoningMessageContent content={item.reasoningContent || ''} pending={!!item.reasoningPending} />
                   {item.imageUrl ? (
                     <div className='chat-image-result'>
@@ -3737,7 +3900,13 @@ function DrawWorkspace(props: {
                       className={`message-bubble ${isUser ? 'user' : 'assistant'} ${message.pending ? 'streaming-bubble' : ''}`}
                     >
                       {!isUser ? <span className='message-role'>{message.modelLabel || DEFAULT_DRAW_MODEL}</span> : null}
-                      <MessageAttachmentGallery attachments={message.attachments} onPreview={openAttachmentPreview} />
+                      <MessageAttachmentGallery
+                        attachments={message.attachments}
+                        onPreview={openAttachmentPreview}
+                        onAttachmentContextMenu={(event, attachment) =>
+                          showAttachmentContextMenu(event, attachment, setSessionContextMenu, openAttachmentPreview)
+                        }
+                      />
                       {isPendingImage ? (
                         <PendingImageContent />
                       ) : message.imageUrl ? (
@@ -4887,6 +5056,10 @@ function CliWorkspace(props: {
   const [reasoningEffort, setReasoningEffort] = useState(client === 'claude' ? 'high' : 'medium')
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
   const [effortMenuOpen, setEffortMenuOpen] = useState(false)
+  const [extensionsMenuOpen, setExtensionsMenuOpen] = useState(false)
+  const [extensionsLoading, setExtensionsLoading] = useState(false)
+  const [extensionSearch, setExtensionSearch] = useState('')
+  const [cliExtensions, setCliExtensions] = useState<CliExtensionEntry[]>([])
   const {
     attachments,
     inputRef: attachmentInputRef,
@@ -4900,6 +5073,7 @@ function CliWorkspace(props: {
   const { ref: promptRef, resize: resizePrompt } = useAutosizeTextarea(prompt)
   const modelMenuRef = useRef<HTMLDivElement | null>(null)
   const effortMenuRef = useRef<HTMLDivElement | null>(null)
+  const extensionsMenuRef = useRef<HTMLDivElement | null>(null)
   const historyPanelRef = useRef<HTMLDivElement | null>(null)
   const threadRef = useRef<HTMLDivElement | null>(null)
   const requestSessionMapRef = useRef(requestSessionMap)
@@ -5017,6 +5191,43 @@ function CliWorkspace(props: {
     }
   }, [client, toast])
 
+  const refreshCliExtensions = useCallback(async (silent = false) => {
+    try {
+      setExtensionsLoading(true)
+      const next = await listCliExtensions(client)
+      setCliExtensions(next)
+    } catch (error) {
+      if (!silent) {
+        toast(error instanceof Error ? error.message : '读取技能与插件失败')
+      }
+    } finally {
+      setExtensionsLoading(false)
+    }
+  }, [client, toast])
+
+  const insertCliExtension = useCallback((item: CliExtensionEntry) => {
+    const nextText = buildCliExtensionInsertText(item)
+    if (!nextText) {
+      toast('该插件由 CLI 按上下文自动调用，无需手动插入。')
+      return
+    }
+
+    setPrompt((current) => {
+      const nextPrompt =
+        item.client === 'claude' && item.kind === 'command'
+          ? `${nextText}${current.trimStart()}`
+          : `${current.trimEnd()}${current.trim() ? '\n\n' : ''}${nextText}`
+      window.setTimeout(() => {
+        resizePrompt()
+        promptRef.current?.focus()
+        const cursor = nextPrompt.length
+        promptRef.current?.setSelectionRange(cursor, cursor)
+      }, 0)
+      return nextPrompt
+    })
+    setExtensionsMenuOpen(false)
+  }, [promptRef, resizePrompt, toast])
+
   useEffect(() => {
     requestSessionMapRef.current = requestSessionMap
   }, [requestSessionMap])
@@ -5067,6 +5278,12 @@ function CliWorkspace(props: {
       window.clearInterval(timer)
     }
   }, [refreshCliState])
+
+  useEffect(() => {
+    window.setTimeout(() => {
+      void refreshCliExtensions(true)
+    }, 0)
+  }, [refreshCliExtensions])
 
   useEffect(() => {
     const unsubscribe = onCliProgress((payload: CliProgressPayload) => {
@@ -5210,6 +5427,10 @@ function CliWorkspace(props: {
         setEffortMenuOpen(false)
       }
 
+      if (extensionsMenuOpen && extensionsMenuRef.current && !extensionsMenuRef.current.contains(target)) {
+        setExtensionsMenuOpen(false)
+      }
+
       if (historyOpen && historyPanelRef.current && !historyPanelRef.current.contains(target)) {
         setHistoryOpen(false)
       }
@@ -5217,7 +5438,7 @@ function CliWorkspace(props: {
 
     window.addEventListener('pointerdown', handlePointerDown)
     return () => window.removeEventListener('pointerdown', handlePointerDown)
-  }, [effortMenuOpen, historyOpen, modelMenuOpen])
+  }, [effortMenuOpen, extensionsMenuOpen, historyOpen, modelMenuOpen])
 
   useEffect(() => {
     function handleOpenHistory() {
@@ -5789,6 +6010,9 @@ function CliWorkspace(props: {
                     <MessageAttachmentGallery
                       attachments={'attachments' in item ? item.attachments : undefined}
                       onPreview={openAttachmentPreview}
+                      onAttachmentContextMenu={(event, attachment) =>
+                        showAttachmentContextMenu(event, attachment, setSessionContextMenu, openAttachmentPreview)
+                      }
                     />
                     {item.kind === 'partial' && item.content === CLI_PENDING_MESSAGE_LABEL ? (
                       <PendingMessageContent />
@@ -5982,6 +6206,44 @@ function CliWorkspace(props: {
                           ))}
                         </div>
                       </div>
+                    )}
+                  </div>
+                ),
+              },
+              {
+                key: 'extensions',
+                node: (
+                  <div className='toolbar-picker' ref={extensionsMenuRef}>
+                    <button
+                      className='ghost-button tiny picker-trigger icon-picker-trigger'
+                      type='button'
+                      aria-expanded={extensionsMenuOpen}
+                      onClick={() => {
+                        setModelMenuOpen(false)
+                        setEffortMenuOpen(false)
+                        const nextOpen = !extensionsMenuOpen
+                        setExtensionsMenuOpen(nextOpen)
+                        if (nextOpen) {
+                          void refreshCliExtensions(true)
+                        }
+                      }}
+                      title={client === 'codex' ? '技能与插件' : '命令与插件'}
+                    >
+                      <Blocks size={16} />
+                      <strong>{client === 'codex' ? '技能' : '命令'}</strong>
+                    </button>
+                    {extensionsMenuOpen && (
+                      <CliExtensionPalette
+                        client={client}
+                        loading={extensionsLoading}
+                        extensions={cliExtensions}
+                        searchValue={extensionSearch}
+                        onSearchChange={setExtensionSearch}
+                        onRefresh={() => void refreshCliExtensions()}
+                        onInsert={insertCliExtension}
+                        onCopyName={(item) => void copyText(item.name)}
+                        onOpenPath={(item) => void openDesktopFolder(item.path, item.kind === 'command')}
+                      />
                     )}
                   </div>
                 ),

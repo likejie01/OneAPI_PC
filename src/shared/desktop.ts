@@ -1,5 +1,6 @@
 export type ApiMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 export type CliClient = 'codex' | 'claude'
+export type CliExtensionKind = 'skill' | 'command' | 'plugin'
 export type AssistantHistoryScope = 'chat' | 'draw'
 export type DeployStatus = 'pending' | 'running' | 'success' | 'error'
 export type DeployLogKind = 'info' | 'command' | 'stdout' | 'stderr' | 'result'
@@ -108,6 +109,16 @@ export interface CliStatus {
   hasConfig: boolean
   hasDataDirectory: boolean
   brokenInstallation?: boolean
+}
+
+export interface CliExtensionEntry {
+  id: string
+  client: CliClient
+  kind: CliExtensionKind
+  name: string
+  description: string
+  path: string
+  source?: string
 }
 
 export interface CliRunRequest {

@@ -5252,3 +5252,75 @@ body,
 :root[data-theme='dark'] .assistant-topbar-actions .assistant-history-button.ghost-button:focus-visible {
   background: rgb(var(--surface-strong-rgb) / calc(0.72 * var(--ui-opacity, 1)));
 }
+
+.cli-extension-menu {
+  width: min(560px, calc(100vw - 40px));
+  padding: 14px;
+}
+
+.cli-extension-menu-head {
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.cli-extension-search {
+  width: 100%;
+  margin-top: 12px;
+}
+
+.cli-extension-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  max-height: 420px;
+  overflow: auto;
+}
+
+.cli-extension-card {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--line) 76%, transparent);
+  border-radius: 14px;
+  background: rgb(var(--surface-strong-rgb) / calc(0.64 + 0.18 * var(--ui-solidness, 0)));
+}
+
+.cli-extension-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.cli-extension-card-head span,
+.cli-extension-source {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.cli-extension-desc {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.cli-extension-path {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.cli-extension-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.cli-extension-empty {
+  padding: 20px 10px;
+  color: var(--muted);
+  text-align: center;
+}

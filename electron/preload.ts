@@ -17,6 +17,7 @@ import type {
   DesktopSaveImageRequest,
   DesktopSaveImageResult,
   CliDeployPreset,
+  CliExtensionEntry,
   DeployProgressPayload,
   DesktopApiRequest,
   DesktopApiResponse,
@@ -131,6 +132,8 @@ contextBridge.exposeInMainWorld('desktopBridge', {
     ipcRenderer.invoke('desktop:file-preview', targetPath) as Promise<DesktopFilePreview>,
   getCliDeployPreset: (client: CliClient) =>
     ipcRenderer.invoke('desktop:cli-deploy-preset', client) as Promise<CliDeployPreset>,
+  listCliExtensions: (client: CliClient) =>
+    ipcRenderer.invoke('desktop:list-cli-extensions', client) as Promise<CliExtensionEntry[]>,
   onDeployProgress: (listener: (payload: DeployProgressPayload) => void) => {
     const channel = 'desktop:deploy-progress'
     const wrapped = (_event: unknown, payload: DeployProgressPayload) => listener(payload)
