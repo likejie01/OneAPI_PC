@@ -35,6 +35,24 @@ contextBridge.exposeInMainWorld('desktopBridge', {
       serverBaseUrl: string
       iconPath: string
     }>,
+  minimizeWindow: () => ipcRenderer.invoke('app:window-minimize') as Promise<void>,
+  toggleMaximizeWindow: () =>
+    ipcRenderer.invoke('app:window-toggle-maximize') as Promise<{ maximized: boolean }>,
+  startWindowDrag: (screenX: number, screenY: number) =>
+    ipcRenderer.invoke('app:window-start-drag', { screenX, screenY }) as Promise<void>,
+  endWindowDrag: () =>
+    ipcRenderer.invoke('app:window-end-drag') as Promise<void>,
+  getWindowBounds: () =>
+    ipcRenderer.invoke('app:window-get-bounds') as Promise<{
+      x: number
+      y: number
+      width: number
+      height: number
+      maximized: boolean
+    }>,
+  setWindowPosition: (x: number, y: number) =>
+    ipcRenderer.invoke('app:window-set-position', { x, y }) as Promise<void>,
+  closeWindow: () => ipcRenderer.invoke('app:window-close') as Promise<void>,
   getServerBaseUrl: () => ipcRenderer.invoke('app:get-server-base-url') as Promise<string>,
   setServerBaseUrl: (value: string) =>
     ipcRenderer.invoke('app:set-server-base-url', value) as Promise<{ serverBaseUrl: string }>,

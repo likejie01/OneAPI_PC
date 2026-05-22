@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { ChangeEvent, ClipboardEvent, Dispatch, DragEvent, MouseEvent, ReactNode, SetStateAction } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import type { ChangeEvent, ClipboardEvent, Dispatch, DragEvent, MouseEvent, PointerEvent as ReactPointerEvent, ReactNode, SetStateAction } from 'react'
 import {
   Bot,
   ChevronDown,
@@ -23,6 +23,7 @@ import {
   LogOut,
   Mail,
   MessageSquareText,
+  Minus,
   Moon,
   PanelRightOpen,
   PencilLine,
@@ -110,12 +111,11 @@ import {
   getCliResumeSessionId,
 } from './lib/cli-session'
 import { AUTH_EXPIRED_EVENT, clearStoredDesktopUserId, saveStoredDesktopUserId } from './lib/desktop-client'
+import { deriveDesktopChatDisplayState, normalizeStoredDesktopChatMessage } from './lib/chat-reasoning'
 import { resolveCliSetupPeerState } from './lib/desktop-service'
 import { clipText, formatDateTime, formatPrice, formatQuota, formatQuotaAsUsd } from './lib/format'
 import { readJsonStorage, writeJsonStorage } from './lib/storage'
 import dayjs from 'dayjs'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
 import type {
   AssistantRecord,
   AuthStatus,
@@ -141,10 +141,18 @@ import type {
 } from './shared/desktop'
 import { useAuthStore } from './stores/auth-store'
 
+const MarkdownMessageContentLazy = lazy(async () => {
+  const module = await import('./components/MarkdownMessageContent')
+  return { default: module.MarkdownMessageContent }
+})
+
 type AssistantMode = 'chat' | 'draw' | 'codex' | 'claude'
 type SideTab = 'assistants' | 'subscriptions' | 'wallet' | 'me'
 type HistoryVisibilityTab = 'visible' | 'hidden'
 type ThemeMode = 'light' | 'dark'
+
+const AURORA_OPACITY_STORAGE_KEY = 'oneapi-desktop-aurora-opacity'
+const DEFAULT_AURORA_OPACITY = 100
 
 type ComposerAttachment = {
   id: string
@@ -1124,6 +1132,7 @@ function buildEmptyCliStatus(client: CliClient): CliStatus {
     dataPath: '',
     hasConfig: false,
     hasDataDirectory: false,
+    brokenInstallation: false,
   }
 }
 
@@ -1142,6 +1151,30 @@ function writeCachedCliStatus(status: CliStatus) {
 
 function sameCliStatus(left: CliStatus, right: CliStatus) {
   return JSON.stringify(left) === JSON.stringify(right)
+}
+
+function resolvePendingReasoningState(
+  content: string,
+  reasoningContent: string,
+  streamComplete = false
+) {
+  const displayState = deriveDesktopChatDisplayState(content, reasoningContent)
+  const hasVisibleContent = displayState.visibleContent.trim().length > 0
+  const hasReasoningContent = displayState.reasoningContent.trim().length > 0
+
+  if (!hasReasoningContent || streamComplete) {
+    return {
+      ...displayState,
+      reasoningPending: false,
+    }
+  }
+
+  const hasDirectReasoning = reasoningContent.trim().length > 0
+
+  return {
+    ...displayState,
+    reasoningPending: displayState.hasUnclosedReasoningTag || (hasDirectReasoning && !hasVisibleContent),
+  }
 }
 
 function notifyCliStatusChanged(status: CliStatus) {
@@ -1386,58 +1419,6 @@ function UsageTrendChart(props: {
   )
 }
 
-function MarkdownMessageContent(props: {
-  content: string
-}) {
-  const { content } = props
-
-  return (
-    <div className='markdown-body'>
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={{
-          a: ({ href, children }) => {
-            const target = href || ''
-            const isLocalPath =
-              /^file:\/\//i.test(target) ||
-              /^[A-Za-z]:[\\/]/.test(target) ||
-              /^\/(Users|home|var|private|Volumes)\//.test(target)
-
-            if (isLocalPath) {
-              const resolved = target.replace(/^file:\/\/\/?/i, '')
-              return (
-                <button
-                  type='button'
-                  className='markdown-inline-link'
-                  onClick={() => void openDesktopTarget(decodeURIComponent(resolved))}
-                >
-                  {children}
-                </button>
-              )
-            }
-
-            return (
-              <a
-                href={target}
-                target='_blank'
-                rel='noreferrer'
-                onClick={(event) => {
-                  event.preventDefault()
-                  void window.desktopBridge?.openExternal(target)
-                }}
-              >
-                {children}
-              </a>
-            )
-          },
-        }}
-      >
-        {content}
-      </ReactMarkdown>
-    </div>
-  )
-}
-
 function PendingMessageContent(props: {
   label?: string
 }) {
@@ -1451,6 +1432,23 @@ function PendingMessageContent(props: {
   )
 }
 
+function LazyMarkdownContent(props: {
+  content: string
+  className?: string
+}) {
+  const { content, className } = props
+
+  return (
+    <Suspense fallback={<div className={className || 'markdown-body'}>{content}</div>}>
+      <MarkdownMessageContentLazy
+        content={content}
+        onOpenLocalPath={openDesktopTarget}
+        onOpenExternal={(target) => window.desktopBridge?.openExternal(target)}
+      />
+    </Suspense>
+  )
+}
+
 function ReasoningMessageContent(props: {
   content: string
   pending?: boolean
@@ -1461,13 +1459,13 @@ function ReasoningMessageContent(props: {
   }
 
   return (
-    <details className={`reasoning-card ${pending ? 'pending' : ''}`} open={pending}>
+    <details className={`reasoning-card ${pending ? 'pending' : ''}`}>
       <summary>
         <span>Thinking</span>
         {pending ? <LoaderCircle className='spin' size={12} /> : null}
       </summary>
       <div className='reasoning-card-body'>
-        <MarkdownMessageContent content={content} />
+        <LazyMarkdownContent content={content} />
       </div>
     </details>
   )
@@ -1616,7 +1614,10 @@ function AttachmentPreviewModal(props: {
   } else if (preview.mode === 'markdown') {
     previewContent = (
       <div className='attachment-preview-text markdown-body attachment-preview-scroll'>
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{preview.content}</ReactMarkdown>
+        <LazyMarkdownContent
+          content={preview.content}
+          className='attachment-preview-text markdown-body attachment-preview-scroll'
+        />
       </div>
     )
   } else {
@@ -1957,6 +1958,7 @@ function loadStoredChatSessions() {
       ...session,
       messages: (session.messages || [])
         .filter((message) => !message.pending)
+        .map((message) => normalizeStoredDesktopChatMessage(message))
         .sort((left, right) => left.createdAt - right.createdAt),
     }))
     .sort((left, right) => right.updatedAt - left.updatedAt)
@@ -2544,6 +2546,36 @@ function AssistantsChatWorkspace(props: {
     let streamedReasoningText = ''
     let streamedUsageData: ChatMessage['usage'] | undefined
 
+    const syncPendingAssistantMessage = (reasoningStreamComplete = false) => {
+      const displayState = resolvePendingReasoningState(
+        streamedAssistantText,
+        streamedReasoningText,
+        reasoningStreamComplete
+      )
+      const visibleContent = displayState.visibleContent
+      const reasoningContent = displayState.reasoningContent.trim()
+      const hasVisibleContent = visibleContent.trim().length > 0
+
+      syncActiveSession((session) => ({
+        ...session,
+        assistantId: activeAssistant?.id || session.assistantId,
+        model: resolvedModel,
+        group: selectedGroup,
+        updatedAt: Date.now(),
+        messages: session.messages.map((item) =>
+          item.id === pendingAssistantId
+            ? {
+                ...item,
+                content: hasVisibleContent ? visibleContent : CHAT_PENDING_MESSAGE_LABEL,
+                reasoningContent: reasoningContent || undefined,
+                reasoningPending: displayState.reasoningPending,
+                createdAt: Date.now(),
+              }
+            : item
+        ),
+      }))
+    }
+
     try {
       if (isImageGenerationModel(resolvedModel)) {
         const response = await sendImageGeneration(
@@ -2608,49 +2640,26 @@ function AssistantsChatWorkspace(props: {
             signal: abortController.signal,
             onDelta: (text) => {
               streamedAssistantText += text
-              syncActiveSession((session) => ({
-                ...session,
-                assistantId: activeAssistant?.id || session.assistantId,
-                model: resolvedModel,
-                group: selectedGroup,
-                updatedAt: Date.now(),
-                messages: session.messages.map((item) =>
-                  item.id === pendingAssistantId
-                    ? {
-                        ...item,
-                        content: streamedAssistantText || CHAT_PENDING_MESSAGE_LABEL,
-                        reasoningContent: streamedReasoningText || undefined,
-                        createdAt: Date.now(),
-                      }
-                    : item
-                ),
-              }))
+              syncPendingAssistantMessage()
             },
             onReasoningDelta: (text) => {
               streamedReasoningText += text
-              syncActiveSession((session) => ({
-                ...session,
-                assistantId: activeAssistant?.id || session.assistantId,
-                model: resolvedModel,
-                group: selectedGroup,
-                updatedAt: Date.now(),
-                messages: session.messages.map((item) =>
-                  item.id === pendingAssistantId
-                    ? {
-                        ...item,
-                        content: streamedAssistantText || CHAT_PENDING_MESSAGE_LABEL,
-                        reasoningContent: streamedReasoningText || undefined,
-                        createdAt: Date.now(),
-                      }
-                    : item
-                ),
-              }))
+              syncPendingAssistantMessage()
             },
             onDone: (usage) => {
               streamedUsageData = usage
             },
           }
         )
+
+        const finalDisplayState = resolvePendingReasoningState(
+          streamedAssistantText,
+          streamedReasoningText,
+          true
+        )
+        const finalVisibleContent = finalDisplayState.visibleContent
+        const finalReasoningContent = finalDisplayState.reasoningContent.trim()
+        const hasFinalVisibleContent = finalVisibleContent.trim().length > 0
 
         syncActiveSession((session) => ({
           ...session,
@@ -2663,9 +2672,15 @@ function AssistantsChatWorkspace(props: {
               ? {
                   id: `assistant-${Date.now()}`,
                   role: 'assistant',
-                  content: streamedAssistantText.trim() || CHAT_PENDING_MESSAGE_LABEL,
+                  content:
+                    hasFinalVisibleContent
+                      ? finalVisibleContent
+                      : finalReasoningContent
+                        ? ''
+                        : CHAT_PENDING_MESSAGE_LABEL,
                   createdAt: Date.now(),
-                  reasoningContent: streamedReasoningText.trim() || undefined,
+                  reasoningContent: finalReasoningContent || undefined,
+                  reasoningPending: false,
                   usage: streamedUsageData,
                   modelLabel: resolvedModelLabel,
                 }
@@ -2674,19 +2689,27 @@ function AssistantsChatWorkspace(props: {
         }))
       }
     } catch (error) {
-      const resolvedPartialText = streamedAssistantText.trim()
+      const partialDisplayState = resolvePendingReasoningState(
+        streamedAssistantText,
+        streamedReasoningText,
+        true
+      )
+      const resolvedPartialText = partialDisplayState.visibleContent
+      const partialReasoningContent = partialDisplayState.reasoningContent.trim()
+      const hasResolvedPartialText = resolvedPartialText.trim().length > 0
       syncActiveSession((session) => ({
         ...session,
         updatedAt: Date.now(),
-        messages: resolvedPartialText
+        messages: hasResolvedPartialText || partialReasoningContent
           ? session.messages.map((item) =>
               item.id === pendingAssistantId
                 ? {
                     id: `assistant-${Date.now()}`,
                     role: 'assistant',
-                    content: resolvedPartialText,
+                    content: hasResolvedPartialText ? resolvedPartialText : '',
                     createdAt: Date.now(),
-                    reasoningContent: streamedReasoningText.trim() || undefined,
+                    reasoningContent: partialReasoningContent || undefined,
+                    reasoningPending: false,
                     usage: streamedUsageData,
                     modelLabel: resolvedModelLabel,
                   }
@@ -2876,7 +2899,7 @@ function AssistantsChatWorkspace(props: {
                         : ''}
                   </span>
                   <MessageAttachmentGallery attachments={item.attachments} onPreview={openAttachmentPreview} />
-                  <ReasoningMessageContent content={item.reasoningContent || ''} pending={!!item.pending} />
+                  <ReasoningMessageContent content={item.reasoningContent || ''} pending={!!item.reasoningPending} />
                   {item.imageUrl ? (
                     <div className='chat-image-result'>
                       <img src={item.imageUrl} alt={item.content || '生成图片'} />
@@ -2884,7 +2907,7 @@ function AssistantsChatWorkspace(props: {
                   ) : (
                     item.pending && (!item.content.trim() || item.content === CHAT_PENDING_MESSAGE_LABEL)
                       ? <PendingMessageContent label={CHAT_PENDING_MESSAGE_LABEL.replace(/\.+$/, '')} />
-                      : <MarkdownMessageContent content={item.content} />
+                      : <LazyMarkdownContent content={item.content} />
                   )}
                   <BubbleMeta
                     side={item.role === 'user' ? 'right' : 'left'}
@@ -3741,10 +3764,10 @@ function DrawWorkspace(props: {
                               <span>下载图片</span>
                             </button>
                           </div>
-                          <MarkdownMessageContent content={message.content} />
+            <LazyMarkdownContent content={message.content} />
                         </div>
                       ) : (
-                        <MarkdownMessageContent content={message.content} />
+                        <LazyMarkdownContent content={message.content} />
                       )}
                       <BubbleMeta
                         side={isUser ? 'right' : 'left'}
@@ -5770,7 +5793,7 @@ function CliWorkspace(props: {
                     {item.kind === 'partial' && item.content === CLI_PENDING_MESSAGE_LABEL ? (
                       <PendingMessageContent />
                     ) : (
-                      <MarkdownMessageContent content={item.content} />
+                      <LazyMarkdownContent content={item.content} />
                     )}
                     {'fileChanges' in item && item.role === 'assistant' ? (
                       <MessageFileChangeLinks
@@ -6694,6 +6717,147 @@ function LoginScreen(props: {
   )
 }
 
+function DesktopWindowFrame({
+  children,
+  iconPath,
+  productName,
+}: {
+  children: ReactNode
+  iconPath: string
+  productName: string
+}) {
+  const handleMinimize = useCallback(() => {
+    void window.desktopBridge?.minimizeWindow?.()
+  }, [])
+
+  const handleToggleMaximize = useCallback(() => {
+    void window.desktopBridge?.toggleMaximizeWindow?.()
+  }, [])
+
+  const handleClose = useCallback(() => {
+    void window.desktopBridge?.closeWindow?.()
+  }, [])
+
+  const dragStateRef = useRef<{
+    active: boolean
+    pointerId: number | null
+  }>({
+    active: false,
+    pointerId: null,
+  })
+
+  const stopWindowDrag = useCallback(() => {
+    const state = dragStateRef.current
+    state.active = false
+    state.pointerId = null
+    void window.desktopBridge?.endWindowDrag?.()
+  }, [])
+
+  useEffect(() => () => stopWindowDrag(), [stopWindowDrag])
+
+  useEffect(() => {
+    const handleBlur = () => {
+      stopWindowDrag()
+    }
+    window.addEventListener('blur', handleBlur)
+    return () => {
+      window.removeEventListener('blur', handleBlur)
+    }
+  }, [stopWindowDrag])
+
+  const handleWindowPointerDown = useCallback(async (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) {
+      return
+    }
+    event.preventDefault()
+    dragStateRef.current.active = true
+    dragStateRef.current.pointerId = event.pointerId
+    event.currentTarget.setPointerCapture(event.pointerId)
+    await window.desktopBridge?.startWindowDrag?.(event.screenX, event.screenY)
+  }, [])
+
+  const handleWindowPointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const state = dragStateRef.current
+    if (!state.active || state.pointerId !== event.pointerId) {
+      return
+    }
+    event.preventDefault()
+  }, [])
+
+  const handleWindowPointerUp = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (dragStateRef.current.pointerId === event.pointerId) {
+      event.currentTarget.releasePointerCapture?.(event.pointerId)
+    }
+    stopWindowDrag()
+  }, [stopWindowDrag])
+
+  return (
+    <div className='desktop-window-shell'>
+      <div className='workspace-aurora app-aurora-shell' aria-hidden='true'>
+        <span className='workspace-aurora-veil' />
+        <span className='workspace-aurora-blob blob-a' />
+        <span className='workspace-aurora-blob blob-b' />
+        <span className='workspace-aurora-blob blob-c' />
+        <span className='workspace-aurora-blob blob-d' />
+      </div>
+      <header className='window-chrome'>
+        <div
+          className='window-drag-region'
+          onPointerDown={handleWindowPointerDown}
+          onPointerMove={handleWindowPointerMove}
+          onPointerUp={handleWindowPointerUp}
+          onPointerCancel={handleWindowPointerUp}
+          onDoubleClick={(event) => {
+            event.preventDefault()
+            stopWindowDrag()
+            handleToggleMaximize()
+          }}
+          title='双击最大化或还原'
+        >
+          <div className='window-chrome-brand'>
+            {iconPath ? (
+              <img className='window-chrome-icon' src={iconPath} alt='' />
+            ) : (
+              <span className='window-chrome-icon window-chrome-icon-fallback' aria-hidden='true' />
+            )}
+            <span className='window-chrome-title'>{productName || 'OneAPI Center'}</span>
+          </div>
+        </div>
+        <div className='window-chrome-controls'>
+          <button
+            className='window-chrome-button'
+            type='button'
+            onClick={handleMinimize}
+            aria-label='最小化'
+            title='最小化'
+          >
+            <Minus size={16} />
+          </button>
+          <button
+            className='window-chrome-button'
+            type='button'
+            onClick={handleToggleMaximize}
+            aria-label='最大化或还原'
+            title='最大化或还原'
+          >
+            <Square size={14} />
+          </button>
+          <button
+            className='window-chrome-button close'
+            type='button'
+            onClick={handleClose}
+            aria-label='关闭'
+            title='关闭'
+          >
+            <X size={16} />
+          </button>
+        </div>
+      </header>
+      <div className='desktop-window-content'>{children}</div>
+    </div>
+  )
+}
+
 export function App() {
   const auth = useAuthStore()
   const setBootstrapping = useAuthStore((state) => state.setBootstrapping)
@@ -6704,6 +6868,10 @@ export function App() {
   const [themeMode, setThemeMode] = useState<ThemeMode>(() =>
     readJsonStorage<ThemeMode>('oneapi-desktop-theme-mode', 'light')
   )
+  const [auroraOpacity] = useState<number>(() => {
+    const value = readJsonStorage<number>(AURORA_OPACITY_STORAGE_KEY, DEFAULT_AURORA_OPACITY)
+    return Math.max(0, Math.min(100, Number.isFinite(value) ? value : DEFAULT_AURORA_OPACITY))
+  })
   const [platformLabel, setPlatformLabel] = useState('Windows')
   const [productName, setProductName] = useState('OneAPI Desktop')
   const [iconPath, setIconPath] = useState('')
@@ -6730,6 +6898,7 @@ export function App() {
     const persistedUser = useAuthStore.getState().user
     if (persistedUser?.id) {
       saveStoredDesktopUserId(persistedUser.id)
+      setUser(persistedUser)
     }
 
     getDesktopBridge()
@@ -6743,14 +6912,24 @@ export function App() {
       })
       .catch(() => undefined)
 
-    getDesktopBridge()
-      .getCliStatus()
-      .then((status) => {
-        setCliStatus(status)
-      })
-      .catch(() => undefined)
+    window.setTimeout(() => {
+      getDesktopBridge()
+        .getCliStatus()
+        .then((status) => {
+          setCliStatus(status)
+        })
+        .catch(() => undefined)
+    }, 0)
 
-    requireSuccess(getSelfProfile())
+    if (!persistedUser?.id) {
+      clearStoredDesktopUserId()
+      setUser(null)
+      setBootstrapping(false)
+      return
+    }
+
+    setBootstrapping(false)
+    void requireSuccess(getSelfProfile())
       .then((profile) => {
         const nextUser = profile as UserProfile
         saveStoredDesktopUserId(nextUser.id)
@@ -6759,9 +6938,6 @@ export function App() {
       .catch(() => {
         clearStoredDesktopUserId()
         setUser(null)
-      })
-      .finally(() => {
-        setBootstrapping(false)
       })
   }, [setBootstrapping, setUser])
 
@@ -6792,6 +6968,14 @@ export function App() {
     writeJsonStorage('oneapi-desktop-theme-mode', themeMode)
     void getDesktopBridge().setThemeMode(themeMode).catch(() => undefined)
   }, [themeMode])
+
+  useEffect(() => {
+    const normalized = Math.max(0, Math.min(100, auroraOpacity))
+    document.documentElement.style.setProperty('--aurora-opacity', '1')
+    document.documentElement.style.setProperty('--ui-opacity', '1')
+    document.documentElement.style.setProperty('--ui-solidness', `${normalized / 100}`)
+    writeJsonStorage(AURORA_OPACITY_STORAGE_KEY, normalized)
+  }, [auroraOpacity])
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -6903,24 +7087,28 @@ export function App() {
 
   if (auth.bootstrapping) {
     return (
-      <div className='boot-screen'>
-        <LoaderCircle className='spin' size={22} />
-        <span>正在初始化桌面工作台...</span>
-      </div>
+      <DesktopWindowFrame iconPath={iconPath} productName={productName}>
+        <div className='boot-screen'>
+          <LoaderCircle className='spin' size={22} />
+          <span>正在初始化桌面工作台...</span>
+        </div>
+      </DesktopWindowFrame>
     )
   }
 
   if (!auth.user) {
     return (
       <>
-        <LoginScreen
-          platformLabel={platformLabel}
-          productName={productName}
-          onLoginSuccess={(user) => {
-            auth.setUser(user)
-          }}
-          toast={setMessage}
-        />
+        <DesktopWindowFrame iconPath={iconPath} productName={productName}>
+          <LoginScreen
+            platformLabel={platformLabel}
+            productName={productName}
+            onLoginSuccess={(user) => {
+              auth.setUser(user)
+            }}
+            toast={setMessage}
+          />
+        </DesktopWindowFrame>
         {message && <div className='toast-bar'>{message}</div>}
       </>
     )
@@ -6928,73 +7116,86 @@ export function App() {
 
   return (
     <>
-      <div className='shell'>
-        <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
-          <div className='sidebar-head'>
-            <div className='brand'>
-              {collapsed && iconPath ? (
-                <button
-                  className='brand-mark brand-mark-button'
-                  type='button'
-                  onClick={() => setCollapsed(false)}
-                  aria-label='展开边栏'
-                >
-                  <img src={iconPath} alt='' />
-                </button>
-              ) : null}
+      <DesktopWindowFrame iconPath={iconPath} productName={productName}>
+        <div className='shell'>
+          <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
+            <div className='sidebar-head'>
+              <div className='brand'>
+                {collapsed && iconPath ? (
+                  <button
+                    className='brand-mark brand-mark-button'
+                    type='button'
+                    onClick={() => setCollapsed(false)}
+                    aria-label='展开边栏'
+                  >
+                    <img src={iconPath} alt='' />
+                  </button>
+                ) : null}
+                {!collapsed && (
+                  <div className='brand-text'>
+                    <div className='brand-name'>OneAPI Center</div>
+                    <div className='brand-sub'>Windows 客户端</div>
+                  </div>
+                )}
+              </div>
+
               {!collapsed && (
-                <div className='brand-text'>
-                  <div className='brand-name'>OneAPI Center</div>
-                  <div className='brand-sub'>Windows 客户端</div>
-                </div>
+                <button
+                  className='collapse-button collapse-text-button'
+                  type='button'
+                  onClick={() => setCollapsed(true)}
+                  aria-label='收起边栏'
+                  title='收起边栏'
+                >
+                  <ChevronLeft size={18} />
+                </button>
               )}
             </div>
 
-            {!collapsed && (
-              <button
-                className='collapse-button collapse-text-button'
-                type='button'
-                onClick={() => setCollapsed(true)}
-                aria-label='收起边栏'
-                title='收起边栏'
-              >
-                <ChevronLeft size={18} />
-              </button>
-            )}
-          </div>
-
-          <nav className='side-nav'>
-            {primarySideTabs.map((item) => {
-              const Icon = item.icon
-              const active = item.key === sideTab
-              return (
-                <button
-                  key={item.key}
-                  type='button'
-                  className={`side-nav-item ${active ? 'active' : ''}`}
-                  onClick={() => setSideTab(item.key)}
-                  title={item.label}
-                >
-                  <Icon size={18} />
-                  {!collapsed && (
-                    <span>
-                      <strong>{item.label}</strong>
-                      <small>{item.desc}</small>
-                    </span>
-                  )}
-                </button>
-              )
-            })}
-          </nav>
-
-          <div className='sidebar-footer'>
-            <div className='sidebar-account'>
-              {!collapsed && (
-                <div className='sidebar-user-row' onClick={handleSidebarSecretClick}>
-                  <span className='user-pill'>{auth.user.username}</span>
-                  <span className='user-pill secondary'>{auth.user.display_name || 'Root User'}</span>
+            <nav className='side-nav'>
+              {primarySideTabs.map((item) => {
+                const Icon = item.icon
+                const active = item.key === sideTab
+                return (
                   <button
-                    className='ghost-button icon-only tiny'
+                    key={item.key}
+                    type='button'
+                    className={`side-nav-item ${active ? 'active' : ''}`}
+                    onClick={() => setSideTab(item.key)}
+                    title={item.label}
+                  >
+                    <Icon size={18} />
+                    {!collapsed && (
+                      <span>
+                        <strong>{item.label}</strong>
+                        <small>{item.desc}</small>
+                      </span>
+                    )}
+                  </button>
+                )
+              })}
+            </nav>
+
+            <div className='sidebar-footer'>
+              <div className='sidebar-account'>
+                {!collapsed && (
+                  <div className='sidebar-user-row' onClick={handleSidebarSecretClick}>
+                    <span className='user-pill'>{auth.user.username}</span>
+                    <span className='user-pill secondary'>{auth.user.display_name || 'Root User'}</span>
+                    <button
+                      className='ghost-button icon-only tiny'
+                      type='button'
+                      onClick={() => void handleLogout()}
+                      title='退出'
+                      aria-label='退出'
+                    >
+                      <LogOut size={16} />
+                    </button>
+                  </div>
+                )}
+                {collapsed && (
+                  <button
+                    className='ghost-button icon-only tiny collapsed-logout-button'
                     type='button'
                     onClick={() => void handleLogout()}
                     title='退出'
@@ -7002,46 +7203,35 @@ export function App() {
                   >
                     <LogOut size={16} />
                   </button>
-                </div>
-              )}
-              {collapsed && (
-                <button
-                  className='ghost-button icon-only tiny collapsed-logout-button'
-                  type='button'
-                  onClick={() => void handleLogout()}
-                  title='退出'
-                  aria-label='退出'
-                >
-                  <LogOut size={16} />
-                </button>
-              )}
+                )}
+              </div>
             </div>
-          </div>
-        </aside>
+          </aside>
 
-        <main className='main-panel'>
-          <div className='workspace-host'>
-            <AssistantWorkspace
-              mode={assistantMode}
-              setMode={setAssistantMode}
-              toast={setMessage}
-              openSettings={() => setSideTab('me')}
-              visible={sideTab === 'assistants'}
-              enabledModes={enabledAssistantModes}
-            />
-            {sideTab === 'subscriptions' && <SubscriptionsWorkspace toast={setMessage} />}
-            {sideTab === 'wallet' && <WalletWorkspace user={auth.user} toast={setMessage} />}
-            <MeWorkspace
-              user={auth.user}
-              toast={setMessage}
-              themeMode={themeMode}
-              onToggleTheme={() => setThemeMode((current) => (current === 'dark' ? 'light' : 'dark'))}
-              visible={sideTab === 'me'}
-            />
-            {/* settings removed */}
-          </div>
-        </main>
-      </div>
+          <main className='main-panel'>
+            <div className='workspace-host workspace-content-layer'>
+              <AssistantWorkspace
+                mode={assistantMode}
+                setMode={setAssistantMode}
+                toast={setMessage}
+                openSettings={() => setSideTab('me')}
+                visible={sideTab === 'assistants'}
+                enabledModes={enabledAssistantModes}
+              />
+              {sideTab === 'subscriptions' && <SubscriptionsWorkspace toast={setMessage} />}
+              {sideTab === 'wallet' && <WalletWorkspace user={auth.user} toast={setMessage} />}
+              <MeWorkspace
+                user={auth.user}
+                toast={setMessage}
+                themeMode={themeMode}
+                onToggleTheme={() => setThemeMode((current) => (current === 'dark' ? 'light' : 'dark'))}
+                visible={sideTab === 'me'}
+              />
+              {/* settings removed */}
+            </div>
+          </main>
+        </div>
+      </DesktopWindowFrame>
 
       {message && <div className='toast-bar'>{message}</div>}
 

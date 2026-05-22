@@ -107,6 +107,7 @@ export interface CliStatus {
   dataPath: string
   hasConfig: boolean
   hasDataDirectory: boolean
+  brokenInstallation?: boolean
 }
 
 export interface CliRunRequest {
@@ -156,7 +157,7 @@ export interface CliDeployRequest {
 export interface DeployProgressPayload {
   jobId: string
   client: CliClient
-  step: 'detect' | 'node' | 'install' | 'config' | 'test' | 'complete'
+  step: 'detect' | 'node' | 'install' | 'config' | 'diagnose' | 'test' | 'complete'
   status: DeployStatus
   message: string
   createdAt: number

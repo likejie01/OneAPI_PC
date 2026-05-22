@@ -3,6 +3,21 @@ import type { CliClient } from '../shared/desktop'
 
 type ApiKeyCandidate = Pick<ApiKeyRecord, 'id' | 'name' | 'status' | 'group' | 'created_time'>
 
+export function resolveCliProbeResult(input: {
+  executablePath: string
+  version: string
+  versionExitCode?: number | null
+}) {
+  const hasExecutable = input.executablePath.trim().length > 0
+  const probeSucceeded = hasExecutable && input.versionExitCode === 0
+
+  return {
+    installed: probeSucceeded,
+    version: input.version.trim(),
+    brokenInstallation: hasExecutable && !probeSucceeded,
+  }
+}
+
 export function shouldUseWindowsCommandShimForPath(command: string, platform = 'unknown') {
   if (platform !== 'win32') {
     return false

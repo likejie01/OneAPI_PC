@@ -7,6 +7,7 @@ import {
   Menu,
   nativeImage,
   nativeTheme,
+  screen,
   session,
   shell,
   Tray,
@@ -26,13 +27,15 @@ import type {
   DesktopChatStreamRequest,
   DesktopDeleteCliMessageRequest,
 } from '../src/shared/desktop'
-import { shouldUseWindowsCommandShimForPath } from '../src/lib/desktop-service.ts'
+import { parseDesktopChatStreamDataLine } from '../src/lib/chat-reasoning.ts'
+import { resolveCliProbeResult, shouldUseWindowsCommandShimForPath } from '../src/lib/desktop-service.ts'
 
 const DEFAULT_SERVER_BASE_URL = 'https://ai.oneapi.center'
 const DEFAULT_CODEX_BASE_URL = 'https://ai.oneapi.center/v1'
 const DEFAULT_CLAUDE_BASE_URL = 'https://ai.oneapi.center'
 const DEFAULT_CODEX_MODEL = 'gpt-5.5'
 const DEFAULT_CLAUDE_MODEL = 'claude-opus-4-7'
+const WINDOW_CHROME_HEIGHT = 25
 const DESKTOP_PARTITION = 'persist:oneapi-desktop'
 const isDev = !!process.env.VITE_DEV_SERVER_URL
 const __filename = fileURLToPath(import.meta.url)
@@ -44,14 +47,23 @@ let mainWindow: BrowserWindow | null = null
 let appTray: Tray | null = null
 let isQuitting = false
 let serverBaseUrl = DEFAULT_SERVER_BASE_URL
+let activeTitleDrag:
+  | {
+      windowId: number
+      offsetX: number
+      offsetY: number
+      timer: NodeJS.Timeout
+    }
+  | null = null
 const activeApiRequests = new Map<string, AbortController>()
 const activeCliProcesses = new Map<string, ChildProcess>()
 const stoppedCliRequests = new Set<string>()
+const hasSingleInstanceLock = app.requestSingleInstanceLock()
 type ThemeMode = 'light' | 'dark'
 
 function applyThemeMode(mode: ThemeMode) {
   nativeTheme.themeSource = mode
-  const backgroundColor = mode === 'dark' ? '#12181d' : '#eef3f5'
+  const backgroundColor = '#00000000'
   mainWindow?.setBackgroundColor(backgroundColor)
 }
 
@@ -179,6 +191,7 @@ interface CliStatus {
   dataPath: string
   hasConfig: boolean
   hasDataDirectory: boolean
+  brokenInstallation?: boolean
 }
 
 interface CliRunRequest {
@@ -200,6 +213,16 @@ interface CliRunResponse {
   raw: string
   sessionId?: string
   metadata: Record<string, unknown>
+}
+
+interface CliRuntimeDiagnostics {
+  networkIssue?: boolean
+  sessionIssue?: boolean
+  authIssue?: boolean
+  configIssue?: boolean
+  sessionFileFound?: boolean
+  sessionReadAttempts?: number
+  probableCause?: string
 }
 
 interface CliProgressPayload {
@@ -228,7 +251,7 @@ interface CliDeployRequest {
 interface DeployProgressPayload {
   jobId: string
   client: CliClient
-  step: 'detect' | 'node' | 'install' | 'config' | 'test' | 'complete'
+  step: 'detect' | 'node' | 'install' | 'config' | 'diagnose' | 'test' | 'complete'
   status: DeployStatus
   message: string
   createdAt: number
@@ -305,16 +328,22 @@ function buildTrayIcon() {
 }
 
 function restoreMainWindow() {
-  if (!mainWindow) {
+  if (!mainWindow || mainWindow.isDestroyed()) {
     createWindow()
     return
   }
 
+  if (!mainWindow.isVisible()) {
+    mainWindow.show()
+  }
   if (mainWindow.isMinimized()) {
     mainWindow.restore()
   }
-  mainWindow.show()
+  mainWindow.setSkipTaskbar(false)
+  mainWindow.moveTop()
+  mainWindow.setAlwaysOnTop(true)
   mainWindow.focus()
+  mainWindow.setAlwaysOnTop(false)
 }
 
 function ensureTray() {
@@ -355,7 +384,9 @@ function createWindow() {
     minWidth: 1240,
     minHeight: 780,
     title: resolveWorkspaceTitle(),
-    backgroundColor: '#eef3f5',
+    frame: false,
+    backgroundColor: '#00000000',
+    transparent: true,
     icon: appIcon,
     autoHideMenuBar: true,
     webPreferences: {
@@ -366,9 +397,17 @@ function createWindow() {
     },
   })
 
+  win.setMenuBarVisibility(false)
+  win.removeMenu()
   mainWindow = win
   ensureTray()
   applyThemeMode('light')
+  win.on('blur', () => {
+    stopActiveTitleDrag(win.id)
+  })
+  win.on('closed', () => {
+    stopActiveTitleDrag(win.id)
+  })
 
   if (isDev && process.env.VITE_DEV_SERVER_URL) {
     win.loadURL(process.env.VITE_DEV_SERVER_URL)
@@ -392,6 +431,16 @@ function createWindow() {
     if (mainWindow === win) {
       mainWindow = null
     }
+  })
+}
+
+if (!hasSingleInstanceLock) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    void app.whenReady().then(() => {
+      restoreMainWindow()
+    })
   })
 }
 
@@ -589,72 +638,6 @@ function getResponseErrorMessage(data: unknown, status: number, fallback?: strin
   return fallback || `请求失败（${status}）`
 }
 
-function resolveStreamDeltaText(data: unknown) {
-  if (typeof data !== 'object' || !data) {
-    return ''
-  }
-
-  if ('choices' in data && Array.isArray((data as { choices?: unknown[] }).choices)) {
-    const delta = ((data as { choices: Array<{ delta?: { content?: unknown } }> }).choices[0]?.delta?.content)
-    if (typeof delta === 'string') {
-      return delta
-    }
-    if (Array.isArray(delta)) {
-      return delta
-        .map((item) => {
-          if (typeof item === 'object' && item && 'text' in item && typeof item.text === 'string') {
-            return item.text
-          }
-          return ''
-        })
-        .join('')
-    }
-  }
-
-  return ''
-}
-
-function resolveStreamReasoningText(data: unknown) {
-  if (typeof data !== 'object' || !data) {
-    return ''
-  }
-
-  if ('choices' in data && Array.isArray((data as { choices?: unknown[] }).choices)) {
-    const delta = ((data as {
-      choices: Array<{
-        delta?: {
-          reasoning_content?: unknown
-          reasoning?: unknown
-        }
-      }>
-    }).choices[0]?.delta)
-
-    if (typeof delta?.reasoning_content === 'string') {
-      return delta.reasoning_content
-    }
-
-    if (typeof delta?.reasoning === 'string') {
-      return delta.reasoning
-    }
-
-    if (Array.isArray(delta?.reasoning_content)) {
-      return delta.reasoning_content
-        .map((item) => {
-          if (typeof item === 'string') {
-            return item
-          }
-          if (typeof item === 'object' && item && 'text' in item && typeof item.text === 'string') {
-            return item.text
-          }
-          return ''
-        })
-        .join('')
-    }
-  }
-
-  return ''
-}
-
 function emitChatStream(sender: WebContents, payload: DesktopChatStreamPayload) {
   sender.send('desktop:chat-stream', payload)
 }
@@ -723,35 +706,35 @@ async function requestChatStream(sender: WebContents, input: DesktopChatStreamRe
           .map((line) => line.slice(5).trim())
 
         for (const line of dataLines) {
-          if (!line || line === '[DONE]') {
+          const parsedLine = parseDesktopChatStreamDataLine(line)
+          if (!parsedLine) {
             continue
           }
 
-          try {
-            const parsed = JSON.parse(line) as ChatCompletionResponse & {
-              usage?: ChatCompletionResponse['usage']
-            }
-            const deltaText = resolveStreamDeltaText(parsed)
-            const reasoningText = resolveStreamReasoningText(parsed)
-            if (deltaText) {
-              emitChatStream(sender, {
-                requestId: input.requestId,
-                type: 'delta',
-                text: deltaText,
-              })
-            }
-            if (reasoningText) {
-              emitChatStream(sender, {
-                requestId: input.requestId,
-                type: 'reasoning',
-                text: reasoningText,
-              })
-            }
-            if (parsed.usage) {
-              usage = parsed.usage
-            }
-          } catch {
-            continue
+          if (parsedLine.deltaText) {
+            emitChatStream(sender, {
+              requestId: input.requestId,
+              type: 'delta',
+              text: parsedLine.deltaText,
+            })
+          }
+          if (parsedLine.reasoningText) {
+            emitChatStream(sender, {
+              requestId: input.requestId,
+              type: 'reasoning',
+              text: parsedLine.reasoningText,
+            })
+          }
+          if (parsedLine.usage) {
+            usage = parsedLine.usage
+          }
+          if (parsedLine.done) {
+            emitChatStream(sender, {
+              requestId: input.requestId,
+              type: 'done',
+              usage,
+            })
+            return
           }
         }
       }
@@ -1228,19 +1211,25 @@ async function inspectCli(client: CliClient): Promise<CliStatus> {
       .split(/\r?\n/)
       .map((item) => item.trim())
       .find(Boolean) ?? ''
+  const probeResult = resolveCliProbeResult({
+    executablePath,
+    version,
+    versionExitCode: versionResult?.exitCode,
+  })
 
   const configPath = cliConfig[client].configPath
   const dataPath = cliConfig[client].dataPath
 
   return {
     client,
-    installed: executablePath.length > 0,
-    version,
+    installed: probeResult.installed,
+    version: probeResult.version,
     executablePath,
     configPath,
     dataPath,
     hasConfig: await pathExists(configPath),
     hasDataDirectory: await pathExists(dataPath),
+    brokenInstallation: probeResult.brokenInstallation,
   }
 }
 
@@ -2389,6 +2378,83 @@ function shouldIgnoreCodexMessage(text: string) {
   )
 }
 
+function extractCodexAssistantTextFromEvent(parsed: Record<string, unknown>) {
+  if (
+    parsed.type === 'response_item' &&
+    typeof parsed.payload === 'object' &&
+    parsed.payload
+  ) {
+    const payload = parsed.payload as Record<string, unknown>
+    if (payload.type === 'message' && payload.role === 'assistant') {
+      const assistantText = contentPartsToText(payload.content)
+      if (assistantText.trim() && !shouldIgnoreCodexMessage(assistantText)) {
+        return assistantText
+      }
+    }
+  }
+
+  if (parsed.type === 'item.completed' && typeof parsed.item === 'object' && parsed.item) {
+    const item = parsed.item as Record<string, unknown>
+    if (item.type === 'agent_message' && typeof item.text === 'string') {
+      const assistantText = item.text.trim()
+      if (assistantText && !shouldIgnoreCodexMessage(assistantText)) {
+        return assistantText
+      }
+    }
+  }
+
+  return ''
+}
+
+function summarizeCliFailure(rawText: string, stderrText: string): CliRuntimeDiagnostics {
+  const combined = `${rawText}\n${stderrText}`.trim()
+  const networkIssue =
+    /stream disconnected before completion/i.test(combined) ||
+    /error sending request for url/i.test(combined) ||
+    /reconnecting\.\.\./i.test(combined) ||
+    /timed out/i.test(combined) ||
+    /tls/i.test(combined) ||
+    /certificate/i.test(combined) ||
+    /dns/i.test(combined) ||
+    /econnrefused/i.test(combined) ||
+    /econnreset/i.test(combined)
+  const sessionIssue =
+    /failed to record rollout items/i.test(combined) ||
+    /thread .* not found/i.test(combined) ||
+    /session .* not found/i.test(combined)
+  const authIssue =
+    /authentication failed/i.test(combined) ||
+    /request not allowed/i.test(combined) ||
+    /forbidden/i.test(combined) ||
+    /unauthorized/i.test(combined) ||
+    /401/i.test(combined) ||
+    /403/i.test(combined)
+  const configIssue =
+    /expected value at line/i.test(combined) ||
+    /failed to parse/i.test(combined) ||
+    /invalid toml/i.test(combined) ||
+    (/json/i.test(combined) && /parse/i.test(combined))
+
+  let probableCause = ''
+  if (networkIssue) {
+    probableCause = '网络 / 代理 / TLS / 反向代理流式转发异常'
+  } else if (sessionIssue) {
+    probableCause = '本地会话状态目录异常，或会话落盘未完成'
+  } else if (authIssue) {
+    probableCause = 'Key 或上游鉴权不通过'
+  } else if (configIssue) {
+    probableCause = '本地配置文件格式无效'
+  }
+
+  return {
+    networkIssue,
+    sessionIssue,
+    authIssue,
+    configIssue,
+    probableCause,
+  }
+}
+
 function uniqueMessages(messages: CliSessionMessage[]) {
   const seen = new Set<string>()
   return messages.filter((item) => {
@@ -2962,7 +3028,7 @@ async function waitForCliSession(client: CliClient, sessionId?: string) {
     return null
   }
 
-  for (let index = 0; index < 6; index += 1) {
+  for (let index = 0; index < 40; index += 1) {
     const details =
       client === 'codex'
         ? await getCodexSession(sessionId)
@@ -3273,6 +3339,7 @@ async function runCodexPrompt(
   const progress = createCliProgressEmitter(webContents, 'codex', input.requestId)
   let sessionId = input.sessionId
   let partialText = ''
+  const runtimeDiagnostics: CliRuntimeDiagnostics = {}
   const executablePath = await locateExecutable('codex')
   const managedRuntime = await readManagedNodeRuntime()
   const spawnCommand = resolveCliSpawnCommand('codex', executablePath)
@@ -3308,6 +3375,12 @@ async function runCodexPrompt(
         typeof parsed.payload === 'object' && parsed.payload
           ? parsed.payload as Record<string, unknown>
           : null
+
+      const streamedAssistantText = extractCodexAssistantTextFromEvent(parsed)
+      if (streamedAssistantText) {
+        partialText = streamedAssistantText
+        progress.partial(partialText, sessionId)
+      }
 
       if (parsed.type === 'response_item' && payload?.type === 'message' && payload.role === 'assistant') {
         const assistantText = contentPartsToText(payload.content)
@@ -3373,20 +3446,42 @@ async function runCodexPrompt(
   }
 
   const session = await waitForCliSession('codex', sessionId)
-  const output = session?.messages.filter((item) => item.role === 'assistant').at(-1)?.content ?? ''
+  runtimeDiagnostics.sessionFileFound = !!session
+  runtimeDiagnostics.sessionReadAttempts = 40
+  const sessionOutput = session?.messages.filter((item) => item.role === 'assistant').at(-1)?.content ?? ''
+  const output = sessionOutput || partialText.trim()
+  Object.assign(runtimeDiagnostics, summarizeCliFailure(result.stdout, result.stderr))
+  if (!session && output) {
+    runtimeDiagnostics.sessionIssue = true
+    runtimeDiagnostics.probableCause =
+      runtimeDiagnostics.probableCause || 'CLI 已返回内容，但本地会话文件未能在等待窗口内落盘'
+  }
   const success = !aborted && result.exitCode === 0 && output.length > 0
 
   if (success) {
     progress.partial(output, sessionId, true)
     progress.result('Codex 已完成本次回复。', sessionId, result.exitCode, output, fileChanges, 'turn.completed')
     progress.status('Codex 已完成本次回复。', sessionId, true, fileChanges, { logKind: 'status', sourceKind: 'turn.completed' })
+    if (!session) {
+      progress.status(
+        'Codex 已返回结果，但本地会话记录未及时落盘；最近会话可能暂时不可见。',
+        sessionId,
+        false,
+        undefined,
+        {
+          logKind: 'status',
+          sourceKind: 'session.persistence.warning',
+          detail: runtimeDiagnostics.probableCause || '',
+        }
+      )
+    }
   } else if (aborted) {
     progress.status('Codex 已停止本次回复。', sessionId, true, undefined, { logKind: 'status', sourceKind: 'request.aborted' })
   } else if (result.stderr.trim()) {
     progress.error('Codex 执行失败', sessionId, true, fileChanges, {
       logKind: 'error',
       sourceKind: 'request.failed',
-      detail: result.stderr.trim(),
+      detail: [result.stderr.trim(), runtimeDiagnostics.probableCause ? `推断原因：${runtimeDiagnostics.probableCause}` : ''].filter(Boolean).join('\n'),
       exitCode: result.exitCode,
     })
   }
@@ -3404,6 +3499,7 @@ async function runCodexPrompt(
       threadId: sessionId ?? '',
       usage: usageEvent?.usage ?? null,
       fileChanges,
+      diagnostics: runtimeDiagnostics,
     },
   }
 }
@@ -3436,6 +3532,7 @@ async function runClaudePrompt(
   let sessionId = input.sessionId
   let partialText = ''
   let finalResult: Record<string, unknown> | null = null
+  const runtimeDiagnostics: CliRuntimeDiagnostics = {}
   const executablePath = await locateExecutable('claude')
   const managedRuntime = await readManagedNodeRuntime()
   const claudeSettings = await readResolvedClaudeSettingsDocument().catch(() => null)
@@ -3557,6 +3654,8 @@ async function runClaudePrompt(
   }
 
   const session = await waitForCliSession('claude', sessionId)
+  runtimeDiagnostics.sessionFileFound = !!session
+  runtimeDiagnostics.sessionReadAttempts = 40
   const transcriptOutput =
     session?.messages.filter((item) => item.role === 'assistant').at(-1)?.content ?? ''
   const parsedOutput =
@@ -3568,19 +3667,38 @@ async function runClaudePrompt(
             : undefined
         )
   const output = transcriptOutput || parsedOutput || partialText.trim()
+  Object.assign(runtimeDiagnostics, summarizeCliFailure(result.stdout, result.stderr))
+  if (!session && output) {
+    runtimeDiagnostics.sessionIssue = true
+    runtimeDiagnostics.probableCause =
+      runtimeDiagnostics.probableCause || 'CLI 已返回内容，但本地会话文件未能在等待窗口内落盘'
+  }
   const success = !aborted && result.exitCode === 0 && output.length > 0
 
   if (success) {
     progress.partial(output, sessionId, true)
     progress.result('Claude 已完成本次回复。', sessionId, result.exitCode, output, fileChanges, 'result')
     progress.status('Claude 已完成本次回复。', sessionId, true, fileChanges, { logKind: 'status', sourceKind: 'result' })
+    if (!session) {
+      progress.status(
+        'Claude 已返回结果，但本地会话记录未及时落盘；最近会话可能暂时不可见。',
+        sessionId,
+        false,
+        undefined,
+        {
+          logKind: 'status',
+          sourceKind: 'session.persistence.warning',
+          detail: runtimeDiagnostics.probableCause || '',
+        }
+      )
+    }
   } else if (aborted) {
     progress.status('Claude 已停止本次回复。', sessionId, true, undefined, { logKind: 'status', sourceKind: 'request.aborted' })
   } else if (result.stderr.trim()) {
     progress.error('Claude 执行失败', sessionId, true, fileChanges, {
       logKind: 'error',
       sourceKind: 'request.failed',
-      detail: result.stderr.trim(),
+      detail: [result.stderr.trim(), runtimeDiagnostics.probableCause ? `推断原因：${runtimeDiagnostics.probableCause}` : ''].filter(Boolean).join('\n'),
       exitCode: result.exitCode,
     })
   }
@@ -3596,6 +3714,7 @@ async function runClaudePrompt(
       ...(finalResult ?? { exitCode: result.exitCode }),
       aborted,
       fileChanges,
+      diagnostics: runtimeDiagnostics,
     },
   }
 }
@@ -3845,6 +3964,228 @@ async function runLoggedCommand(
   })
   logger.result(step, result.exitCode, result.stdout, result.stderr)
   return result
+}
+
+async function verifyDirectoryWritable(targetPath: string) {
+  try {
+    await fs.mkdir(targetPath, { recursive: true })
+    const probePath = path.join(targetPath, `.oneapi-write-test-${Date.now()}.tmp`)
+    await fs.writeFile(probePath, 'ok', 'utf8')
+    await fs.rm(probePath, { force: true })
+    return {
+      ok: true,
+      detail: targetPath,
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      detail: error instanceof Error ? error.message : String(error),
+    }
+  }
+}
+
+async function readResponseTextSafely(response: Response) {
+  try {
+    return await response.text()
+  } catch {
+    return ''
+  }
+}
+
+async function diagnoseCodexEnvironment(
+  logger: ReturnType<typeof createDeployLogger>,
+  request: CliDeployRequest
+) {
+  const resolvedBaseUrl = normalizeCodexBaseUrl(request.baseUrl)
+  const resolvedKey = resolveDesktopCliKeyRecord(request.apiKey)
+
+  logger.info('diagnose', 'running', '开始检查 Codex 配置文件与数据目录')
+
+  const writable = await verifyDirectoryWritable(cliConfig.codex.dataPath)
+  logger.info(
+    'diagnose',
+    writable.ok ? 'success' : 'error',
+    writable.ok ? 'Codex 数据目录可写' : 'Codex 数据目录不可写',
+    writable.detail
+  )
+
+  try {
+    const current = await readCurrentCodexConfig()
+    const configMatches =
+      current.baseUrl === resolvedBaseUrl &&
+      resolveDesktopCliKeyRecord(current.apiKey) === resolvedKey
+    logger.info(
+      'diagnose',
+      configMatches ? 'success' : 'error',
+      configMatches ? 'Codex config.toml 校验通过' : 'Codex config.toml 与预期不一致',
+      `baseUrl=${current.baseUrl}\nmodel=${current.model}\nproviderKeyMatched=${configMatches ? 'yes' : 'no'}`
+    )
+  } catch (error) {
+    logger.info(
+      'diagnose',
+      'error',
+      'Codex config.toml 读取或解析失败',
+      error instanceof Error ? error.message : String(error)
+    )
+  }
+
+  try {
+    const authPath = path.join(cliConfig.codex.dataPath, 'auth.json')
+    const raw = await fs.readFile(authPath, 'utf8')
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    const authKey =
+      typeof parsed.OPENAI_API_KEY === 'string' ? resolveDesktopCliKeyRecord(parsed.OPENAI_API_KEY) : ''
+    logger.info(
+      'diagnose',
+      authKey === resolvedKey ? 'success' : 'error',
+      authKey === resolvedKey ? 'Codex auth.json 校验通过' : 'Codex auth.json 与预期不一致',
+      authPath
+    )
+  } catch (error) {
+    logger.info(
+      'diagnose',
+      'error',
+      'Codex auth.json 缺失或解析失败',
+      error instanceof Error ? error.message : String(error)
+    )
+  }
+
+  const modelsUrl = `${resolvedBaseUrl}/models`
+  try {
+    logger.info('diagnose', 'running', '开始检查 Codex 基础连通性', modelsUrl)
+    const response = await fetch(modelsUrl, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${resolvedKey}`,
+      },
+    })
+    const text = await readResponseTextSafely(response)
+    logger.info(
+      'diagnose',
+      response.ok ? 'success' : 'error',
+      response.ok ? 'Codex /models 连通性正常' : 'Codex /models 连通性失败',
+      `status=${response.status}\n${text.slice(0, 500)}`
+    )
+  } catch (error) {
+    logger.info(
+      'diagnose',
+      'error',
+      'Codex /models 连通性异常',
+      error instanceof Error ? error.message : String(error)
+    )
+  }
+
+  const responsesUrl = `${resolvedBaseUrl}/responses`
+  try {
+    logger.info('diagnose', 'running', '开始检查 Codex /responses 流式响应', responsesUrl)
+    const response = await fetch(responsesUrl, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${resolvedKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: request.model?.trim() || DEFAULT_CODEX_MODEL,
+        input: 'hello',
+        max_output_tokens: 16,
+        stream: true,
+      }),
+    })
+
+    if (!response.ok) {
+      const text = await readResponseTextSafely(response)
+      logger.info(
+        'diagnose',
+        'error',
+        'Codex /responses 流式请求失败',
+        `status=${response.status}\n${text.slice(0, 500)}`
+      )
+      return
+    }
+
+    const reader = response.body?.getReader()
+    if (!reader) {
+      logger.info('diagnose', 'error', 'Codex /responses 未返回可读流')
+      return
+    }
+
+    const firstChunk = await reader.read()
+    await reader.cancel().catch(() => undefined)
+    if (firstChunk.done || !firstChunk.value?.length) {
+      logger.info('diagnose', 'error', 'Codex /responses 流式连接建立成功，但没有收到任何数据块')
+      return
+    }
+
+    logger.info(
+      'diagnose',
+      'success',
+      'Codex /responses 流式响应正常',
+      `首个数据块大小：${firstChunk.value.length} bytes`
+    )
+  } catch (error) {
+    logger.info(
+      'diagnose',
+      'error',
+      'Codex /responses 流式响应异常',
+      error instanceof Error ? error.message : String(error)
+    )
+  }
+}
+
+async function diagnoseClaudeEnvironment(
+  logger: ReturnType<typeof createDeployLogger>,
+  request: CliDeployRequest
+) {
+  const resolvedBaseUrl = normalizeClaudeBaseUrl(request.baseUrl)
+  const resolvedKey = resolveDesktopCliKeyRecord(request.apiKey)
+
+  logger.info('diagnose', 'running', '开始检查 Claude 配置文件与数据目录')
+
+  const writable = await verifyDirectoryWritable(cliConfig.claude.dataPath)
+  logger.info(
+    'diagnose',
+    writable.ok ? 'success' : 'error',
+    writable.ok ? 'Claude 数据目录可写' : 'Claude 数据目录不可写',
+    writable.detail
+  )
+
+  try {
+    const current = await readCurrentClaudeConfig()
+    const configMatches =
+      current.baseUrl === resolvedBaseUrl &&
+      resolveDesktopCliKeyRecord(current.apiKey) === resolvedKey
+    logger.info(
+      'diagnose',
+      configMatches ? 'success' : 'error',
+      configMatches ? 'Claude settings.json 校验通过' : 'Claude settings.json 与预期不一致',
+      `baseUrl=${current.baseUrl}\nmodel=${current.model}\nproviderKeyMatched=${configMatches ? 'yes' : 'no'}`
+    )
+  } catch (error) {
+    logger.info(
+      'diagnose',
+      'error',
+      'Claude settings.json 读取或解析失败',
+      error instanceof Error ? error.message : String(error)
+    )
+  }
+
+  try {
+    const parsed = await readClaudeAuthDocument()
+    const authKey = resolveDesktopCliKeyRecord(pickClaudeApiKeyFromUnknown(parsed))
+    logger.info(
+      'diagnose',
+      authKey === resolvedKey ? 'success' : 'error',
+      authKey === resolvedKey ? 'Claude auth.json 校验通过' : 'Claude auth.json 与预期不一致',
+      path.join(cliConfig.claude.dataPath, 'auth.json')
+    )
+  } catch (error) {
+    logger.info(
+      'diagnose',
+      'error',
+      'Claude auth.json 缺失或解析失败',
+      error instanceof Error ? error.message : String(error)
+    )
+  }
 }
 
 function buildNodeDownloadUrl(version: string) {
@@ -4124,7 +4465,9 @@ async function deployCli(webContents: WebContents, request: CliDeployRequest, jo
     'success',
     detected.installed
       ? `已检测到 ${client}，版本 ${detected.version || '未知'}`
-      : `未检测到 ${client}，准备安装`,
+      : detected.brokenInstallation
+        ? `检测到损坏的 ${client} 安装，准备重装`
+        : `未检测到 ${client}，准备安装`,
     detected.executablePath || '未找到可执行文件'
   )
 
@@ -4167,6 +4510,12 @@ async function deployCli(webContents: WebContents, request: CliDeployRequest, jo
     return
   }
 
+  if (client === 'codex') {
+    await diagnoseCodexEnvironment(logger, request)
+  } else {
+    await diagnoseClaudeEnvironment(logger, request)
+  }
+
   logger.info('test', 'running', `正在验证 ${client} 连接`)
 
   const testProjectPath = path.join(os.homedir())
@@ -4186,17 +4535,42 @@ async function deployCli(webContents: WebContents, request: CliDeployRequest, jo
         })
 
   if (!testResult.success) {
-    logger.info('test', 'error', `${client} 测试失败`, testResult.error || testResult.raw)
+    const runtimeDiagnostics =
+      typeof testResult.metadata?.diagnostics === 'object' && testResult.metadata?.diagnostics
+        ? testResult.metadata.diagnostics as CliRuntimeDiagnostics
+        : null
+    logger.info(
+      'test',
+      'error',
+      `${client} 测试失败`,
+      [
+        testResult.error || testResult.raw,
+        runtimeDiagnostics?.probableCause ? `推断原因：${runtimeDiagnostics.probableCause}` : '',
+      ].filter(Boolean).join('\n')
+    )
     return
   }
 
   logger.info('test', 'success', `${client} 测试通过`, testResult.output)
+  if (typeof testResult.metadata?.diagnostics === 'object' && testResult.metadata?.diagnostics) {
+    const runtimeDiagnostics = testResult.metadata.diagnostics as CliRuntimeDiagnostics
+    if (runtimeDiagnostics.sessionIssue && !runtimeDiagnostics.networkIssue && !runtimeDiagnostics.authIssue) {
+      logger.info(
+        'test',
+        'error',
+        `${client} 运行成功，但本地会话持久化异常`,
+        runtimeDiagnostics.probableCause || 'CLI 已返回结果，但客户端没有稳定读到本地会话记录。'
+      )
+      return
+    }
+  }
 
   logger.info('complete', 'success', `${client} 已可直接使用`)
 }
 
 app.whenReady().then(() => {
   return loadServerBaseUrl().then(() => {
+    Menu.setApplicationMenu(null)
     createWindow()
 
     app.on('activate', () => {
@@ -4221,9 +4595,124 @@ app.on('window-all-closed', () => {
   }
 })
 
+function stopActiveTitleDrag(windowId?: number) {
+  if (!activeTitleDrag) {
+    return
+  }
+  if (typeof windowId === 'number' && activeTitleDrag.windowId !== windowId) {
+    return
+  }
+  clearInterval(activeTitleDrag.timer)
+  activeTitleDrag = null
+}
+
+function startActiveTitleDrag(targetWindow: BrowserWindow, screenX: number, screenY: number) {
+  stopActiveTitleDrag()
+
+  if (targetWindow.isDestroyed()) {
+    return
+  }
+
+  let bounds = targetWindow.getBounds()
+  if (targetWindow.isMaximized()) {
+    const horizontalRatio = bounds.width > 0 ? Math.max(0, Math.min(1, (screenX - bounds.x) / bounds.width)) : 0.5
+    targetWindow.unmaximize()
+    bounds = targetWindow.getBounds()
+    const nextX = Math.round(screenX - bounds.width * horizontalRatio)
+    const nextY = Math.round(screenY - Math.min(Math.max(WINDOW_CHROME_HEIGHT / 2, 8), WINDOW_CHROME_HEIGHT - 4))
+    targetWindow.setPosition(nextX, nextY)
+    bounds = targetWindow.getBounds()
+  }
+
+  const offsetX = screenX - bounds.x
+  const offsetY = screenY - bounds.y
+  const windowId = targetWindow.id
+  const timer = setInterval(() => {
+    const movingWindow = BrowserWindow.fromId(windowId)
+    if (!movingWindow || movingWindow.isDestroyed() || !movingWindow.isFocused()) {
+      stopActiveTitleDrag(windowId)
+      return
+    }
+    const cursorPoint = screen.getCursorScreenPoint()
+    movingWindow.setPosition(
+      Math.round(cursorPoint.x - offsetX),
+      Math.round(cursorPoint.y - offsetY),
+    )
+  }, 8)
+
+  activeTitleDrag = {
+    windowId,
+    offsetX,
+    offsetY,
+    timer,
+  }
+}
+
 ipcMain.handle('app:get-platform', () => process.platform)
 ipcMain.handle('app:get-meta', () => getAppMeta())
 ipcMain.handle('app:get-server-base-url', () => serverBaseUrl)
+ipcMain.handle('app:window-minimize', (event) => {
+  BrowserWindow.fromWebContents(event.sender)?.minimize()
+})
+ipcMain.handle('app:window-toggle-maximize', (event) => {
+  const targetWindow = BrowserWindow.fromWebContents(event.sender)
+  if (!targetWindow) {
+    return {
+      maximized: false,
+    }
+  }
+  if (targetWindow.isMaximized()) {
+    targetWindow.unmaximize()
+  } else {
+    targetWindow.maximize()
+  }
+  return {
+    maximized: targetWindow.isMaximized(),
+  }
+})
+ipcMain.handle('app:window-get-bounds', (event) => {
+  const targetWindow = BrowserWindow.fromWebContents(event.sender)
+  if (!targetWindow) {
+    return {
+      x: 0,
+      y: 0,
+      width: 0,
+      height: 0,
+      maximized: false,
+    }
+  }
+  const bounds = targetWindow.getBounds()
+  return {
+    ...bounds,
+    maximized: targetWindow.isMaximized(),
+  }
+})
+ipcMain.handle('app:window-set-position', (event, payload: { x: number; y: number }) => {
+  const targetWindow = BrowserWindow.fromWebContents(event.sender)
+  if (!targetWindow || targetWindow.isDestroyed()) {
+    return
+  }
+  if (targetWindow.isMaximized()) {
+    return
+  }
+  const nextX = Math.round(payload?.x ?? 0)
+  const nextY = Math.round(payload?.y ?? 0)
+  targetWindow.setPosition(nextX, nextY)
+})
+ipcMain.handle('app:window-start-drag', (event, payload: { screenX: number; screenY: number }) => {
+  const targetWindow = BrowserWindow.fromWebContents(event.sender)
+  if (!targetWindow || targetWindow.isDestroyed()) {
+    return
+  }
+  startActiveTitleDrag(targetWindow, Math.round(payload?.screenX ?? 0), Math.round(payload?.screenY ?? 0))
+})
+ipcMain.handle('app:window-end-drag', (event) => {
+  const targetWindow = BrowserWindow.fromWebContents(event.sender)
+  stopActiveTitleDrag(targetWindow?.id)
+})
+ipcMain.handle('app:window-close', (event) => {
+  BrowserWindow.fromWebContents(event.sender)?.close()
+})
 ipcMain.handle('app:set-server-base-url', async (_event, nextValue: string) => {
   const normalized = await persistServerBaseUrl(nextValue)
   return {

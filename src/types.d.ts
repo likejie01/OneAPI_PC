@@ -36,6 +36,19 @@ declare global {
         serverBaseUrl: string
         iconPath: string
       }>
+      minimizeWindow: () => Promise<void>
+      toggleMaximizeWindow: () => Promise<{ maximized: boolean }>
+      startWindowDrag: (screenX: number, screenY: number) => Promise<void>
+      endWindowDrag: () => Promise<void>
+      getWindowBounds: () => Promise<{
+        x: number
+        y: number
+        width: number
+        height: number
+        maximized: boolean
+      }>
+      setWindowPosition: (x: number, y: number) => Promise<void>
+      closeWindow: () => Promise<void>
       getServerBaseUrl: () => Promise<string>
       setServerBaseUrl: (value: string) => Promise<{ serverBaseUrl: string }>
       resetServerBaseUrl: () => Promise<{ serverBaseUrl: string }>
