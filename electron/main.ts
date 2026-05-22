@@ -24,12 +24,27 @@ import process from 'node:process'
 import type { ChatCompletionResponse } from '../src/shared/contracts'
 import type {
   CliExtensionEntry,
+  CliExtensionInstallRequest,
+  CliExtensionInstallResult,
+  CliPlanState,
   DesktopChatStreamPayload,
   DesktopChatStreamRequest,
   DesktopDeleteCliMessageRequest,
 } from '../src/shared/desktop'
 import { parseDesktopChatStreamDataLine } from '../src/lib/chat-reasoning.ts'
-import { parseMarkdownFrontmatterMeta } from '../src/lib/cli-extensions.ts'
+import {
+  buildClaudePlanStateFromRecords,
+  buildCodexPlanStateFromRecords,
+  parseClaudePlanMutationFromRecord,
+  parseCodexPlanStateFromRecord,
+} from '../src/lib/cli-plan.ts'
+import { buildCliExtensionDedupeKey, parseMarkdownFrontmatterMeta } from '../src/lib/cli-extensions.ts'
+import {
+  buildBundledCodexCuratedSkillEntries,
+  buildBundledMarketplaceEntries,
+  type BundledCodexCuratedSkillCatalog,
+  type BundledPluginMarketplaceCatalog,
+} from '../src/lib/cli-marketplace-catalog.ts'
 import { resolveCliProbeResult, shouldUseWindowsCommandShimForPath } from '../src/lib/desktop-service.ts'
 
 const DEFAULT_SERVER_BASE_URL = 'https://ai.oneapi.center'
@@ -45,6 +60,7 @@ const __dirname = path.dirname(__filename)
 const APP_ICON_PATH = isDev
   ? path.join(path.dirname(__dirname), 'public', 'Icon.png')
   : path.join(path.dirname(__dirname), 'dist', 'Icon.png')
+const BUNDLED_CLI_CATALOG_DEV_ROOT = path.resolve(__dirname, '..', '..', 'shared-cli-catalog')
 let mainWindow: BrowserWindow | null = null
 let appTray: Tray | null = null
 let isQuitting = false
@@ -62,6 +78,7 @@ const activeCliProcesses = new Map<string, ChildProcess>()
 const stoppedCliRequests = new Set<string>()
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
 type ThemeMode = 'light' | 'dark'
+const bundledCliCatalogCache = new Map<string, unknown>()
 
 function applyThemeMode(mode: ThemeMode) {
   nativeTheme.themeSource = mode
@@ -79,6 +96,34 @@ function getAssistantHistoryRoot(scope: AssistantHistoryScope) {
 
 function getAssistantHistorySessionDirectory(scope: AssistantHistoryScope, sessionId: string) {
   return path.join(getAssistantHistoryRoot(scope), sessionId)
+}
+
+function getBundledCliCatalogRoot() {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, 'cli-catalog')
+    : BUNDLED_CLI_CATALOG_DEV_ROOT
+}
+
+async function readBundledCliCatalogFile<T>(fileName: string) {
+  if (bundledCliCatalogCache.has(fileName)) {
+    return bundledCliCatalogCache.get(fileName) as T
+  }
+
+  const filePath = path.join(getBundledCliCatalogRoot(), fileName)
+  const raw = await fs.readFile(filePath, 'utf8').catch(() => '')
+  if (!raw.trim()) {
+    bundledCliCatalogCache.set(fileName, null)
+    return null
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as T
+    bundledCliCatalogCache.set(fileName, parsed)
+    return parsed
+  } catch {
+    bundledCliCatalogCache.set(fileName, null)
+    return null
+  }
 }
 
 function normalizeServerBaseUrl(value?: string) {
@@ -182,6 +227,7 @@ interface CliSessionDetails {
   projectPath: string
   messages: CliSessionMessage[]
   fileChanges?: CliFileChange[]
+  plan?: CliPlanState | null
 }
 
 interface CliStatus {
@@ -253,6 +299,7 @@ interface CliProgressPayload {
   detail?: string
   command?: string
   exitCode?: number
+  plan?: CliPlanState | null
 }
 
 interface CliDeployRequest {
@@ -1950,31 +1997,6 @@ function normalizeCliExtensionId(
   return `${client}:${kind}:${name.trim().toLowerCase()}:${targetPath.trim().toLowerCase()}`
 }
 
-async function listCodexSkills(): Promise<CliExtensionEntry[]> {
-  const skillsRoot = path.join(cliConfig.codex.dataPath, 'skills')
-  const files = await walkFiles(skillsRoot, (filePath) => path.basename(filePath).toUpperCase() === 'SKILL.MD')
-  const entries = await Promise.all(
-    files.map(async (filePath) => {
-      const raw = await fs.readFile(filePath, 'utf8').catch(() => '')
-      const meta = parseMarkdownFrontmatterMeta(raw)
-      const relativePath = path.relative(skillsRoot, filePath)
-      const skillRoot = path.dirname(filePath)
-      const fallbackName = relativePath.split(/[\\/]/).filter(Boolean).at(-2) || path.basename(skillRoot)
-      return {
-        id: normalizeCliExtensionId('codex', 'skill', meta.name || fallbackName, skillRoot),
-        client: 'codex' as const,
-        kind: 'skill' as const,
-        name: meta.name || fallbackName,
-        description: meta.description,
-        path: skillRoot,
-        source: relativePath.startsWith('.system') ? 'system' : 'user',
-      } satisfies CliExtensionEntry
-    })
-  )
-
-  return entries.sort((left, right) => left.name.localeCompare(right.name))
-}
-
 async function readPluginManifest(targetPath: string) {
   const raw = await fs.readFile(targetPath, 'utf8').catch(() => '')
   if (!raw.trim()) {
@@ -1988,57 +2010,397 @@ async function readPluginManifest(targetPath: string) {
   }
 }
 
-async function listCodexPlugins(): Promise<CliExtensionEntry[]> {
-  const pluginsRoot = path.join(cliConfig.codex.dataPath, 'plugins')
+type LocalClaudeMarketplaceManifest = {
+  name?: string
+  id?: string
+  owner?: {
+    name?: string
+    email?: string
+  }
+  plugins?: Array<Record<string, unknown>>
+}
+
+type ClaudeMarketplaceInstallInfo = {
+  scope?: string
+  installPath?: string
+  version?: string
+  installedAt?: string
+  lastUpdated?: string
+  gitCommitSha?: string
+}
+
+type CodexCuratedSkillCatalogEntry = {
+  id: string
+  name: string
+  description: string
+  sourceRoot: string
+}
+
+type CodexMarketplaceSource = {
+  marketplace: string
+  sourceRoot: string
+}
+
+function readTomlSectionBoolean(lines: string[], key: string) {
+  const pattern = new RegExp(`^\\s*${key}\\s*=\\s*(true|false)\\s*$`, 'i')
+  for (const line of lines) {
+    const match = line.match(pattern)
+    if (match) {
+      return match[1].toLowerCase() === 'true'
+    }
+  }
+  return false
+}
+
+function isOfficialAuthorName(value: unknown) {
+  if (typeof value !== 'string') {
+    return false
+  }
+  const normalized = value.trim().toLowerCase()
+  return normalized === 'openai' || normalized === 'anthropic'
+}
+
+function readCodexEnabledPluginKeys(raw: string) {
+  const parsed = parseTomlDocument(raw)
+  const enabledKeys = new Set<string>()
+
+  for (const section of parsed.sections) {
+    const match = section.header.match(/^plugins\."(.+)"$/)
+    if (!match) {
+      continue
+    }
+    if (readTomlSectionBoolean(section.lines, 'enabled')) {
+      enabledKeys.add(match[1].trim())
+    }
+  }
+
+  return enabledKeys
+}
+
+function mergeCodexPluginEnabled(raw: string, installKey: string) {
+  const parsed = parseTomlDocument(raw)
+  const targetHeader = `plugins."${installKey}"`
+  let updated = false
+  const nextSections = parsed.sections.map((section) => {
+    if (section.header !== targetHeader) {
+      return section
+    }
+    updated = true
+    return {
+      header: targetHeader,
+      lines: [`[${targetHeader}]`, 'enabled = true'],
+    } satisfies TomlSectionBlock
+  })
+
+  if (!updated) {
+    nextSections.push({
+      header: targetHeader,
+      lines: [`[${targetHeader}]`, 'enabled = true'],
+    })
+  }
+
+  return serializeTomlDocument(parsed.preamble, nextSections)
+}
+
+function normalizeCliInstallName(value: string) {
+  return value.trim().toLowerCase()
+}
+
+function buildCodexCuratedSkillInstallKey(name: string) {
+  return `codex-curated-skill:${normalizeCliInstallName(name)}`
+}
+
+function isCodexCuratedSkillInstallKey(value?: string) {
+  return value?.startsWith('codex-curated-skill:') || false
+}
+
+function normalizeCodexLocalPath(value: string) {
+  return value.trim().replace(/^\\\\\?\\/, '').replace(/^['"]|['"]$/g, '')
+}
+
+function isPathInside(targetPath: string, parentPath: string) {
+  const normalizedTarget = path.resolve(targetPath)
+  const normalizedParent = path.resolve(parentPath)
+  return normalizedTarget === normalizedParent || normalizedTarget.startsWith(`${normalizedParent}${path.sep}`)
+}
+
+async function readCodexCuratedSkillCatalog(): Promise<CodexCuratedSkillCatalogEntry[]> {
+  const cachePath = path.join(cliConfig.codex.dataPath, 'vendor_imports', 'skills-curated-cache.json')
+  const vendorRoot = path.join(cliConfig.codex.dataPath, 'vendor_imports', 'skills')
+  const raw = await fs.readFile(cachePath, 'utf8').catch(() => '')
+  if (!raw.trim()) {
+    return []
+  }
+
+  let document: {
+    skills?: Array<Record<string, unknown>>
+  }
+  try {
+    document = JSON.parse(raw) as {
+      skills?: Array<Record<string, unknown>>
+    }
+  } catch {
+    return []
+  }
+
+  const skills = Array.isArray(document.skills) ? document.skills : []
+  const resolved = await Promise.all(
+    skills.map(async (item) => {
+      const name = typeof item.name === 'string' && item.name.trim() ? item.name.trim() : ''
+      const id =
+        (typeof item.id === 'string' && item.id.trim()) ||
+        name
+      const repoPath =
+        (typeof item.repoPath === 'string' && item.repoPath.trim()) ||
+        `skills/.curated/${id}`
+      const sourceRoot = path.join(vendorRoot, repoPath)
+      if (!name || !(await pathExists(sourceRoot))) {
+        return null
+      }
+      return {
+        id,
+        name,
+        description:
+          (typeof item.description === 'string' && item.description.trim()) ||
+          (typeof item.shortDescription === 'string' && item.shortDescription.trim()) ||
+          '',
+        sourceRoot,
+      } satisfies CodexCuratedSkillCatalogEntry
+    })
+  )
+
+  return resolved.filter((item): item is CodexCuratedSkillCatalogEntry => !!item)
+}
+
+async function readBundledCodexCuratedSkillCatalog() {
+  return readBundledCliCatalogFile<BundledCodexCuratedSkillCatalog>('codex-curated-skills.json')
+}
+
+async function readBundledCodexPublicMarketplaceCatalog() {
+  return readBundledCliCatalogFile<BundledPluginMarketplaceCatalog>('codex-public-marketplace.json')
+}
+
+async function readBundledClaudeOfficialMarketplaceCatalog() {
+  return readBundledCliCatalogFile<BundledPluginMarketplaceCatalog>('claude-official-marketplace.json')
+}
+
+function readCodexMarketplaceSources(raw: string) {
+  const parsed = parseTomlDocument(raw)
+  const sources: CodexMarketplaceSource[] = []
+
+  for (const section of parsed.sections) {
+    const match = section.header.match(/^marketplaces\.(.+)$/)
+    if (!match) {
+      continue
+    }
+    const marketplace = match[1].trim()
+    const sourceType = readTomlSectionString(section.lines, 'source_type').trim().toLowerCase()
+    const sourceRoot = normalizeCodexLocalPath(readTomlSectionString(section.lines, 'source'))
+    if (sourceType !== 'local' || !marketplace || !sourceRoot) {
+      continue
+    }
+    sources.push({
+      marketplace,
+      sourceRoot,
+    })
+  }
+
+  return sources
+}
+
+async function listCodexMarketplaceExtensionsFromSource(
+  source: CodexMarketplaceSource,
+  enabledPluginKeys: Set<string>
+) {
+  const manifestPath = path.join(source.sourceRoot, '.agents', 'plugins', 'marketplace.json')
+  const raw = await fs.readFile(manifestPath, 'utf8').catch(() => '')
+  if (!raw.trim()) {
+    return []
+  }
+
+  let document: {
+    plugins?: Array<Record<string, unknown>>
+  }
+  try {
+    document = JSON.parse(raw) as {
+      plugins?: Array<Record<string, unknown>>
+    }
+  } catch {
+    return []
+  }
+
+  const entries: CliExtensionEntry[] = []
+  const plugins = Array.isArray(document.plugins) ? document.plugins : []
+  for (const plugin of plugins) {
+    const sourceValue = plugin.source
+    const relativePath =
+      typeof sourceValue === 'string'
+        ? sourceValue.trim()
+        : sourceValue && typeof sourceValue === 'object' && typeof (sourceValue as Record<string, unknown>).path === 'string'
+          ? ((sourceValue as Record<string, unknown>).path as string).trim()
+          : ''
+    if (!relativePath) {
+      continue
+    }
+
+    const pluginRoot = path.join(source.sourceRoot, relativePath)
+    const pluginManifestPath = path.join(pluginRoot, '.codex-plugin', 'plugin.json')
+    if (!(await pathExists(pluginManifestPath))) {
+      continue
+    }
+
+    const manifest = await readPluginManifest(pluginManifestPath)
+    const meta = resolveCodexPluginMeta(manifest, pluginRoot, source.marketplace)
+    const installed = enabledPluginKeys.has(meta.installKey)
+    const pluginId = normalizeCliExtensionId('codex', 'plugin', meta.pluginName, meta.installKey)
+    entries.push({
+      id: pluginId,
+      client: 'codex',
+      kind: 'plugin',
+      name: meta.manifestName,
+      description: meta.description,
+      path: pluginRoot,
+      source: source.marketplace,
+      marketplace: source.marketplace,
+      installed,
+      official: meta.official,
+      installable: !installed,
+      installKey: meta.installKey,
+    })
+
+    const skillsDir = path.join(pluginRoot, 'skills')
+    if (await pathExists(skillsDir)) {
+      entries.push(...await listSkillEntriesFromRoot({
+        client: 'codex',
+        root: skillsDir,
+        sourceLabel: meta.manifestName,
+        marketplace: source.marketplace,
+        installed,
+        official: meta.official,
+        installable: !installed,
+        installKey: meta.installKey,
+        parentPluginId: pluginId,
+        parentPluginName: meta.manifestName,
+        relativeRootForFallback: skillsDir,
+      }))
+    }
+  }
+
+  return entries
+}
+
+async function listCodexCachedExtensions(enabledPluginKeys: Set<string>) {
+  const pluginsCacheRoot = path.join(cliConfig.codex.dataPath, 'plugins', 'cache')
+  const entries: CliExtensionEntry[] = []
+  if (!(await pathExists(pluginsCacheRoot))) {
+    return entries
+  }
+
   const manifestPaths = await walkFiles(
-    pluginsRoot,
+    pluginsCacheRoot,
     (filePath) =>
       path.basename(filePath).toLowerCase() === 'plugin.json' &&
       filePath.toLowerCase().includes(`${path.sep}.codex-plugin${path.sep}`.toLowerCase())
   )
 
+  for (const manifestPath of manifestPaths) {
+    const pluginRoot = path.dirname(path.dirname(manifestPath))
+    const marketplace = path.relative(pluginsCacheRoot, pluginRoot).split(/[\\/]/).filter(Boolean)[0] || 'cache'
+    const manifest = await readPluginManifest(manifestPath)
+    const meta = resolveCodexPluginMeta(manifest, pluginRoot, marketplace)
+    const installed = enabledPluginKeys.has(meta.installKey)
+    const pluginId = normalizeCliExtensionId('codex', 'plugin', meta.pluginName, meta.installKey)
+    entries.push({
+      id: pluginId,
+      client: 'codex',
+      kind: 'plugin',
+      name: meta.manifestName,
+      description: meta.description,
+      path: pluginRoot,
+      source: marketplace,
+      marketplace,
+      installed,
+      official: meta.official,
+      installable: !installed,
+      installKey: meta.installKey,
+    })
+
+    const skillsDir = path.join(pluginRoot, 'skills')
+    if (await pathExists(skillsDir)) {
+      entries.push(...await listSkillEntriesFromRoot({
+        client: 'codex',
+        root: skillsDir,
+        sourceLabel: meta.manifestName,
+        marketplace,
+        installed,
+        official: meta.official,
+        installable: !installed,
+        installKey: meta.installKey,
+        parentPluginId: pluginId,
+        parentPluginName: meta.manifestName,
+        relativeRootForFallback: skillsDir,
+      }))
+    }
+  }
+
+  return entries
+}
+
+async function listSkillEntriesFromRoot(options: {
+  client: CliClient
+  root: string
+  sourceLabel: string
+  marketplace?: string
+  installed: boolean
+  official: boolean
+  installable: boolean
+  installKey?: string
+  parentPluginId?: string
+  parentPluginName?: string
+  relativeRootForFallback?: string
+}) {
+  const files = await walkFiles(options.root, (filePath) => path.basename(filePath).toUpperCase() === 'SKILL.MD')
   const entries = await Promise.all(
-    manifestPaths.map(async (manifestPath) => {
-      const manifest = await readPluginManifest(manifestPath)
-      const installRoot = path.dirname(path.dirname(manifestPath))
-      const interfaceSection =
-        manifest && typeof manifest.interface === 'object' && manifest.interface
-          ? (manifest.interface as Record<string, unknown>)
-          : null
-      const manifestName =
-        (interfaceSection && typeof interfaceSection.displayName === 'string' && interfaceSection.displayName.trim()) ||
-        (manifest && typeof manifest.name === 'string' && manifest.name.trim()) ||
-        path.basename(installRoot)
-      const description =
-        (interfaceSection && typeof interfaceSection.shortDescription === 'string' && interfaceSection.shortDescription.trim()) ||
-        (manifest && typeof manifest.description === 'string' && manifest.description.trim()) ||
-        ''
-      const relativeRoot = path.relative(pluginsRoot, installRoot)
-      const source = relativeRoot.split(/[\\/]/).filter(Boolean).slice(0, 2).join(' / ')
+    files.map(async (filePath) => {
+      const raw = await fs.readFile(filePath, 'utf8').catch(() => '')
+      const meta = parseMarkdownFrontmatterMeta(raw)
+      const relativePath = path.relative(options.relativeRootForFallback || options.root, filePath)
+      const skillRoot = path.dirname(filePath)
+      const fallbackName = relativePath.split(/[\\/]/).filter(Boolean).at(-2) || path.basename(skillRoot)
       return {
-        id: normalizeCliExtensionId('codex', 'plugin', manifestName, installRoot),
-        client: 'codex' as const,
-        kind: 'plugin' as const,
-        name: manifestName,
-        description,
-        path: installRoot,
-        source: source || 'plugin',
+        id: normalizeCliExtensionId(options.client, 'skill', meta.name || fallbackName, skillRoot),
+        client: options.client,
+        kind: 'skill' as const,
+        name: meta.name || fallbackName,
+        description: meta.description,
+        path: skillRoot,
+        source: options.sourceLabel,
+        marketplace: options.marketplace,
+        installed: options.installed,
+        official: options.official,
+        installable: options.installable,
+        installKey: options.installKey,
+        parentPluginId: options.parentPluginId,
+        parentPluginName: options.parentPluginName,
       } satisfies CliExtensionEntry
     })
   )
 
-  const unique = new Map<string, CliExtensionEntry>()
-  for (const item of entries) {
-    if (!unique.has(item.id)) {
-      unique.set(item.id, item)
-    }
-  }
-  return [...unique.values()].sort((left, right) => left.name.localeCompare(right.name))
+  return entries
 }
 
-async function listClaudeCommands(): Promise<CliExtensionEntry[]> {
-  const commandsRoot = path.join(cliConfig.claude.dataPath, 'commands')
-  const files = await walkFiles(commandsRoot, (filePath) => path.extname(filePath).toLowerCase() === '.md')
+async function listCommandEntriesFromRoot(options: {
+  root: string
+  sourceLabel: string
+  marketplace?: string
+  installed: boolean
+  official: boolean
+  installable: boolean
+  installKey?: string
+  parentPluginId?: string
+  parentPluginName?: string
+}) {
+  const files = await walkFiles(options.root, (filePath) => path.extname(filePath).toLowerCase() === '.md')
   const entries = await Promise.all(
     files.map(async (filePath) => {
       const raw = await fs.readFile(filePath, 'utf8').catch(() => '')
@@ -2051,66 +2413,796 @@ async function listClaudeCommands(): Promise<CliExtensionEntry[]> {
         name: commandName,
         description: meta.description,
         path: filePath,
-        source: 'user',
+        source: options.sourceLabel,
+        marketplace: options.marketplace,
+        installed: options.installed,
+        official: options.official,
+        installable: options.installable,
+        installKey: options.installKey,
+        parentPluginId: options.parentPluginId,
+        parentPluginName: options.parentPluginName,
       } satisfies CliExtensionEntry
     })
   )
 
-  return entries.sort((left, right) => left.name.localeCompare(right.name))
+  return entries
 }
 
-async function listClaudePlugins(): Promise<CliExtensionEntry[]> {
+function resolveCodexPluginMeta(
+  manifest: Record<string, unknown> | null,
+  pluginRoot: string,
+  marketplace: string
+) {
+  const interfaceSection =
+    manifest && typeof manifest.interface === 'object' && manifest.interface
+      ? (manifest.interface as Record<string, unknown>)
+      : null
+  const authorSection =
+    manifest && typeof manifest.author === 'object' && manifest.author
+      ? (manifest.author as Record<string, unknown>)
+      : null
+  const manifestName =
+    (interfaceSection && typeof interfaceSection.displayName === 'string' && interfaceSection.displayName.trim()) ||
+    (manifest && typeof manifest.name === 'string' && manifest.name.trim()) ||
+    path.basename(pluginRoot)
+  const pluginName =
+    (manifest && typeof manifest.name === 'string' && manifest.name.trim()) || manifestName
+  const description =
+    (interfaceSection && typeof interfaceSection.shortDescription === 'string' && interfaceSection.shortDescription.trim()) ||
+    (manifest && typeof manifest.description === 'string' && manifest.description.trim()) ||
+    ''
+  const authorName =
+    (interfaceSection && typeof interfaceSection.developerName === 'string' && interfaceSection.developerName.trim()) ||
+    (authorSection && typeof authorSection.name === 'string' && authorSection.name.trim()) ||
+    ''
+
+  return {
+    manifestName,
+    pluginName,
+    description,
+    authorName,
+    official: isOfficialAuthorName(authorName),
+    installKey: `${pluginName}@${marketplace}`,
+  }
+}
+
+async function listCodexExtensions(): Promise<CliExtensionEntry[]> {
+  const configRaw = await fs.readFile(cliConfig.codex.configPath, 'utf8').catch(() => '')
+  const enabledPluginKeys = readCodexEnabledPluginKeys(configRaw)
+  const skillsRoot = path.join(cliConfig.codex.dataPath, 'skills')
+  const entries: CliExtensionEntry[] = []
+  const curatedCatalog = await readCodexCuratedSkillCatalog()
+  const bundledCuratedCatalog = await readBundledCodexCuratedSkillCatalog()
+  const curatedByKey = curatedCatalog.reduce<Map<string, CodexCuratedSkillCatalogEntry>>((map, item) => {
+    map.set(normalizeCliInstallName(item.name), item)
+    map.set(normalizeCliInstallName(path.basename(item.sourceRoot)), item)
+    return map
+  }, new Map())
+  const installedCuratedKeys = new Set<string>()
+
+  if (await pathExists(skillsRoot)) {
+    const localSkillEntries = await listSkillEntriesFromRoot({
+      client: 'codex',
+      root: skillsRoot,
+      sourceLabel: '本地技能',
+      installed: true,
+      official: false,
+      installable: false,
+      relativeRootForFallback: skillsRoot,
+    })
+    for (const entry of localSkillEntries) {
+      if (entry.path.toLowerCase().includes(`${path.sep}.system${path.sep}`.toLowerCase())) {
+        entry.source = '系统'
+        entry.official = true
+        continue
+      }
+
+      const curated =
+        curatedByKey.get(normalizeCliInstallName(entry.name)) ||
+        curatedByKey.get(normalizeCliInstallName(path.basename(entry.path)))
+      if (curated) {
+        entry.source = '官方技能'
+        entry.official = true
+        entry.installKey = buildCodexCuratedSkillInstallKey(curated.name)
+        installedCuratedKeys.add(normalizeCliInstallName(curated.name))
+      }
+    }
+    entries.push(...localSkillEntries)
+  }
+
+  for (const curated of curatedCatalog) {
+    const curatedKey = normalizeCliInstallName(curated.name)
+    if (installedCuratedKeys.has(curatedKey)) {
+      continue
+    }
+    entries.push({
+      id: normalizeCliExtensionId('codex', 'skill', curated.name, curated.sourceRoot),
+      client: 'codex',
+      kind: 'skill',
+      name: curated.name,
+      description: curated.description,
+      path: curated.sourceRoot,
+      source: '官方技能',
+      installed: false,
+      official: true,
+      installable: true,
+      installKey: buildCodexCuratedSkillInstallKey(curated.name),
+    })
+  }
+
+  if (bundledCuratedCatalog) {
+    entries.push(
+      ...buildBundledCodexCuratedSkillEntries(
+        bundledCuratedCatalog,
+        installedCuratedKeys
+      )
+    )
+  }
+
+  for (const source of readCodexMarketplaceSources(configRaw)) {
+    entries.push(...await listCodexMarketplaceExtensionsFromSource(source, enabledPluginKeys))
+  }
+
+  const bundledPublicMarketplace = await readBundledCodexPublicMarketplaceCatalog()
+  if (bundledPublicMarketplace) {
+    entries.push(...buildBundledMarketplaceEntries('codex', bundledPublicMarketplace, enabledPluginKeys))
+  }
+
+  entries.push(...await listCodexCachedExtensions(enabledPluginKeys))
+
+  return entries
+}
+
+async function readInstalledClaudePluginsDocument() {
   const registryPath = path.join(cliConfig.claude.dataPath, 'plugins', 'installed_plugins.json')
   const raw = await fs.readFile(registryPath, 'utf8').catch(() => '')
   if (!raw.trim()) {
-    return []
+    return {
+      registryPath,
+      document: {
+        version: 2,
+        plugins: {},
+      } satisfies ClaudeInstalledPluginsDocument,
+    }
   }
 
-  let parsed: ClaudeInstalledPluginsDocument
   try {
-    parsed = JSON.parse(raw) as ClaudeInstalledPluginsDocument
+    return {
+      registryPath,
+      document: JSON.parse(raw) as ClaudeInstalledPluginsDocument,
+    }
   } catch {
-    return []
+    return {
+      registryPath,
+      document: {
+        version: 2,
+        plugins: {},
+      } satisfies ClaudeInstalledPluginsDocument,
+    }
+  }
+}
+
+async function listClaudeInstalledExtensions() {
+  const entries: CliExtensionEntry[] = []
+  const commandsRoot = path.join(cliConfig.claude.dataPath, 'commands')
+  if (await pathExists(commandsRoot)) {
+    entries.push(...await listCommandEntriesFromRoot({
+      root: commandsRoot,
+      sourceLabel: '本地命令',
+      installed: true,
+      official: false,
+      installable: false,
+    }))
   }
 
-  const pluginGroups = parsed.plugins || {}
-  const entries = await Promise.all(
-    Object.entries(pluginGroups).flatMap(([pluginKey, installs]) =>
-      installs.map(async (installInfo, index) => {
-        const installRoot = installInfo.installPath?.trim() || ''
-        if (!installRoot) {
+  const { document } = await readInstalledClaudePluginsDocument()
+  const pluginGroups = document.plugins || {}
+  for (const [pluginKey, installs] of Object.entries(pluginGroups)) {
+    for (const [index, installInfo] of installs.entries()) {
+      const installRoot = installInfo.installPath?.trim() || ''
+      if (!installRoot) {
+        continue
+      }
+      const manifest = await readPluginManifest(path.join(installRoot, '.claude-plugin', 'plugin.json'))
+      const authorSection =
+        manifest && typeof manifest.author === 'object' && manifest.author
+          ? (manifest.author as Record<string, unknown>)
+          : null
+      const manifestName =
+        (manifest && typeof manifest.name === 'string' && manifest.name.trim()) ||
+        pluginKey.split('@')[0] ||
+        path.basename(installRoot)
+      const description =
+        (manifest && typeof manifest.description === 'string' && manifest.description.trim()) || ''
+      const authorName =
+        (authorSection && typeof authorSection.name === 'string' && authorSection.name.trim()) || ''
+      const [pluginName, marketplace = 'installed'] = pluginKey.split('@')
+      const pluginId = normalizeCliExtensionId('claude', 'plugin', `${pluginName}:${index}`, installRoot)
+      entries.push({
+        id: pluginId,
+        client: 'claude',
+        kind: 'plugin',
+        name: manifestName,
+        description,
+        path: installRoot,
+        source: pluginKey,
+        marketplace,
+        installed: true,
+        official: isOfficialAuthorName(authorName),
+        installable: false,
+        installKey: pluginKey,
+      })
+
+      const skillsDir = path.join(installRoot, 'skills')
+      if (await pathExists(skillsDir)) {
+        entries.push(...await listSkillEntriesFromRoot({
+          client: 'claude',
+          root: skillsDir,
+          sourceLabel: manifestName,
+          marketplace,
+          installed: true,
+          official: isOfficialAuthorName(authorName),
+          installable: false,
+          installKey: pluginKey,
+          parentPluginId: pluginId,
+          parentPluginName: manifestName,
+          relativeRootForFallback: skillsDir,
+        }))
+      }
+
+      const pluginCommandsDir = path.join(installRoot, 'commands')
+      if (await pathExists(pluginCommandsDir)) {
+        entries.push(...await listCommandEntriesFromRoot({
+          root: pluginCommandsDir,
+          sourceLabel: manifestName,
+          marketplace,
+          installed: true,
+          official: isOfficialAuthorName(authorName),
+          installable: false,
+          installKey: pluginKey,
+          parentPluginId: pluginId,
+          parentPluginName: manifestName,
+        }))
+      }
+    }
+  }
+
+  return entries
+}
+
+async function listClaudeMarketplaceExtensions() {
+  const marketplacesRoot = path.join(cliConfig.claude.dataPath, 'plugins', 'marketplaces')
+  const { document } = await readInstalledClaudePluginsDocument()
+  const installedPluginKeys = new Set(Object.keys(document.plugins || {}))
+  const entries: CliExtensionEntry[] = []
+  if (await pathExists(marketplacesRoot)) {
+    const marketplaceNames = await fs.readdir(marketplacesRoot).catch(() => [] as string[])
+
+    for (const marketplaceName of marketplaceNames) {
+      const marketplaceRoot = path.join(marketplacesRoot, marketplaceName)
+      const marketplaceManifestPath = path.join(marketplaceRoot, '.claude-plugin', 'marketplace.json')
+      if (!(await pathExists(marketplaceManifestPath))) {
+        continue
+      }
+      const raw = await fs.readFile(marketplaceManifestPath, 'utf8').catch(() => '')
+      if (!raw.trim()) {
+        continue
+      }
+
+      const marketplaceManifest = (() => {
+        try {
+          return JSON.parse(raw) as LocalClaudeMarketplaceManifest
+        } catch {
           return null
         }
+      })()
+      if (!marketplaceManifest?.plugins?.length) {
+        continue
+      }
 
-        const manifestPath = path.join(installRoot, '.claude-plugin', 'plugin.json')
-        const manifest = await readPluginManifest(manifestPath)
-        const manifestName =
-          (manifest && typeof manifest.name === 'string' && manifest.name.trim()) ||
-          pluginKey.split('@')[0] ||
-          path.basename(installRoot)
-        const description =
-          (manifest && typeof manifest.description === 'string' && manifest.description.trim()) || ''
-        return {
-          id: normalizeCliExtensionId('claude', 'plugin', `${pluginKey}:${index}`, installRoot),
-          client: 'claude' as const,
-          kind: 'plugin' as const,
-          name: manifestName,
+      for (const plugin of marketplaceManifest.plugins) {
+        const pluginName = typeof plugin.name === 'string' && plugin.name.trim() ? plugin.name.trim() : ''
+        if (!pluginName) {
+          continue
+        }
+        const installKey = `${pluginName}@${marketplaceName}`
+        const installed = installedPluginKeys.has(installKey)
+        const description = typeof plugin.description === 'string' ? plugin.description.trim() : ''
+        const authorSection =
+          typeof plugin.author === 'object' && plugin.author ? (plugin.author as Record<string, unknown>) : null
+        const sourceValue = plugin.source
+        const sourceLabel = `${marketplaceName}`
+        const official =
+          isOfficialAuthorName(authorSection?.name) ||
+          (typeof sourceValue === 'string' && sourceValue.startsWith('./plugins/'))
+        const pluginPathHint =
+          typeof sourceValue === 'string' && sourceValue.trim()
+            ? path.join(marketplaceRoot, sourceValue)
+            : marketplaceRoot
+        const pluginId = normalizeCliExtensionId('claude', 'plugin', pluginName, installKey)
+
+        entries.push({
+          id: pluginId,
+          client: 'claude',
+          kind: 'plugin',
+          name: pluginName,
           description,
-          path: installRoot,
-          source: pluginKey,
-        } satisfies CliExtensionEntry
-      })
-    )
-  )
+          path: pluginPathHint,
+          source: sourceLabel,
+          marketplace: marketplaceName,
+          installed,
+          official,
+          installable: !installed,
+          installKey,
+        })
 
-  const filteredEntries: CliExtensionEntry[] = entries.filter((item) => item !== null)
-  return filteredEntries.sort((left, right) => left.name.localeCompare(right.name))
+        if (installed) {
+          continue
+        }
+
+        if (typeof sourceValue !== 'string' || !sourceValue.startsWith('./')) {
+          continue
+        }
+
+        const sourceRoot = path.join(marketplaceRoot, sourceValue)
+        const skillsDir = path.join(sourceRoot, 'skills')
+        if (await pathExists(skillsDir)) {
+          entries.push(...await listSkillEntriesFromRoot({
+            client: 'claude',
+            root: skillsDir,
+            sourceLabel: pluginName,
+            marketplace: marketplaceName,
+            installed: false,
+            official,
+            installable: true,
+            installKey,
+            parentPluginId: pluginId,
+            parentPluginName: pluginName,
+            relativeRootForFallback: skillsDir,
+          }))
+        }
+
+        const commandsDir = path.join(sourceRoot, 'commands')
+        if (await pathExists(commandsDir)) {
+          entries.push(...await listCommandEntriesFromRoot({
+            root: commandsDir,
+            sourceLabel: pluginName,
+            marketplace: marketplaceName,
+            installed: false,
+            official,
+            installable: true,
+            installKey,
+            parentPluginId: pluginId,
+            parentPluginName: pluginName,
+          }))
+        }
+      }
+    }
+  }
+
+  const bundledOfficialMarketplace = await readBundledClaudeOfficialMarketplaceCatalog()
+  if (bundledOfficialMarketplace) {
+    entries.push(...buildBundledMarketplaceEntries('claude', bundledOfficialMarketplace, installedPluginKeys))
+  }
+
+  return entries
 }
 
 async function listCliExtensions(client: CliClient): Promise<CliExtensionEntry[]> {
-  return client === 'codex'
-    ? [...await listCodexSkills(), ...await listCodexPlugins()]
-    : [...await listClaudeCommands(), ...await listClaudePlugins()]
+  const entries = client === 'codex'
+    ? await listCodexExtensions()
+    : [...await listClaudeInstalledExtensions(), ...await listClaudeMarketplaceExtensions()]
+
+  const unique = new Map<string, CliExtensionEntry>()
+  for (const item of entries) {
+    const dedupeKey = buildCliExtensionDedupeKey(item)
+    const existing = unique.get(dedupeKey)
+    if (!existing) {
+      unique.set(dedupeKey, item)
+      continue
+    }
+    const existingInstalled = existing.installed !== false
+    const itemInstalled = item.installed !== false
+    const existingInCache = isPathInside(existing.path, path.join(cliConfig.codex.dataPath, 'plugins', 'cache'))
+    const itemInCache = isPathInside(item.path, path.join(cliConfig.codex.dataPath, 'plugins', 'cache'))
+    if (!existingInstalled && itemInstalled) {
+      unique.set(dedupeKey, item)
+      continue
+    }
+    if (existingInstalled === itemInstalled && !existingInCache && itemInCache) {
+      unique.set(dedupeKey, item)
+      continue
+    }
+    if (existingInstalled === itemInstalled && !existing.official && !!item.official) {
+      unique.set(dedupeKey, item)
+    }
+  }
+  return [...unique.values()].sort((left, right) => left.name.localeCompare(right.name))
+}
+
+async function installCodexCuratedSkill(entry: CliExtensionEntry): Promise<CliExtensionInstallResult> {
+  const sourceRoot = entry.path.trim()
+  const skillFilePath = path.join(sourceRoot, 'SKILL.md')
+  let resolvedSourceRoot = sourceRoot
+  let tempRoot = ''
+
+  try {
+    if (!resolvedSourceRoot || !(await pathExists(skillFilePath))) {
+      const catalogSource = entry.catalogSource
+      if (!catalogSource?.repoUrl || !catalogSource.subdir) {
+        return {
+          success: false,
+          message: '未找到可安装的官方技能目录。',
+        }
+      }
+      tempRoot = path.join(os.tmpdir(), 'oneapi-codex-skill-install', randomUUID())
+      resolvedSourceRoot = await cloneGitRepoSubdir(catalogSource.repoUrl, tempRoot, {
+        ref: catalogSource.sha || catalogSource.ref,
+        subdir: catalogSource.subdir,
+      })
+    }
+
+    const targetDirName = path.basename(resolvedSourceRoot)
+    const targetRoot = path.join(cliConfig.codex.dataPath, 'skills', targetDirName)
+    await fs.rm(targetRoot, { recursive: true, force: true })
+    await fs.mkdir(path.dirname(targetRoot), { recursive: true })
+    await fs.cp(resolvedSourceRoot, targetRoot, { recursive: true })
+  } finally {
+    if (tempRoot) {
+      await fs.rm(tempRoot, { recursive: true, force: true }).catch(() => undefined)
+    }
+  }
+  return {
+    success: true,
+    message: '安装完成。下次发送消息时将自动生效，无需重启当前客户端。',
+  }
+}
+
+async function installCodexMarketplacePlugin(entry: CliExtensionEntry): Promise<CliExtensionInstallResult> {
+  const installKey = entry.installKey?.trim() || ''
+  if (!installKey) {
+    return {
+      success: false,
+      message: '缺少可安装的插件标识。',
+    }
+  }
+
+  let sourceRoot = entry.path.trim()
+  const cacheRoot = path.join(cliConfig.codex.dataPath, 'plugins', 'cache')
+  let tempRoot = ''
+  try {
+    const manifestPath = path.join(sourceRoot, '.codex-plugin', 'plugin.json')
+    if (!sourceRoot || !(await pathExists(manifestPath))) {
+      const catalogSource = entry.catalogSource
+      if (!catalogSource?.repoUrl || !catalogSource.subdir) {
+        return {
+          success: false,
+          message: '未找到可安装的插件目录。',
+        }
+      }
+      tempRoot = path.join(os.tmpdir(), 'oneapi-codex-plugin-install', randomUUID())
+      sourceRoot = await cloneGitRepoSubdir(catalogSource.repoUrl, tempRoot, {
+        ref: catalogSource.sha || catalogSource.ref,
+        subdir: catalogSource.subdir,
+      })
+    }
+
+    if (sourceRoot && !isPathInside(sourceRoot, cacheRoot)) {
+      const manifest = await readPluginManifest(path.join(sourceRoot, '.codex-plugin', 'plugin.json'))
+      const pluginName =
+        (manifest && typeof manifest.name === 'string' && manifest.name.trim()) ||
+        installKey.split('@')[0] ||
+        path.basename(sourceRoot)
+      const versionToken =
+        (entry.catalogSource?.sha?.trim()) ||
+        (manifest && typeof manifest.version === 'string' && manifest.version.trim()) ||
+        path.basename(sourceRoot) ||
+        `${Date.now()}`
+      const marketplace = entry.marketplace?.trim() || installKey.split('@')[1] || 'marketplace'
+      const installPath = path.join(cacheRoot, marketplace, pluginName, versionToken)
+      await fs.rm(installPath, { recursive: true, force: true })
+      await fs.mkdir(path.dirname(installPath), { recursive: true })
+      await fs.cp(sourceRoot, installPath, { recursive: true })
+    }
+  } finally {
+    if (tempRoot) {
+      await fs.rm(tempRoot, { recursive: true, force: true }).catch(() => undefined)
+    }
+  }
+
+  const currentRaw = await fs.readFile(cliConfig.codex.configPath, 'utf8').catch(() => '')
+  const nextRaw = mergeCodexPluginEnabled(currentRaw, installKey)
+  await fs.mkdir(path.dirname(cliConfig.codex.configPath), { recursive: true })
+  await fs.writeFile(cliConfig.codex.configPath, nextRaw, 'utf8')
+  return {
+    success: true,
+    message: '安装完成。下次发送消息时将自动生效，无需重启当前客户端。',
+  }
+}
+
+function normalizeMarketplaceGitUrl(value: string) {
+  const normalized = value.trim()
+  if (!normalized) {
+    return normalized
+  }
+  if (/^(https?:\/\/|git@)/i.test(normalized)) {
+    return normalized
+  }
+  if (/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(normalized)) {
+    return `https://github.com/${normalized}.git`
+  }
+  return normalized
+}
+
+function isGitCommitish(value: string) {
+  return /^[0-9a-f]{7,40}$/i.test(value.trim())
+}
+
+async function cloneGitRepoSubdir(
+  repoUrl: string,
+  tempRoot: string,
+  options: {
+    ref?: string
+    subdir?: string
+  } = {}
+) {
+  const normalizedUrl = normalizeMarketplaceGitUrl(repoUrl)
+  if (!normalizedUrl) {
+    throw new Error('缺少可用的仓库地址。')
+  }
+
+  const cloneTarget = path.join(tempRoot, 'repo')
+  await fs.mkdir(tempRoot, { recursive: true })
+  const normalizedRef = options.ref?.trim() || ''
+  const cloneArgs = ['clone', '--depth', '1']
+  if (normalizedRef && !isGitCommitish(normalizedRef)) {
+    cloneArgs.push('--branch', normalizedRef)
+  }
+  cloneArgs.push(normalizedUrl, cloneTarget)
+  const cloneResult = await spawnCommandWithHandlers('git', cloneArgs, {
+    timeoutMs: 180000,
+  })
+  if (cloneResult.exitCode !== 0) {
+    throw new Error(cloneResult.stderr.trim() || '克隆仓库失败。')
+  }
+
+  if (normalizedRef && isGitCommitish(normalizedRef)) {
+    const checkoutResult = await spawnCommandWithHandlers('git', ['-C', cloneTarget, 'checkout', normalizedRef], {
+      timeoutMs: 180000,
+    })
+    if (checkoutResult.exitCode !== 0) {
+      throw new Error(checkoutResult.stderr.trim() || '切换仓库版本失败。')
+    }
+  }
+
+  const relativePath = options.subdir?.trim() ? options.subdir.trim() : ''
+  return relativePath ? path.join(cloneTarget, relativePath) : cloneTarget
+}
+
+async function cloneClaudeMarketplaceSource(
+  source: Record<string, unknown>,
+  tempRoot: string
+) {
+  const rawUrl =
+    (typeof source.url === 'string' && source.url.trim()) ||
+    (typeof source.repo === 'string' && source.repo.trim()) ||
+    ''
+  const repoUrl = normalizeMarketplaceGitUrl(rawUrl)
+  if (!repoUrl) {
+    throw new Error('插件源缺少可用的仓库地址。')
+  }
+  const ref =
+    (typeof source.sha === 'string' && source.sha.trim()) ||
+    (typeof source.ref === 'string' && source.ref.trim()) ||
+    ''
+  const relativePath = typeof source.path === 'string' && source.path.trim() ? source.path.trim() : ''
+  return cloneGitRepoSubdir(repoUrl, tempRoot, {
+    ref,
+    subdir: relativePath,
+  })
+}
+
+async function resolveClaudeMarketplacePluginSource(pluginKey: string) {
+  const [pluginName, marketplaceName] = pluginKey.split('@')
+  if (!pluginName || !marketplaceName) {
+    throw new Error('插件安装标识无效。')
+  }
+
+  const marketplaceRoot = path.join(cliConfig.claude.dataPath, 'plugins', 'marketplaces', marketplaceName)
+  const marketplaceManifestPath = path.join(marketplaceRoot, '.claude-plugin', 'marketplace.json')
+  const raw = await fs.readFile(marketplaceManifestPath, 'utf8').catch(() => '')
+  if (!raw.trim()) {
+    throw new Error('未找到插件市场清单。')
+  }
+
+  let marketplaceManifest: LocalClaudeMarketplaceManifest
+  try {
+    marketplaceManifest = JSON.parse(raw) as LocalClaudeMarketplaceManifest
+  } catch {
+    throw new Error('插件市场清单格式无效。')
+  }
+
+  const plugin = marketplaceManifest.plugins?.find((item) => {
+    const name = typeof item.name === 'string' ? item.name.trim() : ''
+    return name === pluginName
+  })
+  if (!plugin) {
+    throw new Error('未在插件市场中找到目标插件。')
+  }
+
+  const rawSource = plugin.source
+  if (typeof rawSource === 'string' && rawSource.trim()) {
+    const sourceRoot = path.join(marketplaceRoot, rawSource)
+    return {
+      plugin,
+      pluginName,
+      marketplaceName,
+      sourceRoot,
+      versionToken:
+        (typeof plugin.version === 'string' && plugin.version.trim()) ||
+        path.basename(sourceRoot) ||
+        'local',
+    }
+  }
+
+  if (rawSource && typeof rawSource === 'object') {
+    const sourceSpec = rawSource as Record<string, unknown>
+    const tempRoot = path.join(os.tmpdir(), 'oneapi-claude-plugin-install', randomUUID())
+    const sourceRoot = await cloneClaudeMarketplaceSource(sourceSpec, tempRoot)
+    return {
+      plugin,
+      pluginName,
+      marketplaceName,
+      sourceRoot,
+      tempRoot,
+      versionToken:
+        (typeof sourceSpec.sha === 'string' && sourceSpec.sha.trim()) ||
+        (typeof plugin.version === 'string' && plugin.version.trim()) ||
+        (typeof sourceSpec.ref === 'string' && sourceSpec.ref.trim()) ||
+        `${Date.now()}`,
+    }
+  }
+
+  throw new Error('当前插件源不支持自动安装。')
+}
+
+async function resolveClaudeMarketplacePluginSourceFromCatalogEntry(entry: CliExtensionEntry) {
+  const installKey = entry.installKey?.trim() || ''
+  const [pluginName, marketplaceName] = installKey.split('@')
+  const catalogSource = entry.catalogSource
+  if (!pluginName || !marketplaceName || !catalogSource?.repoUrl) {
+    return null
+  }
+
+  const rawSource = catalogSource.rawSource
+  if (typeof rawSource === 'string' && rawSource.trim()) {
+    const tempRoot = path.join(os.tmpdir(), 'oneapi-claude-plugin-install', randomUUID())
+    const sourceRoot = await cloneGitRepoSubdir(catalogSource.repoUrl, tempRoot, {
+      ref: catalogSource.sha || catalogSource.ref,
+      subdir: catalogSource.subdir || rawSource,
+    })
+    return {
+      pluginName,
+      marketplaceName,
+      sourceRoot,
+      tempRoot,
+      versionToken: catalogSource.sha || catalogSource.ref || `${Date.now()}`,
+    }
+  }
+
+  if (rawSource && typeof rawSource === 'object') {
+    const tempRoot = path.join(os.tmpdir(), 'oneapi-claude-plugin-install', randomUUID())
+    const sourceRoot = await cloneClaudeMarketplaceSource(rawSource as Record<string, unknown>, tempRoot)
+    const sourceSpec = rawSource as Record<string, unknown>
+    return {
+      pluginName,
+      marketplaceName,
+      sourceRoot,
+      tempRoot,
+      versionToken:
+        (typeof sourceSpec.sha === 'string' && sourceSpec.sha.trim()) ||
+        (typeof sourceSpec.ref === 'string' && sourceSpec.ref.trim()) ||
+        catalogSource.sha ||
+        catalogSource.ref ||
+        `${Date.now()}`,
+    }
+  }
+
+  return null
+}
+
+async function installClaudeMarketplacePlugin(entry: CliExtensionEntry): Promise<CliExtensionInstallResult> {
+  const installKey = entry.installKey?.trim() || ''
+  if (!installKey) {
+    return {
+      success: false,
+      message: '缺少可安装的插件标识。',
+    }
+  }
+
+  const resolved =
+    (await resolveClaudeMarketplacePluginSourceFromCatalogEntry(entry)) ||
+    (await resolveClaudeMarketplacePluginSource(installKey))
+  const installPath = path.join(
+    cliConfig.claude.dataPath,
+    'plugins',
+    'cache',
+    resolved.marketplaceName,
+    resolved.pluginName,
+    resolved.versionToken
+  )
+
+  try {
+    await fs.rm(installPath, { recursive: true, force: true })
+    await fs.mkdir(path.dirname(installPath), { recursive: true })
+    await fs.cp(resolved.sourceRoot, installPath, { recursive: true })
+  } finally {
+    if (resolved.tempRoot) {
+      await fs.rm(resolved.tempRoot, { recursive: true, force: true }).catch(() => undefined)
+    }
+  }
+
+  const { registryPath, document } = await readInstalledClaudePluginsDocument()
+  const currentInstalls = document.plugins?.[installKey] || []
+  const nextInstall: ClaudeMarketplaceInstallInfo = {
+    scope: 'user',
+    installPath,
+    version: resolved.versionToken,
+    installedAt: new Date().toISOString(),
+    lastUpdated: new Date().toISOString(),
+    gitCommitSha: resolved.versionToken,
+  }
+  const nextDocument: ClaudeInstalledPluginsDocument = {
+    version: document.version || 2,
+    plugins: {
+      ...(document.plugins || {}),
+      [installKey]: [nextInstall, ...currentInstalls.filter((item) => item.installPath !== installPath)],
+    },
+  }
+  await fs.mkdir(path.dirname(registryPath), { recursive: true })
+  await fs.writeFile(registryPath, JSON.stringify(nextDocument, null, 2), 'utf8')
+
+  return {
+    success: true,
+    message: '安装完成。下次发送消息时将自动生效，无需重启当前客户端。',
+  }
+}
+
+async function installCliExtension(request: CliExtensionInstallRequest): Promise<CliExtensionInstallResult> {
+  const currentEntries = await listCliExtensions(request.client)
+  const entry = currentEntries.find((item) => item.id === request.extensionId)
+  if (!entry) {
+    return {
+      success: false,
+      message: '未找到目标技能或插件。',
+    }
+  }
+
+  const installTarget =
+    (entry.parentPluginId && currentEntries.find((item) => item.id === entry.parentPluginId)) ||
+    entry
+
+  if (installTarget.installed !== false) {
+    return {
+      success: true,
+      message: '该技能或插件已经可用。',
+    }
+  }
+
+  if (!installTarget.installable || !installTarget.installKey) {
+    return {
+      success: false,
+      message: '当前条目不支持直接安装。',
+    }
+  }
+
+  if (request.client === 'codex') {
+    return isCodexCuratedSkillInstallKey(installTarget.installKey)
+      ? installCodexCuratedSkill(installTarget)
+      : installCodexMarketplacePlugin(installTarget)
+  }
+
+  return installClaudeMarketplacePlugin(installTarget)
 }
 
 async function readJsonLines(filePath: string) {
@@ -2820,9 +3912,14 @@ function mergeFileChanges(left: CliFileChange[], right: CliFileChange[]) {
   })
 }
 
-function parseCodexSession(lines: string[]): { messages: CliSessionMessage[]; fileChanges: CliFileChange[] } {
+function parseCodexSession(lines: string[]): {
+  messages: CliSessionMessage[]
+  fileChanges: CliFileChange[]
+  plan: CliPlanState | null
+} {
   const messages: CliSessionMessage[] = []
   const fileChanges: CliFileChange[] = []
+  const planRecords: Array<Record<string, unknown>> = []
 
   for (const [index, line] of lines.entries()) {
     try {
@@ -2839,6 +3936,8 @@ function parseCodexSession(lines: string[]): { messages: CliSessionMessage[]; fi
         }
         changes?: Record<string, { type?: string; unified_diff?: string }>
       }
+
+      planRecords.push(parsed as Record<string, unknown>)
 
       if (parsed.changes && typeof parsed.changes === 'object') {
         for (const [pathName, change] of Object.entries(parsed.changes)) {
@@ -2896,6 +3995,7 @@ function parseCodexSession(lines: string[]): { messages: CliSessionMessage[]; fi
   return {
     messages: uniqueMessages(messages),
     fileChanges: mergeFileChanges([], fileChanges),
+    plan: buildCodexPlanStateFromRecords(planRecords),
   }
 }
 
@@ -2998,6 +4098,7 @@ async function getCodexSession(sessionId: string): Promise<CliSessionDetails | n
       fileChanges: message.role === 'assistant' ? parsedSession.fileChanges : undefined,
     })),
     fileChanges: parsedSession.fileChanges,
+    plan: parsedSession.plan,
   }
 }
 
@@ -3085,9 +4186,14 @@ async function getClaudeSessionFile(sessionId: string) {
   return files[0] ?? ''
 }
 
-function parseClaudeSession(lines: string[]): { messages: CliSessionMessage[]; fileChanges: CliFileChange[] } {
+function parseClaudeSession(lines: string[]): {
+  messages: CliSessionMessage[]
+  fileChanges: CliFileChange[]
+  plan: CliPlanState | null
+} {
   const messages: CliSessionMessage[] = []
   const fileChanges: CliFileChange[] = []
+  const planRecords: Array<Record<string, unknown>> = []
 
   for (const [index, line] of lines.entries()) {
     try {
@@ -3109,6 +4215,8 @@ function parseClaudeSession(lines: string[]): { messages: CliSessionMessage[]; f
           structuredPatch?: string
         }
       }
+
+      planRecords.push(parsed as Record<string, unknown>)
 
       if (parsed.type !== 'user' && parsed.type !== 'assistant') {
         continue
@@ -3164,6 +4272,7 @@ function parseClaudeSession(lines: string[]): { messages: CliSessionMessage[]; f
   return {
     messages: uniqueMessages(messages),
     fileChanges: mergeFileChanges([], fileChanges),
+    plan: buildClaudePlanStateFromRecords(planRecords),
   }
 }
 
@@ -3202,6 +4311,7 @@ async function getClaudeSession(sessionId: string): Promise<CliSessionDetails | 
       fileChanges: message.role === 'assistant' ? parsedSession.fileChanges : undefined,
     })),
     fileChanges: parsedSession.fileChanges,
+    plan: parsedSession.plan,
   }
 }
 
@@ -3264,6 +4374,7 @@ function createCliProgressEmitter(
         detail?: string
         command?: string
         exitCode?: number
+        plan?: CliPlanState | null
       }
     ) {
       const trimmed = input.message.trim()
@@ -3285,6 +4396,7 @@ function createCliProgressEmitter(
         detail: input.detail,
         command: input.command,
         exitCode: input.exitCode,
+        plan: input.plan,
       } satisfies CliProgressPayload)
     },
     status(
@@ -3292,7 +4404,14 @@ function createCliProgressEmitter(
       sessionId?: string,
       done = false,
       files?: CliFileChange[],
-      options: { logKind?: CliLogKind; sourceKind?: string; detail?: string; command?: string; exitCode?: number } = {}
+      options: {
+        logKind?: CliLogKind
+        sourceKind?: string
+        detail?: string
+        command?: string
+        exitCode?: number
+        plan?: CliPlanState | null
+      } = {}
     ) {
       this.send({ kind: 'status', message, sessionId, done, files, ...options })
     },
@@ -3301,16 +4420,35 @@ function createCliProgressEmitter(
       sessionId?: string,
       done = false,
       files?: CliFileChange[],
-      options: { logKind?: CliLogKind; sourceKind?: string; detail?: string; command?: string; exitCode?: number } = {}
+      options: {
+        logKind?: CliLogKind
+        sourceKind?: string
+        detail?: string
+        command?: string
+        exitCode?: number
+        plan?: CliPlanState | null
+      } = {}
     ) {
-      this.send({ kind: 'error', message, sessionId, done, files, logKind: options.logKind || 'error', sourceKind: options.sourceKind, detail: options.detail, command: options.command, exitCode: options.exitCode })
+      this.send({
+        kind: 'error',
+        message,
+        sessionId,
+        done,
+        files,
+        logKind: options.logKind || 'error',
+        sourceKind: options.sourceKind,
+        detail: options.detail,
+        command: options.command,
+        exitCode: options.exitCode,
+        plan: options.plan,
+      })
     },
-    partial(message: string, sessionId?: string, done = false) {
+    partial(message: string, sessionId?: string, done = false, plan?: CliPlanState | null) {
       if (!message || message === lastPartial) {
         return
       }
       lastPartial = message
-      this.send({ kind: 'partial', message, sessionId, done })
+      this.send({ kind: 'partial', message, sessionId, done, plan })
     },
     intent(message: string, sessionId?: string, detail?: string, files?: CliFileChange[], sourceKind?: string) {
       this.status(message, sessionId, false, files, { logKind: 'intent', detail, sourceKind })
@@ -3329,6 +4467,9 @@ function createCliProgressEmitter(
     },
     result(message: string, sessionId?: string, exitCode?: number, detail?: string, files?: CliFileChange[], sourceKind?: string) {
       this.status(message, sessionId, false, files, { logKind: 'result', exitCode, detail, sourceKind })
+    },
+    plan(message: string, plan: CliPlanState | null, sessionId?: string, sourceKind = 'plan.update') {
+      this.status(message, sessionId, false, undefined, { logKind: 'status', sourceKind, plan })
     },
   }
 }
@@ -3525,6 +4666,7 @@ async function runCodexPrompt(
   const progress = createCliProgressEmitter(webContents, 'codex', input.requestId)
   let sessionId = input.sessionId
   let partialText = ''
+  let planState: CliPlanState | null = null
   const runtimeDiagnostics: CliRuntimeDiagnostics = {}
   const executablePath = await locateExecutable('codex')
   const managedRuntime = await readManagedNodeRuntime()
@@ -3562,17 +4704,23 @@ async function runCodexPrompt(
           ? parsed.payload as Record<string, unknown>
           : null
 
+      const nextPlanState = parseCodexPlanStateFromRecord(parsed)
+      if (nextPlanState) {
+        planState = nextPlanState
+        progress.plan(`计划已更新，共 ${nextPlanState.items.length} 项。`, planState, sessionId, 'plan.update_plan')
+      }
+
       const streamedAssistantText = extractCodexAssistantTextFromEvent(parsed)
       if (streamedAssistantText) {
         partialText = streamedAssistantText
-        progress.partial(partialText, sessionId)
+        progress.partial(partialText, sessionId, false, planState)
       }
 
       if (parsed.type === 'response_item' && payload?.type === 'message' && payload.role === 'assistant') {
         const assistantText = contentPartsToText(payload.content)
         if (assistantText.trim() && !shouldIgnoreCodexMessage(assistantText)) {
           partialText = assistantText
-          progress.partial(partialText, sessionId)
+          progress.partial(partialText, sessionId, false, planState)
         }
       }
 
@@ -3647,7 +4795,7 @@ async function runCodexPrompt(
   if (success) {
     progress.partial(output, sessionId, true)
     progress.result('Codex 已完成本次回复。', sessionId, result.exitCode, output, fileChanges, 'turn.completed')
-    progress.status('Codex 已完成本次回复。', sessionId, true, fileChanges, { logKind: 'status', sourceKind: 'turn.completed' })
+    progress.status('Codex 已完成本次回复。', sessionId, true, fileChanges, { logKind: 'status', sourceKind: 'turn.completed', plan: planState })
     if (!session) {
       progress.status(
         'Codex 已返回结果，但本地会话记录未及时落盘；最近会话可能暂时不可见。',
@@ -3662,13 +4810,14 @@ async function runCodexPrompt(
       )
     }
   } else if (aborted) {
-    progress.status('Codex 已停止本次回复。', sessionId, true, undefined, { logKind: 'status', sourceKind: 'request.aborted' })
+    progress.status('Codex 已停止本次回复。', sessionId, true, undefined, { logKind: 'status', sourceKind: 'request.aborted', plan: planState })
   } else if (result.stderr.trim()) {
     progress.error('Codex 执行失败', sessionId, true, fileChanges, {
       logKind: 'error',
       sourceKind: 'request.failed',
       detail: [result.stderr.trim(), runtimeDiagnostics.probableCause ? `推断原因：${runtimeDiagnostics.probableCause}` : ''].filter(Boolean).join('\n'),
       exitCode: result.exitCode,
+      plan: planState,
     })
   }
 
@@ -3685,6 +4834,7 @@ async function runCodexPrompt(
       threadId: sessionId ?? '',
       usage: usageEvent?.usage ?? null,
       fileChanges,
+      plan: planState,
       diagnostics: runtimeDiagnostics,
     },
   }
@@ -3718,6 +4868,8 @@ async function runClaudePrompt(
   let sessionId = input.sessionId
   let partialText = ''
   let finalResult: Record<string, unknown> | null = null
+  let planState: CliPlanState | null = null
+  const planRecords: Array<Record<string, unknown>> = []
   const runtimeDiagnostics: CliRuntimeDiagnostics = {}
   const executablePath = await locateExecutable('claude')
   const managedRuntime = await readManagedNodeRuntime()
@@ -3747,6 +4899,15 @@ async function runClaudePrompt(
       ) {
         sessionId = parsed.session_id
         progress.intent('已连接到 Claude 会话。', sessionId, 'session.connected', undefined, 'session.connected')
+      }
+
+      const planMutation = parseClaudePlanMutationFromRecord(parsed)
+      if (planMutation) {
+        planRecords.push(parsed)
+        planState = buildClaudePlanStateFromRecords(planRecords)
+        if (planState) {
+          progress.plan(`计划已更新，共 ${planState.items.length} 项。`, planState, sessionId, 'plan.task_update')
+        }
       }
 
       if (parsed.type === 'system') {
@@ -3809,7 +4970,7 @@ async function runClaudePrompt(
           const delta = event.delta as Record<string, unknown>
           if (delta.type === 'text_delta' && typeof delta.text === 'string') {
             partialText += delta.text
-            progress.partial(partialText, sessionId)
+            progress.partial(partialText, sessionId, false, planState)
           }
         }
         return
@@ -3864,7 +5025,7 @@ async function runClaudePrompt(
   if (success) {
     progress.partial(output, sessionId, true)
     progress.result('Claude 已完成本次回复。', sessionId, result.exitCode, output, fileChanges, 'result')
-    progress.status('Claude 已完成本次回复。', sessionId, true, fileChanges, { logKind: 'status', sourceKind: 'result' })
+    progress.status('Claude 已完成本次回复。', sessionId, true, fileChanges, { logKind: 'status', sourceKind: 'result', plan: planState })
     if (!session) {
       progress.status(
         'Claude 已返回结果，但本地会话记录未及时落盘；最近会话可能暂时不可见。',
@@ -3879,13 +5040,14 @@ async function runClaudePrompt(
       )
     }
   } else if (aborted) {
-    progress.status('Claude 已停止本次回复。', sessionId, true, undefined, { logKind: 'status', sourceKind: 'request.aborted' })
+    progress.status('Claude 已停止本次回复。', sessionId, true, undefined, { logKind: 'status', sourceKind: 'request.aborted', plan: planState })
   } else if (result.stderr.trim()) {
     progress.error('Claude 执行失败', sessionId, true, fileChanges, {
       logKind: 'error',
       sourceKind: 'request.failed',
       detail: [result.stderr.trim(), runtimeDiagnostics.probableCause ? `推断原因：${runtimeDiagnostics.probableCause}` : ''].filter(Boolean).join('\n'),
       exitCode: result.exitCode,
+      plan: planState,
     })
   }
 
@@ -3900,6 +5062,7 @@ async function runClaudePrompt(
       ...(finalResult ?? { exitCode: result.exitCode }),
       aborted,
       fileChanges,
+      plan: planState,
       diagnostics: runtimeDiagnostics,
     },
   }
@@ -5017,6 +6180,10 @@ ipcMain.handle('desktop:cli-deploy-preset', async (_event, client: CliClient) =>
 })
 ipcMain.handle('desktop:list-cli-extensions', async (_event, client: CliClient) => {
   return listCliExtensions(client)
+})
+
+ipcMain.handle('desktop:install-cli-extension', async (_event, request: CliExtensionInstallRequest) => {
+  return installCliExtension(request)
 })
 ipcMain.handle('desktop:save-attachment', async (_event, input: DesktopAttachmentSaveRequest) => {
   return saveDesktopAttachment(input)

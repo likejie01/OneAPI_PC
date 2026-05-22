@@ -18,6 +18,8 @@ import type {
   DesktopSaveImageResult,
   CliDeployPreset,
   CliExtensionEntry,
+  CliExtensionInstallRequest,
+  CliExtensionInstallResult,
   DeployProgressPayload,
   DesktopApiRequest,
   DesktopApiResponse,
@@ -134,6 +136,8 @@ contextBridge.exposeInMainWorld('desktopBridge', {
     ipcRenderer.invoke('desktop:cli-deploy-preset', client) as Promise<CliDeployPreset>,
   listCliExtensions: (client: CliClient) =>
     ipcRenderer.invoke('desktop:list-cli-extensions', client) as Promise<CliExtensionEntry[]>,
+  installCliExtension: (input: CliExtensionInstallRequest) =>
+    ipcRenderer.invoke('desktop:install-cli-extension', input) as Promise<CliExtensionInstallResult>,
   onDeployProgress: (listener: (payload: DeployProgressPayload) => void) => {
     const channel = 'desktop:deploy-progress'
     const wrapped = (_event: unknown, payload: DeployProgressPayload) => listener(payload)

@@ -1,4 +1,32 @@
-import type { CliClient, CliExtensionKind } from '../shared/desktop'
+import type { CliClient, CliExtensionEntry, CliExtensionKind, CliSessionMessage } from '../shared/desktop'
+
+export type CliMessageOverlay = Pick<
+  CliSessionMessage,
+  'role' | 'content' | 'attachments' | 'selectedExtensions' | 'requestId'
+>
+
+export type CliExtensionViewItem = CliExtensionEntry & {
+  favorite: boolean
+  note: string
+  displayName: string
+}
+
+export function canUseCliExtension(item: Pick<CliExtensionEntry, 'installed'>) {
+  return item.installed !== false
+}
+
+export function buildCliExtensionDedupeKey(
+  item: Pick<CliExtensionEntry, 'kind' | 'installKey' | 'name' | 'id'>
+) {
+  const normalizedInstallKey = item.installKey?.trim().toLowerCase() || ''
+  if (item.kind === 'plugin' && normalizedInstallKey) {
+    return `plugin:${normalizedInstallKey}`
+  }
+  if ((item.kind === 'skill' || item.kind === 'command') && normalizedInstallKey) {
+    return `${item.kind}:${normalizedInstallKey}:${item.name.trim().toLowerCase()}`
+  }
+  return item.id
+}
 
 export function parseMarkdownFrontmatterMeta(raw: string) {
   const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/)
@@ -51,6 +79,15 @@ export function buildCliExtensionInsertText(input: {
   }
 
   return ''
+}
+
+export function buildCliExtensionDisplayName(name: string, note?: string) {
+  const normalizedName = name.trim()
+  const normalizedNote = (note || '').trim()
+  if (!normalizedNote) {
+    return normalizedName
+  }
+  return `${normalizedName} · ${normalizedNote}`
 }
 
 function containsChinese(value: string) {
@@ -113,6 +150,42 @@ export function translateCliExtensionDescription(name: string, description: stri
   return normalized
 }
 
+export function decorateCliExtensions(
+  entries: CliExtensionEntry[],
+  favoriteIds: string[],
+  noteMap: Record<string, string>
+): CliExtensionViewItem[] {
+  const favoriteIndex = new Map(favoriteIds.map((id, index) => [id, index]))
+
+  return entries
+    .map((item) => {
+      const note = (noteMap[item.id] || '').trim()
+      return {
+        ...item,
+        favorite: favoriteIndex.has(item.id),
+        note,
+        displayName: buildCliExtensionDisplayName(item.name, note),
+      } satisfies CliExtensionViewItem
+    })
+    .sort((left, right) => {
+      const leftInstalled = canUseCliExtension(left) ? 1 : 0
+      const rightInstalled = canUseCliExtension(right) ? 1 : 0
+      if (leftInstalled !== rightInstalled) {
+        return rightInstalled - leftInstalled
+      }
+
+      const leftRank = favoriteIndex.has(left.id) ? 1 : 0
+      const rightRank = favoriteIndex.has(right.id) ? 1 : 0
+      if (leftRank !== rightRank) {
+        return rightRank - leftRank
+      }
+      if (leftRank && rightRank) {
+        return (favoriteIndex.get(left.id) || 0) - (favoriteIndex.get(right.id) || 0)
+      }
+      return left.displayName.localeCompare(right.displayName, 'zh-Hans-CN')
+    })
+}
+
 export function buildCliExtensionPromptBlock(items: Array<{
   client: CliClient
   kind: CliExtensionKind
@@ -150,6 +223,55 @@ export function buildCliExtensionAugmentedPrompt(
     return cleanedPrompt
   }
   return `${extensionBlock}\n\n${cleanedPrompt}`
+}
+
+function buildCliOverlayMatchKey(role: CliSessionMessage['role'], content: string) {
+  return `${role}:${content.replace(/\s+/g, ' ').trim()}`
+}
+
+export function applyCliMessageOverlays<T extends CliSessionMessage>(
+  messages: T[],
+  overlays: CliMessageOverlay[]
+) {
+  const overlayQueues = overlays.reduce<Map<string, CliMessageOverlay[]>>((map, item) => {
+    const key = buildCliOverlayMatchKey(item.role, item.content)
+    const current = map.get(key) || []
+    current.push(item)
+    map.set(key, current)
+    return map
+  }, new Map())
+
+  return messages.map((message) => {
+    const key = buildCliOverlayMatchKey(message.role, message.content)
+    const queue = overlayQueues.get(key)
+    const overlay = queue?.shift()
+    if (!overlay) {
+      return message
+    }
+    return {
+      ...message,
+      attachments: overlay.attachments || message.attachments,
+      selectedExtensions: overlay.selectedExtensions || message.selectedExtensions,
+      requestId: overlay.requestId || message.requestId,
+    }
+  })
+}
+
+export function collectCliToolNames(sourceKinds: Array<string | undefined>) {
+  const seen = new Set<string>()
+  const names: string[] = []
+
+  for (const item of sourceKinds) {
+    const match = item?.match(/tool_use\.([A-Za-z0-9_-]+)/)
+    const toolName = match?.[1]?.trim()
+    if (!toolName || seen.has(toolName)) {
+      continue
+    }
+    seen.add(toolName)
+    names.push(toolName)
+  }
+
+  return names
 }
 
 export function resolveCliSlashTriggerState(value: string, caretIndex: number) {

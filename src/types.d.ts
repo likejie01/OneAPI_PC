@@ -86,6 +86,13 @@ declare global {
       readFilePreview: (targetPath: string) => Promise<DesktopFilePreview>
       getCliDeployPreset: (client: CliClient) => Promise<CliDeployPreset>
       listCliExtensions: (client: CliClient) => Promise<CliExtensionEntry[]>
+      installCliExtension: (input: {
+        client: CliClient
+        extensionId: string
+      }) => Promise<{
+        success: boolean
+        message: string
+      }>
       onDeployProgress: (
         listener: (payload: DeployProgressPayload) => void
       ) => () => void

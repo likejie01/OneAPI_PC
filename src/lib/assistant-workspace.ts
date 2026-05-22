@@ -45,8 +45,10 @@ export type CliTimelineEntry =
       role: 'user' | 'assistant'
       content: string
       createdAt: number
+      requestId?: string
       modelLabel?: string
       attachments?: CliSessionMessage['attachments']
+      selectedExtensions?: CliSessionMessage['selectedExtensions']
       fileChanges?: CliFileChange[]
     }
   | {
@@ -243,8 +245,10 @@ export function buildCliTimeline(input: {
       role: item.role,
       content: item.content,
       createdAt: toTimelineTimestamp(item.createdAt),
+      requestId: item.requestId,
       modelLabel: item.modelLabel,
       attachments: item.attachments,
+      selectedExtensions: item.selectedExtensions,
       fileChanges: item.fileChanges,
     }))
     .sort((left, right) => left.createdAt - right.createdAt)

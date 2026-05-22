@@ -1,8 +1,14 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  applyCliMessageOverlays,
   buildCliExtensionAugmentedPrompt,
+  buildCliExtensionDedupeKey,
+  buildCliExtensionDisplayName,
   buildCliExtensionPromptBlock,
+  canUseCliExtension,
+  collectCliToolNames,
+  decorateCliExtensions,
   buildCliExtensionInsertText,
   resolveCliSlashTriggerState,
   translateCliExtensionDescription,
@@ -137,4 +143,161 @@ test('translateCliExtensionDescription provides Chinese translation text for kno
   )
 
   assert.match(translated, /适用于继续当前项目开发/)
+})
+
+test('buildCliExtensionDisplayName appends note after extension name', () => {
+  assert.equal(buildCliExtensionDisplayName('algorithmic-art', '绘制算法海报'), 'algorithmic-art · 绘制算法海报')
+  assert.equal(buildCliExtensionDisplayName('algorithmic-art', ''), 'algorithmic-art')
+})
+
+test('canUseCliExtension treats explicit uninstalled entries as unavailable', () => {
+  assert.equal(canUseCliExtension({ installed: false }), false)
+  assert.equal(canUseCliExtension({ installed: true }), true)
+  assert.equal(canUseCliExtension({}), true)
+})
+
+test('buildCliExtensionDedupeKey collapses installed and uninstalled variants for the same install target', () => {
+  assert.equal(
+    buildCliExtensionDedupeKey({
+      id: 'skill-installed',
+      kind: 'skill',
+      name: 'playwright',
+      installKey: 'codex-curated-skill:playwright',
+    }),
+    buildCliExtensionDedupeKey({
+      id: 'skill-marketplace',
+      kind: 'skill',
+      name: 'playwright',
+      installKey: 'codex-curated-skill:playwright',
+    })
+  )
+
+  assert.equal(
+    buildCliExtensionDedupeKey({
+      id: 'plugin-installed',
+      kind: 'plugin',
+      name: 'browser',
+      installKey: 'browser@openai-bundled',
+    }),
+    'plugin:browser@openai-bundled'
+  )
+})
+
+test('decorateCliExtensions keeps installed entries ahead of uninstalled entries and applies notes', () => {
+  const resolved = decorateCliExtensions(
+    [
+      {
+        id: 'a',
+        client: 'codex',
+        kind: 'skill',
+        name: 'alpha',
+        description: '',
+        path: 'C:\\alpha',
+      },
+      {
+        id: 'b',
+        client: 'codex',
+        kind: 'skill',
+        name: 'beta',
+        description: '',
+        path: 'C:\\beta',
+        installed: false,
+      },
+      {
+        id: 'c',
+        client: 'codex',
+        kind: 'plugin',
+        name: 'charlie',
+        description: '',
+        path: 'C:\\charlie',
+      },
+    ],
+    ['c', 'a'],
+    {
+      a: '项目默认调试流',
+    }
+  )
+
+  assert.deepEqual(
+    resolved.map((item) => ({
+      id: item.id,
+      favorite: item.favorite,
+      note: item.note,
+      displayName: item.displayName,
+      installed: item.installed,
+    })),
+    [
+      { id: 'c', favorite: true, note: '', displayName: 'charlie', installed: undefined },
+      { id: 'a', favorite: true, note: '项目默认调试流', displayName: 'alpha · 项目默认调试流', installed: undefined },
+      { id: 'b', favorite: false, note: '', displayName: 'beta', installed: false },
+    ]
+  )
+})
+
+test('applyCliMessageOverlays restores attachments and selected extensions onto matching user messages', () => {
+  const restored = applyCliMessageOverlays(
+    [
+      {
+        id: 'm1',
+        role: 'user',
+        content: '请检查构建错误',
+        createdAt: 1,
+      },
+      {
+        id: 'm2',
+        role: 'assistant',
+        content: '我先看一下',
+        createdAt: 2,
+      },
+    ],
+    [
+      {
+        role: 'user',
+        content: '请检查构建错误',
+        requestId: 'req-1',
+        attachments: [
+          {
+            id: 'file-1',
+            name: 'error.log',
+            filePath: 'C:\\tmp\\error.log',
+            kind: 'file',
+          },
+        ],
+        selectedExtensions: [
+          {
+            id: 'skill-1',
+            client: 'codex',
+            kind: 'skill',
+            name: 'superpowers:systematic-debugging',
+            description: '',
+            path: 'C:\\skills\\debug',
+            note: '优先使用',
+          },
+        ],
+      },
+    ]
+  )
+
+  assert.deepEqual(restored[0].attachments, [
+    {
+      id: 'file-1',
+      name: 'error.log',
+      filePath: 'C:\\tmp\\error.log',
+      kind: 'file',
+    },
+  ])
+  assert.equal(restored[0].selectedExtensions?.[0]?.note, '优先使用')
+  assert.equal(restored[0].requestId, 'req-1')
+})
+
+test('collectCliToolNames extracts unique tool names from source kinds', () => {
+  assert.deepEqual(
+    collectCliToolNames([
+      'assistant.tool_use.read_file',
+      'stream.tool_use.edit_file',
+      'assistant.tool_use.read_file',
+      'request.started',
+    ]),
+    ['read_file', 'edit_file']
+  )
 })

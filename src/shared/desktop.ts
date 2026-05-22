@@ -3,6 +3,7 @@ export type CliClient = 'codex' | 'claude'
 export type CliExtensionKind = 'skill' | 'command' | 'plugin'
 export type AssistantHistoryScope = 'chat' | 'draw'
 export type DeployStatus = 'pending' | 'running' | 'success' | 'error'
+export type CliPlanStatus = 'pending' | 'in_progress' | 'completed'
 export type DeployLogKind = 'info' | 'command' | 'stdout' | 'stderr' | 'result'
 import type { ChatCompletionResponse, ChatContentPart } from './contracts'
 export type CliLogKind =
@@ -67,6 +68,7 @@ export interface CliSessionMessage {
   role: 'user' | 'assistant'
   content: string
   createdAt: number
+  requestId?: string
   modelLabel?: string
   sourceFilePath?: string
   sourceLineNumber?: number
@@ -77,6 +79,7 @@ export interface CliSessionMessage {
     filePath: string
     kind: 'image' | 'file'
   }>
+  selectedExtensions?: CliExtensionEntry[]
   files?: CliFileChange[]
   fileChanges?: CliFileChange[]
 }
@@ -88,6 +91,18 @@ export interface CliFileChange {
   diff?: string
 }
 
+export interface CliPlanItem {
+  id: string
+  step: string
+  status: CliPlanStatus
+}
+
+export interface CliPlanState {
+  explanation: string
+  items: CliPlanItem[]
+  updatedAt: number
+}
+
 export interface CliSessionDetails {
   id: string
   client: CliClient
@@ -97,6 +112,7 @@ export interface CliSessionDetails {
   projectPath: string
   messages: CliSessionMessage[]
   fileChanges?: CliFileChange[]
+  plan?: CliPlanState | null
 }
 
 export interface CliStatus {
@@ -119,6 +135,34 @@ export interface CliExtensionEntry {
   description: string
   path: string
   source?: string
+  marketplace?: string
+  installed?: boolean
+  official?: boolean
+  installable?: boolean
+  installKey?: string
+  parentPluginId?: string
+  parentPluginName?: string
+  note?: string
+  favorite?: boolean
+  catalogSource?: CliExtensionCatalogSource
+}
+
+export interface CliExtensionCatalogSource {
+  repoUrl: string
+  ref?: string
+  sha?: string
+  subdir?: string
+  rawSource?: string | Record<string, unknown>
+}
+
+export interface CliExtensionInstallRequest {
+  client: CliClient
+  extensionId: string
+}
+
+export interface CliExtensionInstallResult {
+  success: boolean
+  message: string
 }
 
 export interface CliRunRequest {
@@ -156,6 +200,7 @@ export interface CliProgressPayload {
   detail?: string
   command?: string
   exitCode?: number
+  plan?: CliPlanState | null
 }
 
 export interface CliDeployRequest {

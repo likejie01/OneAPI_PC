@@ -9,6 +9,7 @@ import type {
   CliSessionDetails,
   CliSessionMessage,
   CliExtensionEntry,
+  CliExtensionInstallRequest,
   DesktopDeleteCliMessageRequest,
   DeployProgressPayload,
 } from '../shared/desktop'
@@ -86,6 +87,10 @@ export function getCliDeployPreset(client: CliClient) {
 
 export function listCliExtensions(client: CliClient) {
   return desktopBridge().listCliExtensions(client) as Promise<CliExtensionEntry[]>
+}
+
+export function installCliExtension(input: CliExtensionInstallRequest) {
+  return desktopBridge().installCliExtension(input)
 }
 
 export function onDeployProgress(listener: (payload: DeployProgressPayload) => void) {

@@ -1,8 +1,9 @@
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { ChangeEvent, ClipboardEvent, Dispatch, DragEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent, PointerEvent as ReactPointerEvent, ReactNode, SetStateAction } from 'react'
+import type { CSSProperties, ChangeEvent, ClipboardEvent, Dispatch, DragEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent, PointerEvent as ReactPointerEvent, ReactNode, SetStateAction } from 'react'
 import {
   Blocks,
   Bot,
+  CircleHelp,
   ChevronDown,
   ChevronLeft,
   ChevronUp,
@@ -22,6 +23,7 @@ import {
   LoaderCircle,
   LockKeyhole,
   LogOut,
+  Languages,
   Mail,
   MessageSquareText,
   Minus,
@@ -51,6 +53,11 @@ import {
   saveAssistants,
 } from './domains/assistants'
 import {
+  createImageStylePreset,
+  loadImageStylePresets,
+  saveImageStylePresets,
+} from './domains/image-style-presets'
+import {
   getAuthStatus,
   login,
   login2fa,
@@ -63,6 +70,7 @@ import {
   getUserGroups,
   getUserModels,
   saveImageToDisk,
+  sendChatCompletion,
   sendDirectImageGeneration,
   sendImageEdit,
   sendImageGeneration,
@@ -75,6 +83,7 @@ import {
   getCliSession,
   getCliDeployPreset,
   getCliStatus,
+  installCliExtension,
   listCliExtensions,
   listCliHistory,
   openAssistantHistoryFolder,
@@ -111,15 +120,30 @@ import {
   resolveCompatibleModel,
 } from './lib/assistant-workspace'
 import {
+  decorateAssistants,
+} from './lib/assistants'
+import {
   getCliResumeSessionId,
 } from './lib/cli-session'
 import { AUTH_EXPIRED_EVENT, clearStoredDesktopUserId, saveStoredDesktopUserId } from './lib/desktop-client'
 import { deriveDesktopChatDisplayState, normalizeStoredDesktopChatMessage } from './lib/chat-reasoning'
 import {
+  applyCliMessageOverlays,
   buildCliExtensionAugmentedPrompt,
+  buildCliExtensionDisplayName,
+  canUseCliExtension,
+  collectCliToolNames,
+  decorateCliExtensions,
   resolveCliSlashTriggerState,
   translateCliExtensionDescription,
+  type CliExtensionViewItem,
+  type CliMessageOverlay,
 } from './lib/cli-extensions'
+import {
+  buildImageStyleAugmentedPrompt,
+  decorateImageStylePresets,
+  type ImageStylePreset,
+} from './lib/image-style-presets'
 import { resolveCliSetupPeerState } from './lib/desktop-service'
 import { clipText, formatDateTime, formatPrice, formatQuota, formatQuotaAsUsd } from './lib/format'
 import { readJsonStorage, writeJsonStorage } from './lib/storage'
@@ -142,6 +166,7 @@ import type {
   CliExtensionEntry,
   CliHistoryEntry,
   CliLogKind,
+  CliPlanState,
   CliProgressPayload,
   CliSessionDetails,
   CliSessionMessage,
@@ -162,6 +187,8 @@ type ThemeMode = 'light' | 'dark'
 
 const AURORA_OPACITY_STORAGE_KEY = 'oneapi-desktop-aurora-opacity'
 const DEFAULT_AURORA_OPACITY = 100
+const ASSISTANT_FAVORITES_STORAGE_KEY = 'oneapi-desktop-chat-assistant-favorites'
+const IMAGE_STYLE_FAVORITES_STORAGE_KEY = 'oneapi-desktop-image-style-favorites'
 
 type ComposerAttachment = {
   id: string
@@ -560,9 +587,12 @@ function useComposerAttachments(toast: (message: string) => void) {
 
 function loadInitialAssistantsState() {
   const nextAssistants = loadAssistants()
+  const storedActiveAssistantId = loadActiveAssistantId()
   return {
     assistants: nextAssistants,
-    activeAssistantId: loadActiveAssistantId() || nextAssistants[0]?.id || '',
+    activeAssistantId: nextAssistants.some((item) => item.id === storedActiveAssistantId)
+      ? storedActiveAssistantId
+      : nextAssistants[0]?.id || '',
   }
 }
 
@@ -646,6 +676,15 @@ type CliLogEntry = {
   exitCode?: number
 }
 
+type CliExtensionPreferenceBucket = {
+  favoriteIds: string[]
+  notes: Record<string, string>
+}
+
+type CliExtensionPreferenceStore = Record<string, CliExtensionPreferenceBucket>
+
+type CliMessageOverlayStore = Record<string, CliMessageOverlay[]>
+
 type ComposerActionItem = {
   key: string
   node: ReactNode
@@ -665,6 +704,7 @@ type ComposerTokenItem = {
   id: string
   label: string
   kindLabel: string
+  onEdit?: () => void
   onRemove?: () => void
 }
 
@@ -712,77 +752,90 @@ function renderComposer(props: {
           onChange={onAttachmentInputChange}
         />
       )}
-      <div
-        className='composer-input-zone'
-        onDragOver={(event) => {
-          event.preventDefault()
-        }}
-        onDrop={onDrop}
-      >
-        {tokenItems.length > 0 && (
-          <div className='composer-token-strip'>
-            {tokenItems.map((item) => (
-              <div key={item.id} className='composer-token-chip'>
-                <span className='composer-token-kind'>{item.kindLabel}</span>
-                <strong className='composer-token-label' title={item.label}>{item.label}</strong>
-                {item.onRemove ? (
-                  <button
-                    className='composer-token-remove'
-                    type='button'
-                    onClick={item.onRemove}
-                    aria-label='移除扩展'
-                  >
-                    <X size={12} />
-                  </button>
-                ) : null}
-              </div>
-            ))}
-          </div>
-        )}
-        <textarea
-          ref={textareaRef}
-          value={value}
-          rows={AUTO_TEXTAREA_MIN_ROWS}
-          onChange={(event) => onChange(event.target.value)}
-          onKeyDown={onKeyDown}
-          onPaste={onPaste}
+      <div className='composer-input-shell'>
+        {overlayPanel ? <div className='composer-overlay-panel'>{overlayPanel}</div> : null}
+        <div
+          className='composer-input-zone'
           onDragOver={(event) => {
             event.preventDefault()
           }}
           onDrop={onDrop}
-          onInput={(event) => syncTextareaHeight(event.currentTarget)}
-          placeholder={placeholder}
-        />
-        {fileAssets.length > 0 && (
-          <div className='composer-asset-strip'>
-            {fileAssets.map((item) => (
-              <div key={item.id} className='composer-asset-card'>
-                <button
-                  type='button'
-                  className='composer-asset-preview'
-                  onClick={item.onPreview}
-                  title={item.filePath}
-                >
-                  <div className='composer-asset-thumb'>
-                    {item.kind === 'image' && item.previewUrl ? (
-                      <img src={item.previewUrl} alt={item.name} />
-                    ) : (
-                      <FileText size={14} />
-                    )}
-                  </div>
-                  <span className='composer-asset-name' title={item.name}>{item.name}</span>
-                </button>
-                {item.onRemove && (
-                  <button className='composer-asset-remove' type='button' onClick={item.onRemove} aria-label='移除附件'>
-                    <X size={12} />
+        >
+          {tokenItems.length > 0 && (
+            <div className='composer-token-strip'>
+              {tokenItems.map((item) => (
+                <div key={item.id} className='composer-token-chip'>
+                  <span className='composer-token-kind'>{item.kindLabel}</span>
+                  <strong className='composer-token-label' title={item.label}>{item.label}</strong>
+                  {item.onEdit ? (
+                    <button
+                      className='composer-token-edit'
+                      type='button'
+                      onClick={item.onEdit}
+                      aria-label='编辑预设'
+                      title='展开并编辑'
+                    >
+                      <PencilLine size={12} />
+                    </button>
+                  ) : null}
+                  {item.onRemove ? (
+                    <button
+                      className='composer-token-remove'
+                      type='button'
+                      onClick={item.onRemove}
+                      aria-label='移除扩展'
+                    >
+                      <X size={12} />
+                    </button>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          )}
+          <textarea
+            ref={textareaRef}
+            value={value}
+            rows={AUTO_TEXTAREA_MIN_ROWS}
+            onChange={(event) => onChange(event.target.value)}
+            onKeyDown={onKeyDown}
+            onPaste={onPaste}
+            onDragOver={(event) => {
+              event.preventDefault()
+            }}
+            onDrop={onDrop}
+            onInput={(event) => syncTextareaHeight(event.currentTarget)}
+            placeholder={placeholder}
+          />
+          {fileAssets.length > 0 && (
+            <div className='composer-asset-strip'>
+              {fileAssets.map((item) => (
+                <div key={item.id} className='composer-asset-card'>
+                  <button
+                    type='button'
+                    className='composer-asset-preview'
+                    onClick={item.onPreview}
+                    title={item.filePath}
+                  >
+                    <div className='composer-asset-thumb'>
+                      {item.kind === 'image' && item.previewUrl ? (
+                        <img src={item.previewUrl} alt={item.name} />
+                      ) : (
+                        <FileText size={14} />
+                      )}
+                    </div>
+                    <span className='composer-asset-name' title={item.name}>{item.name}</span>
                   </button>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
+                  {item.onRemove && (
+                    <button className='composer-asset-remove' type='button' onClick={item.onRemove} aria-label='移除附件'>
+                      <X size={12} />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
-      {overlayPanel ? <div className='composer-overlay-panel'>{overlayPanel}</div> : null}
       <div className='composer-toolbar'>
         <div className='composer-actions left'>
           {leftActions.map((item) => (
@@ -1018,6 +1071,10 @@ function normalizeTimestampMs(value: number) {
     return 0
   }
   return value > 10_000_000_000 ? Math.floor(value) : Math.floor(value * 1000)
+}
+
+function getCurrentTimestamp() {
+  return Date.now()
 }
 
 function resolveUsageTimestamp(item: UsageData['items'][number]) {
@@ -1785,20 +1842,85 @@ function getCliExtensionKindLabel(item: CliExtensionEntry) {
   return '插件'
 }
 
+function CliPlanFloatingPanel(props: {
+  plan: CliPlanState | null
+}) {
+  const { plan } = props
+  if (!plan?.items.length) {
+    return null
+  }
+
+  return (
+    <aside className='cli-plan-floating-panel' aria-label='当前计划进度'>
+      <div className='cli-plan-floating-head'>
+        <strong>计划</strong>
+        <span>{plan.items.length} 项</span>
+      </div>
+      {plan.explanation ? <p className='cli-plan-floating-summary'>{plan.explanation}</p> : null}
+      <div className='cli-plan-floating-list'>
+        {plan.items.map((item) => (
+          <div key={item.id} className='cli-plan-floating-item'>
+            <span className={`cli-plan-status-icon ${item.status}`}>
+              {item.status === 'completed' ? (
+                '✔'
+              ) : item.status === 'in_progress' ? (
+                <LoaderCircle className='spin' size={13} />
+              ) : (
+                '○'
+              )}
+            </span>
+            <span className='cli-plan-status-text'>{item.step}</span>
+          </div>
+        ))}
+      </div>
+    </aside>
+  )
+}
+
+function MessageCliExtensionChips(props: {
+  items?: CliExtensionEntry[]
+  label?: string
+}) {
+  const { items = [], label = '已插入扩展' } = props
+  if (!items.length) {
+    return null
+  }
+
+  return (
+    <div className='message-extension-strip'>
+      <span className='message-extension-strip-label'>{label}</span>
+      <div className='message-extension-strip-chips'>
+        {items.map((item) => (
+          <div key={item.id} className='message-extension-chip' title={item.path}>
+            <span className='message-extension-kind'>{getCliExtensionKindLabel(item)}</span>
+            <strong>{buildCliExtensionDisplayName(item.name, item.note)}</strong>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function CliExtensionPalette(props: {
   client: CliClient
   loading: boolean
-  filteredExtensions: CliExtensionEntry[]
+  filteredExtensions: CliExtensionViewItem[]
   highlightedIndex: number
   searchValue: string
   onSearchChange: (value: string) => void
-  onSelect: (item: CliExtensionEntry) => void
-  onInsert: (item: CliExtensionEntry) => void
-  onCopyName: (item: CliExtensionEntry) => void
+  onSelect: (item: CliExtensionViewItem) => void
+  onInsert: (item: CliExtensionViewItem) => void
+  onCopyName: (item: CliExtensionViewItem) => void
   onHoverIndex: (index: number) => void
   onRefresh: () => void
+  installingIds: string[]
+  onInstall: (item: CliExtensionViewItem) => void
   searchActive: boolean
   onKeyDown: (event: ReactKeyboardEvent<HTMLElement>) => void
+  onToggleFavorite: (item: CliExtensionViewItem) => void
+  onTranslateDetail: (item: CliExtensionViewItem) => Promise<string>
+  onContextMenu: (event: MouseEvent, item: CliExtensionViewItem) => void
+  menuHostRef?: React.RefObject<HTMLDivElement | null>
 }) {
   const {
     client,
@@ -1812,12 +1934,94 @@ function CliExtensionPalette(props: {
     onCopyName,
     onHoverIndex,
     onRefresh,
+    installingIds,
+    onInstall,
     searchActive,
     onKeyDown,
+    onToggleFavorite,
+    onTranslateDetail,
+    onContextMenu,
+    menuHostRef,
   } = props
+  const menuRef = useRef<HTMLDivElement | null>(null)
+  const tooltipHideTimerRef = useRef<number | null>(null)
+  const [hoveredTooltip, setHoveredTooltip] = useState<{
+    left: number
+    top?: number
+    bottom?: number
+    item: CliExtensionViewItem
+    originalDescription: string
+    translatedDescription: string
+    showTranslated: boolean
+    translating: boolean
+    translationUnavailable: boolean
+  } | null>(null)
+
+  function clearTooltipHideTimer() {
+    if (tooltipHideTimerRef.current !== null) {
+      window.clearTimeout(tooltipHideTimerRef.current)
+      tooltipHideTimerRef.current = null
+    }
+  }
+
+  function scheduleTooltipHide() {
+    clearTooltipHideTimer()
+    tooltipHideTimerRef.current = window.setTimeout(() => {
+      setHoveredTooltip(null)
+      tooltipHideTimerRef.current = null
+    }, 120)
+  }
+
+  function openDetailTooltip(trigger: HTMLElement, item: CliExtensionViewItem) {
+    clearTooltipHideTimer()
+    const menuRect = menuRef.current?.getBoundingClientRect()
+    if (!menuRect) {
+      return
+    }
+    const triggerRect = trigger.getBoundingClientRect()
+    const originalDescription = item.description.trim()
+    const translatedDescription = translateCliExtensionDescription(item.name, originalDescription)
+    const tooltipWidth = 280
+    const menuPadding = 12
+    const tooltipGap = 10
+    const estimatedTooltipHeight = 180
+    const relativeLeft = Math.max(
+      menuPadding,
+      Math.min(
+        triggerRect.right - menuRect.left - tooltipWidth,
+        menuRect.width - tooltipWidth - menuPadding
+      )
+    )
+    const spaceAbove = triggerRect.top - menuRect.top
+    const spaceBelow = menuRect.bottom - triggerRect.bottom
+    const placeBelow = spaceBelow >= estimatedTooltipHeight || spaceBelow >= spaceAbove
+
+    setHoveredTooltip({
+      left: relativeLeft,
+      top: placeBelow ? triggerRect.bottom - menuRect.top + tooltipGap : undefined,
+      bottom: placeBelow ? undefined : menuRect.bottom - triggerRect.top + tooltipGap,
+      item,
+      originalDescription,
+      translatedDescription,
+      showTranslated: false,
+      translating: false,
+      translationUnavailable: false,
+    })
+  }
+
+  useEffect(() => () => clearTooltipHideTimer(), [])
 
   return (
-    <div className='picker-menu cli-extension-menu'>
+    <div
+      ref={(node) => {
+        menuRef.current = node
+        if (menuHostRef) {
+          menuHostRef.current = node
+        }
+      }}
+      className='picker-menu cli-extension-menu'
+      onMouseLeave={scheduleTooltipHide}
+    >
       <div className='picker-menu-head cli-extension-menu-head'>
         <strong>{client === 'codex' ? 'Codex 技能与插件' : 'Claude 技能与插件'}</strong>
         <input
@@ -1846,70 +2050,367 @@ function CliExtensionPalette(props: {
               : `共 ${filteredExtensions.length} 项`}
         </span>
       </div>
+      {hoveredTooltip ? (
+        <div
+          className='cli-extension-floating-tooltip'
+          style={{
+            left: hoveredTooltip.left,
+            ...(typeof hoveredTooltip.top === 'number'
+              ? { top: hoveredTooltip.top }
+              : { bottom: hoveredTooltip.bottom }),
+          }}
+          onMouseEnter={clearTooltipHideTimer}
+          onMouseLeave={scheduleTooltipHide}
+        >
+          <div className='cli-extension-tooltip-head'>
+            <strong>{hoveredTooltip.item.displayName}</strong>
+            <button
+              className='ghost-button icon-only tiny cli-extension-tooltip-action'
+              type='button'
+              title={hoveredTooltip.showTranslated ? '查看原文' : '翻译为中文'}
+              aria-label={hoveredTooltip.showTranslated ? '查看原文' : '翻译为中文'}
+              onClick={async (event) => {
+                event.stopPropagation()
+                if (hoveredTooltip.showTranslated) {
+                  setHoveredTooltip((current) =>
+                    current && current.item.id === hoveredTooltip.item.id
+                      ? { ...current, showTranslated: false, translationUnavailable: false }
+                      : current
+                  )
+                  return
+                }
+
+                if (
+                  hoveredTooltip.translatedDescription &&
+                  hoveredTooltip.translatedDescription !== hoveredTooltip.originalDescription
+                ) {
+                  setHoveredTooltip((current) =>
+                    current && current.item.id === hoveredTooltip.item.id
+                      ? { ...current, showTranslated: true, translationUnavailable: false }
+                      : current
+                  )
+                  return
+                }
+
+                setHoveredTooltip((current) =>
+                  current && current.item.id === hoveredTooltip.item.id
+                    ? { ...current, translating: true, translationUnavailable: false }
+                    : current
+                )
+
+                const nextTranslation = await onTranslateDetail(hoveredTooltip.item)
+
+                setHoveredTooltip((current) => {
+                  if (!current || current.item.id !== hoveredTooltip.item.id) {
+                    return current
+                  }
+                  const normalizedTranslation = nextTranslation.trim()
+                  return {
+                    ...current,
+                    translating: false,
+                    translatedDescription: normalizedTranslation || current.originalDescription,
+                    showTranslated: true,
+                    translationUnavailable:
+                      !normalizedTranslation || normalizedTranslation === current.originalDescription,
+                  }
+                })
+              }}
+            >
+              {hoveredTooltip.translating ? <LoaderCircle className='spin' size={13} /> : <Languages size={13} />}
+            </button>
+          </div>
+          <p>
+            {hoveredTooltip.showTranslated
+              ? hoveredTooltip.translatedDescription || hoveredTooltip.originalDescription || '未提供描述'
+              : hoveredTooltip.originalDescription || '未提供描述'}
+          </p>
+          {hoveredTooltip.showTranslated && hoveredTooltip.originalDescription && hoveredTooltip.translatedDescription !== hoveredTooltip.originalDescription ? (
+            <p className='muted'>{hoveredTooltip.originalDescription}</p>
+          ) : null}
+          {hoveredTooltip.translationUnavailable ? <p className='muted'>当前仅能显示原文。</p> : null}
+        </div>
+      ) : null}
       <div className='cli-extension-list'>
         {loading ? (
-          <div className='cli-extension-empty'>正在读取本机扩展...</div>
+          <div className='cli-extension-empty'>正在读取本机与官方扩展...</div>
         ) : filteredExtensions.length === 0 ? (
           <div className='cli-extension-empty'>未找到匹配的技能、命令或插件。</div>
         ) : filteredExtensions.map((item, index) => {
           const translatedDescription = translateCliExtensionDescription(item.name, item.description)
           const compactDescription = translatedDescription || item.description || '未提供描述'
+          const installed = canUseCliExtension(item)
+          const installing = installingIds.includes(item.id)
           return (
             <button
               key={item.id}
               type='button'
-              className={`cli-extension-card ${index === highlightedIndex ? 'selected' : ''}`}
+              className={`cli-extension-card ${index === highlightedIndex ? 'selected' : ''} ${installed ? '' : 'uninstalled'}`}
               onMouseEnter={() => onHoverIndex(index)}
-              onClick={() => onSelect(item)}
+              onClick={() => {
+                if (installed) {
+                  onSelect(item)
+                }
+              }}
+              onContextMenu={(event) => {
+                if (installed) {
+                  onContextMenu(event, item)
+                }
+              }}
               aria-selected={index === highlightedIndex}
             >
               <div className='cli-extension-name-row'>
                 <div className='cli-extension-name-meta'>
-                  <strong>{item.name}</strong>
-                  <span className='cli-extension-meta'>{getCliExtensionKindLabel(item)}{item.source ? ` · ${item.source}` : ''}</span>
+                  <strong>
+                    {item.displayName}
+                    {item.official ? <span className='cli-extension-badge'>官</span> : null}
+                  </strong>
+                  <span className='cli-extension-meta'>
+                    {getCliExtensionKindLabel(item)}
+                    {item.source ? ` · ${item.source}` : ''}
+                    {!installed ? ' · 未安装' : ''}
+                  </span>
                 </div>
                 <div className='cli-extension-inline-actions'>
-                  <button
-                    className='ghost-button icon-only tiny cli-extension-inline-action'
-                    type='button'
-                    title='复制名称'
-                    aria-label='复制名称'
-                    onClick={(event) => {
-                      event.stopPropagation()
-                      onCopyName(item)
-                    }}
-                  >
-                    <Copy size={13} />
-                  </button>
-                  <button
-                    className='ghost-button icon-only tiny cli-extension-inline-action'
-                    type='button'
-                    title='插入'
-                    aria-label='插入'
-                    onClick={(event) => {
-                      event.stopPropagation()
-                      onInsert(item)
-                    }}
-                  >
-                    <Plus size={13} />
-                  </button>
+                  {installed ? (
+                    <>
+                      <button
+                        className='ghost-button icon-only tiny cli-extension-inline-action cli-extension-detail-trigger'
+                        type='button'
+                        title='查看详情'
+                        aria-label='查看详情'
+                        onMouseEnter={(event) => {
+                          event.stopPropagation()
+                          openDetailTooltip(event.currentTarget, item)
+                        }}
+                        onMouseLeave={scheduleTooltipHide}
+                        onFocus={(event) => openDetailTooltip(event.currentTarget, item)}
+                        onBlur={scheduleTooltipHide}
+                        onClick={(event) => {
+                          event.preventDefault()
+                          event.stopPropagation()
+                        }}
+                      >
+                        <CircleHelp size={13} />
+                      </button>
+                      <button
+                        className={`ghost-button icon-only tiny cli-extension-inline-action model-favorite ${item.favorite ? 'active' : ''}`}
+                        type='button'
+                        title={item.favorite ? '取消收藏' : '收藏并置顶'}
+                        aria-label={item.favorite ? '取消收藏' : '收藏并置顶'}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          onToggleFavorite(item)
+                        }}
+                      >
+                        <Star size={13} />
+                      </button>
+                      <button
+                        className='ghost-button icon-only tiny cli-extension-inline-action'
+                        type='button'
+                        title='复制名称'
+                        aria-label='复制名称'
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          onCopyName(item)
+                        }}
+                      >
+                        <Copy size={13} />
+                      </button>
+                      <button
+                        className='ghost-button icon-only tiny cli-extension-inline-action'
+                        type='button'
+                        title='插入'
+                        aria-label='插入'
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          onInsert(item)
+                        }}
+                      >
+                        <Plus size={13} />
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      className='secondary-button tiny cli-extension-install-button'
+                      type='button'
+                      disabled={installing}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        onInstall(item)
+                      }}
+                    >
+                      {installing ? <LoaderCircle className='spin' size={13} /> : <Download size={13} />}
+                      <span>{installing ? '安装中' : '安装'}</span>
+                    </button>
+                  )}
                 </div>
               </div>
               <div className='cli-extension-desc-line' title={compactDescription}>
                 {compactDescription}
               </div>
-              <div className='cli-extension-tooltip'>
-                {translatedDescription && translatedDescription !== item.description ? (
-                  <p>{translatedDescription}</p>
-                ) : null}
-                {item.description && item.description !== translatedDescription ? (
-                  <p>{item.description}</p>
-                ) : null}
-              </div>
             </button>
           )
         })}
       </div>
+    </div>
+  )
+}
+
+function ImageStylePresetPalette(props: {
+  mode: 'list' | 'create' | 'edit'
+  searchValue: string
+  items: Array<ImageStylePreset & { favorite: boolean }>
+  selectedPresetId?: string
+  onSelect: (item: ImageStylePreset) => void
+  onSearchChange: (value: string) => void
+  onToggleFavorite: (presetId: string) => void
+  onOpenCreateEditor: () => void
+  onContextMenu: (event: MouseEvent, presetId: string) => void
+  titleValue: string
+  categoryValue: string
+  descriptionValue: string
+  promptValue: string
+  sizeValue: (typeof DRAW_SIZE_OPTIONS)[number]['value']
+  qualityValue: (typeof DRAW_QUALITY_OPTIONS)[number]['value']
+  onTitleChange: (value: string) => void
+  onCategoryChange: (value: string) => void
+  onDescriptionChange: (value: string) => void
+  onPromptChange: (value: string) => void
+  onSizeChange: (value: (typeof DRAW_SIZE_OPTIONS)[number]['value']) => void
+  onQualityChange: (value: (typeof DRAW_QUALITY_OPTIONS)[number]['value']) => void
+  onCancelEditor: () => void
+  onSaveEditor: () => void
+}) {
+  const {
+    mode,
+    searchValue,
+    items,
+    selectedPresetId = '',
+    onSelect,
+    onSearchChange,
+    onToggleFavorite,
+    onOpenCreateEditor,
+    onContextMenu,
+    titleValue,
+    categoryValue,
+    descriptionValue,
+    promptValue,
+    sizeValue,
+    qualityValue,
+    onTitleChange,
+    onCategoryChange,
+    onDescriptionChange,
+    onPromptChange,
+    onSizeChange,
+    onQualityChange,
+    onCancelEditor,
+    onSaveEditor,
+  } = props
+
+  return (
+    <div className='picker-menu assistant-menu image-style-menu'>
+      {mode === 'list' ? (
+        <>
+          <div className='picker-menu-head assistant-menu-head image-style-menu-head'>
+            <strong>助手</strong>
+            <input
+              className='assistant-search'
+              value={searchValue}
+              placeholder='搜索助手'
+              autoFocus
+              onChange={(event) => onSearchChange(event.target.value)}
+            />
+          </div>
+          <div className='assistant-menu-toolbar'>
+            <span>一次会话仅保留一个图像风格助手，收藏可置顶，右键可编辑。</span>
+            <button className='secondary-button tiny' type='button' onClick={onOpenCreateEditor}>
+              <Plus size={14} />
+              <span>新建自定义助手</span>
+            </button>
+          </div>
+          <div className='picker-menu-list assistant-picker-list'>
+            {items.length === 0 ? (
+              <div className='assistant-picker-empty'>未找到匹配助手</div>
+            ) : items.map((item) => (
+              <div
+                key={item.id}
+                className='assistant-picker-row'
+                onContextMenu={(event) => onContextMenu(event, item.id)}
+              >
+                <button
+                  type='button'
+                  className={`picker-option assistant-picker-option image-style-picker-option ${selectedPresetId === item.id ? 'active' : ''}`}
+                  onClick={() => onSelect(item)}
+                  title={item.prompt}
+                >
+                  <strong>{item.title}</strong>
+                  <span>{`${item.description}${item.category && item.category !== item.title ? ` · ${item.category}` : ''} · ${item.size}${item.quality ? ` · ${item.quality}` : ''}`}</span>
+                </button>
+                <button
+                  className={`ghost-button icon-only tiny model-favorite ${item.favorite ? 'active' : ''}`}
+                  type='button'
+                  title={item.favorite ? '取消收藏' : '收藏并置顶'}
+                  aria-label={item.favorite ? '取消收藏' : '收藏并置顶'}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onToggleFavorite(item.id)
+                  }}
+                >
+                  <Star size={13} />
+                </button>
+              </div>
+            ))}
+          </div>
+        </>
+      ) : (
+        <div className='assistant-editor'>
+          <div className='assistant-editor-head'>
+            <strong>{mode === 'edit' ? '编辑助手' : '新建助手'}</strong>
+          </div>
+          <div className='assistant-editor-fields'>
+            <input
+              value={titleValue}
+              onChange={(event) => onTitleChange(event.target.value)}
+              placeholder='助手名称，例如商业海报'
+            />
+            <input
+              value={categoryValue}
+              onChange={(event) => onCategoryChange(event.target.value)}
+              placeholder='分类，例如产品与海报'
+            />
+            <input
+              value={descriptionValue}
+              onChange={(event) => onDescriptionChange(event.target.value)}
+              placeholder='一句话描述'
+            />
+            <div className='assistant-editor-inline-fields'>
+              <select value={sizeValue} onChange={(event) => onSizeChange(event.target.value as (typeof DRAW_SIZE_OPTIONS)[number]['value'])}>
+                {DRAW_SIZE_OPTIONS.map((item) => (
+                  <option key={item.value} value={item.value}>{item.label}</option>
+                ))}
+              </select>
+              <select value={qualityValue} onChange={(event) => onQualityChange(event.target.value as (typeof DRAW_QUALITY_OPTIONS)[number]['value'])}>
+                {DRAW_QUALITY_OPTIONS.map((item) => (
+                  <option key={item.value} value={item.value}>{item.label}</option>
+                ))}
+              </select>
+            </div>
+            <textarea
+              value={promptValue}
+              onChange={(event) => onPromptChange(event.target.value)}
+              placeholder='输入图像风格提示词。'
+            />
+          </div>
+          <div className='assistant-editor-actions'>
+            <button className='ghost-button tiny' type='button' onClick={onCancelEditor}>
+              <span>取消</span>
+            </button>
+            <button className='secondary-button tiny' type='button' onClick={onSaveEditor}>
+              <span>{mode === 'edit' ? '保存更新' : '新建助手'}</span>
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -2054,6 +2555,7 @@ function CliLogBubble(props: {
   onToggleEvent: (eventId: string) => void
   onOpenFile: (ownerId: string, path: string) => void
   onCopy: () => void
+  requestedExtensions?: CliExtensionEntry[]
   previewFile?: {
     ownerId: string
     path: string
@@ -2061,8 +2563,9 @@ function CliLogBubble(props: {
     content: string
   } | null
 }) {
-  const { item, expanded, onToggle, expandedEventIds, onToggleEvent, onOpenFile, onCopy, previewFile } = props
+  const { item, expanded, onToggle, expandedEventIds, onToggleEvent, onOpenFile, onCopy, requestedExtensions = [], previewFile } = props
   const uniqueFiles = Array.from(new Map(item.files.map((file) => [file.path, file])).values())
+  const executedToolNames = collectCliToolNames(item.events.map((eventItem) => eventItem.sourceKind))
 
   return (
     <div className={`message-bubble system cli-log-bubble ${item.level === 'error' ? 'error' : ''}`}>
@@ -2071,6 +2574,20 @@ function CliLogBubble(props: {
         <strong>{`已执行 ${item.events.length} 步`}</strong>
         <small>{expanded ? '点击收起' : '点击展开'}</small>
       </button>
+      <MessageCliExtensionChips items={requestedExtensions} label='本轮指定扩展' />
+      {executedToolNames.length > 0 ? (
+        <div className='message-extension-strip compact'>
+          <span className='message-extension-strip-label'>实际工具调用</span>
+          <div className='message-extension-strip-chips'>
+            {executedToolNames.map((itemName) => (
+              <div key={itemName} className='message-extension-chip subtle'>
+                <span className='message-extension-kind'>工具</span>
+                <strong>{itemName}</strong>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
       <div className='cli-log-event-list'>
         {(expanded ? item.events : item.events.slice(0, 1)).map((eventItem) => {
           const eventFiles = Array.from(new Map(eventItem.files.map((file) => [file.path, file])).values())
@@ -2201,6 +2718,17 @@ function resolveProjectNameFromPath(value?: string) {
   return normalized.at(-1) || ''
 }
 
+function resolveCliExtensionPreferenceProjectKey(projectPath?: string) {
+  return normalizeProjectKey(projectPath) || '__global__'
+}
+
+function createEmptyCliExtensionPreferenceBucket(): CliExtensionPreferenceBucket {
+  return {
+    favoriteIds: [],
+    notes: {},
+  }
+}
+
 function createDefaultChatSession(
   activeAssistantId: string,
   model: string,
@@ -2215,6 +2743,13 @@ function createDefaultChatSession(
     updatedAt: Date.now(),
     messages: [],
   }
+}
+
+function resolveExistingAssistantId(assistants: AssistantRecord[], requestedId?: string) {
+  if (requestedId && assistants.some((item) => item.id === requestedId)) {
+    return requestedId
+  }
+  return assistants[0]?.id || ''
 }
 
 function loadStoredChatSessions() {
@@ -2371,8 +2906,9 @@ function PasswordField(props: {
   value: string
   placeholder: string
   onChange: (value: string) => void
+  onEnter?: () => void
 }) {
-  const { value, placeholder, onChange } = props
+  const { value, placeholder, onChange, onEnter } = props
   const [revealed, setRevealed] = useState(false)
 
   return (
@@ -2381,6 +2917,12 @@ function PasswordField(props: {
         type={revealed ? 'text' : 'password'}
         value={value}
         onChange={(event) => onChange(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' && onEnter) {
+            event.preventDefault()
+            onEnter()
+          }
+        }}
         placeholder={placeholder}
       />
       <button
@@ -2448,6 +2990,9 @@ function AssistantsChatWorkspace(props: {
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
   const [reasoningMenuOpen, setReasoningMenuOpen] = useState(false)
   const [contextMenuOpen, setContextMenuOpen] = useState(false)
+  const [assistantSearch, setAssistantSearch] = useState('')
+  const [assistantMenuMode, setAssistantMenuMode] = useState<'list' | 'create' | 'edit'>('list')
+  const [editingAssistantId, setEditingAssistantId] = useState('')
   const [assistantName, setAssistantName] = useState('')
   const [assistantDescription, setAssistantDescription] = useState('')
   const [assistantPrompt, setAssistantPrompt] = useState('')
@@ -2460,6 +3005,9 @@ function AssistantsChatWorkspace(props: {
   const [initialAssistantsState] = useState(loadInitialAssistantsState)
   const [assistants, setAssistants] = useState(initialAssistantsState.assistants)
   const [activeAssistantId, setActiveAssistantId] = useState(initialAssistantsState.activeAssistantId)
+  const [assistantFavorites, setAssistantFavorites] = useState<string[]>(() =>
+    loadFavoriteModels(ASSISTANT_FAVORITES_STORAGE_KEY)
+  )
   const {
     attachments,
     inputRef: attachmentInputRef,
@@ -2487,6 +3035,10 @@ function AssistantsChatWorkspace(props: {
   const activeAssistant = useMemo(
     () => assistants.find((item) => item.id === activeAssistantId) ?? assistants[0] ?? null,
     [assistants, activeAssistantId]
+  )
+  const assistantMenuItems = useMemo(
+    () => decorateAssistants(assistants, assistantFavorites, assistantSearch),
+    [assistantFavorites, assistantSearch, assistants]
   )
   const resolvedActiveSessionId =
     activeSessionId && chatSessions.some((item) => item.id === activeSessionId)
@@ -2581,6 +3133,7 @@ function AssistantsChatWorkspace(props: {
 
       if (assistantMenuOpen && assistantMenuRef.current && !assistantMenuRef.current.contains(target)) {
         setAssistantMenuOpen(false)
+        setAssistantMenuMode('list')
       }
 
       if (modelMenuOpen && modelMenuRef.current && !modelMenuRef.current.contains(target)) {
@@ -2688,29 +3241,87 @@ function AssistantsChatWorkspace(props: {
     setSelectedGroup(activeSession.group || '')
   }, [activeAssistant?.model, activeSession?.group, activeSession?.id, activeSession?.model, models])
 
-  function handleCreateAssistant() {
+  function resetAssistantEditor() {
+    setAssistantName('')
+    setAssistantDescription('')
+    setAssistantPrompt('')
+    setEditingAssistantId('')
+  }
+
+  function openAssistantCreateEditor() {
+    resetAssistantEditor()
+    setAssistantMenuMode('create')
+    window.setTimeout(() => {
+      const target = assistantMenuRef.current?.querySelector<HTMLInputElement | HTMLTextAreaElement>(
+        '.assistant-editor input, .assistant-editor textarea'
+      )
+      target?.focus()
+    }, 0)
+  }
+
+  function openAssistantEditEditor(assistantId: string) {
+    const target = assistants.find((item) => item.id === assistantId)
+    if (!target) {
+      return
+    }
+    setEditingAssistantId(target.id)
+    setAssistantName(target.name)
+    setAssistantDescription(target.description)
+    setAssistantPrompt(target.prompt)
+    setAssistantMenuMode('edit')
+    window.setTimeout(() => {
+      const targetNode = assistantMenuRef.current?.querySelector<HTMLInputElement | HTMLTextAreaElement>(
+        '.assistant-editor input, .assistant-editor textarea'
+      )
+      targetNode?.focus()
+    }, 0)
+  }
+
+  function closeAssistantEditor() {
+    setAssistantMenuMode('list')
+    resetAssistantEditor()
+  }
+
+  function handleSaveAssistant() {
     if (!assistantName.trim() || !assistantPrompt.trim()) {
       toast('请填写助手名称和提示词。')
       return
     }
 
-    const next = createAssistant({
-      name: assistantName.trim(),
-      description: assistantDescription.trim() || '自定义助手',
-      prompt: assistantPrompt.trim(),
-      model: selectedModel || resolvePreferredModel(models, DEFAULT_CHAT_MODEL),
-      temperature: 0.7,
-    })
-    const all = [next, ...assistants]
+    const normalizedName = assistantName.trim()
+    const normalizedDescription = assistantDescription.trim() || '自定义助手'
+    const normalizedPrompt = assistantPrompt.trim()
+    const editingTarget =
+      editingAssistantId
+        ? assistants.find((item) => item.id === editingAssistantId)
+        : null
+
+    const next = editingTarget
+      ? {
+          ...editingTarget,
+          name: normalizedName,
+          description: normalizedDescription,
+          prompt: normalizedPrompt,
+          updatedAt: Date.now(),
+        }
+      : createAssistant({
+          name: normalizedName,
+          description: normalizedDescription,
+          prompt: normalizedPrompt,
+          model: selectedModel || resolvePreferredModel(models, DEFAULT_CHAT_MODEL),
+          temperature: 0.7,
+        })
+
+    const all = editingTarget
+      ? assistants.map((item) => (item.id === editingTarget.id ? next : item))
+      : [next, ...assistants]
     setAssistants(all)
     saveAssistants(all)
     setActiveAssistantId(next.id)
     saveActiveAssistantId(next.id)
-    setAssistantName('')
-    setAssistantDescription('')
-    setAssistantPrompt('')
-    setAssistantMenuOpen(false)
-    toast('自定义助手已创建。')
+    closeAssistantEditor()
+    setAssistantSearch('')
+    toast(editingTarget ? '助手已更新。' : '自定义助手已创建。')
   }
 
   function createChatSession() {
@@ -2733,6 +3344,36 @@ function AssistantsChatWorkspace(props: {
         : [value, ...current]
       storeFavoriteModels('oneapi-desktop-chat-favorites', next)
       return next
+    })
+  }
+
+  function toggleFavoriteAssistant(value: string) {
+    setAssistantFavorites((current) => {
+      const next = current.includes(value)
+        ? current.filter((item) => item !== value)
+        : [value, ...current.filter((item) => item !== value)]
+      storeFavoriteModels(ASSISTANT_FAVORITES_STORAGE_KEY, next)
+      return next
+    })
+  }
+
+  function handleAssistantContextMenu(event: MouseEvent, assistantId: string) {
+    event.preventDefault()
+    const target = assistants.find((item) => item.id === assistantId)
+    if (!target) {
+      return
+    }
+    setSessionContextMenu({
+      x: event.clientX,
+      y: event.clientY,
+      title: target.name,
+      items: [
+        {
+          key: 'edit',
+          label: '编辑',
+          onSelect: () => openAssistantEditEditor(target.id),
+        },
+      ],
     })
   }
 
@@ -3027,7 +3668,7 @@ function AssistantsChatWorkspace(props: {
   }
 
   function resolveAssistantHistoryGroup(session: ChatSessionRecord) {
-    return assistants.find((item) => item.id === session.assistantId)?.name || '通用助手'
+    return assistants.find((item) => item.id === session.assistantId)?.name || assistants[0]?.name || '助手'
   }
 
   function hideChatSession(sessionId: string) {
@@ -3068,8 +3709,9 @@ function AssistantsChatWorkspace(props: {
 
   function handleSelectChatSession(session: ChatSessionRecord) {
     setActiveSessionId(session.id)
-    setActiveAssistantId(session.assistantId || activeAssistantId)
-    saveActiveAssistantId(session.assistantId || activeAssistantId)
+    const resolvedAssistantId = resolveExistingAssistantId(assistants, session.assistantId || activeAssistantId)
+    setActiveAssistantId(resolvedAssistantId)
+    saveActiveAssistantId(resolvedAssistantId)
     setSelectedModel(
       session.model || resolvePreferredModel(models, DEFAULT_CHAT_MODEL, activeAssistant?.model)
     )
@@ -3262,58 +3904,112 @@ function AssistantsChatWorkspace(props: {
                         setModelMenuOpen(false)
                         setReasoningMenuOpen(false)
                         setContextMenuOpen(false)
-                        setAssistantMenuOpen((current) => !current)
+                        setAssistantMenuOpen((current) => {
+                          const next = !current
+                          if (next) {
+                            setAssistantSearch('')
+                            setAssistantMenuMode('list')
+                          }
+                          return next
+                        })
                       }}
-                      title='助手提示词'
+                      title='助手'
                     >
                       <Sparkles size={16} />
-                      <strong>{activeAssistant?.name || '通用助手'}</strong>
+                      <strong>{activeAssistant?.name || assistants[0]?.name || '助手'}</strong>
                     </button>
                     {assistantMenuOpen && (
                       <div className='picker-menu assistant-menu'>
-                        <div className='picker-menu-head'>
-                          <strong>助手提示词</strong>
-                          <span>点击即可切换当前助手</span>
-                        </div>
-                        <div className='picker-menu-list'>
-                          {assistants.map((item) => (
-                            <button
-                              key={item.id}
-                              type='button'
-                              className={`picker-option ${item.id === activeAssistantId ? 'active' : ''}`}
-                              onClick={() => {
-                                setActiveAssistantId(item.id)
-                                saveActiveAssistantId(item.id)
-                                setAssistantMenuOpen(false)
-                              }}
-                            >
-                              <strong>{item.name}</strong>
-                              <span>{item.description}</span>
-                            </button>
-                          ))}
-                        </div>
-                        <div className='picker-divider' />
-                        <div className='subform assistant-inline-form'>
-                          <input
-                            value={assistantName}
-                            onChange={(event) => setAssistantName(event.target.value)}
-                            placeholder='助手名称，例如法务助手'
-                          />
-                          <input
-                            value={assistantDescription}
-                            onChange={(event) => setAssistantDescription(event.target.value)}
-                            placeholder='一句话描述'
-                          />
-                          <textarea
-                            value={assistantPrompt}
-                            onChange={(event) => setAssistantPrompt(event.target.value)}
-                            placeholder='输入提示词，保存后即可作为专用助手参与聊天。'
-                          />
-                          <button className='secondary-button full' type='button' onClick={handleCreateAssistant}>
-                            <Plus size={16} />
-                            <span>新建自定义助手</span>
-                          </button>
-                        </div>
+                        {assistantMenuMode === 'list' ? (
+                          <>
+                            <div className='picker-menu-head assistant-menu-head'>
+                              <strong>助手</strong>
+                              <input
+                                className='assistant-search'
+                                value={assistantSearch}
+                                placeholder='搜索助手'
+                                autoFocus
+                                onChange={(event) => setAssistantSearch(event.target.value)}
+                              />
+                            </div>
+                            <div className='assistant-menu-toolbar'>
+                              <span>收藏可置顶，搜索会匹配名称、描述和提示词。</span>
+                              <button className='secondary-button tiny' type='button' onClick={openAssistantCreateEditor}>
+                                <Plus size={14} />
+                                <span>新建自定义助手</span>
+                              </button>
+                            </div>
+                            <div className='picker-menu-list assistant-picker-list'>
+                              {assistantMenuItems.length === 0 ? (
+                                <div className='assistant-picker-empty'>未找到匹配助手</div>
+                              ) : assistantMenuItems.map((item) => (
+                                <div
+                                  key={item.id}
+                                  className='assistant-picker-row'
+                                  onContextMenu={(event) => handleAssistantContextMenu(event, item.id)}
+                                >
+                                  <button
+                                    type='button'
+                                    className={`picker-option assistant-picker-option ${item.id === activeAssistantId ? 'active' : ''}`}
+                                    onClick={() => {
+                                      setActiveAssistantId(item.id)
+                                      saveActiveAssistantId(item.id)
+                                      setAssistantMenuMode('list')
+                                      setAssistantMenuOpen(false)
+                                      setAssistantSearch('')
+                                    }}
+                                  >
+                                    <strong>{item.name}</strong>
+                                    <span>{item.description}</span>
+                                  </button>
+                                  <button
+                                    className={`ghost-button icon-only tiny model-favorite ${item.favorite ? 'active' : ''}`}
+                                    type='button'
+                                    title={item.favorite ? '取消收藏' : '收藏并置顶'}
+                                    aria-label={item.favorite ? '取消收藏' : '收藏并置顶'}
+                                    onClick={(event) => {
+                                      event.stopPropagation()
+                                      toggleFavoriteAssistant(item.id)
+                                    }}
+                                  >
+                                    <Star size={13} />
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          </>
+                        ) : (
+                          <div className='assistant-editor'>
+                            <div className='assistant-editor-head'>
+                              <strong>{assistantMenuMode === 'edit' ? '编辑助手' : '新建助手'}</strong>
+                            </div>
+                            <div className='assistant-editor-fields'>
+                              <input
+                                value={assistantName}
+                                onChange={(event) => setAssistantName(event.target.value)}
+                                placeholder='助手名称，例如法务助手'
+                              />
+                              <input
+                                value={assistantDescription}
+                                onChange={(event) => setAssistantDescription(event.target.value)}
+                                placeholder='一句话描述'
+                              />
+                              <textarea
+                                value={assistantPrompt}
+                                onChange={(event) => setAssistantPrompt(event.target.value)}
+                                placeholder='输入提示词，保存后即可作为专用助手参与聊天。'
+                              />
+                            </div>
+                            <div className='assistant-editor-actions'>
+                              <button className='ghost-button tiny' type='button' onClick={closeAssistantEditor}>
+                                <span>取消</span>
+                              </button>
+                              <button className='secondary-button tiny' type='button' onClick={handleSaveAssistant}>
+                                <span>{assistantMenuMode === 'edit' ? '保存更新' : '新建助手'}</span>
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -3648,6 +4344,21 @@ function DrawWorkspace(props: {
   const [drawRandomSeed, setDrawRandomSeed] = useState(true)
   const [drawSizeMenuOpen, setDrawSizeMenuOpen] = useState(false)
   const [drawQualityMenuOpen, setDrawQualityMenuOpen] = useState(false)
+  const [imageStyleMenuOpen, setImageStyleMenuOpen] = useState(false)
+  const [imageStyleSearch, setImageStyleSearch] = useState('')
+  const [imageStyleMenuMode, setImageStyleMenuMode] = useState<'list' | 'create' | 'edit'>('list')
+  const [editingImageStylePresetId, setEditingImageStylePresetId] = useState('')
+  const [imageStyleTitle, setImageStyleTitle] = useState('')
+  const [imageStyleCategory, setImageStyleCategory] = useState('')
+  const [imageStyleDescription, setImageStyleDescription] = useState('')
+  const [imageStylePrompt, setImageStylePrompt] = useState('')
+  const [imageStyleSizeDraft, setImageStyleSizeDraft] = useState<(typeof DRAW_SIZE_OPTIONS)[number]['value']>('1024x1024')
+  const [imageStyleQualityDraft, setImageStyleQualityDraft] = useState<(typeof DRAW_QUALITY_OPTIONS)[number]['value']>('high')
+  const [imageStylePresets, setImageStylePresets] = useState<ImageStylePreset[]>(() => loadImageStylePresets())
+  const [imageStyleFavorites, setImageStyleFavorites] = useState<string[]>(() =>
+    loadFavoriteModels(IMAGE_STYLE_FAVORITES_STORAGE_KEY)
+  )
+  const [selectedImageStylePreset, setSelectedImageStylePreset] = useState<ImageStylePreset | null>(null)
   const [sessionContextMenu, setSessionContextMenu] = useState<SessionContextMenuState | null>(null)
   const [renamingDrawSession, setRenamingDrawSession] = useState<SessionRenameDraft>(null)
   const [previewImage, setPreviewImage] = useState<{
@@ -3669,6 +4380,7 @@ function DrawWorkspace(props: {
   const messageStreamRef = useRef<HTMLDivElement | null>(null)
   const drawSizeMenuRef = useRef<HTMLDivElement | null>(null)
   const drawQualityMenuRef = useRef<HTMLDivElement | null>(null)
+  const imageStyleMenuRef = useRef<HTMLDivElement | null>(null)
 
   const resolvedActiveSessionId = useMemo(() => {
     if (activeSessionId && drawSessions.some((item) => item.id === activeSessionId)) {
@@ -3682,6 +4394,11 @@ function DrawWorkspace(props: {
     DRAW_SIZE_OPTIONS.find((item) => item.value === drawSize)?.label || drawSize
   const drawQualityLabel =
     DRAW_QUALITY_OPTIONS.find((item) => item.value === drawQuality)?.label || drawQuality
+  const drawRandomSeedLabel = drawRandomSeed ? '随机' : '固定'
+  const imageStyleMenuItems = useMemo(
+    () => decorateImageStylePresets(imageStylePresets, imageStyleFavorites, imageStyleSearch),
+    [imageStyleFavorites, imageStylePresets, imageStyleSearch]
+  )
 
   useAutoFollowScroll(messageStreamRef, [messages, sending])
 
@@ -3737,10 +4454,15 @@ function DrawWorkspace(props: {
       if (drawQualityMenuOpen && drawQualityMenuRef.current && !drawQualityMenuRef.current.contains(target)) {
         setDrawQualityMenuOpen(false)
       }
+      if (imageStyleMenuOpen && imageStyleMenuRef.current && !imageStyleMenuRef.current.contains(target)) {
+        setImageStyleMenuOpen(false)
+        setImageStyleSearch('')
+        setImageStyleMenuMode('list')
+      }
     }
     window.addEventListener('pointerdown', handlePointerDown)
     return () => window.removeEventListener('pointerdown', handlePointerDown)
-  }, [drawQualityMenuOpen, drawSizeMenuOpen, historyOpen])
+  }, [drawQualityMenuOpen, drawSizeMenuOpen, historyOpen, imageStyleMenuOpen])
 
   useEffect(() => {
     function handleOpenHistory() {
@@ -3761,6 +4483,8 @@ function DrawWorkspace(props: {
     setDrawSessions((current) => [next, ...current])
     setActiveSessionId(next.id)
     setDraft('')
+    setSelectedImageStylePreset(null)
+    setImageStyleMenuOpen(false)
     clearAttachments()
     window.setTimeout(() => resizeDraft(), 0)
   }
@@ -3862,6 +4586,127 @@ function DrawWorkspace(props: {
     })
   }
 
+  function resetImageStyleEditor() {
+    setEditingImageStylePresetId('')
+    setImageStyleTitle('')
+    setImageStyleCategory('')
+    setImageStyleDescription('')
+    setImageStylePrompt('')
+    setImageStyleSizeDraft('1024x1024')
+    setImageStyleQualityDraft('high')
+  }
+
+  function openImageStyleCreateEditor() {
+    resetImageStyleEditor()
+    setImageStyleMenuMode('create')
+    window.setTimeout(() => {
+      const target = imageStyleMenuRef.current?.querySelector<HTMLInputElement | HTMLTextAreaElement>(
+        '.assistant-editor input, .assistant-editor textarea'
+      )
+      target?.focus()
+    }, 0)
+  }
+
+  function openImageStyleEditEditor(presetId: string) {
+    const target = imageStylePresets.find((item) => item.id === presetId)
+    if (!target) {
+      return
+    }
+    setEditingImageStylePresetId(target.id)
+    setImageStyleTitle(target.title)
+    setImageStyleCategory(target.category)
+    setImageStyleDescription(target.description)
+    setImageStylePrompt(target.prompt)
+    setImageStyleSizeDraft(target.size)
+    setImageStyleQualityDraft(target.quality || 'high')
+    setImageStyleMenuMode('edit')
+    window.setTimeout(() => {
+      const targetNode = imageStyleMenuRef.current?.querySelector<HTMLInputElement | HTMLTextAreaElement>(
+        '.assistant-editor input, .assistant-editor textarea'
+      )
+      targetNode?.focus()
+    }, 0)
+  }
+
+  function closeImageStyleEditor() {
+    setImageStyleMenuMode('list')
+    resetImageStyleEditor()
+  }
+
+  function toggleFavoriteImageStylePreset(presetId: string) {
+    setImageStyleFavorites((current) => {
+      const next = current.includes(presetId)
+        ? current.filter((item) => item !== presetId)
+        : [presetId, ...current.filter((item) => item !== presetId)]
+      storeFavoriteModels(IMAGE_STYLE_FAVORITES_STORAGE_KEY, next)
+      return next
+    })
+  }
+
+  function handleImageStylePresetContextMenu(event: MouseEvent, presetId: string) {
+    event.preventDefault()
+    const target = imageStylePresets.find((item) => item.id === presetId)
+    if (!target) {
+      return
+    }
+    setSessionContextMenu({
+      x: event.clientX,
+      y: event.clientY,
+      title: target.title,
+      items: [
+        {
+          key: 'edit',
+          label: '编辑',
+          onSelect: () => openImageStyleEditEditor(target.id),
+        },
+      ],
+    })
+  }
+
+  function handleSaveImageStylePreset() {
+    if (!imageStyleTitle.trim() || !imageStylePrompt.trim()) {
+      toast('请填写风格名称和提示词。')
+      return
+    }
+
+    const normalizedTitle = imageStyleTitle.trim()
+    const normalizedCategory = imageStyleCategory.trim() || '自定义'
+    const normalizedDescription = imageStyleDescription.trim() || '自定义图像风格助手'
+    const normalizedPrompt = imageStylePrompt.trim()
+    const editingTarget = editingImageStylePresetId
+      ? imageStylePresets.find((item) => item.id === editingImageStylePresetId)
+      : null
+
+    const nextPreset = editingTarget
+      ? {
+          ...editingTarget,
+          title: normalizedTitle,
+          category: normalizedCategory,
+          description: normalizedDescription,
+          prompt: normalizedPrompt,
+          size: imageStyleSizeDraft,
+          quality: imageStyleQualityDraft,
+        }
+      : createImageStylePreset({
+          title: normalizedTitle,
+          category: normalizedCategory,
+          description: normalizedDescription,
+          prompt: normalizedPrompt,
+          size: imageStyleSizeDraft,
+          quality: imageStyleQualityDraft,
+        })
+
+    const nextPresets = editingTarget
+      ? imageStylePresets.map((item) => (item.id === editingTarget.id ? nextPreset : item))
+      : [nextPreset, ...imageStylePresets]
+
+    setImageStylePresets(nextPresets)
+    saveImageStylePresets(nextPresets)
+    setSelectedImageStylePreset((current) => current?.id === nextPreset.id ? nextPreset : current)
+    closeImageStyleEditor()
+    toast(editingTarget ? '图像助手已更新。' : '图像助手已创建。')
+  }
+
   async function copyText(content: string) {
     try {
       await navigator.clipboard.writeText(content)
@@ -3895,19 +4740,43 @@ function DrawWorkspace(props: {
     }))
   }
 
+  function applyImageStylePreset(preset: ImageStylePreset) {
+    setSelectedImageStylePreset(preset)
+    setDrawSize(preset.size)
+    if (preset.quality) {
+      setDrawQuality(preset.quality)
+    }
+    setImageStyleMenuOpen(false)
+    setImageStyleSearch('')
+    window.setTimeout(() => draftRef.current?.focus(), 0)
+  }
+
+  function expandImageStylePresetToDraft() {
+    if (!selectedImageStylePreset) {
+      return
+    }
+    const expandedPrompt = buildImageStyleAugmentedPrompt(draft, selectedImageStylePreset)
+    setDraft(expandedPrompt)
+    setSelectedImageStylePreset(null)
+    setImageStyleSearch('')
+    window.setTimeout(() => resizeDraft(), 0)
+    window.setTimeout(() => draftRef.current?.focus(), 0)
+  }
+
   async function handleSendDrawMessage() {
-    if (!draft.trim() || sending) {
+    if ((!draft.trim() && !selectedImageStylePreset) || sending) {
       toast('请输入绘图提示词。')
       return
     }
 
     const nextSessionId = ensureDrawSession()
     const imageAttachment = attachments.find((item) => item.kind === 'image')
-    const now = Date.now()
+    const now = getCurrentTimestamp()
+    const nextPrompt = buildImageStyleAugmentedPrompt(draft, selectedImageStylePreset || { prompt: '' })
     const userMessage: ChatBubbleMessage = {
       id: `draw-user-${now}`,
       role: 'user',
-      content: draft.trim(),
+      content: nextPrompt,
       createdAt: now,
       attachments: toMessageAttachments(attachments),
     }
@@ -3923,13 +4792,15 @@ function DrawWorkspace(props: {
 
     updateDrawSession(nextSessionId, (session) => ({
       ...session,
-      title: clipText(draft.trim(), 32),
+      title: clipText(nextPrompt, 32),
       updatedAt: now + 1,
       messages: [...session.messages, userMessage, pendingMessage],
     }))
 
-    const nextDraft = draft.trim()
     setDraft('')
+    setSelectedImageStylePreset(null)
+    setImageStyleMenuOpen(false)
+    setImageStyleSearch('')
     clearAttachments()
     window.setTimeout(() => resizeDraft(), 0)
     setSending(true)
@@ -3938,7 +4809,7 @@ function DrawWorkspace(props: {
       const response = imageAttachment
         ? await sendImageEdit({
             model: DEFAULT_DRAW_MODEL,
-            prompt: nextDraft,
+            prompt: nextPrompt,
             imageName: imageAttachment.name,
             mimeType: imageAttachment.mimeType,
             dataBase64: imageAttachment.dataBase64,
@@ -3954,7 +4825,7 @@ function DrawWorkspace(props: {
             return sendDirectImageGeneration({
               apiKey: serviceKey.key,
               model: DEFAULT_DRAW_MODEL,
-              prompt: nextDraft,
+              prompt: nextPrompt,
               size: drawSize,
               quality: drawQuality,
               seed: drawRandomSeed ? undefined : 1,
@@ -3968,21 +4839,23 @@ function DrawWorkspace(props: {
         throw new Error('模型没有返回可展示的图片。')
       }
 
+      const resolvedAt = getCurrentTimestamp()
       replacePendingDrawMessage(nextSessionId, {
-        id: `draw-assistant-${Date.now()}`,
+        id: `draw-assistant-${resolvedAt}`,
         role: 'assistant',
-        content: firstImage?.revised_prompt?.trim() || nextDraft,
-        createdAt: Date.now(),
+        content: firstImage?.revised_prompt?.trim() || nextPrompt,
+        createdAt: resolvedAt,
         imageUrl: imageSource,
-        imagePrompt: firstImage?.revised_prompt?.trim() || nextDraft,
+        imagePrompt: firstImage?.revised_prompt?.trim() || nextPrompt,
         modelLabel: DEFAULT_DRAW_MODEL,
       })
     } catch (error) {
+      const failedAt = getCurrentTimestamp()
       replacePendingDrawMessage(nextSessionId, {
-        id: `draw-assistant-error-${Date.now()}`,
+        id: `draw-assistant-error-${failedAt}`,
         role: 'assistant',
         content: error instanceof Error ? error.message : '图片生成失败',
-        createdAt: Date.now(),
+        createdAt: failedAt,
         modelLabel: DEFAULT_DRAW_MODEL,
       })
       toast(error instanceof Error ? error.message : '图片生成失败')
@@ -4093,8 +4966,25 @@ function DrawWorkspace(props: {
               setDraft(value)
               window.setTimeout(() => resizeDraft(), 0)
             },
+            onKeyDown: (event) => {
+              if ((event.ctrlKey || event.metaKey) && event.key === 'Enter' && !sending) {
+                event.preventDefault()
+                void handleSendDrawMessage()
+              }
+            },
             onPaste: handleAttachmentPaste,
             onDrop: handleAttachmentDrop,
+            tokenItems: selectedImageStylePreset
+              ? [
+                  {
+                    id: selectedImageStylePreset.id,
+                    label: `${selectedImageStylePreset.title} · ${selectedImageStylePreset.description}`,
+                    kindLabel: '风格',
+                    onEdit: expandImageStylePresetToDraft,
+                    onRemove: () => setSelectedImageStylePreset(null),
+                  },
+                ]
+              : [],
             leftActions: [
               {
                 key: 'group',
@@ -4108,21 +4998,78 @@ function DrawWorkspace(props: {
                 ),
               },
               {
+                key: 'draw-style',
+                node: (
+                  <div className='toolbar-picker' ref={imageStyleMenuRef}>
+                    <button
+                      className={`ghost-button tiny picker-trigger icon-picker-trigger ${imageStyleMenuOpen ? 'selected-toggle' : ''}`}
+                      type='button'
+                      aria-expanded={imageStyleMenuOpen}
+                      title={selectedImageStylePreset ? `提示词助手：${selectedImageStylePreset.title}` : '提示词助手'}
+                      onClick={() => {
+                        setDrawSizeMenuOpen(false)
+                        setDrawQualityMenuOpen(false)
+                        setImageStyleMenuOpen((current) => {
+                          const next = !current
+                          if (next) {
+                            setImageStyleMenuMode('list')
+                            setImageStyleSearch('')
+                          }
+                          return next
+                        })
+                      }}
+                    >
+                      <Sparkles size={16} />
+                      <strong>{selectedImageStylePreset?.title || '提示词助手'}</strong>
+                    </button>
+                    {imageStyleMenuOpen && (
+                      <ImageStylePresetPalette
+                        mode={imageStyleMenuMode}
+                        searchValue={imageStyleSearch}
+                        items={imageStyleMenuItems}
+                        selectedPresetId={selectedImageStylePreset?.id}
+                        onSelect={applyImageStylePreset}
+                        onSearchChange={setImageStyleSearch}
+                        onToggleFavorite={toggleFavoriteImageStylePreset}
+                        onOpenCreateEditor={openImageStyleCreateEditor}
+                        onContextMenu={handleImageStylePresetContextMenu}
+                        titleValue={imageStyleTitle}
+                        categoryValue={imageStyleCategory}
+                        descriptionValue={imageStyleDescription}
+                        promptValue={imageStylePrompt}
+                        sizeValue={imageStyleSizeDraft}
+                        qualityValue={imageStyleQualityDraft}
+                        onTitleChange={setImageStyleTitle}
+                        onCategoryChange={setImageStyleCategory}
+                        onDescriptionChange={setImageStyleDescription}
+                        onPromptChange={setImageStylePrompt}
+                        onSizeChange={setImageStyleSizeDraft}
+                        onQualityChange={setImageStyleQualityDraft}
+                        onCancelEditor={closeImageStyleEditor}
+                        onSaveEditor={handleSaveImageStylePreset}
+                      />
+                    )}
+                  </div>
+                ),
+              },
+              {
                 key: 'draw-size',
                 node: (
                   <div className='toolbar-picker' ref={drawSizeMenuRef}>
                     <button
-                      className={`ghost-button icon-only tiny toolbar-icon-button ${drawSizeMenuOpen ? 'selected-toggle' : ''}`}
+                      className={`ghost-button tiny toolbar-icon-button ${drawSizeMenuOpen ? 'selected-toggle' : ''}`}
                       type='button'
                       title={`图片尺寸：${drawSizeLabel}`}
                       aria-label={`图片尺寸：${drawSizeLabel}`}
                       aria-expanded={drawSizeMenuOpen}
                       onClick={() => {
+                        setImageStyleMenuOpen(false)
                         setDrawQualityMenuOpen(false)
                         setDrawSizeMenuOpen((current) => !current)
                       }}
                     >
                       <Crop size={16} />
+                      <span className='toolbar-icon-label'>{drawSizeLabel}</span>
                     </button>
                     {drawSizeMenuOpen && (
                       <div className='picker-menu image-config-menu'>
@@ -4154,17 +5101,19 @@ function DrawWorkspace(props: {
                 node: (
                   <div className='toolbar-picker' ref={drawQualityMenuRef}>
                     <button
-                      className={`ghost-button icon-only tiny toolbar-icon-button ${drawQualityMenuOpen ? 'selected-toggle' : ''}`}
+                      className={`ghost-button tiny toolbar-icon-button ${drawQualityMenuOpen ? 'selected-toggle' : ''}`}
                       type='button'
                       title={`图片质量：${drawQualityLabel}`}
                       aria-label={`图片质量：${drawQualityLabel}`}
                       aria-expanded={drawQualityMenuOpen}
                       onClick={() => {
+                        setImageStyleMenuOpen(false)
                         setDrawSizeMenuOpen(false)
                         setDrawQualityMenuOpen((current) => !current)
                       }}
                     >
                       <SlidersHorizontal size={16} />
+                      <span className='toolbar-icon-label'>{drawQualityLabel}</span>
                     </button>
                     {drawQualityMenuOpen && (
                       <div className='picker-menu image-config-menu'>
@@ -4195,13 +5144,14 @@ function DrawWorkspace(props: {
                 key: 'draw-random',
                 node: (
                   <button
-                    className={`ghost-button icon-only tiny toolbar-icon-button ${drawRandomSeed ? 'active' : ''}`}
+                    className={`ghost-button tiny toolbar-icon-button ${drawRandomSeed ? 'active' : ''}`}
                     type='button'
-                    title={`随机种子：${drawRandomSeed ? '开启' : '固定'}`}
-                    aria-label={`随机种子：${drawRandomSeed ? '开启' : '固定'}`}
+                    title={`随机种子：${drawRandomSeedLabel}`}
+                    aria-label={`随机种子：${drawRandomSeedLabel}`}
                     onClick={() => setDrawRandomSeed((current) => !current)}
                   >
                     <Shuffle size={16} />
+                    <span className='toolbar-icon-label'>{drawRandomSeedLabel}</span>
                   </button>
                 ),
               },
@@ -5133,9 +6083,16 @@ function CliWorkspace(props: {
   const [running, setRunning] = useState(false)
   const [fullAccess, setFullAccess] = useState(false)
   const [projectSessionMap, setProjectSessionMap] = useState<Record<string, string>>({})
-  const [sessionProjectPathMap, setSessionProjectPathMap] = useState<Record<string, string>>({})
+  const [sessionProjectPathMap, setSessionProjectPathMap] = useState<Record<string, string>>(() =>
+    readJsonStorage<Record<string, string>>(`oneapi-desktop-${client}-session-project-paths`, {})
+  )
   const [sessionMessagesMap, setSessionMessagesMap] = useState<Record<string, CliMessage[]>>({})
-  const [sessionLogsMap, setSessionLogsMap] = useState<Record<string, CliLogEntry[]>>({})
+  const [sessionLogsMap, setSessionLogsMap] = useState<Record<string, CliLogEntry[]>>(() =>
+    readJsonStorage<Record<string, CliLogEntry[]>>(`oneapi-desktop-${client}-session-logs`, {})
+  )
+  const [sessionPlansMap, setSessionPlansMap] = useState<Record<string, CliPlanState | null>>(() =>
+    readJsonStorage<Record<string, CliPlanState | null>>(`oneapi-desktop-${client}-session-plans`, {})
+  )
   const [sessionPartialMap, setSessionPartialMap] = useState<Record<string, string>>({})
   const [expandedLogGroupIds, setExpandedLogGroupIds] = useState<string[]>([])
   const [expandedLogEventMap, setExpandedLogEventMap] = useState<Record<string, string[]>>({})
@@ -5166,11 +6123,20 @@ function CliWorkspace(props: {
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
   const [effortMenuOpen, setEffortMenuOpen] = useState(false)
   const [extensionsMenuOpen, setExtensionsMenuOpen] = useState(false)
+  const [extensionsMenuAnchor, setExtensionsMenuAnchor] = useState<'composer' | 'button'>('button')
+  const [extensionsOverlayStyle, setExtensionsOverlayStyle] = useState<CSSProperties>({})
   const [extensionsLoading, setExtensionsLoading] = useState(false)
+  const [installingExtensionIds, setInstallingExtensionIds] = useState<string[]>([])
   const [extensionSearch, setExtensionSearch] = useState('')
   const [cliExtensions, setCliExtensions] = useState<CliExtensionEntry[]>([])
   const [selectedExtensions, setSelectedExtensions] = useState<CliExtensionEntry[]>([])
   const [highlightedExtensionIndex, setHighlightedExtensionIndex] = useState(0)
+  const [cliExtensionPreferences, setCliExtensionPreferences] = useState<CliExtensionPreferenceStore>(() =>
+    readJsonStorage<CliExtensionPreferenceStore>(`oneapi-desktop-${client}-extension-preferences`, {})
+  )
+  const [cliMessageOverlays, setCliMessageOverlays] = useState<CliMessageOverlayStore>(() =>
+    readJsonStorage<CliMessageOverlayStore>(`oneapi-desktop-${client}-message-overlays`, {})
+  )
   const {
     attachments,
     inputRef: attachmentInputRef,
@@ -5186,6 +6152,8 @@ function CliWorkspace(props: {
   const modelMenuRef = useRef<HTMLDivElement | null>(null)
   const effortMenuRef = useRef<HTMLDivElement | null>(null)
   const extensionsMenuRef = useRef<HTMLDivElement | null>(null)
+  const extensionsButtonRef = useRef<HTMLButtonElement | null>(null)
+  const extensionsPaletteRef = useRef<HTMLDivElement | null>(null)
   const historyPanelRef = useRef<HTMLDivElement | null>(null)
   const threadRef = useRef<HTMLDivElement | null>(null)
   const requestSessionMapRef = useRef(requestSessionMap)
@@ -5193,10 +6161,17 @@ function CliWorkspace(props: {
   const stoppingRunRef = useRef(false)
 
   const currentProjectKey = useMemo(() => normalizeProjectKey(projectPath), [projectPath])
+  const currentExtensionPreferenceKey = useMemo(
+    () => resolveCliExtensionPreferenceProjectKey(projectPath),
+    [projectPath]
+  )
   const activeSessionId = currentProjectKey ? projectSessionMap[currentProjectKey] || '' : ''
   const activeMessages = activeSessionId ? sessionMessagesMap[activeSessionId] || [] : []
   const activeLogs = activeSessionId ? sessionLogsMap[activeSessionId] || [] : []
+  const activePlan = activeSessionId ? sessionPlansMap[activeSessionId] || null : null
   const activePartial = activeSessionId ? sessionPartialMap[activeSessionId] || '' : ''
+  const activeExtensionPreferenceBucket =
+    cliExtensionPreferences[currentExtensionPreferenceKey] || createEmptyCliExtensionPreferenceBucket()
   const reasoningOptions = client === 'claude' ? CLAUDE_REASONING_OPTIONS : CLI_REASONING_OPTIONS
   const preferredCliModel = client === 'codex' ? DEFAULT_CODEX_MODEL : DEFAULT_CLAUDE_MODEL
   const fallbackCliModels = useMemo(
@@ -5220,26 +6195,40 @@ function CliWorkspace(props: {
   const selectedEffortLabel =
     reasoningOptions.find((item) => item.value === reasoningEffort)?.label || reasoningEffort
   const filteredCliExtensions = useMemo(() => {
+    const selectedIds = new Set(selectedExtensions.map((item) => item.id))
+    const decoratedEntries = decorateCliExtensions(
+      cliExtensions,
+      activeExtensionPreferenceBucket.favoriteIds,
+      activeExtensionPreferenceBucket.notes
+    ).filter((item) => !selectedIds.has(item.id))
     const normalizedSearch = extensionSearch.trim().toLowerCase()
     if (!normalizedSearch) {
-      return cliExtensions
+      return decoratedEntries
     }
 
-    return cliExtensions.filter((item) =>
+    return decoratedEntries.filter((item) =>
       [
         item.name,
+        item.note || '',
+        item.displayName,
         item.description,
         translateCliExtensionDescription(item.name, item.description),
         item.source || '',
         item.path,
       ].some((value) => value.toLowerCase().includes(normalizedSearch))
     )
-  }, [cliExtensions, extensionSearch])
+  }, [
+    activeExtensionPreferenceBucket.favoriteIds,
+    activeExtensionPreferenceBucket.notes,
+    cliExtensions,
+    extensionSearch,
+    selectedExtensions,
+  ])
   const composerTokenItems = useMemo(
     () =>
       selectedExtensions.map((item) => ({
         id: item.id,
-        label: item.name,
+        label: buildCliExtensionDisplayName(item.name, item.note),
         kindLabel: getCliExtensionKindLabel(item),
         onRemove: () => {
           setSelectedExtensions((current) => current.filter((entry) => entry.id !== item.id))
@@ -5251,6 +6240,16 @@ function CliWorkspace(props: {
   const effectiveHighlightedExtensionIndex = filteredCliExtensions.length
     ? Math.min(highlightedExtensionIndex, filteredCliExtensions.length - 1)
     : 0
+  const requestExtensionMap = useMemo(
+    () =>
+      activeMessages.reduce<Record<string, CliExtensionEntry[]>>((map, item) => {
+        if (item.requestId && item.selectedExtensions?.length) {
+          map[item.requestId] = item.selectedExtensions
+        }
+        return map
+      }, {}),
+    [activeMessages]
+  )
   const recentSessions = useMemo(
     () =>
       buildCliRecentSessions({
@@ -5349,8 +6348,108 @@ function CliWorkspace(props: {
     }
   }, [client, toast])
 
+  const updateCliExtensionPreferenceBucket = useCallback((
+    projectKey: string,
+    updater: (bucket: CliExtensionPreferenceBucket) => CliExtensionPreferenceBucket
+  ) => {
+    setCliExtensionPreferences((current) => {
+      const previousBucket = current[projectKey] || createEmptyCliExtensionPreferenceBucket()
+      const nextBucket = updater(previousBucket)
+      return {
+        ...current,
+        [projectKey]: nextBucket,
+      }
+    })
+  }, [])
+
+  const toggleFavoriteCliExtension = useCallback((item: CliExtensionEntry) => {
+    updateCliExtensionPreferenceBucket(currentExtensionPreferenceKey, (bucket) => {
+      const exists = bucket.favoriteIds.includes(item.id)
+      return {
+        ...bucket,
+        favoriteIds: exists
+          ? bucket.favoriteIds.filter((entryId) => entryId !== item.id)
+          : [item.id, ...bucket.favoriteIds.filter((entryId) => entryId !== item.id)],
+      }
+    })
+  }, [currentExtensionPreferenceKey, updateCliExtensionPreferenceBucket])
+
+  const updateCliExtensionNote = useCallback((item: CliExtensionEntry, note: string) => {
+    updateCliExtensionPreferenceBucket(currentExtensionPreferenceKey, (bucket) => {
+      const normalizedNote = note.trim()
+      const nextNotes = { ...bucket.notes }
+      if (normalizedNote) {
+        nextNotes[item.id] = normalizedNote
+      } else {
+        delete nextNotes[item.id]
+      }
+      return {
+        ...bucket,
+        notes: nextNotes,
+      }
+    })
+    setSelectedExtensions((current) =>
+      current.map((entry) =>
+        entry.id === item.id
+          ? {
+              ...entry,
+              note: note.trim(),
+            }
+          : entry
+      )
+    )
+  }, [currentExtensionPreferenceKey, updateCliExtensionPreferenceBucket])
+
+  const moveCliSessionOverlay = useCallback((fromSessionId: string, toSessionId: string) => {
+    if (!fromSessionId || !toSessionId || fromSessionId === toSessionId) {
+      return
+    }
+    setCliMessageOverlays((current) => {
+      const fromEntries = current[fromSessionId] || []
+      if (!fromEntries.length) {
+        return current
+      }
+      const next = {
+        ...current,
+        [toSessionId]: [...(current[toSessionId] || []), ...fromEntries],
+      }
+      delete next[fromSessionId]
+      return next
+    })
+    setSessionPlansMap((current) => {
+      if (!current[fromSessionId]) {
+        return current
+      }
+      const next = {
+        ...current,
+        [toSessionId]: current[toSessionId] || current[fromSessionId],
+      }
+      delete next[fromSessionId]
+      return next
+    })
+  }, [])
+
+  const persistCliMessageOverlay = useCallback((sessionId: string, message: CliMessage) => {
+    if (!sessionId || message.role !== 'user') {
+      return
+    }
+    const nextOverlay: CliMessageOverlay = {
+      role: message.role,
+      content: message.content,
+      requestId: message.requestId,
+      attachments: message.attachments,
+      selectedExtensions: message.selectedExtensions,
+    }
+    setCliMessageOverlays((current) => ({
+      ...current,
+      [sessionId]: [...(current[sessionId] || []), nextOverlay],
+    }))
+  }, [])
+
   const closeCliExtensionsMenu = useCallback((focusPrompt = false) => {
     setExtensionsMenuOpen(false)
+    setExtensionsMenuAnchor('button')
+    setExtensionsOverlayStyle({})
     setExtensionSearch('')
     setHighlightedExtensionIndex(0)
     if (focusPrompt) {
@@ -5358,9 +6457,28 @@ function CliWorkspace(props: {
     }
   }, [promptRef])
 
-  const openCliExtensionsMenu = useCallback(() => {
+  const openCliExtensionsMenu = useCallback((anchor: 'composer' | 'button') => {
     setModelMenuOpen(false)
     setEffortMenuOpen(false)
+    setExtensionsMenuAnchor(anchor)
+    if (anchor === 'button') {
+      const composerShell = extensionsMenuRef.current?.querySelector<HTMLElement>('.composer-input-shell')
+      const buttonRect = extensionsButtonRef.current?.getBoundingClientRect()
+      const shellRect = composerShell?.getBoundingClientRect()
+      if (buttonRect && shellRect) {
+        const paletteWidth = Math.min(400, Math.max(shellRect.width - 16, 280))
+        const requestedLeft = buttonRect.right - shellRect.left - paletteWidth
+        const maxLeft = Math.max(0, shellRect.width - paletteWidth)
+        setExtensionsOverlayStyle({
+          left: Math.max(0, Math.min(requestedLeft, maxLeft)),
+          width: paletteWidth,
+        })
+      } else {
+        setExtensionsOverlayStyle({})
+      }
+    } else {
+      setExtensionsOverlayStyle({})
+    }
     setExtensionsMenuOpen(true)
     setExtensionSearch('')
     setHighlightedExtensionIndex(0)
@@ -5368,6 +6486,9 @@ function CliWorkspace(props: {
   }, [refreshCliExtensions])
 
   const insertCliExtension = useCallback((item: CliExtensionEntry) => {
+    if (!canUseCliExtension(item)) {
+      return
+    }
     setSelectedExtensions((current) => {
       if (current.some((entry) => entry.id === item.id)) {
         return current
@@ -5382,10 +6503,33 @@ function CliWorkspace(props: {
 
   const selectHighlightedCliExtension = useCallback(() => {
     const target = filteredCliExtensions[effectiveHighlightedExtensionIndex]
-    if (target) {
+    if (target && canUseCliExtension(target)) {
       insertCliExtension(target)
     }
   }, [effectiveHighlightedExtensionIndex, filteredCliExtensions, insertCliExtension])
+
+  const handleInstallCliExtension = useCallback(async (item: CliExtensionViewItem) => {
+    if (!item.installable || !item.installKey) {
+      return
+    }
+    setInstallingExtensionIds((current) => current.includes(item.id) ? current : [...current, item.id])
+    try {
+      const result = await installCliExtension({
+        client,
+        extensionId: item.id,
+      })
+      if (!result.success) {
+        toast(result.message || '安装失败')
+        return
+      }
+      toast(result.message || '安装完成')
+      await refreshCliExtensions(true)
+    } catch (error) {
+      toast(error instanceof Error ? error.message : '安装失败')
+    } finally {
+      setInstallingExtensionIds((current) => current.filter((entryId) => entryId !== item.id))
+    }
+  }, [client, refreshCliExtensions, toast])
 
   const handleCliExtensionPaletteKeyDown = useCallback((event: ReactKeyboardEvent<HTMLElement>) => {
     if (!extensionsMenuOpen) {
@@ -5425,6 +6569,43 @@ function CliWorkspace(props: {
     return false
   }, [closeCliExtensionsMenu, extensionsMenuOpen, filteredCliExtensions, selectHighlightedCliExtension])
 
+  const translateCliExtensionDetail = useCallback(async (item: CliExtensionViewItem) => {
+    const originalDescription = item.description.trim()
+    if (!originalDescription) {
+      return ''
+    }
+
+    const localTranslation = translateCliExtensionDescription(item.name, originalDescription).trim()
+    if (localTranslation && localTranslation !== originalDescription) {
+      return localTranslation
+    }
+
+    const translationModel =
+      selectedModel ||
+      compatibleCliModels.find((entry) => entry.value.trim())?.value ||
+      preferredCliModel
+
+    try {
+      const response = await sendChatCompletion({
+        model: translationModel,
+        temperature: 0,
+        messages: [
+          {
+            role: 'system',
+            content: '你是专业的软件技能说明翻译助手。请将用户给出的英文说明准确翻译成简体中文，只输出译文，不要补充解释。技术名词、路径、命令、标识符保持原样。',
+          },
+          {
+            role: 'user',
+            content: originalDescription,
+          },
+        ],
+      })
+      return response.choices[0]?.message?.content?.trim() || localTranslation || originalDescription
+    } catch {
+      return localTranslation || originalDescription
+    }
+  }, [compatibleCliModels, preferredCliModel, selectedModel])
+
   useEffect(() => {
     requestSessionMapRef.current = requestSessionMap
   }, [requestSessionMap])
@@ -5436,6 +6617,26 @@ function CliWorkspace(props: {
   useEffect(() => {
     writeJsonStorage(`oneapi-desktop-${client}-history-title-overrides`, historyTitleOverrides)
   }, [client, historyTitleOverrides])
+
+  useEffect(() => {
+    writeJsonStorage(`oneapi-desktop-${client}-extension-preferences`, cliExtensionPreferences)
+  }, [cliExtensionPreferences, client])
+
+  useEffect(() => {
+    writeJsonStorage(`oneapi-desktop-${client}-message-overlays`, cliMessageOverlays)
+  }, [cliMessageOverlays, client])
+
+  useEffect(() => {
+    writeJsonStorage(`oneapi-desktop-${client}-session-logs`, sessionLogsMap)
+  }, [client, sessionLogsMap])
+
+  useEffect(() => {
+    writeJsonStorage(`oneapi-desktop-${client}-session-plans`, sessionPlansMap)
+  }, [client, sessionPlansMap])
+
+  useEffect(() => {
+    writeJsonStorage(`oneapi-desktop-${client}-session-project-paths`, sessionProjectPathMap)
+  }, [client, sessionProjectPathMap])
 
   useEffect(() => {
     let disposed = false
@@ -5537,9 +6738,17 @@ function CliWorkspace(props: {
             sessionId: nextSessionId,
           },
         }))
+        moveCliSessionOverlay(tracked.sessionId, nextSessionId)
       }
 
       const targetSessionId = payload.sessionId || tracked?.sessionId || currentSession
+
+      if (Object.prototype.hasOwnProperty.call(payload, 'plan')) {
+        setSessionPlansMap((current) => ({
+          ...current,
+          [targetSessionId]: payload.plan || null,
+        }))
+      }
 
       if (payload.kind === 'partial') {
         setSessionPartialMap((current) => ({
@@ -5601,15 +6810,18 @@ function CliWorkspace(props: {
     })
 
     return unsubscribe
-  }, [client])
+  }, [client, moveCliSessionOverlay])
 
   useEffect(() => {
-    setExpandedLogGroupIds([])
-    setExpandedLogEventMap({})
-    setPreviewFile(null)
-    setExtensionsMenuOpen(false)
-    setExtensionSearch('')
-    setSelectedExtensions([])
+    const resetTimer = window.setTimeout(() => {
+      setExpandedLogGroupIds([])
+      setExpandedLogEventMap({})
+      setPreviewFile(null)
+      setExtensionsMenuOpen(false)
+      setExtensionSearch('')
+      setSelectedExtensions([])
+    }, 0)
+    return () => window.clearTimeout(resetTimer)
   }, [activeSessionId])
 
   useEffect(() => {
@@ -5627,8 +6839,8 @@ function CliWorkspace(props: {
         setEffortMenuOpen(false)
       }
 
-      if (extensionsMenuOpen && extensionsMenuRef.current && !extensionsMenuRef.current.contains(target)) {
-        setExtensionsMenuOpen(false)
+      if (extensionsMenuOpen && extensionsPaletteRef.current && !extensionsPaletteRef.current.contains(target)) {
+        closeCliExtensionsMenu(false)
       }
 
       if (historyOpen && historyPanelRef.current && !historyPanelRef.current.contains(target)) {
@@ -5636,9 +6848,28 @@ function CliWorkspace(props: {
       }
     }
 
+    function handleFocusIn(event: FocusEvent) {
+      const target = event.target as Node | null
+      if (extensionsMenuOpen && target && extensionsPaletteRef.current && !extensionsPaletteRef.current.contains(target)) {
+        closeCliExtensionsMenu(false)
+      }
+    }
+
+    function handleWindowBlur() {
+      if (extensionsMenuOpen) {
+        closeCliExtensionsMenu(false)
+      }
+    }
+
     window.addEventListener('pointerdown', handlePointerDown)
-    return () => window.removeEventListener('pointerdown', handlePointerDown)
-  }, [effortMenuOpen, extensionsMenuOpen, historyOpen, modelMenuOpen])
+    window.addEventListener('focusin', handleFocusIn)
+    window.addEventListener('blur', handleWindowBlur)
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown)
+      window.removeEventListener('focusin', handleFocusIn)
+      window.removeEventListener('blur', handleWindowBlur)
+    }
+  }, [closeCliExtensionsMenu, effortMenuOpen, extensionsMenuOpen, historyOpen, modelMenuOpen])
 
   useEffect(() => {
     function handleOpenHistory() {
@@ -5646,7 +6877,7 @@ function CliWorkspace(props: {
     }
     window.addEventListener(`oneapi:open-${client}-history`, handleOpenHistory as EventListener)
     return () => window.removeEventListener(`oneapi:open-${client}-history`, handleOpenHistory as EventListener)
-  }, [client])
+  }, [client, moveCliSessionOverlay])
 
   useEffect(() => {
     if (active) {
@@ -5724,10 +6955,13 @@ function CliWorkspace(props: {
     } = {}
   ) {
     const normalizedUpdatedAt = normalizeTimestampMs(details.updatedAt)
-    const normalizedMessages = details.messages.map((message) => ({
-      ...message,
-      createdAt: normalizeTimestampMs(message.createdAt),
-    }))
+    const normalizedMessages = applyCliMessageOverlays(
+      details.messages.map((message) => ({
+        ...message,
+        createdAt: normalizeTimestampMs(message.createdAt),
+      })),
+      cliMessageOverlays[details.id] || []
+    )
 
     if (details.projectPath) {
       bindProjectSession(details.projectPath, details.id)
@@ -5763,6 +6997,10 @@ function CliWorkspace(props: {
     setSessionPartialMap((current) => ({
       ...current,
       [details.id]: '',
+    }))
+    setSessionPlansMap((current) => ({
+      ...current,
+      [details.id]: details.plan || null,
     }))
   }
 
@@ -5959,11 +7197,12 @@ function CliWorkspace(props: {
       name: string
       filePath: string
       kind: 'image' | 'file'
-    }>
+    }>,
+    messageExtensions?: CliExtensionEntry[]
   ) {
     setPrompt(content)
     replaceAttachments(rehydrateCliComposerAttachments(messageAttachments))
-    setSelectedExtensions([])
+    setSelectedExtensions(messageExtensions || [])
     window.setTimeout(() => {
       syncTextareaHeight(promptRef.current)
       promptRef.current?.focus()
@@ -5994,9 +7233,10 @@ function CliWorkspace(props: {
     const requestProjectPath = targetProjectPath
     const requestProjectKey = normalizeProjectKey(requestProjectPath)
     const currentSessionKey = activeSessionId || `draft-${client}-${Date.now()}`
+    const requestExtensions = selectedExtensions.map((item) => ({ ...item }))
     const promptBody = buildCliExtensionAugmentedPrompt(
       `${cleanedPrompt}${buildCliAttachmentReferenceText(targetAttachments)}`,
-      selectedExtensions
+      requestExtensions
     )
     const promptWithAttachments = buildCliExecutionPrompt(
       promptBody
@@ -6006,7 +7246,9 @@ function CliWorkspace(props: {
       role: 'user' as const,
       content: cleanedPrompt,
       createdAt: Date.now(),
+      requestId,
       attachments: toMessageAttachments(targetAttachments),
+      selectedExtensions: requestExtensions,
     }
 
     setProjectSessionMap((current) => ({
@@ -6026,6 +7268,7 @@ function CliWorkspace(props: {
       ...current,
       [currentSessionKey]: [...(current[currentSessionKey] || []), userMessage],
     }))
+    persistCliMessageOverlay(currentSessionKey, userMessage)
     setSessionPartialMap((current) => ({
       ...current,
       [currentSessionKey]: CLI_PENDING_MESSAGE_LABEL,
@@ -6052,6 +7295,7 @@ function CliWorkspace(props: {
       bindProjectSession(requestProjectPath, nextSessionId)
 
       if (nextSessionId !== currentSessionKey) {
+        moveCliSessionOverlay(currentSessionKey, nextSessionId)
         setSessionMessagesMap((current) => {
           const previous = current[currentSessionKey] || []
           const incoming = current[nextSessionId] || []
@@ -6111,6 +7355,8 @@ function CliWorkspace(props: {
     compatibleCliModels,
     preferredCliModel,
     projectPath,
+    moveCliSessionOverlay,
+    persistCliMessageOverlay,
     reasoningEffort,
     refreshCliState,
     resizePrompt,
@@ -6174,6 +7420,85 @@ function CliWorkspace(props: {
     }
   }
 
+  const extensionsPalette = extensionsMenuOpen ? (
+    <CliExtensionPalette
+      client={client}
+      loading={extensionsLoading}
+      filteredExtensions={filteredCliExtensions}
+      highlightedIndex={effectiveHighlightedExtensionIndex}
+      searchValue={extensionSearch}
+      onSearchChange={(value) => {
+        setExtensionSearch(value)
+        setHighlightedExtensionIndex(0)
+      }}
+      onSelect={insertCliExtension}
+      onInsert={insertCliExtension}
+      onCopyName={(item) => void copyText(item.name)}
+      onHoverIndex={setHighlightedExtensionIndex}
+      onRefresh={() => void refreshCliExtensions()}
+      installingIds={installingExtensionIds}
+      onInstall={handleInstallCliExtension}
+      searchActive={extensionSearch.trim().length > 0}
+      onKeyDown={handleCliExtensionPaletteKeyDown}
+      onToggleFavorite={toggleFavoriteCliExtension}
+      onTranslateDetail={translateCliExtensionDetail}
+      menuHostRef={extensionsPaletteRef}
+      onContextMenu={(event, item) => {
+        event.preventDefault()
+        setSessionContextMenu({
+          x: event.clientX,
+          y: event.clientY,
+          title: item.displayName,
+          items: [
+            {
+              key: 'favorite',
+              label: item.favorite ? '取消收藏' : '收藏并置顶',
+              onSelect: () => toggleFavoriteCliExtension(item),
+            },
+            {
+              key: 'remark',
+              label: item.note ? '编辑备注' : '添加备注',
+              onSelect: () => {
+                const nextNote = window.prompt('请输入备注名称', item.note || '')
+                if (nextNote === null) {
+                  return
+                }
+                updateCliExtensionNote(item, nextNote)
+              },
+            },
+            ...(item.note
+              ? [
+                  {
+                    key: 'clear-remark',
+                    label: '清除备注',
+                    onSelect: () => updateCliExtensionNote(item, ''),
+                  },
+                ]
+              : []),
+            {
+              key: 'copy',
+              label: '复制名称',
+              onSelect: () => copyText(item.name),
+            },
+            {
+              key: 'insert',
+              label: '插入到输入框',
+              onSelect: () => insertCliExtension(item),
+            },
+          ],
+        })
+      }}
+    />
+  ) : null
+  const extensionsOverlayPanel = extensionsPalette ? (
+    <div
+      className={`cli-extension-overlay-anchor ${extensionsMenuAnchor === 'button' ? 'anchored-to-button' : 'anchored-to-composer'}`}
+      style={extensionsOverlayStyle}
+    >
+      {extensionsPalette}
+    </div>
+  ) : null
+
   return (
     <section className='workspace-page cli-page'>
       <div className={`cli-layout ${historyOpen ? 'history-open' : ''}`}>
@@ -6187,7 +7512,8 @@ function CliWorkspace(props: {
             </div>
           )}
 
-          <div className='conversation-scroll-region'>
+          <div className={`conversation-scroll-region ${activePlan?.items.length ? 'has-cli-plan' : ''}`}>
+            <CliPlanFloatingPanel plan={activePlan} />
             <div ref={threadRef} className='cli-thread'>
               {activeTimeline.length === 0 ? (
                 <EmptyState
@@ -6208,6 +7534,7 @@ function CliWorkspace(props: {
                       onToggleEvent={(eventId) => toggleLogEvent(item.id, eventId)}
                       onOpenFile={(ownerId, path) => void handlePreviewFile(ownerId, path)}
                       onCopy={() => void copyText(item.events.map((eventItem) => serializeCliLogEvent(eventItem)).join('\n\n'))}
+                      requestedExtensions={item.requestId ? requestExtensionMap[item.requestId] : undefined}
                       previewFile={previewFile}
                     />
                   )
@@ -6230,6 +7557,9 @@ function CliWorkspace(props: {
                         showAttachmentContextMenu(event, attachment, setSessionContextMenu, openAttachmentPreview)
                       }
                     />
+                    {'selectedExtensions' in item ? (
+                      <MessageCliExtensionChips items={item.selectedExtensions} />
+                    ) : null}
                     {item.kind === 'partial' && item.content === CLI_PENDING_MESSAGE_LABEL ? (
                       <PendingMessageContent />
                     ) : (
@@ -6264,7 +7594,12 @@ function CliWorkspace(props: {
                           key: 'edit',
                           label: '编辑',
                           icon: PencilLine,
-                          onClick: () => loadPromptForEdit(item.content, 'attachments' in item ? item.attachments : undefined),
+                          onClick: () =>
+                            loadPromptForEdit(
+                              item.content,
+                              'attachments' in item ? item.attachments : undefined,
+                              'selectedExtensions' in item ? item.selectedExtensions : undefined
+                            ),
                         },
                       ]}
                     />
@@ -6284,7 +7619,7 @@ function CliWorkspace(props: {
               onAttachmentInputChange: handleAttachmentInputChange,
               textareaRef: promptRef,
               value: prompt,
-              placeholder: `输入要发给 ${client} 的消息，例如：阅读当前项目并总结关键模块。`,
+              placeholder: `输入要发给 ${client} 的消息。空白行输入 / 可直接呼出${client === 'codex' ? '技能/插件' : '命令/插件'}。`,
               onChange: (value) => {
                 setPrompt(value)
                 resizePrompt()
@@ -6310,7 +7645,7 @@ function CliWorkspace(props: {
                 const nextState = resolveCliSlashTriggerState(nextValue, event.currentTarget.selectionStart + 1)
                 if (nextState.active) {
                   event.preventDefault()
-                  openCliExtensionsMenu()
+                  openCliExtensionsMenu('composer')
                 }
               },
               onPaste: handleAttachmentPaste,
@@ -6325,26 +7660,7 @@ function CliWorkspace(props: {
                 onRemove: () => removeAttachment(item.id),
               })),
               tokenItems: composerTokenItems,
-              overlayPanel: extensionsMenuOpen ? (
-                <CliExtensionPalette
-                  client={client}
-                  loading={extensionsLoading}
-                  filteredExtensions={filteredCliExtensions}
-                  highlightedIndex={effectiveHighlightedExtensionIndex}
-                  searchValue={extensionSearch}
-                  onSearchChange={(value) => {
-                    setExtensionSearch(value)
-                    setHighlightedExtensionIndex(0)
-                  }}
-                  onSelect={insertCliExtension}
-                  onInsert={insertCliExtension}
-                  onCopyName={(item) => void copyText(item.name)}
-                  onHoverIndex={setHighlightedExtensionIndex}
-                  onRefresh={() => void refreshCliExtensions()}
-                  searchActive={extensionSearch.trim().length > 0}
-                  onKeyDown={handleCliExtensionPaletteKeyDown}
-                />
-              ) : null,
+              overlayPanel: extensionsMenuOpen ? extensionsOverlayPanel : null,
               leftActions: [
               {
                 key: 'project',
@@ -6477,6 +7793,7 @@ function CliWorkspace(props: {
                 node: (
                   <div className='toolbar-picker'>
                     <button
+                      ref={extensionsButtonRef}
                       className='ghost-button tiny picker-trigger icon-picker-trigger'
                       type='button'
                       aria-expanded={extensionsMenuOpen}
@@ -6484,7 +7801,7 @@ function CliWorkspace(props: {
                         if (extensionsMenuOpen) {
                           closeCliExtensionsMenu(true)
                         } else {
-                          openCliExtensionsMenu()
+                          openCliExtensionsMenu('button')
                         }
                       }}
                       title={client === 'codex' ? '技能与插件' : '命令与插件'}
@@ -7142,6 +8459,12 @@ function LoginScreen(props: {
               <input
                 value={twoFactorCode}
                 onChange={(event) => setTwoFactorCode(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && !submitting) {
+                    event.preventDefault()
+                    void handleTwoFactorLogin()
+                  }
+                }}
                 placeholder='6 位验证码或备用码'
               />
               <button className='primary-button full' type='button' disabled={submitting} onClick={() => void handleTwoFactorLogin()}>
@@ -7164,28 +8487,56 @@ function LoginScreen(props: {
               <input
                 value={registerUsernameValue}
                 onChange={(event) => setRegisterUsernameValue(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && !submitting) {
+                    event.preventDefault()
+                    void handleRegister()
+                  }
+                }}
                 placeholder='用户名'
               />
               <input
                 value={registerEmail}
                 onChange={(event) => setRegisterEmail(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && !submitting) {
+                    event.preventDefault()
+                    void handleRegister()
+                  }
+                }}
                 placeholder={emailVerificationRequired ? '邮箱（必填）' : '邮箱（选填）'}
               />
               <PasswordField
                 value={registerPasswordValue}
                 onChange={setRegisterPasswordValue}
                 placeholder='密码'
+                onEnter={() => {
+                  if (!submitting) {
+                    void handleRegister()
+                  }
+                }}
               />
               <PasswordField
                 value={registerConfirmPassword}
                 onChange={setRegisterConfirmPassword}
                 placeholder='确认密码'
+                onEnter={() => {
+                  if (!submitting) {
+                    void handleRegister()
+                  }
+                }}
               />
               {emailVerificationRequired && (
                 <div className='inline-fields verification-inline-fields'>
                   <input
                     value={verificationCode}
                     onChange={(event) => setVerificationCode(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' && !submitting) {
+                        event.preventDefault()
+                        void handleRegister()
+                      }
+                    }}
                     placeholder='邮箱验证码'
                   />
                   <button
@@ -7212,9 +8563,24 @@ function LoginScreen(props: {
               <input
                 value={username}
                 onChange={(event) => setUsername(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && !submitting) {
+                    event.preventDefault()
+                    void handlePasswordLogin()
+                  }
+                }}
                 placeholder='账号或邮箱'
               />
-              <PasswordField value={password} onChange={setPassword} placeholder='密码' />
+              <PasswordField
+                value={password}
+                onChange={setPassword}
+                placeholder='密码'
+                onEnter={() => {
+                  if (!submitting) {
+                    void handlePasswordLogin()
+                  }
+                }}
+              />
               <button className='primary-button full' type='button' disabled={submitting} onClick={() => void handlePasswordLogin()}>
                 {submitting ? <LoaderCircle className='spin' size={16} /> : <LockKeyhole size={16} />}
                 <span>{submitting ? '登录中' : '登录'}</span>

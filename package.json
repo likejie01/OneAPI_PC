@@ -67,6 +67,12 @@
       "dist-electron/**/*",
       "package.json"
     ],
+    "extraResources": [
+      {
+        "from": "../shared-cli-catalog",
+        "to": "cli-catalog"
+      }
+    ],
     "win": {
       "icon": "build/icon.ico",
       "signAndEditExecutable": false,
