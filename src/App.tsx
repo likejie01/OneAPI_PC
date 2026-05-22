@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { ChangeEvent, ClipboardEvent, Dispatch, DragEvent, MouseEvent, PointerEvent as ReactPointerEvent, ReactNode, SetStateAction } from 'react'
+import type { ChangeEvent, ClipboardEvent, Dispatch, DragEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent, PointerEvent as ReactPointerEvent, ReactNode, SetStateAction } from 'react'
 import {
   Blocks,
   Bot,
@@ -31,6 +31,7 @@ import {
   Pin,
   Plus,
   RotateCcw,
+  Search,
   Send,
   Square,
   Sparkles,
@@ -114,7 +115,11 @@ import {
 } from './lib/cli-session'
 import { AUTH_EXPIRED_EVENT, clearStoredDesktopUserId, saveStoredDesktopUserId } from './lib/desktop-client'
 import { deriveDesktopChatDisplayState, normalizeStoredDesktopChatMessage } from './lib/chat-reasoning'
-import { buildCliExtensionInsertText } from './lib/cli-extensions'
+import {
+  buildCliExtensionAugmentedPrompt,
+  resolveCliSlashTriggerState,
+  translateCliExtensionDescription,
+} from './lib/cli-extensions'
 import { resolveCliSetupPeerState } from './lib/desktop-service'
 import { clipText, formatDateTime, formatPrice, formatQuota, formatQuotaAsUsd } from './lib/format'
 import { readJsonStorage, writeJsonStorage } from './lib/storage'
@@ -362,6 +367,25 @@ async function openDesktopFolder(targetPath: string, treatAsFile = false) {
   await window.desktopBridge?.openPath(resolvedPath)
 }
 
+function rehydrateCliComposerAttachments(
+  attachments: Array<{
+    id: string
+    name: string
+    filePath: string
+    kind: 'image' | 'file'
+  }> = []
+): ComposerAttachment[] {
+  return attachments.map((item) => ({
+    id: item.id || globalThis.crypto.randomUUID(),
+    name: item.name,
+    filePath: item.filePath,
+    size: 0,
+    kind: item.kind,
+    dataBase64: '',
+    previewUrl: item.kind === 'image' ? toRenderableFileUrl(item.filePath) : undefined,
+  }))
+}
+
 function isInlinePreviewableFile(targetPath: string) {
   const normalized = targetPath.trim().toLowerCase()
   const fileName = normalized.split(/[\\/]/).filter(Boolean).at(-1) || normalized
@@ -424,6 +448,20 @@ function useComposerAttachments(toast: (message: string) => void) {
         return item.id !== attachmentId
       })
     )
+  }, [])
+
+  const replaceAttachments = useCallback((nextAttachments: ComposerAttachment[]) => {
+    setAttachments((current) => {
+      current.forEach((item) => {
+        if (item.previewUrl?.startsWith('blob:')) {
+          URL.revokeObjectURL(item.previewUrl)
+        }
+      })
+      return nextAttachments
+    })
+    if (inputRef.current) {
+      inputRef.current.value = ''
+    }
   }, [])
 
   const appendFiles = useCallback(async (incomingFiles: File[]) => {
@@ -512,6 +550,7 @@ function useComposerAttachments(toast: (message: string) => void) {
     inputRef,
     clearAttachments,
     removeAttachment,
+    replaceAttachments,
     handleInputChange,
     handlePaste,
     handleDrop,
@@ -622,6 +661,13 @@ type ComposerFileAsset = {
   onRemove?: () => void
 }
 
+type ComposerTokenItem = {
+  id: string
+  label: string
+  kindLabel: string
+  onRemove?: () => void
+}
+
 function renderComposer(props: {
   inputRef?: React.RefObject<HTMLInputElement | null>
   onAttachmentInputChange?: (event: ChangeEvent<HTMLInputElement>) => void | Promise<void>
@@ -629,11 +675,14 @@ function renderComposer(props: {
   value: string
   placeholder: string
   onChange: (value: string) => void
+  onKeyDown?: (event: React.KeyboardEvent<HTMLTextAreaElement>) => void
   onPaste?: (event: ClipboardEvent<HTMLTextAreaElement>) => void | Promise<void>
   onDrop?: (event: DragEvent<HTMLDivElement | HTMLTextAreaElement>) => void | Promise<void>
   leftActions: ComposerActionItem[]
   sendButton: React.ReactNode
   fileAssets?: ComposerFileAsset[]
+  tokenItems?: ComposerTokenItem[]
+  overlayPanel?: ReactNode
 }) {
   const {
     inputRef,
@@ -642,11 +691,14 @@ function renderComposer(props: {
     value,
     placeholder,
     onChange,
+    onKeyDown,
     onPaste,
     onDrop,
     leftActions,
     sendButton,
     fileAssets = [],
+    tokenItems = [],
+    overlayPanel,
   } = props
 
   return (
@@ -667,11 +719,32 @@ function renderComposer(props: {
         }}
         onDrop={onDrop}
       >
+        {tokenItems.length > 0 && (
+          <div className='composer-token-strip'>
+            {tokenItems.map((item) => (
+              <div key={item.id} className='composer-token-chip'>
+                <span className='composer-token-kind'>{item.kindLabel}</span>
+                <strong className='composer-token-label' title={item.label}>{item.label}</strong>
+                {item.onRemove ? (
+                  <button
+                    className='composer-token-remove'
+                    type='button'
+                    onClick={item.onRemove}
+                    aria-label='移除扩展'
+                  >
+                    <X size={12} />
+                  </button>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        )}
         <textarea
           ref={textareaRef}
           value={value}
           rows={AUTO_TEXTAREA_MIN_ROWS}
           onChange={(event) => onChange(event.target.value)}
+          onKeyDown={onKeyDown}
           onPaste={onPaste}
           onDragOver={(event) => {
             event.preventDefault()
@@ -709,6 +782,7 @@ function renderComposer(props: {
           </div>
         )}
       </div>
+      {overlayPanel ? <div className='composer-overlay-panel'>{overlayPanel}</div> : null}
       <div className='composer-toolbar'>
         <div className='composer-actions left'>
           {leftActions.map((item) => (
@@ -1714,90 +1788,125 @@ function getCliExtensionKindLabel(item: CliExtensionEntry) {
 function CliExtensionPalette(props: {
   client: CliClient
   loading: boolean
-  extensions: CliExtensionEntry[]
+  filteredExtensions: CliExtensionEntry[]
+  highlightedIndex: number
   searchValue: string
   onSearchChange: (value: string) => void
+  onSelect: (item: CliExtensionEntry) => void
   onInsert: (item: CliExtensionEntry) => void
   onCopyName: (item: CliExtensionEntry) => void
-  onOpenPath: (item: CliExtensionEntry) => void
+  onHoverIndex: (index: number) => void
   onRefresh: () => void
+  searchActive: boolean
+  onKeyDown: (event: ReactKeyboardEvent<HTMLElement>) => void
 }) {
   const {
     client,
     loading,
-    extensions,
+    filteredExtensions,
+    highlightedIndex,
     searchValue,
     onSearchChange,
+    onSelect,
     onInsert,
     onCopyName,
-    onOpenPath,
+    onHoverIndex,
     onRefresh,
+    searchActive,
+    onKeyDown,
   } = props
-
-  const normalizedSearch = searchValue.trim().toLowerCase()
-  const filtered = extensions.filter((item) => {
-    if (!normalizedSearch) {
-      return true
-    }
-    return [
-      item.name,
-      item.description,
-      item.source || '',
-      item.path,
-    ].some((value) => value.toLowerCase().includes(normalizedSearch))
-  })
-  const usageHint =
-    client === 'codex'
-      ? '技能可直接点名插入；插件由 Codex 按上下文自动调用。'
-      : '命令会插入为 /Command；插件由 Claude 按上下文自动调用。'
 
   return (
     <div className='picker-menu cli-extension-menu'>
       <div className='picker-menu-head cli-extension-menu-head'>
-        <div>
-          <strong>{client === 'codex' ? 'Codex 技能与插件' : 'Claude 命令与插件'}</strong>
-          <span>{usageHint}</span>
-        </div>
-        <button className='ghost-button tiny' type='button' onClick={onRefresh}>
-          刷新
-        </button>
+        <strong>{client === 'codex' ? 'Codex 技能与插件' : 'Claude 技能与插件'}</strong>
+        <input
+          className='cli-extension-search'
+          value={searchValue}
+          placeholder='搜索扩展'
+          autoFocus
+          onChange={(event) => onSearchChange(event.target.value)}
+          onKeyDown={onKeyDown}
+        />
       </div>
-      <input
-        className='cli-extension-search'
-        value={searchValue}
-        placeholder='搜索名称、描述或路径'
-        onChange={(event) => onSearchChange(event.target.value)}
-      />
+      <div className='cli-extension-toolbar'>
+        <button
+          className='ghost-button icon-only tiny'
+          type='button'
+          onClick={onRefresh}
+          title={loading ? '正在刷新' : searchActive ? '搜索已生效' : '刷新扩展'}
+        >
+          {loading ? <LoaderCircle className='spin' size={14} /> : searchActive ? <Search size={14} /> : <RotateCcw size={14} />}
+        </button>
+        <span className='cli-extension-toolbar-status'>
+          {loading
+            ? '正在刷新扩展列表...'
+            : searchActive
+              ? `搜索中，命中 ${filteredExtensions.length} 项`
+              : `共 ${filteredExtensions.length} 项`}
+        </span>
+      </div>
       <div className='cli-extension-list'>
         {loading ? (
           <div className='cli-extension-empty'>正在读取本机扩展...</div>
-        ) : filtered.length === 0 ? (
+        ) : filteredExtensions.length === 0 ? (
           <div className='cli-extension-empty'>未找到匹配的技能、命令或插件。</div>
-        ) : filtered.map((item) => {
-          const insertText = buildCliExtensionInsertText(item)
+        ) : filteredExtensions.map((item, index) => {
+          const translatedDescription = translateCliExtensionDescription(item.name, item.description)
+          const compactDescription = translatedDescription || item.description || '未提供描述'
           return (
-            <div key={item.id} className='cli-extension-card'>
-              <div className='cli-extension-card-head'>
-                <strong>{item.name}</strong>
-                <span>{getCliExtensionKindLabel(item)}</span>
-              </div>
-              <p className='cli-extension-desc'>{item.description || '未提供描述'}</p>
-              <code className='cli-extension-path' title={item.path}>{item.path}</code>
-              {item.source ? <span className='cli-extension-source'>{item.source}</span> : null}
-              <div className='cli-extension-actions'>
-                {insertText ? (
-                  <button className='secondary-button tiny' type='button' onClick={() => onInsert(item)}>
-                    插入
+            <button
+              key={item.id}
+              type='button'
+              className={`cli-extension-card ${index === highlightedIndex ? 'selected' : ''}`}
+              onMouseEnter={() => onHoverIndex(index)}
+              onClick={() => onSelect(item)}
+              aria-selected={index === highlightedIndex}
+            >
+              <div className='cli-extension-name-row'>
+                <div className='cli-extension-name-meta'>
+                  <strong>{item.name}</strong>
+                  <span className='cli-extension-meta'>{getCliExtensionKindLabel(item)}{item.source ? ` · ${item.source}` : ''}</span>
+                </div>
+                <div className='cli-extension-inline-actions'>
+                  <button
+                    className='ghost-button icon-only tiny cli-extension-inline-action'
+                    type='button'
+                    title='复制名称'
+                    aria-label='复制名称'
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      onCopyName(item)
+                    }}
+                  >
+                    <Copy size={13} />
                   </button>
-                ) : null}
-                <button className='ghost-button tiny' type='button' onClick={() => onCopyName(item)}>
-                  复制名称
-                </button>
-                <button className='ghost-button tiny' type='button' onClick={() => onOpenPath(item)}>
-                  打开目录
-                </button>
+                  <button
+                    className='ghost-button icon-only tiny cli-extension-inline-action'
+                    type='button'
+                    title='插入'
+                    aria-label='插入'
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      onInsert(item)
+                    }}
+                  >
+                    <Plus size={13} />
+                  </button>
+                </div>
               </div>
-            </div>
+              <div className='cli-extension-desc-line' title={compactDescription}>
+                {compactDescription}
+              </div>
+              <div className='cli-extension-tooltip'>
+                {translatedDescription && translatedDescription !== item.description ? (
+                  <p>{translatedDescription}</p>
+                ) : null}
+                {item.description && item.description !== translatedDescription ? (
+                  <p>{item.description}</p>
+                ) : null}
+              </div>
+            </button>
           )
         })}
       </div>
@@ -5060,11 +5169,14 @@ function CliWorkspace(props: {
   const [extensionsLoading, setExtensionsLoading] = useState(false)
   const [extensionSearch, setExtensionSearch] = useState('')
   const [cliExtensions, setCliExtensions] = useState<CliExtensionEntry[]>([])
+  const [selectedExtensions, setSelectedExtensions] = useState<CliExtensionEntry[]>([])
+  const [highlightedExtensionIndex, setHighlightedExtensionIndex] = useState(0)
   const {
     attachments,
     inputRef: attachmentInputRef,
     clearAttachments,
     removeAttachment,
+    replaceAttachments,
     handleInputChange: handleAttachmentInputChange,
     handlePaste: handleAttachmentPaste,
     handleDrop: handleAttachmentDrop,
@@ -5107,6 +5219,38 @@ function CliWorkspace(props: {
     compatibleCliModels.find((item) => item.value === selectedModel)?.label || selectedModel || preferredCliModel
   const selectedEffortLabel =
     reasoningOptions.find((item) => item.value === reasoningEffort)?.label || reasoningEffort
+  const filteredCliExtensions = useMemo(() => {
+    const normalizedSearch = extensionSearch.trim().toLowerCase()
+    if (!normalizedSearch) {
+      return cliExtensions
+    }
+
+    return cliExtensions.filter((item) =>
+      [
+        item.name,
+        item.description,
+        translateCliExtensionDescription(item.name, item.description),
+        item.source || '',
+        item.path,
+      ].some((value) => value.toLowerCase().includes(normalizedSearch))
+    )
+  }, [cliExtensions, extensionSearch])
+  const composerTokenItems = useMemo(
+    () =>
+      selectedExtensions.map((item) => ({
+        id: item.id,
+        label: item.name,
+        kindLabel: getCliExtensionKindLabel(item),
+        onRemove: () => {
+          setSelectedExtensions((current) => current.filter((entry) => entry.id !== item.id))
+          window.setTimeout(() => promptRef.current?.focus(), 0)
+        },
+      })),
+    [promptRef, selectedExtensions]
+  )
+  const effectiveHighlightedExtensionIndex = filteredCliExtensions.length
+    ? Math.min(highlightedExtensionIndex, filteredCliExtensions.length - 1)
+    : 0
   const recentSessions = useMemo(
     () =>
       buildCliRecentSessions({
@@ -5205,28 +5349,81 @@ function CliWorkspace(props: {
     }
   }, [client, toast])
 
+  const closeCliExtensionsMenu = useCallback((focusPrompt = false) => {
+    setExtensionsMenuOpen(false)
+    setExtensionSearch('')
+    setHighlightedExtensionIndex(0)
+    if (focusPrompt) {
+      window.setTimeout(() => promptRef.current?.focus(), 0)
+    }
+  }, [promptRef])
+
+  const openCliExtensionsMenu = useCallback(() => {
+    setModelMenuOpen(false)
+    setEffortMenuOpen(false)
+    setExtensionsMenuOpen(true)
+    setExtensionSearch('')
+    setHighlightedExtensionIndex(0)
+    void refreshCliExtensions(true)
+  }, [refreshCliExtensions])
+
   const insertCliExtension = useCallback((item: CliExtensionEntry) => {
-    const nextText = buildCliExtensionInsertText(item)
-    if (!nextText) {
-      toast('该插件由 CLI 按上下文自动调用，无需手动插入。')
-      return
+    setSelectedExtensions((current) => {
+      if (current.some((entry) => entry.id === item.id)) {
+        return current
+      }
+      return [...current, item]
+    })
+    closeCliExtensionsMenu(true)
+    window.setTimeout(() => {
+      resizePrompt()
+    }, 0)
+  }, [closeCliExtensionsMenu, resizePrompt])
+
+  const selectHighlightedCliExtension = useCallback(() => {
+    const target = filteredCliExtensions[effectiveHighlightedExtensionIndex]
+    if (target) {
+      insertCliExtension(target)
+    }
+  }, [effectiveHighlightedExtensionIndex, filteredCliExtensions, insertCliExtension])
+
+  const handleCliExtensionPaletteKeyDown = useCallback((event: ReactKeyboardEvent<HTMLElement>) => {
+    if (!extensionsMenuOpen) {
+      return false
     }
 
-    setPrompt((current) => {
-      const nextPrompt =
-        item.client === 'claude' && item.kind === 'command'
-          ? `${nextText}${current.trimStart()}`
-          : `${current.trimEnd()}${current.trim() ? '\n\n' : ''}${nextText}`
-      window.setTimeout(() => {
-        resizePrompt()
-        promptRef.current?.focus()
-        const cursor = nextPrompt.length
-        promptRef.current?.setSelectionRange(cursor, cursor)
-      }, 0)
-      return nextPrompt
-    })
-    setExtensionsMenuOpen(false)
-  }, [promptRef, resizePrompt, toast])
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      closeCliExtensionsMenu(true)
+      return true
+    }
+
+    if (!filteredCliExtensions.length) {
+      return false
+    }
+
+    if (event.key === 'ArrowDown') {
+      event.preventDefault()
+      setHighlightedExtensionIndex((current) => (current + 1) % filteredCliExtensions.length)
+      return true
+    }
+
+    if (event.key === 'ArrowUp') {
+      event.preventDefault()
+      setHighlightedExtensionIndex((current) =>
+        current <= 0 ? filteredCliExtensions.length - 1 : current - 1
+      )
+      return true
+    }
+
+    if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+      event.preventDefault()
+      selectHighlightedCliExtension()
+      return true
+    }
+
+    return false
+  }, [closeCliExtensionsMenu, extensionsMenuOpen, filteredCliExtensions, selectHighlightedCliExtension])
 
   useEffect(() => {
     requestSessionMapRef.current = requestSessionMap
@@ -5410,6 +5607,9 @@ function CliWorkspace(props: {
     setExpandedLogGroupIds([])
     setExpandedLogEventMap({})
     setPreviewFile(null)
+    setExtensionsMenuOpen(false)
+    setExtensionSearch('')
+    setSelectedExtensions([])
   }, [activeSessionId])
 
   useEffect(() => {
@@ -5752,8 +5952,18 @@ function CliWorkspace(props: {
     }
   }
 
-  function loadPromptForEdit(content: string) {
+  function loadPromptForEdit(
+    content: string,
+    messageAttachments?: Array<{
+      id: string
+      name: string
+      filePath: string
+      kind: 'image' | 'file'
+    }>
+  ) {
     setPrompt(content)
+    replaceAttachments(rehydrateCliComposerAttachments(messageAttachments))
+    setSelectedExtensions([])
     window.setTimeout(() => {
       syncTextareaHeight(promptRef.current)
       promptRef.current?.focus()
@@ -5784,8 +5994,12 @@ function CliWorkspace(props: {
     const requestProjectPath = targetProjectPath
     const requestProjectKey = normalizeProjectKey(requestProjectPath)
     const currentSessionKey = activeSessionId || `draft-${client}-${Date.now()}`
+    const promptBody = buildCliExtensionAugmentedPrompt(
+      `${cleanedPrompt}${buildCliAttachmentReferenceText(targetAttachments)}`,
+      selectedExtensions
+    )
     const promptWithAttachments = buildCliExecutionPrompt(
-      `${cleanedPrompt}${buildCliAttachmentReferenceText(targetAttachments)}`
+      promptBody
     )
     const userMessage = {
       id: `user-${Date.now()}`,
@@ -5817,6 +6031,7 @@ function CliWorkspace(props: {
       [currentSessionKey]: CLI_PENDING_MESSAGE_LABEL,
     }))
     setPrompt('')
+    setSelectedExtensions([])
     clearAttachments()
     window.setTimeout(() => resizePrompt(), 0)
     setRunning(true)
@@ -5901,6 +6116,7 @@ function CliWorkspace(props: {
     resizePrompt,
     running,
     selectedModel,
+    selectedExtensions,
     toast,
     fullAccess,
     hydrateCliSession,
@@ -6048,7 +6264,7 @@ function CliWorkspace(props: {
                           key: 'edit',
                           label: '编辑',
                           icon: PencilLine,
-                          onClick: () => loadPromptForEdit(item.content),
+                          onClick: () => loadPromptForEdit(item.content, 'attachments' in item ? item.attachments : undefined),
                         },
                       ]}
                     />
@@ -6062,28 +6278,74 @@ function CliWorkspace(props: {
             />
           </div>
 
-          {renderComposer({
-            inputRef: attachmentInputRef,
-            onAttachmentInputChange: handleAttachmentInputChange,
-            textareaRef: promptRef,
-            value: prompt,
-            placeholder: `输入要发给 ${client} 的消息，例如：阅读当前项目并总结关键模块。`,
-            onChange: (value) => {
-              setPrompt(value)
-              resizePrompt()
-            },
-            onPaste: handleAttachmentPaste,
-            onDrop: handleAttachmentDrop,
-            fileAssets: attachments.map((item) => ({
-              id: item.id,
-              name: item.name,
-              filePath: item.filePath,
-              previewUrl: item.previewUrl,
-              kind: item.kind,
-              onPreview: () => void openAttachmentPreview(item.filePath),
-              onRemove: () => removeAttachment(item.id),
-            })),
-            leftActions: [
+          <div ref={extensionsMenuRef}>
+            {renderComposer({
+              inputRef: attachmentInputRef,
+              onAttachmentInputChange: handleAttachmentInputChange,
+              textareaRef: promptRef,
+              value: prompt,
+              placeholder: `输入要发给 ${client} 的消息，例如：阅读当前项目并总结关键模块。`,
+              onChange: (value) => {
+                setPrompt(value)
+                resizePrompt()
+              },
+              onKeyDown: (event) => {
+                if ((event.ctrlKey || event.metaKey) && event.key === 'Enter' && !running) {
+                  event.preventDefault()
+                  void handleRun()
+                  return
+                }
+
+                if (handleCliExtensionPaletteKeyDown(event)) {
+                  return
+                }
+
+                if (event.ctrlKey || event.metaKey || event.altKey || event.key !== '/') {
+                  return
+                }
+
+                const nextValue =
+                  `${prompt.slice(0, event.currentTarget.selectionStart)}/` +
+                  prompt.slice(event.currentTarget.selectionEnd)
+                const nextState = resolveCliSlashTriggerState(nextValue, event.currentTarget.selectionStart + 1)
+                if (nextState.active) {
+                  event.preventDefault()
+                  openCliExtensionsMenu()
+                }
+              },
+              onPaste: handleAttachmentPaste,
+              onDrop: handleAttachmentDrop,
+              fileAssets: attachments.map((item) => ({
+                id: item.id,
+                name: item.name,
+                filePath: item.filePath,
+                previewUrl: item.previewUrl,
+                kind: item.kind,
+                onPreview: () => void openAttachmentPreview(item.filePath),
+                onRemove: () => removeAttachment(item.id),
+              })),
+              tokenItems: composerTokenItems,
+              overlayPanel: extensionsMenuOpen ? (
+                <CliExtensionPalette
+                  client={client}
+                  loading={extensionsLoading}
+                  filteredExtensions={filteredCliExtensions}
+                  highlightedIndex={effectiveHighlightedExtensionIndex}
+                  searchValue={extensionSearch}
+                  onSearchChange={(value) => {
+                    setExtensionSearch(value)
+                    setHighlightedExtensionIndex(0)
+                  }}
+                  onSelect={insertCliExtension}
+                  onInsert={insertCliExtension}
+                  onCopyName={(item) => void copyText(item.name)}
+                  onHoverIndex={setHighlightedExtensionIndex}
+                  onRefresh={() => void refreshCliExtensions()}
+                  searchActive={extensionSearch.trim().length > 0}
+                  onKeyDown={handleCliExtensionPaletteKeyDown}
+                />
+              ) : null,
+              leftActions: [
               {
                 key: 'project',
                 node: (
@@ -6213,54 +6475,40 @@ function CliWorkspace(props: {
               {
                 key: 'extensions',
                 node: (
-                  <div className='toolbar-picker' ref={extensionsMenuRef}>
+                  <div className='toolbar-picker'>
                     <button
                       className='ghost-button tiny picker-trigger icon-picker-trigger'
                       type='button'
                       aria-expanded={extensionsMenuOpen}
                       onClick={() => {
-                        setModelMenuOpen(false)
-                        setEffortMenuOpen(false)
-                        const nextOpen = !extensionsMenuOpen
-                        setExtensionsMenuOpen(nextOpen)
-                        if (nextOpen) {
-                          void refreshCliExtensions(true)
+                        if (extensionsMenuOpen) {
+                          closeCliExtensionsMenu(true)
+                        } else {
+                          openCliExtensionsMenu()
                         }
                       }}
                       title={client === 'codex' ? '技能与插件' : '命令与插件'}
                     >
                       <Blocks size={16} />
-                      <strong>{client === 'codex' ? '技能' : '命令'}</strong>
+                      <strong>{client === 'codex' ? '技能/插件' : '命令/插件'}</strong>
                     </button>
-                    {extensionsMenuOpen && (
-                      <CliExtensionPalette
-                        client={client}
-                        loading={extensionsLoading}
-                        extensions={cliExtensions}
-                        searchValue={extensionSearch}
-                        onSearchChange={setExtensionSearch}
-                        onRefresh={() => void refreshCliExtensions()}
-                        onInsert={insertCliExtension}
-                        onCopyName={(item) => void copyText(item.name)}
-                        onOpenPath={(item) => void openDesktopFolder(item.path, item.kind === 'command')}
-                      />
-                    )}
                   </div>
                 ),
               },
             ],
-            sendButton: (
-              <button
-                className={`primary-button icon-only send-button ${running ? 'stop-button' : ''}`}
-                type='button'
-                onClick={() => void (running ? handleStopRun() : handleRun())}
-                title={running ? '停止回复' : '发送消息'}
-                aria-label={running ? '停止回复' : '发送消息'}
-              >
-                {running ? <Square size={14} /> : <Send size={16} />}
-              </button>
-            ),
-          })}
+              sendButton: (
+                <button
+                  className={`primary-button icon-only send-button ${running ? 'stop-button' : ''}`}
+                  type='button'
+                  onClick={() => void (running ? handleStopRun() : handleRun())}
+                  title={running ? '停止回复' : '发送消息'}
+                  aria-label={running ? '停止回复' : '发送消息'}
+                >
+                  {running ? <Square size={14} /> : <Send size={16} />}
+                </button>
+              ),
+            })}
+          </div>
         </article>
 
         <aside

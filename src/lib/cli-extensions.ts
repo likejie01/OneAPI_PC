@@ -52,3 +52,116 @@ export function buildCliExtensionInsertText(input: {
 
   return ''
 }
+
+function containsChinese(value: string) {
+  return /[\u3400-\u9fff]/.test(value)
+}
+
+const knownDescriptionTranslations: Array<{
+  pattern: RegExp
+  replacement: string
+}> = [
+  {
+    pattern: /^Use when resuming work on a project\./i,
+    replacement: '适用于继续当前项目开发。',
+  },
+  {
+    pattern: /^Use when implementing any feature or bugfix, before writing implementation code$/i,
+    replacement: '适用于实现新功能或修复缺陷前，先按测试驱动方式编写测试。',
+  },
+  {
+    pattern: /^Use when about to claim work is complete.*$/i,
+    replacement: '适用于准备宣称任务完成前，先做最终验证并确认结果。',
+  },
+  {
+    pattern: /^An agentic skills framework.*$/i,
+    replacement: '一个面向编码代理的技能与工作流框架，覆盖规划、TDD、调试和交付。'
+  },
+  {
+    pattern: /^Planning, TDD, debugging, and delivery workflows for coding agents$/i,
+    replacement: '面向编码代理的规划、测试驱动、调试与交付工作流。'
+  },
+]
+
+export function translateCliExtensionDescription(name: string, description: string) {
+  const normalized = description.trim()
+  if (!normalized) {
+    return ''
+  }
+
+  if (containsChinese(normalized)) {
+    return normalized
+  }
+
+  for (const item of knownDescriptionTranslations) {
+    if (item.pattern.test(normalized)) {
+      return item.replacement
+    }
+  }
+
+  const normalizedName = name.trim().toLowerCase()
+  if (normalizedName === 'frontend design') {
+    return '适用于构建高质量前端界面、组件、页面和交互样式。'
+  }
+  if (normalizedName === 'continuecoding') {
+    return '适用于恢复项目上下文后继续开发，并维护 PROJECT_CONTEXT.md。'
+  }
+  if (normalizedName === 'superpowers') {
+    return '提供规划、测试驱动、调试、并行开发与交付校验等工作流能力。'
+  }
+
+  return normalized
+}
+
+export function buildCliExtensionPromptBlock(items: Array<{
+  client: CliClient
+  kind: CliExtensionKind
+  name: string
+}>) {
+  if (!items.length) {
+    return ''
+  }
+
+  const lines = items.map((item, index) => {
+    const prefix = `${index + 1}. `
+    if (item.kind === 'skill') {
+      return `${prefix}本次任务请主动使用已安装技能 "${item.name}"。`
+    }
+    if (item.kind === 'command') {
+      return `${prefix}本次任务请按该命令的既定用途使用 "${item.name}" 命令。`
+    }
+    return `${prefix}如任务需要，请调用已安装插件 "${item.name}"。`
+  })
+
+  return ['扩展调用要求：', ...lines].join('\n')
+}
+
+export function buildCliExtensionAugmentedPrompt(
+  prompt: string,
+  items: Array<{
+    client: CliClient
+    kind: CliExtensionKind
+    name: string
+  }>
+) {
+  const cleanedPrompt = prompt.trim()
+  const extensionBlock = buildCliExtensionPromptBlock(items)
+  if (!extensionBlock) {
+    return cleanedPrompt
+  }
+  return `${extensionBlock}\n\n${cleanedPrompt}`
+}
+
+export function resolveCliSlashTriggerState(value: string, caretIndex: number) {
+  const safeCaret = Math.max(0, Math.min(caretIndex, value.length))
+  const lineStart = value.lastIndexOf('\n', safeCaret - 1) + 1
+  const nextBreak = value.indexOf('\n', safeCaret)
+  const lineEnd = nextBreak === -1 ? value.length : nextBreak
+  const currentLine = value.slice(lineStart, lineEnd)
+
+  return {
+    active: currentLine === '/',
+    lineStart,
+    lineEnd,
+  }
+}

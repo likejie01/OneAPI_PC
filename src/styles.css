@@ -5253,74 +5253,211 @@ body,
   background: rgb(var(--surface-strong-rgb) / calc(0.72 * var(--ui-opacity, 1)));
 }
 
-.cli-extension-menu {
-  width: min(560px, calc(100vw - 40px));
-  padding: 14px;
-}
-
-.cli-extension-menu-head {
-  align-items: flex-start;
-  gap: 12px;
-}
-
-.cli-extension-search {
-  width: 100%;
-  margin-top: 12px;
-}
-
-.cli-extension-list {
-  display: grid;
-  gap: 10px;
-  margin-top: 12px;
-  max-height: 420px;
-  overflow: auto;
-}
-
-.cli-extension-card {
-  display: grid;
-  gap: 8px;
-  padding: 12px;
-  border: 1px solid color-mix(in srgb, var(--line) 76%, transparent);
-  border-radius: 14px;
-  background: rgb(var(--surface-strong-rgb) / calc(0.64 + 0.18 * var(--ui-solidness, 0)));
-}
-
-.cli-extension-card-head {
+.composer-token-strip {
   display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.composer-token-chip {
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 5px 10px;
+  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+  border-radius: 999px;
+  background: rgb(var(--surface-strong-rgb) / calc(0.52 + 0.2 * var(--ui-solidness, 0)));
 }
 
-.cli-extension-card-head span,
-.cli-extension-source {
+.composer-token-kind {
+  flex: 0 0 auto;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
+  line-height: 1;
 }
 
-.cli-extension-desc {
-  margin: 0;
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 1.5;
-}
-
-.cli-extension-path {
-  display: block;
+.composer-token-label {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 12px;
 }
 
-.cli-extension-actions {
+.composer-token-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+}
+
+.composer-token-remove:hover,
+.composer-token-remove:focus-visible {
+  background: rgb(var(--surface-strong-rgb) / calc(0.94 * var(--ui-opacity, 1)));
+  color: var(--text);
+}
+
+.composer-overlay-panel {
+  position: relative;
+  margin-top: 10px;
+}
+
+.cli-extension-menu {
+  width: min(720px, calc(100vw - 40px));
+  padding: 14px;
+}
+
+.cli-extension-menu-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 50%);
+  align-items: center;
+  gap: 12px;
+}
+
+.cli-extension-search {
+  width: 100%;
+  margin: 0;
+  justify-self: end;
+}
+
+.cli-extension-toolbar {
   display: flex;
-  flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
+  margin-top: 10px;
+}
+
+.cli-extension-toolbar-status {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.cli-extension-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  max-height: 420px;
+  overflow: auto;
+}
+
+.cli-extension-card {
+  position: relative;
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--line) 76%, transparent);
+  border-radius: 12px;
+  background: rgb(var(--surface-strong-rgb) / calc(0.46 + 0.18 * var(--ui-solidness, 0)));
+  text-align: left;
+  transition: border-color 140ms ease, background 140ms ease, transform 140ms ease;
+}
+
+.cli-extension-card:hover,
+.cli-extension-card:focus-visible,
+.cli-extension-card.selected {
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--line));
+  background: rgb(var(--surface-strong-rgb) / calc(0.72 + 0.16 * var(--ui-solidness, 0)));
+}
+
+.cli-extension-name-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.cli-extension-name-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.cli-extension-name-meta strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cli-extension-meta {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.cli-extension-inline-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.cli-extension-inline-action {
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  min-height: 24px;
+}
+
+.cli-extension-desc-line {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cli-extension-tooltip {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  top: calc(100% + 8px);
+  z-index: 20;
+  display: none;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+  border-radius: 12px;
+  background: rgb(var(--surface-rgb) / 0.98);
+  box-shadow: 0 18px 44px rgb(0 0 0 / 0.16);
+}
+
+.cli-extension-card:hover .cli-extension-tooltip,
+.cli-extension-card:focus-visible .cli-extension-tooltip {
+  display: grid;
+}
+
+.cli-extension-tooltip p {
+  margin: 0;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.55;
 }
 
 .cli-extension-empty {
   padding: 20px 10px;
   color: var(--muted);
   text-align: center;
+}
+
+@media (max-width: 760px) {
+  .cli-extension-menu-head {
+    grid-template-columns: 1fr;
+  }
+
+  .cli-extension-search {
+    justify-self: stretch;
+  }
 }
