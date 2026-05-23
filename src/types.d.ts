@@ -24,6 +24,11 @@ import type {
   DesktopChatStreamPayload,
   DesktopChatStreamRequest,
   DesktopDeleteCliMessageRequest,
+  DesktopDeleteCliSessionsRequest,
+  DesktopDeleteCliSessionsResult,
+  DesktopExportTextFileRequest,
+  DesktopExportTextFileResult,
+  DesktopTranslateSelectionPayload,
 } from './shared/desktop'
 import type { ImageGenerationResponse } from './shared/contracts'
 
@@ -68,6 +73,7 @@ declare global {
       listCliHistory: (client: CliClient, limit?: number) => Promise<CliHistoryEntry[]>
       getCliSession: (client: CliClient, sessionId: string) => Promise<CliSessionDetails | null>
       deleteCliMessage: (input: DesktopDeleteCliMessageRequest) => Promise<CliSessionDetails | null>
+      deleteCliSessions: (input: DesktopDeleteCliSessionsRequest) => Promise<DesktopDeleteCliSessionsResult>
       openCliSessionFolder: (client: CliClient, sessionId: string) => Promise<void>
       runCliPrompt: (input: CliRunRequest) => Promise<CliRunResponse>
       stopCliPrompt: (requestId: string) => Promise<void>
@@ -83,6 +89,7 @@ declare global {
       ) => Promise<DesktopAttachmentSaveResult>
       editImage: (input: DesktopImageEditRequest) => Promise<ImageGenerationResponse>
       saveImage: (input: DesktopSaveImageRequest) => Promise<DesktopSaveImageResult>
+      exportTextFile: (input: DesktopExportTextFileRequest) => Promise<DesktopExportTextFileResult>
       readFilePreview: (targetPath: string) => Promise<DesktopFilePreview>
       getCliDeployPreset: (client: CliClient) => Promise<CliDeployPreset>
       listCliExtensions: (client: CliClient) => Promise<CliExtensionEntry[]>
@@ -98,6 +105,9 @@ declare global {
       ) => () => void
       onChatStream: (
         listener: (payload: DesktopChatStreamPayload) => void
+      ) => () => void
+      onTranslateSelectionRequested: (
+        listener: (payload: DesktopTranslateSelectionPayload) => void
       ) => () => void
     }
   }

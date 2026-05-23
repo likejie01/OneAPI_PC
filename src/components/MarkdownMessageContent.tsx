@@ -108,7 +108,6 @@ export function MarkdownMessageContent(props: MarkdownMessageContentProps) {
                     }}
                   >
                     <Copy size={13} />
-                    <span>{copied ? '已复制' : '复制'}</span>
                   </button>
                   <code className={className} {...rest}>
                     {normalizedText}

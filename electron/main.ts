@@ -30,6 +30,8 @@ import type {
   DesktopChatStreamPayload,
   DesktopChatStreamRequest,
   DesktopDeleteCliMessageRequest,
+  DesktopDeleteCliSessionsRequest,
+  DesktopExportTextFileRequest,
 } from '../src/shared/desktop'
 import { parseDesktopChatStreamDataLine } from '../src/lib/chat-reasoning.ts'
 import {
@@ -238,6 +240,9 @@ interface CliStatus {
   configPath: string
   dataPath: string
   hasConfig: boolean
+  baseUrl?: string
+  hasApiKey?: boolean
+  managedByDesktop?: boolean
   hasDataDirectory: boolean
   brokenInstallation?: boolean
 }
@@ -535,6 +540,14 @@ function attachContextMenu(win: BrowserWindow) {
     } else {
       if (hasSelection) {
         template.push({ label: '复制', role: 'copy' })
+        template.push({
+          label: '翻译选中文本',
+          click: () => {
+            win.webContents.send('desktop:translate-selection-requested', {
+              text: params.selectionText.trim(),
+            })
+          },
+        })
       }
       template.push({
         label: '全选',
@@ -1280,6 +1293,24 @@ async function inspectCli(client: CliClient): Promise<CliStatus> {
 
   const configPath = cliConfig[client].configPath
   const dataPath = cliConfig[client].dataPath
+  const hasConfig = await pathExists(configPath)
+  const hasDataDirectory = await pathExists(dataPath)
+  let baseUrl = ''
+  let hasApiKey = false
+  let managedByDesktop = false
+
+  if (hasConfig) {
+    try {
+      const currentConfig = client === 'codex'
+        ? await readCurrentCodexConfig()
+        : await readCurrentClaudeConfig()
+      baseUrl = currentConfig.baseUrl
+      hasApiKey = !!currentConfig.apiKey.trim()
+      managedByDesktop = !!currentConfig.managedByDesktop
+    } catch {
+      /* ignore parse errors and surface raw file presence only */
+    }
+  }
 
   return {
     client,
@@ -1288,8 +1319,11 @@ async function inspectCli(client: CliClient): Promise<CliStatus> {
     executablePath,
     configPath,
     dataPath,
-    hasConfig: await pathExists(configPath),
-    hasDataDirectory: await pathExists(dataPath),
+    hasConfig,
+    baseUrl,
+    hasApiKey,
+    managedByDesktop,
+    hasDataDirectory,
     brokenInstallation: probeResult.brokenInstallation,
   }
 }
@@ -1491,6 +1525,29 @@ async function openCliSessionFolder(client: CliClient, sessionId: string) {
   throw new Error('当前会话没有可打开的目录。')
 }
 
+async function exportTextFile(input: DesktopExportTextFileRequest) {
+  const suggestedName = path.basename(input.suggestedName || `oneapi-session-${Date.now()}.md`)
+  const saveResult = await dialog.showSaveDialog({
+    title: input.title || '导出会话',
+    defaultPath: path.join(app.getPath('documents'), suggestedName),
+    filters: [
+      { name: 'Markdown', extensions: ['md'] },
+      { name: 'Text', extensions: ['txt'] },
+      { name: 'All Files', extensions: ['*'] },
+    ],
+  })
+
+  if (saveResult.canceled || !saveResult.filePath) {
+    throw new Error('已取消导出。')
+  }
+
+  await fs.mkdir(path.dirname(saveResult.filePath), { recursive: true })
+  await fs.writeFile(saveResult.filePath, input.content, 'utf8')
+  return {
+    path: saveResult.filePath,
+  }
+}
+
 async function saveImageToUserPath(input: DesktopSaveImageRequest) {
   const defaultName = path.basename(input.suggestedName || `oneapi-image-${Date.now()}.png`)
   const saveResult = await dialog.showSaveDialog({
@@ -1535,6 +1592,7 @@ async function readCurrentCodexConfig() {
   const parsed = parseTomlDocument(raw)
   const model = readTomlTopLevelString(parsed.preamble, 'model') || DEFAULT_CODEX_MODEL
   const provider = readTomlTopLevelString(parsed.preamble, 'model_provider') || 'oneapi_desktop'
+  const credentialsStore = readTomlTopLevelString(parsed.preamble, 'cli_auth_credentials_store')
   const providerSection =
     parsed.sections.find((section) => section.header === `model_providers.${provider}`) ||
     parsed.sections.find((section) => section.header === 'model_providers.oneapi_desktop')
@@ -1546,6 +1604,7 @@ async function readCurrentCodexConfig() {
     apiKey: apiKey?.trim() || '',
     model: model.trim() || DEFAULT_CODEX_MODEL,
     baseUrl: normalizeCodexBaseUrl(baseUrl),
+    managedByDesktop: provider === 'oneapi_desktop' && credentialsStore === 'file',
   }
 }
 
@@ -1847,12 +1906,18 @@ function maskSensitiveText(value?: string) {
 async function readCurrentClaudeConfig() {
   const targetPath = cliConfig.claude.configPath
   const parsed = await readResolvedClaudeSettingsDocument(targetPath)
+  const env = parsed.env || {}
+  const managedByDesktop =
+    env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC === '1' ||
+    typeof env.ONEAPI_ORIGINAL_ANTHROPIC_API_KEY === 'string' ||
+    typeof env.ONEAPI_ORIGINAL_ANTHROPIC_AUTH_TOKEN === 'string'
 
   return {
     client: 'claude' as const,
-    apiKey: pickClaudeApiKey(parsed.env),
+    apiKey: pickClaudeApiKey(env),
     model: parsed.model?.trim() || DEFAULT_CLAUDE_MODEL,
-    baseUrl: normalizeClaudeBaseUrl(parsed.env?.ANTHROPIC_BASE_URL),
+    baseUrl: normalizeClaudeBaseUrl(env.ANTHROPIC_BASE_URL),
+    managedByDesktop,
   }
 }
 
@@ -3255,6 +3320,32 @@ async function rewriteJsonLinesFile(
   }
 }
 
+async function pruneEmptyParentDirectories(startDirectory: string, stopDirectory: string) {
+  let current = path.resolve(startDirectory)
+  const boundary = path.resolve(stopDirectory)
+  while (current.startsWith(boundary) && current !== boundary) {
+    const entries = await fs.readdir(current).catch(() => [])
+    if (entries.length > 0) {
+      return
+    }
+    await fs.rmdir(current).catch(() => undefined)
+    current = path.dirname(current)
+  }
+}
+
+async function listCliSessionFiles(client: CliClient, sessionId: string) {
+  if (client === 'codex') {
+    const sessionRoot = path.join(os.homedir(), '.codex', 'sessions')
+    return walkFiles(
+      sessionRoot,
+      (filePath) => filePath.endsWith('.jsonl') && filePath.includes(sessionId)
+    )
+  }
+
+  const target = await getClaudeSessionFile(sessionId)
+  return target ? [target] : []
+}
+
 function isMatchingCodexMessageLine(
   line: string,
   input: DesktopDeleteCliMessageRequest['message']
@@ -3449,6 +3540,54 @@ async function deleteCliMessage(input: DesktopDeleteCliMessageRequest) {
   return input.client === 'codex'
     ? getCodexSession(input.sessionId)
     : getClaudeSession(input.sessionId)
+}
+
+async function deleteCliSessionHistoryEntries(client: CliClient, sessionId: string) {
+  const historyFilePath =
+    client === 'codex'
+      ? path.join(os.homedir(), '.codex', 'history.jsonl')
+      : path.join(os.homedir(), '.claude', 'history.jsonl')
+
+  if (!(await pathExists(historyFilePath))) {
+    return
+  }
+
+  await rewriteJsonLinesFile(historyFilePath, (line) => {
+    try {
+      const parsed = JSON.parse(line) as {
+        session_id?: string
+        sessionId?: string
+      }
+      return client === 'codex'
+        ? parsed.session_id !== sessionId
+        : parsed.sessionId !== sessionId
+    } catch {
+      return true
+    }
+  })
+}
+
+async function deleteCliSessions(input: DesktopDeleteCliSessionsRequest) {
+  const deletedSessionIds: string[] = []
+
+  for (const sessionId of [...new Set(input.sessionIds.map((item) => item.trim()).filter(Boolean))]) {
+    const sessionFiles = await listCliSessionFiles(input.client, sessionId)
+    await Promise.all(
+      sessionFiles.map(async (filePath) => {
+        await fs.rm(filePath, { force: true }).catch(() => undefined)
+        await pruneEmptyParentDirectories(path.dirname(filePath), input.client === 'codex'
+          ? path.join(os.homedir(), '.codex', 'sessions')
+          : path.join(os.homedir(), '.claude', 'projects'))
+      })
+    )
+    await deleteCliSessionHistoryEntries(input.client, sessionId)
+    deletedSessionIds.push(sessionId)
+  }
+
+  return {
+    deletedCount: deletedSessionIds.length,
+    deletedSessionIds,
+  }
 }
 
 async function walkFiles(root: string, matcher: (filePath: string) => boolean) {
@@ -6145,6 +6284,14 @@ ipcMain.handle(
 )
 ipcMain.handle('desktop:delete-cli-message', async (_event, input: DesktopDeleteCliMessageRequest) => {
   return deleteCliMessage(input)
+})
+
+ipcMain.handle('desktop:delete-cli-sessions', async (_event, input: DesktopDeleteCliSessionsRequest) => {
+  return deleteCliSessions(input)
+})
+
+ipcMain.handle('desktop:export-text-file', async (_event, input: DesktopExportTextFileRequest) => {
+  return exportTextFile(input)
 })
 ipcMain.handle(
   'desktop:open-cli-session-folder',

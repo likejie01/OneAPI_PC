@@ -1,0 +1,149 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import type { CliSessionMessage } from '../shared/desktop.ts'
+import {
+  buildChatSessionExportMarkdown,
+  buildCliSessionExportMarkdown,
+  buildSessionExportFileName,
+  hasActiveCliPlan,
+  mergeCliMessages,
+} from './session-history.ts'
+
+test('mergeCliMessages keeps stable source location from hydrated duplicate messages', () => {
+  const draftOnly: CliSessionMessage = {
+    id: 'draft-1',
+    role: 'assistant',
+    content: '我先检查一下。',
+    createdAt: 1000,
+    modelLabel: 'Codex',
+  }
+  const hydrated: CliSessionMessage = {
+    id: 'hydrated-1',
+    role: 'assistant',
+    content: '我先检查一下。',
+    createdAt: 1000,
+    modelLabel: 'Codex',
+    sourceFilePath: 'C:\\Users\\test\\.codex\\sessions\\abc.jsonl',
+    sourceLineNumber: 42,
+    sourceTimestamp: '2026-05-23T08:00:00.000Z',
+  }
+
+  const merged = mergeCliMessages([draftOnly], [hydrated])
+
+  assert.equal(merged.length, 1)
+  assert.equal(merged[0].sourceFilePath, hydrated.sourceFilePath)
+  assert.equal(merged[0].sourceLineNumber, 42)
+  assert.equal(merged[0].sourceTimestamp, hydrated.sourceTimestamp)
+})
+
+test('hasActiveCliPlan hides fully completed plans', () => {
+  assert.equal(
+    hasActiveCliPlan({
+      explanation: 'all done',
+      updatedAt: Date.now(),
+      items: [
+        { id: '1', step: 'done', status: 'completed' },
+        { id: '2', step: 'done too', status: 'completed' },
+      ],
+    }),
+    false
+  )
+
+  assert.equal(
+    hasActiveCliPlan({
+      explanation: 'running',
+      updatedAt: Date.now(),
+      items: [
+        { id: '1', step: 'done', status: 'completed' },
+        { id: '2', step: 'next', status: 'in_progress' },
+      ],
+    }),
+    true
+  )
+})
+
+test('buildChatSessionExportMarkdown includes think content and attachments', () => {
+  const markdown = buildChatSessionExportMarkdown({
+    title: '测试聊天',
+    updatedAt: 1,
+    messages: [
+      {
+        id: 'u1',
+        role: 'user',
+        content: '帮我看下这个错误',
+        createdAt: 1,
+        attachments: [
+          {
+            id: 'a1',
+            name: 'error.log',
+            filePath: 'C:\\tmp\\error.log',
+            kind: 'file',
+          },
+        ],
+      },
+      {
+        id: 'a1',
+        role: 'assistant',
+        content: '这是一个依赖问题。',
+        createdAt: 2,
+        reasoningContent: '先确认依赖版本。',
+      },
+    ],
+  })
+
+  assert.match(markdown, /### Think/)
+  assert.match(markdown, /error\.log/)
+  assert.match(markdown, /这是一个依赖问题/)
+})
+
+test('buildCliSessionExportMarkdown includes plan and logs', () => {
+  const markdown = buildCliSessionExportMarkdown({
+    client: 'codex',
+    title: 'CLI 会话',
+    details: {
+      id: 's1',
+      client: 'codex',
+      preview: '检查构建',
+      updatedAt: 2,
+      projectName: 'demo',
+      projectPath: 'D:\\demo',
+      messages: [
+        {
+          id: 'u1',
+          role: 'user',
+          content: '检查构建失败',
+          createdAt: 1,
+        },
+      ],
+      plan: {
+        explanation: '先看日志',
+        updatedAt: 2,
+        items: [{ id: 'p1', step: '读取日志', status: 'completed' }],
+      },
+    },
+    logs: [
+      {
+        title: '读取文件',
+        createdAt: 2,
+        events: [
+          {
+            kind: 'tool',
+            message: 'read_file package.json',
+            sourceKind: 'assistant.tool_use.read_file',
+          },
+        ],
+      },
+    ],
+  })
+
+  assert.match(markdown, /## 计划/)
+  assert.match(markdown, /## 执行日志/)
+  assert.match(markdown, /read_file package\.json/)
+})
+
+test('buildSessionExportFileName sanitizes reserved filename characters', () => {
+  assert.equal(
+    buildSessionExportFileName('chat', '项目: 构建/排错?'),
+    'chat-项目 构建 排错.md'
+  )
+})

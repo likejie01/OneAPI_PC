@@ -26,6 +26,11 @@ import type {
   DesktopChatStreamPayload,
   DesktopChatStreamRequest,
   DesktopDeleteCliMessageRequest,
+  DesktopDeleteCliSessionsRequest,
+  DesktopDeleteCliSessionsResult,
+  DesktopExportTextFileRequest,
+  DesktopExportTextFileResult,
+  DesktopTranslateSelectionPayload,
 } from '../src/shared/desktop'
 import type { ImageGenerationResponse } from '../src/shared/contracts'
 
@@ -99,6 +104,8 @@ contextBridge.exposeInMainWorld('desktopBridge', {
     }) as Promise<CliSessionDetails | null>,
   deleteCliMessage: (input: DesktopDeleteCliMessageRequest) =>
     ipcRenderer.invoke('desktop:delete-cli-message', input) as Promise<CliSessionDetails | null>,
+  deleteCliSessions: (input: DesktopDeleteCliSessionsRequest) =>
+    ipcRenderer.invoke('desktop:delete-cli-sessions', input) as Promise<DesktopDeleteCliSessionsResult>,
   openCliSessionFolder: (client: CliClient, sessionId: string) =>
     ipcRenderer.invoke('desktop:open-cli-session-folder', {
       client,
@@ -130,6 +137,8 @@ contextBridge.exposeInMainWorld('desktopBridge', {
     ipcRenderer.invoke('desktop:image-edit', input) as Promise<ImageGenerationResponse>,
   saveImage: (input: DesktopSaveImageRequest) =>
     ipcRenderer.invoke('desktop:save-image', input) as Promise<DesktopSaveImageResult>,
+  exportTextFile: (input: DesktopExportTextFileRequest) =>
+    ipcRenderer.invoke('desktop:export-text-file', input) as Promise<DesktopExportTextFileResult>,
   readFilePreview: (targetPath: string) =>
     ipcRenderer.invoke('desktop:file-preview', targetPath) as Promise<DesktopFilePreview>,
   getCliDeployPreset: (client: CliClient) =>
@@ -149,6 +158,14 @@ contextBridge.exposeInMainWorld('desktopBridge', {
   onChatStream: (listener: (payload: DesktopChatStreamPayload) => void) => {
     const channel = 'desktop:chat-stream'
     const wrapped = (_event: unknown, payload: DesktopChatStreamPayload) => listener(payload)
+    ipcRenderer.on(channel, wrapped)
+    return () => {
+      ipcRenderer.removeListener(channel, wrapped)
+    }
+  },
+  onTranslateSelectionRequested: (listener: (payload: DesktopTranslateSelectionPayload) => void) => {
+    const channel = 'desktop:translate-selection-requested'
+    const wrapped = (_event: unknown, payload: DesktopTranslateSelectionPayload) => listener(payload)
     ipcRenderer.on(channel, wrapped)
     return () => {
       ipcRenderer.removeListener(channel, wrapped)

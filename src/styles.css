@@ -798,16 +798,184 @@ select {
   min-width: 0;
 }
 
+.subscription-plan-card {
+  position: relative;
+  gap: 12px;
+  padding: 18px 18px 16px;
+  overflow: hidden;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--panel-strong) 96%, transparent), color-mix(in srgb, var(--panel-strong) 84%, transparent));
+}
+
+.subscription-plan-card.recommended {
+  border-color: rgba(29, 107, 120, 0.22);
+  box-shadow: 0 18px 36px rgba(29, 107, 120, 0.12);
+}
+
+.subscription-plan-card.limit-reached {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--panel-strong) 92%, transparent), color-mix(in srgb, var(--panel-strong) 72%, var(--accent-2) 28%));
+}
+
+.subscription-plan-badge-row,
+.subscription-plan-head,
+.subscription-plan-price-group,
+.subscription-plan-quota,
+.subscription-plan-footnote,
+.subscription-record-main,
+.subscription-record-side {
+  display: flex;
+  flex-direction: column;
+}
+
+.subscription-plan-badge-row {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.subscription-plan-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid transparent;
+}
+
+.subscription-plan-badge.recommended {
+  background: rgba(29, 107, 120, 0.14);
+  color: #195662;
+}
+
+.subscription-plan-badge.subtle {
+  background: rgba(23, 49, 74, 0.06);
+  color: #4f667b;
+}
+
+.subscription-plan-badge.muted {
+  background: rgba(201, 110, 75, 0.12);
+  color: #93583c;
+}
+
+.subscription-plan-head {
+  gap: 6px;
+}
+
+.subscription-plan-subtitle {
+  color: var(--muted);
+  min-height: 38px;
+}
+
+.subscription-plan-price-group {
+  gap: 0;
+}
+
+.subscription-plan-price-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
 .pricing-card b {
   display: block;
-  margin: 10px 0 2px;
+  margin: 2px 0 1px;
   font-size: 24px;
   color: #153f54;
+}
+
+.subscription-plan-price-unit {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.subscription-plan-price-caption {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.subscription-plan-quota {
+  gap: 4px;
+  padding: 10px 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(29, 52, 73, 0.08);
+  background: rgba(29, 107, 120, 0.06);
+}
+
+.subscription-plan-quota-label,
+.subscription-record-main small,
+.subscription-record-status {
+  color: var(--muted);
+}
+
+.subscription-plan-quota-values {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.subscription-plan-quota strong {
+  font-size: 14px;
+  line-height: 1.3;
+  font-weight: 700;
+}
+
+.subscription-plan-quota-divider {
+  color: var(--muted);
+  padding-left: 2px;
+  padding-right: 2px;
+}
+
+.subscription-plan-token-value {
+  padding-left: 10px;
 }
 
 .pricing-actions {
   margin-top: auto;
   padding-top: 6px;
+}
+
+.subscription-plan-actions {
+  gap: 8px;
+  padding-top: 2px;
+}
+
+.subscription-plan-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.subscription-record-row {
+  align-items: stretch;
+}
+
+.subscription-record-main {
+  flex: 1;
+  gap: 3px;
+}
+
+.subscription-record-main small {
+  font-size: 12px;
+}
+
+.subscription-record-side {
+  width: 148px;
+  justify-content: center;
+  gap: 8px;
+}
+
+.subscription-record-status {
+  text-align: right;
 }
 
 .chip,
@@ -2317,24 +2485,25 @@ select {
 
 .markdown-code-copy {
   position: absolute;
-  top: 8px;
-  right: 8px;
+  top: 7px;
+  right: 7px;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  min-height: 24px;
-  padding: 0 8px;
-  border-radius: 9px;
-  border: 1px solid rgba(23, 49, 74, 0.08);
-  background: rgba(255, 255, 255, 0.92);
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: transparent;
   color: #234a61;
-  font-size: 11px;
   line-height: 1;
 }
 
 .markdown-code-copy:hover,
 .markdown-code-copy:focus-visible {
-  background: rgba(255, 255, 255, 0.98);
+  border-color: rgba(23, 49, 74, 0.08);
+  background: rgba(255, 255, 255, 0.92);
 }
 
 .markdown-body pre code {
@@ -3008,6 +3177,15 @@ select {
     grid-template-columns: 1fr;
   }
 
+  .subscription-record-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .subscription-record-side {
+    width: 100%;
+  }
+
   .chat-layout.history-open,
   .cli-layout.history-open,
   .chat-layout,
@@ -3025,6 +3203,11 @@ select {
 }
 
 @media (max-width: 880px) {
+  .subscription-plan-meta {
+    flex-direction: column;
+    gap: 2px;
+  }
+
   .sidebar {
     width: 84px;
     padding-inline: 12px;
@@ -4052,9 +4235,9 @@ body,
 
 .session-context-menu {
   position: fixed;
-  min-width: 160px;
-  padding: 8px;
-  border-radius: 16px;
+  min-width: 146px;
+  padding: 6px;
+  border-radius: 14px;
   border: 1px solid rgba(78, 82, 92, 0.08);
   background: rgba(255, 252, 248, 0.94);
   box-shadow: 0 18px 38px rgba(25, 35, 48, 0.16);
@@ -4062,21 +4245,59 @@ body,
   z-index: 80;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
 }
 
 .session-context-menu-item {
   width: 100%;
   text-align: left;
-  padding: 10px 12px;
-  border-radius: 12px;
+  padding: 8px 10px;
+  border-radius: 10px;
   color: var(--text);
   background: transparent;
+  font-size: 12px;
+  line-height: 1.25;
 }
 
 .session-context-menu-item:hover,
 .session-context-menu-item:focus-visible {
   background: rgba(23, 49, 74, 0.06);
+}
+
+.session-context-menu-item.danger {
+  color: var(--danger);
+}
+
+.translation-modal-card {
+  width: min(560px, calc(100vw - 32px));
+}
+
+.translation-modal-sections {
+  display: grid;
+  gap: 12px;
+}
+
+.translation-modal-section {
+  display: grid;
+  gap: 8px;
+}
+
+.translation-modal-section strong {
+  font-size: 12px;
+}
+
+.translation-modal-section pre {
+  margin: 0;
+  padding: 12px;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border-radius: 12px;
+  background: rgb(var(--surface-strong-rgb) / calc(0.74 + 0.12 * var(--ui-solidness, 0)));
+  border: 1px solid color-mix(in srgb, var(--line) 88%, transparent);
+  font-size: 12px;
+  line-height: 1.55;
 }
 
 .sidebar {

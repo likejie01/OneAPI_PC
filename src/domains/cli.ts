@@ -11,6 +11,9 @@ import type {
   CliExtensionEntry,
   CliExtensionInstallRequest,
   DesktopDeleteCliMessageRequest,
+  DesktopDeleteCliSessionsResult,
+  DesktopExportTextFileResult,
+  DesktopTranslateSelectionPayload,
   DeployProgressPayload,
 } from '../shared/desktop'
 
@@ -39,6 +42,13 @@ export function deleteCliMessage(
     sessionId,
     message,
   } satisfies DesktopDeleteCliMessageRequest)
+}
+
+export function deleteCliSessions(client: CliClient, sessionIds: string[]): Promise<DesktopDeleteCliSessionsResult> {
+  return desktopBridge().deleteCliSessions({
+    client,
+    sessionIds,
+  })
 }
 
 export function openCliSessionFolder(client: CliClient, sessionId: string) {
@@ -81,6 +91,18 @@ export function readDesktopFilePreview(targetPath: string) {
   return desktopBridge().readFilePreview(targetPath)
 }
 
+export function exportTextFile(
+  suggestedName: string,
+  content: string,
+  title?: string
+): Promise<DesktopExportTextFileResult> {
+  return desktopBridge().exportTextFile({
+    suggestedName,
+    content,
+    title,
+  })
+}
+
 export function getCliDeployPreset(client: CliClient) {
   return desktopBridge().getCliDeployPreset(client)
 }
@@ -95,4 +117,10 @@ export function installCliExtension(input: CliExtensionInstallRequest) {
 
 export function onDeployProgress(listener: (payload: DeployProgressPayload) => void) {
   return desktopBridge().onDeployProgress(listener)
+}
+
+export function onTranslateSelectionRequested(
+  listener: (payload: DesktopTranslateSelectionPayload) => void
+) {
+  return desktopBridge().onTranslateSelectionRequested(listener)
 }

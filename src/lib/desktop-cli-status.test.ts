@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { resolveCliProbeResult } from './desktop-service.ts'
+import { isCliStatusReadyForWorkspace, resolveCliProbeResult } from './desktop-service.ts'
 
 test('resolveCliProbeResult treats runnable binaries as installed', () => {
   assert.deepEqual(
@@ -29,5 +29,47 @@ test('resolveCliProbeResult treats broken binaries as not installed', () => {
       version: '',
       brokenInstallation: true,
     }
+  )
+})
+
+test('isCliStatusReadyForWorkspace accepts legacy desktop Codex configs that still target the current server', () => {
+  assert.equal(
+    isCliStatusReadyForWorkspace(
+      {
+        client: 'codex',
+        installed: true,
+        version: '1.2.3',
+        executablePath: 'C:\\tools\\codex.cmd',
+        configPath: 'C:\\Users\\demo\\.codex\\config.toml',
+        dataPath: 'C:\\Users\\demo\\.codex',
+        hasConfig: true,
+        hasDataDirectory: true,
+        hasApiKey: true,
+        baseUrl: 'https://ai.oneapi.center/v1',
+      },
+      'https://ai.oneapi.center'
+    ),
+    true
+  )
+})
+
+test('isCliStatusReadyForWorkspace rejects historical Codex configs that still point to another endpoint', () => {
+  assert.equal(
+    isCliStatusReadyForWorkspace(
+      {
+        client: 'codex',
+        installed: true,
+        version: '1.2.3',
+        executablePath: 'C:\\tools\\codex.cmd',
+        configPath: 'C:\\Users\\demo\\.codex\\config.toml',
+        dataPath: 'C:\\Users\\demo\\.codex',
+        hasConfig: true,
+        hasDataDirectory: true,
+        hasApiKey: true,
+        baseUrl: 'http://192.168.30.241:3001/v1',
+      },
+      'https://ai.oneapi.center'
+    ),
+    false
   )
 })

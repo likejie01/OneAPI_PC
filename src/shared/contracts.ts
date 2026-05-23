@@ -75,6 +75,8 @@ export interface ChatMessage {
   reasoningPending?: boolean
   imageUrl?: string
   imagePrompt?: string
+  imageStylePresetId?: string
+  imageStylePresetTitle?: string
   attachments?: Array<{
     id: string
     name: string
@@ -154,8 +156,16 @@ export interface SubscriptionPlan {
   currency: string
   duration_unit: 'year' | 'month' | 'day' | 'hour' | 'custom'
   duration_value: number
+  custom_seconds?: number
+  quota_reset_period?: 'never' | 'daily' | 'weekly' | 'monthly' | 'custom'
+  quota_reset_custom_seconds?: number
   total_amount: number
   enabled: boolean
+  sort_order?: number
+  max_purchase_per_user?: number
+  upgrade_group?: string
+  stripe_price_id?: string
+  creem_product_id?: string
 }
 
 export interface PlanRecord {

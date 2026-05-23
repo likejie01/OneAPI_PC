@@ -123,6 +123,9 @@ export interface CliStatus {
   configPath: string
   dataPath: string
   hasConfig: boolean
+  baseUrl?: string
+  hasApiKey?: boolean
+  managedByDesktop?: boolean
   hasDataDirectory: boolean
   brokenInstallation?: boolean
 }
@@ -265,6 +268,7 @@ export interface CliDeployPreset {
   apiKey: string
   model: string
   baseUrl: string
+  managedByDesktop?: boolean
 }
 
 export interface DesktopDeleteCliMessageRequest {
@@ -274,6 +278,30 @@ export interface DesktopDeleteCliMessageRequest {
     CliSessionMessage,
     'id' | 'role' | 'content' | 'createdAt' | 'sourceFilePath' | 'sourceLineNumber' | 'sourceTimestamp'
   >
+}
+
+export interface DesktopDeleteCliSessionsRequest {
+  client: CliClient
+  sessionIds: string[]
+}
+
+export interface DesktopDeleteCliSessionsResult {
+  deletedCount: number
+  deletedSessionIds: string[]
+}
+
+export interface DesktopExportTextFileRequest {
+  suggestedName: string
+  content: string
+  title?: string
+}
+
+export interface DesktopExportTextFileResult {
+  path: string
+}
+
+export interface DesktopTranslateSelectionPayload {
+  text: string
 }
 
 export interface AssistantHistorySnapshotEntry {

@@ -1,5 +1,5 @@
 import type { ApiKeyRecord } from '../shared/contracts'
-import type { CliClient } from '../shared/desktop'
+import type { CliClient, CliStatus } from '../shared/desktop'
 
 type ApiKeyCandidate = Pick<ApiKeyRecord, 'id' | 'name' | 'status' | 'group' | 'created_time'>
 
@@ -30,6 +30,41 @@ export function shouldUseWindowsCommandShimForPath(command: string, platform = '
   }
 
   return baseName === 'codex' || baseName === 'claude' || baseName === 'npm' || baseName === 'npx'
+}
+
+function normalizeDesktopServerBaseUrl(serverBaseUrl?: string) {
+  const normalized = (serverBaseUrl || '').trim().replace(/\/+$/, '')
+  return normalized || 'https://ai.oneapi.center'
+}
+
+function normalizeWorkspaceCliBaseUrl(client: CliClient, baseUrl?: string) {
+  const normalized = (baseUrl || '').trim().replace(/\/+$/, '')
+  if (!normalized) {
+    return ''
+  }
+  return client === 'codex'
+    ? normalized.toLowerCase().endsWith('/v1')
+      ? normalized
+      : `${normalized}/v1`
+    : normalized
+}
+
+export function isCliStatusReadyForWorkspace(status: CliStatus, serverBaseUrl?: string) {
+  if (!status.installed || !status.hasConfig) {
+    return false
+  }
+
+  if (status.managedByDesktop) {
+    return true
+  }
+
+  if (!status.hasApiKey) {
+    return false
+  }
+
+  const expectedBaseUrl = normalizeWorkspaceCliBaseUrl(status.client, normalizeDesktopServerBaseUrl(serverBaseUrl))
+  const currentBaseUrl = normalizeWorkspaceCliBaseUrl(status.client, status.baseUrl)
+  return !!expectedBaseUrl && currentBaseUrl === expectedBaseUrl
 }
 
 export function selectReusableDesktopApiKey(

@@ -79,7 +79,9 @@ import {
 } from './domains/chat'
 import {
   deleteCliMessage,
+  deleteCliSessions,
   deployCli,
+  exportTextFile,
   getCliSession,
   getCliDeployPreset,
   getCliStatus,
@@ -90,6 +92,7 @@ import {
   openCliSessionFolder,
   onCliProgress,
   onDeployProgress,
+  onTranslateSelectionRequested,
   pickProjectDirectory,
   readDesktopFilePreview,
   runCliPrompt,
@@ -119,6 +122,12 @@ import {
   prioritizeFavoriteModels,
   resolveCompatibleModel,
 } from './lib/assistant-workspace'
+import { resolveCliDeploySettings } from './lib/cli-deploy'
+import {
+  normalizeCliProjectKey,
+  resolveCliHistorySessionForProject,
+  resolvePreferredCliSessionId,
+} from './lib/cli-project-state'
 import {
   decorateAssistants,
 } from './lib/assistants'
@@ -144,8 +153,28 @@ import {
   decorateImageStylePresets,
   type ImageStylePreset,
 } from './lib/image-style-presets'
-import { resolveCliSetupPeerState } from './lib/desktop-service'
-import { clipText, formatDateTime, formatPrice, formatQuota, formatQuotaAsUsd } from './lib/format'
+import { groupDrawSessionsByAssistant } from './lib/draw-history'
+import { isCliStatusReadyForWorkspace, resolveCliSetupPeerState } from './lib/desktop-service'
+import {
+  clipText,
+  formatDateTime,
+  formatPlainPrice,
+  formatPrice,
+  formatQuota,
+  formatQuotaAsMillions,
+  formatQuotaAsUsd,
+  formatSubscriptionDuration,
+  formatSubscriptionResetPeriod,
+} from './lib/format'
+import {
+  buildChatSessionExportMarkdown,
+  buildCliSessionExportMarkdown,
+  buildDrawSessionExportMarkdown,
+  buildSessionExportFileName,
+  hasActiveCliPlan,
+  mergeCliMessages,
+  type ExportCliLogGroup,
+} from './lib/session-history'
 import { readJsonStorage, writeJsonStorage } from './lib/storage'
 import dayjs from 'dayjs'
 import type {
@@ -163,6 +192,7 @@ import type {
 } from './shared/contracts'
 import type {
   CliClient,
+  CliDeployPreset,
   CliExtensionEntry,
   CliHistoryEntry,
   CliLogKind,
@@ -225,6 +255,52 @@ function getDesktopBridge() {
     throw new Error('桌面桥接未初始化')
   }
   return window.desktopBridge
+}
+
+function countPlanPurchases(records: SubscriptionSelfData['all_subscriptions'], planId: number) {
+  return records.filter((item) => item.subscription.plan_id === planId).length
+}
+
+function resolveSubscriptionStatusLabel(status?: string) {
+  switch (String(status || '').toLowerCase()) {
+    case 'active':
+      return '生效中'
+    case 'expired':
+      return '已过期'
+    case 'cancelled':
+      return '已取消'
+    default:
+      return status || '未知状态'
+  }
+}
+
+function resolveRecommendedSubscriptionPlanId(plans: PlanRecord[]) {
+  const candidates = plans
+    .map((item) => {
+      const price = Number(item.plan.price_amount || 0)
+      const totalAmount = Number(item.plan.total_amount || 0)
+      if (price <= 0 || totalAmount <= 0) {
+        return null
+      }
+      return {
+        id: item.plan.id,
+        valueScore: totalAmount / price,
+        totalAmount,
+        price,
+      }
+    })
+    .filter((item): item is { id: number; valueScore: number; totalAmount: number; price: number } => Boolean(item))
+    .sort((left, right) => {
+      if (right.valueScore !== left.valueScore) {
+        return right.valueScore - left.valueScore
+      }
+      if (right.totalAmount !== left.totalAmount) {
+        return right.totalAmount - left.totalAmount
+      }
+      return left.price - right.price
+    })
+
+  return candidates[0]?.id ?? 0
 }
 
 function useToastState() {
@@ -1279,6 +1355,9 @@ function buildEmptyCliStatus(client: CliClient): CliStatus {
     configPath: '',
     dataPath: '',
     hasConfig: false,
+    baseUrl: '',
+    hasApiKey: false,
+    managedByDesktop: false,
     hasDataDirectory: false,
     brokenInstallation: false,
   }
@@ -1635,10 +1714,12 @@ type SessionContextMenuState = {
   x: number
   y: number
   title: string
+  scope?: 'history' | 'general'
   items: Array<{
     key: string
     label: string
     onSelect: () => void | Promise<void>
+    variant?: 'default' | 'danger'
   }>
 }
 
@@ -1742,10 +1823,14 @@ function SessionContextMenu(props: {
     }
 
     window.addEventListener('pointerdown', handleClose)
+    window.addEventListener('blur', handleClose)
+    window.addEventListener('focusin', handleClose)
     window.addEventListener('resize', handleClose)
     window.addEventListener('scroll', handleClose, true)
     return () => {
       window.removeEventListener('pointerdown', handleClose)
+      window.removeEventListener('blur', handleClose)
+      window.removeEventListener('focusin', handleClose)
       window.removeEventListener('resize', handleClose)
       window.removeEventListener('scroll', handleClose, true)
     }
@@ -1769,7 +1854,7 @@ function SessionContextMenu(props: {
       {menu.items.map((item) => (
         <button
           key={item.key}
-          className='session-context-menu-item'
+          className={`session-context-menu-item ${item.variant === 'danger' ? 'danger' : ''}`}
           type='button'
           role='menuitem'
           onClick={() => {
@@ -1832,6 +1917,53 @@ function AttachmentPreviewModal(props: {
   )
 }
 
+function TranslationResultModal(props: {
+  open: boolean
+  sourceText: string
+  translatedText: string
+  loading: boolean
+  onClose: () => void
+  onCopy: () => void
+}) {
+  const { open, sourceText, translatedText, loading, onClose, onCopy } = props
+
+  if (!open) {
+    return null
+  }
+
+  return (
+    <div className='modal-mask' onClick={onClose}>
+      <div className='modal-card translation-modal-card' onClick={(event) => event.stopPropagation()}>
+        <div className='panel-header compact'>
+          <div>
+            <span className='eyebrow dark'>选中文本翻译</span>
+            <h2>翻译结果</h2>
+          </div>
+        </div>
+        <div className='translation-modal-sections'>
+          <section className='translation-modal-section'>
+            <strong>原文</strong>
+            <pre>{sourceText}</pre>
+          </section>
+          <section className='translation-modal-section'>
+            <strong>译文</strong>
+            <pre>{loading ? '翻译中...' : translatedText || '暂无可用结果。'}</pre>
+          </section>
+        </div>
+        <div className='modal-actions'>
+          <button className='secondary-button' type='button' onClick={onClose}>
+            关闭
+          </button>
+          <button className='primary-button' type='button' disabled={loading || !translatedText.trim()} onClick={onCopy}>
+            <Copy size={14} />
+            <span>复制译文</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function getCliExtensionKindLabel(item: CliExtensionEntry) {
   if (item.kind === 'skill') {
     return '技能'
@@ -1845,8 +1977,8 @@ function getCliExtensionKindLabel(item: CliExtensionEntry) {
 function CliPlanFloatingPanel(props: {
   plan: CliPlanState | null
 }) {
-  const { plan } = props
-  if (!plan?.items.length) {
+  const resolvedPlan = props.plan
+  if (!resolvedPlan || !hasActiveCliPlan(resolvedPlan)) {
     return null
   }
 
@@ -1854,11 +1986,11 @@ function CliPlanFloatingPanel(props: {
     <aside className='cli-plan-floating-panel' aria-label='当前计划进度'>
       <div className='cli-plan-floating-head'>
         <strong>计划</strong>
-        <span>{plan.items.length} 项</span>
+        <span>{resolvedPlan.items.length} 项</span>
       </div>
-      {plan.explanation ? <p className='cli-plan-floating-summary'>{plan.explanation}</p> : null}
+      {resolvedPlan.explanation ? <p className='cli-plan-floating-summary'>{resolvedPlan.explanation}</p> : null}
       <div className='cli-plan-floating-list'>
-        {plan.items.map((item) => (
+        {resolvedPlan.items.map((item) => (
           <div key={item.id} className='cli-plan-floating-item'>
             <span className={`cli-plan-status-icon ${item.status}`}>
               {item.status === 'completed' ? (
@@ -2707,10 +2839,7 @@ function CliLogBubble(props: {
 }
 
 function normalizeProjectKey(value?: string) {
-  return (value || '')
-    .replace(/[\\/]+/g, '/')
-    .replace(/\/$/, '')
-    .toLowerCase()
+  return normalizeCliProjectKey(value)
 }
 
 function resolveProjectNameFromPath(value?: string) {
@@ -2812,24 +2941,6 @@ function orderGroupedEntries<T extends { updatedAt?: number }>(
 function extractDataUrlBase64(value: string) {
   const match = value.match(/^data:[^;]+;base64,(.+)$/)
   return match?.[1] || ''
-}
-
-function mergeCliMessages(left: CliMessage[], right: CliMessage[]) {
-  const seen = new Set<string>()
-  return [...left, ...right]
-    .map((item) => ({
-      ...item,
-      createdAt: normalizeTimestampMs(item.createdAt),
-    }))
-    .sort((a, b) => a.createdAt - b.createdAt)
-    .filter((item) => {
-      const key = `${item.role}:${item.createdAt}:${item.content}`
-      if (seen.has(key)) {
-        return false
-      }
-      seen.add(key)
-      return true
-    })
 }
 
 function mergeCliLogs(left: CliLogEntry[], right: CliLogEntry[]) {
@@ -2964,8 +3075,9 @@ function EmptyState(props: { title: string; description: string; icon?: typeof B
 
 function AssistantsChatWorkspace(props: {
   toast: (message: string) => void
+  active: boolean
 }) {
-  const { toast } = props
+  const { toast, active } = props
   const [models, setModels] = useState<ChatModelOption[]>([])
   const [favoriteModels, setFavoriteModels] = useState<string[]>(() => loadFavoriteModels('oneapi-desktop-chat-favorites'))
   const [chatSessions, setChatSessions] = useState<ChatSessionRecord[]>(() => loadStoredChatSessions())
@@ -2985,6 +3097,11 @@ function AssistantsChatWorkspace(props: {
   )
   const [historyVisibilityTab, setHistoryVisibilityTab] = useState<HistoryVisibilityTab>('visible')
   const [sessionContextMenu, setSessionContextMenu] = useState<SessionContextMenuState | null>(null)
+  const [translationState, setTranslationState] = useState<{
+    sourceText: string
+    translatedText: string
+    loading: boolean
+  } | null>(null)
   const [renamingChatSession, setRenamingChatSession] = useState<SessionRenameDraft>(null)
   const [assistantMenuOpen, setAssistantMenuOpen] = useState(false)
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
@@ -3031,6 +3148,10 @@ function AssistantsChatWorkspace(props: {
   const stoppingRef = useRef(false)
   const persistChatSessionsTimerRef = useRef<number | null>(null)
   const persistChatHistoryTimerRef = useRef<number | null>(null)
+  const closeChatHistoryPanel = useCallback(() => {
+    setHistoryOpen(false)
+    setSessionContextMenu(null)
+  }, [])
 
   const activeAssistant = useMemo(
     () => assistants.find((item) => item.id === activeAssistantId) ?? assistants[0] ?? null,
@@ -3078,6 +3199,114 @@ function AssistantsChatWorkspace(props: {
   const historySessions = historyVisibilityTab === 'hidden' ? hiddenChatSessions : visibleChatSessions
 
   useAutoFollowScroll(messageStreamRef, [messages, sending])
+
+  const ensureChatSessionRemainder = useCallback((remaining: ChatSessionRecord[]) => {
+    if (remaining.length) {
+      return remaining
+    }
+    return [
+      createDefaultChatSession(
+        resolveExistingAssistantId(assistants, activeAssistantId),
+        selectedModel || resolvePreferredModel(models, DEFAULT_CHAT_MODEL, activeAssistant?.model),
+        selectedGroup
+      ),
+    ]
+  }, [activeAssistant?.model, activeAssistantId, assistants, models, selectedGroup, selectedModel])
+
+  const removeChatSessions = useCallback((sessionIds: string[]) => {
+    const removeSet = new Set(sessionIds)
+    let nextActiveSessionId = ''
+    setChatSessions((current) => {
+      const remaining = ensureChatSessionRemainder(current.filter((item) => !removeSet.has(item.id)))
+      nextActiveSessionId = remaining[0]?.id || ''
+      return remaining
+    })
+    setHiddenChatSessionIds((current) => current.filter((item) => !removeSet.has(item)))
+    if (removeSet.has(resolvedActiveSessionId)) {
+      setActiveSessionId(nextActiveSessionId)
+    }
+  }, [ensureChatSessionRemainder, resolvedActiveSessionId])
+
+  const exportChatSession = useCallback(async (session: ChatSessionRecord) => {
+    try {
+      const content = buildChatSessionExportMarkdown({
+        title: session.title,
+        updatedAt: session.updatedAt,
+        messages: session.messages,
+      })
+      const result = await exportTextFile(
+        buildSessionExportFileName('chat', session.title || '聊天会话'),
+        content,
+        '导出聊天会话'
+      )
+      toast(`已导出到：${result.path}`)
+    } catch (error) {
+      if (error instanceof Error && error.message === '已取消导出。') {
+        return
+      }
+      toast(error instanceof Error ? error.message : '导出会话失败')
+    }
+  }, [toast])
+
+  const requestChatSelectionTranslation = useCallback(async (sourceText: string) => {
+    const normalizedText = sourceText.trim()
+    if (!normalizedText) {
+      return
+    }
+
+    setTranslationState({
+      sourceText: normalizedText,
+      translatedText: '',
+      loading: true,
+    })
+
+    try {
+      const resolvedModel = selectedModel || resolvePreferredModel(models, DEFAULT_CHAT_MODEL, activeAssistant?.model)
+      if (!resolvedModel) {
+        throw new Error('当前没有可用于翻译的模型。')
+      }
+
+      const response = await sendChatCompletion({
+        model: resolvedModel,
+        group: selectedGroup || undefined,
+        messages: [
+          {
+            role: 'system',
+            content: '你是专业翻译助手。请将用户给出的文本准确翻译成简体中文，保留原有格式、代码块、列表、链接和换行，不要添加解释。',
+          },
+          {
+            role: 'user',
+            content: normalizedText,
+          },
+        ],
+        temperature: 0.1,
+      })
+
+      const translatedText = response.choices?.[0]?.message?.content?.trim() || ''
+      setTranslationState({
+        sourceText: normalizedText,
+        translatedText,
+        loading: false,
+      })
+    } catch (error) {
+      setTranslationState({
+        sourceText: normalizedText,
+        translatedText: '',
+        loading: false,
+      })
+      toast(error instanceof Error ? error.message : '翻译失败')
+    }
+  }, [activeAssistant, models, selectedGroup, selectedModel, toast])
+
+  useEffect(() => {
+    if (!active) {
+      return
+    }
+
+    return onTranslateSelectionRequested((payload) => {
+      void requestChatSelectionTranslation(payload.text)
+    })
+  }, [active, requestChatSelectionTranslation])
 
   useEffect(() => {
     let disposed = false
@@ -3149,13 +3378,13 @@ function AssistantsChatWorkspace(props: {
       }
 
       if (historyOpen && historyPanelRef.current && !historyPanelRef.current.contains(target)) {
-        setHistoryOpen(false)
+        closeChatHistoryPanel()
       }
     }
 
     window.addEventListener('pointerdown', handlePointerDown)
     return () => window.removeEventListener('pointerdown', handlePointerDown)
-  }, [assistantMenuOpen, contextMenuOpen, historyOpen, modelMenuOpen, reasoningMenuOpen])
+  }, [assistantMenuOpen, closeChatHistoryPanel, contextMenuOpen, historyOpen, modelMenuOpen, reasoningMenuOpen])
 
   useEffect(() => {
     function handleOpenHistory() {
@@ -3164,6 +3393,12 @@ function AssistantsChatWorkspace(props: {
     window.addEventListener('oneapi:open-assistant-history', handleOpenHistory as EventListener)
     return () => window.removeEventListener('oneapi:open-assistant-history', handleOpenHistory as EventListener)
   }, [])
+
+  useEffect(() => {
+    if (!historyOpen && sessionContextMenu?.scope === 'history') {
+      setSessionContextMenu(null)
+    }
+  }, [historyOpen, sessionContextMenu])
 
   useEffect(() => {
     const hasPending = chatSessions.some((session) => session.messages.some((item) => item.pending))
@@ -3334,7 +3569,7 @@ function AssistantsChatWorkspace(props: {
     setActiveSessionId(next.id)
     setDraft('')
     window.setTimeout(() => resizeDraft(), 0)
-    setHistoryOpen(false)
+    closeChatHistoryPanel()
   }
 
   function toggleFavoriteModel(value: string) {
@@ -3667,8 +3902,25 @@ function AssistantsChatWorkspace(props: {
     }))
   }
 
+  function deleteChatSession(sessionId: string) {
+    removeChatSessions([sessionId])
+    toast('已删除该聊天会话。')
+  }
+
   function resolveAssistantHistoryGroup(session: ChatSessionRecord) {
     return assistants.find((item) => item.id === session.assistantId)?.name || assistants[0]?.name || '助手'
+  }
+
+  function deleteChatGroup(groupKey: string) {
+    const sessionIds = chatSessions
+      .filter((item) => resolveAssistantHistoryGroup(item) === groupKey)
+      .map((item) => item.id)
+    if (!sessionIds.length) {
+      return
+    }
+    removeChatSessions(sessionIds)
+    setPinnedChatGroups((current) => current.filter((item) => item !== groupKey))
+    toast(`已删除“${groupKey}”分类下的 ${sessionIds.length} 个会话。`)
   }
 
   function hideChatSession(sessionId: string) {
@@ -3718,7 +3970,7 @@ function AssistantsChatWorkspace(props: {
     setSelectedGroup(session.group || selectedGroup)
     setDraft('')
     window.setTimeout(() => resizeDraft(), 0)
-    setHistoryOpen(false)
+    closeChatHistoryPanel()
   }
 
   function renameChatSession(sessionId: string) {
@@ -3761,12 +4013,36 @@ function AssistantsChatWorkspace(props: {
     })
   }
 
+  function handleChatGroupContextMenu(event: MouseEvent, groupKey: string) {
+    event.preventDefault()
+    setSessionContextMenu({
+      x: event.clientX,
+      y: event.clientY,
+      title: groupKey,
+      scope: 'history',
+      items: [
+        {
+          key: 'pin',
+          label: pinnedChatGroups.includes(groupKey) ? '取消置顶分类' : '置顶分类',
+          onSelect: () => togglePinnedChatGroup(groupKey),
+        },
+        {
+          key: 'delete-group',
+          label: '删除分类会话',
+          variant: 'danger',
+          onSelect: () => deleteChatGroup(groupKey),
+        },
+      ],
+    })
+  }
+
   function handleChatSessionContextMenu(event: MouseEvent, session: ChatSessionRecord) {
     event.preventDefault()
     setSessionContextMenu({
       x: event.clientX,
       y: event.clientY,
       title: session.title,
+      scope: 'history',
       items: [
         {
           key: 'rename',
@@ -3777,6 +4053,17 @@ function AssistantsChatWorkspace(props: {
           key: 'open-folder',
           label: '打开文件夹',
           onSelect: () => openChatSessionFolder(session.id),
+        },
+        {
+          key: 'export',
+          label: '导出会话',
+          onSelect: () => void exportChatSession(session),
+        },
+        {
+          key: 'delete',
+          label: '删除会话',
+          variant: 'danger',
+          onSelect: () => deleteChatSession(session.id),
         },
       ],
     })
@@ -4240,7 +4527,7 @@ function AssistantsChatWorkspace(props: {
                   pinnedChatGroups
                 ).map(([groupKey, items]) => (
                   <div key={groupKey} className='history-group'>
-                    <div className='history-group-head'>
+                    <div className='history-group-head' onContextMenu={(event) => handleChatGroupContextMenu(event, groupKey)}>
                       <strong>{groupKey}</strong>
                       <div className='history-group-head-actions'>
                         <span>{items.length} 条</span>
@@ -4314,6 +4601,19 @@ function AssistantsChatWorkspace(props: {
         </aside>
       </div>
       <AttachmentPreviewModal preview={attachmentPreview} onClose={() => setAttachmentPreview(null)} />
+      <TranslationResultModal
+        open={!!translationState}
+        sourceText={translationState?.sourceText || ''}
+        translatedText={translationState?.translatedText || ''}
+        loading={!!translationState?.loading}
+        onClose={() => setTranslationState(null)}
+        onCopy={() => {
+          if (!translationState?.translatedText) {
+            return
+          }
+          void copyText(translationState.translatedText)
+        }}
+      />
       <SessionContextMenu menu={sessionContextMenu} onClose={() => setSessionContextMenu(null)} />
     </section>
   )
@@ -4399,6 +4699,14 @@ function DrawWorkspace(props: {
     () => decorateImageStylePresets(imageStylePresets, imageStyleFavorites, imageStyleSearch),
     [imageStyleFavorites, imageStylePresets, imageStyleSearch]
   )
+  const imageStyleTitleById = useMemo(
+    () => Object.fromEntries(imageStylePresets.map((item) => [item.id, item.title])),
+    [imageStylePresets]
+  )
+  const drawSessionsByAssistant = useMemo(
+    () => groupDrawSessionsByAssistant(drawSessions, imageStyleTitleById),
+    [drawSessions, imageStyleTitleById]
+  )
 
   useAutoFollowScroll(messageStreamRef, [messages, sending])
 
@@ -4446,7 +4754,7 @@ function DrawWorkspace(props: {
         return
       }
       if (historyOpen && historyPanelRef.current && !historyPanelRef.current.contains(target)) {
-        setHistoryOpen(false)
+        closeDrawHistoryPanel()
       }
       if (drawSizeMenuOpen && drawSizeMenuRef.current && !drawSizeMenuRef.current.contains(target)) {
         setDrawSizeMenuOpen(false)
@@ -4472,10 +4780,21 @@ function DrawWorkspace(props: {
     return () => window.removeEventListener('oneapi:open-draw-history', handleOpenHistory as EventListener)
   }, [])
 
+  useEffect(() => {
+    if (!historyOpen && sessionContextMenu?.scope === 'history') {
+      setSessionContextMenu(null)
+    }
+  }, [historyOpen, sessionContextMenu])
+
   function updateDrawSession(sessionId: string, updater: (session: DrawSessionRecord) => DrawSessionRecord) {
     setDrawSessions((current) =>
       current.map((item) => (item.id === sessionId ? updater(item) : item)).sort((a, b) => b.updatedAt - a.updatedAt)
     )
+  }
+
+  function closeDrawHistoryPanel() {
+    setHistoryOpen(false)
+    setSessionContextMenu(null)
   }
 
   function createDrawSession() {
@@ -4519,7 +4838,7 @@ function DrawWorkspace(props: {
 
   function handleSelectDrawSession(session: DrawSessionRecord) {
     setActiveSessionId(session.id)
-    setHistoryOpen(false)
+    closeDrawHistoryPanel()
     setDraft('')
     clearAttachments()
     window.setTimeout(() => resizeDraft(), 0)
@@ -4565,12 +4884,48 @@ function DrawWorkspace(props: {
     })
   }
 
+  function deleteDrawSession(sessionId: string) {
+    setDrawSessions((current) => {
+      const remaining = current.filter((item) => item.id !== sessionId)
+      if (remaining.length) {
+        return remaining
+      }
+      return [createDefaultDrawSession()]
+    })
+    if (resolvedActiveSessionId === sessionId) {
+      setActiveSessionId('')
+    }
+    toast('已删除该绘图会话。')
+  }
+
+  async function exportDrawSession(session: DrawSessionRecord) {
+    try {
+      const content = buildDrawSessionExportMarkdown({
+        title: session.title,
+        updatedAt: session.updatedAt,
+        messages: session.messages,
+      })
+      const result = await exportTextFile(
+        buildSessionExportFileName('image', session.title || '绘图会话'),
+        content,
+        '导出绘图会话'
+      )
+      toast(`已导出到：${result.path}`)
+    } catch (error) {
+      if (error instanceof Error && error.message === '已取消导出。') {
+        return
+      }
+      toast(error instanceof Error ? error.message : '导出会话失败')
+    }
+  }
+
   function handleDrawSessionContextMenu(event: MouseEvent, session: DrawSessionRecord) {
     event.preventDefault()
     setSessionContextMenu({
       x: event.clientX,
       y: event.clientY,
       title: session.title || '新绘图',
+      scope: 'history',
       items: [
         {
           key: 'rename',
@@ -4581,6 +4936,17 @@ function DrawWorkspace(props: {
           key: 'open-folder',
           label: '打开文件夹',
           onSelect: () => openDrawSessionFolder(session.id),
+        },
+        {
+          key: 'export',
+          label: '导出会话',
+          onSelect: () => void exportDrawSession(session),
+        },
+        {
+          key: 'delete',
+          label: '删除会话',
+          variant: 'danger',
+          onSelect: () => deleteDrawSession(session.id),
         },
       ],
     })
@@ -4778,6 +5144,8 @@ function DrawWorkspace(props: {
       role: 'user',
       content: nextPrompt,
       createdAt: now,
+      imageStylePresetId: selectedImageStylePreset?.id,
+      imageStylePresetTitle: selectedImageStylePreset?.title,
       attachments: toMessageAttachments(attachments),
     }
     const pendingMessage: ChatBubbleMessage = {
@@ -5202,48 +5570,50 @@ function DrawWorkspace(props: {
               <EmptyState title='当前没有绘图会话' description='生成第一张图片后，会话会显示在这里。' />
             ) : (
               <div className='history-project-groups'>
-                <div className='history-group'>
-                  <div className='history-group-head'>
-                    <strong>绘图会话</strong>
-                    <span>{drawSessions.length} 条</span>
+                {drawSessionsByAssistant.map(([assistantGroup, items]) => (
+                  <div key={assistantGroup} className='history-group'>
+                    <div className='history-group-head'>
+                      <strong>{assistantGroup}</strong>
+                      <span>{items.length} 条</span>
+                    </div>
+                    <div className='subrecords compact-records'>
+                      {items.map((session) => (
+                        <div
+                          key={session.id}
+                          className={`record-row action-row session-row ${session.id === resolvedActiveSessionId ? 'highlighted' : ''}`}
+                          role='button'
+                          tabIndex={0}
+                          onContextMenu={(event) => handleDrawSessionContextMenu(event, session)}
+                          onClick={() => {
+                            if (renamingDrawSession?.id !== session.id) {
+                              handleSelectDrawSession(session)
+                            }
+                          }}
+                          onKeyDown={(event) => {
+                            if (renamingDrawSession?.id === session.id) {
+                              return
+                            }
+                            if (event.key === 'Enter' || event.key === ' ') {
+                              event.preventDefault()
+                              handleSelectDrawSession(session)
+                            }
+                          }}
+                        >
+                          <SessionTitleEditor
+                            editing={renamingDrawSession?.id === session.id}
+                            value={renamingDrawSession?.id === session.id ? renamingDrawSession.value : ''}
+                            displayValue={session.title || '新绘图'}
+                            maxLength={56}
+                            onChange={(value) => setRenamingDrawSession({ id: session.id, value })}
+                            onCommit={() => commitDrawSessionRename(session.id)}
+                            onCancel={() => setRenamingDrawSession(null)}
+                          />
+                          <small>{formatDateTime(session.updatedAt)}</small>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  <div className='subrecords compact-records'>
-                    {drawSessions.map((session) => (
-                      <div
-                        key={session.id}
-                        className={`record-row action-row session-row ${session.id === resolvedActiveSessionId ? 'highlighted' : ''}`}
-                        role='button'
-                        tabIndex={0}
-                        onContextMenu={(event) => handleDrawSessionContextMenu(event, session)}
-                        onClick={() => {
-                          if (renamingDrawSession?.id !== session.id) {
-                            handleSelectDrawSession(session)
-                          }
-                        }}
-                        onKeyDown={(event) => {
-                          if (renamingDrawSession?.id === session.id) {
-                            return
-                          }
-                          if (event.key === 'Enter' || event.key === ' ') {
-                            event.preventDefault()
-                            handleSelectDrawSession(session)
-                          }
-                        }}
-                      >
-                        <SessionTitleEditor
-                          editing={renamingDrawSession?.id === session.id}
-                          value={renamingDrawSession?.id === session.id ? renamingDrawSession.value : ''}
-                          displayValue={session.title || '新绘图'}
-                          maxLength={56}
-                          onChange={(value) => setRenamingDrawSession({ id: session.id, value })}
-                          onCommit={() => commitDrawSessionRename(session.id)}
-                          onCancel={() => setRenamingDrawSession(null)}
-                        />
-                        <small>{formatDateTime(session.updatedAt)}</small>
-                      </div>
-                    ))}
-                  </div>
-                </div>
+                ))}
               </div>
             )}
           </div>
@@ -5282,19 +5652,38 @@ function SubscriptionsWorkspace(props: {
   const [plans, setPlans] = useState<PlanRecord[]>([])
   const [subscriptionSelf, setSubscriptionSelf] = useState<SubscriptionSelfData | null>(null)
   const [paymentInfo, setPaymentInfo] = useState<SubscriptionPaymentInfo | null>(null)
+  const [quotaPerUnit, setQuotaPerUnit] = useState(500_000)
   const [buyingPlanId, setBuyingPlanId] = useState(0)
   const activeSubscriptions = subscriptionSelf?.subscriptions || []
   const allSubscriptions = subscriptionSelf?.all_subscriptions || []
+  const recommendedPlanId = useMemo(() => resolveRecommendedSubscriptionPlanId(plans), [plans])
+  const planTitleMap = useMemo(
+    () => new Map(plans.map((item) => [item.plan.id, item.plan.title])),
+    [plans]
+  )
+  const paymentOptions = useMemo(() => {
+    const next: Array<{ key: string; label: string; variant: 'primary' | 'secondary' }> = []
+    if (paymentInfo?.enable_wallet_payment) {
+      next.push({ key: 'wallet', label: '钱包购买', variant: 'primary' })
+    }
+    return next
+  }, [paymentInfo])
+  const paymentStatusLabel = paymentOptions.length > 0 ? '可购买' : '待配置'
 
   const refreshSubscriptions = useCallback(async () => {
-    const [nextPlans, nextSelf, nextPaymentInfo] = await Promise.all([
+    const [nextPlans, nextSelf, nextPaymentInfo, nextStatus] = await Promise.all([
       getPublicPlans(),
       getSelfSubscriptions(),
       getSubscriptionPaymentInfo(),
+      unwrapEnvelope(getAuthStatus()).catch(() => null),
     ])
     setPlans(nextPlans.filter((item) => item.plan.enabled))
     setSubscriptionSelf(nextSelf)
     setPaymentInfo(nextPaymentInfo ?? null)
+    const resolvedQuotaPerUnit = Number(nextStatus?.quota_per_unit || 0)
+    if (resolvedQuotaPerUnit > 0) {
+      setQuotaPerUnit(resolvedQuotaPerUnit)
+    }
   }, [])
 
   useEffect(() => {
@@ -5302,10 +5691,11 @@ function SubscriptionsWorkspace(props: {
 
     void (async () => {
       try {
-        const [nextPlans, nextSelf, nextPaymentInfo] = await Promise.all([
+        const [nextPlans, nextSelf, nextPaymentInfo, nextStatus] = await Promise.all([
           getPublicPlans(),
           getSelfSubscriptions(),
           getSubscriptionPaymentInfo(),
+          unwrapEnvelope(getAuthStatus()).catch(() => null),
         ])
 
         if (disposed) {
@@ -5315,6 +5705,10 @@ function SubscriptionsWorkspace(props: {
         setPlans(nextPlans.filter((item) => item.plan.enabled))
         setSubscriptionSelf(nextSelf)
         setPaymentInfo(nextPaymentInfo ?? null)
+        const resolvedQuotaPerUnit = Number(nextStatus?.quota_per_unit || 0)
+        if (resolvedQuotaPerUnit > 0) {
+          setQuotaPerUnit(resolvedQuotaPerUnit)
+        }
       } catch (error) {
         if (!disposed) {
           toast(error instanceof Error ? error.message : '加载订阅信息失败')
@@ -5368,7 +5762,7 @@ function SubscriptionsWorkspace(props: {
               <span>全部订阅记录</span>
             </div>
             <div className='mini-stat'>
-              <strong>{paymentInfo?.enable_wallet_payment ? '钱包可购' : '待配置'}</strong>
+              <strong>{paymentStatusLabel}</strong>
               <span>支付状态</span>
             </div>
           </div>
@@ -5378,26 +5772,91 @@ function SubscriptionsWorkspace(props: {
               {plans.length === 0 ? (
                 <EmptyState title='当前没有可购买套餐' description='请稍后刷新或检查服务端套餐配置。' />
               ) : (
-                plans.map((item) => (
-                  <article key={item.plan.id} className='pricing-card'>
-                    <strong>{item.plan.title}</strong>
-                    <span>{item.plan.subtitle || '适合稳定桌面端高频使用。'}</span>
-                    <b>{formatPrice(item.plan.price_amount, item.plan.currency || 'USD')}</b>
-                    <small>总额度 {formatQuota(item.plan.total_amount)}</small>
-                    <div className='pricing-actions'>
-                      {paymentInfo?.enable_wallet_payment && (
-                        <button
-                          className='primary-button tiny'
-                          type='button'
-                          disabled={buyingPlanId === item.plan.id}
-                          onClick={() => void handleBuyPlan(item.plan.id, 'wallet')}
-                        >
-                          钱包购买
-                        </button>
-                      )}
-                    </div>
-                  </article>
-                ))
+                plans.map((item) => {
+                  const purchaseLimit = Number(item.plan.max_purchase_per_user || 0)
+                  const purchaseCount = countPlanPurchases(allSubscriptions, item.plan.id)
+                  const limitReached = purchaseLimit > 0 && purchaseCount >= purchaseLimit
+                  const buying = buyingPlanId === item.plan.id
+                  const isRecommended = item.plan.id === recommendedPlanId
+                  const quotaUsd = Number(item.plan.total_amount || 0) > 0 ? formatQuotaAsUsd(item.plan.total_amount, quotaPerUnit) : '不限额度'
+                  const quotaMillion = Number(item.plan.total_amount || 0) > 0 ? formatQuotaAsMillions(item.plan.total_amount) : 'unlimited'
+                  const resetRule = formatSubscriptionResetPeriod(item.plan)
+                  const validity = formatSubscriptionDuration(item.plan)
+
+                  return (
+                    <article
+                      key={item.plan.id}
+                      className={`pricing-card subscription-plan-card ${isRecommended ? 'recommended' : ''} ${limitReached ? 'limit-reached' : ''}`}
+                    >
+                      <div className='subscription-plan-badge-row'>
+                        {isRecommended ? (
+                          <span className='subscription-plan-badge recommended'>
+                            <Sparkles size={14} />
+                            <span>推荐</span>
+                          </span>
+                        ) : (
+                          <span className='subscription-plan-badge subtle'>套餐</span>
+                        )}
+                        {purchaseLimit > 0 ? (
+                          <span className={`subscription-plan-badge ${limitReached ? 'muted' : 'subtle'}`}>
+                            限购 {purchaseCount}/{purchaseLimit}
+                          </span>
+                        ) : (
+                          <span className='subscription-plan-badge subtle'>不限购</span>
+                        )}
+                      </div>
+
+                      <div className='subscription-plan-head'>
+                        <strong>{item.plan.title}</strong>
+                        <span className='subscription-plan-subtitle'>
+                          {item.plan.subtitle || '适合稳定桌面端高频使用。'}
+                        </span>
+                      </div>
+
+                      <div className='subscription-plan-price-group'>
+                        <div className='subscription-plan-price-row'>
+                          <b>{formatPlainPrice(item.plan.price_amount)}</b>
+                          <span className='subscription-plan-price-unit'>人民币</span>
+                        </div>
+                        <span className='subscription-plan-price-caption'>一次购买即生效</span>
+                      </div>
+
+                      <div className='subscription-plan-quota'>
+                        <span className='subscription-plan-quota-label'>总额度</span>
+                        <div className='subscription-plan-quota-values'>
+                          <strong>{quotaUsd}</strong>
+                          <strong className='subscription-plan-quota-divider'>|</strong>
+                          <strong className='subscription-plan-token-value'>{`${quotaMillion} Token`}</strong>
+                        </div>
+                      </div>
+
+                      <div className='subscription-plan-meta'>
+                        <span>{`有效期 ${validity}`}</span>
+                        <span>{`重置规则 ${resetRule}`}</span>
+                      </div>
+
+                      <div className='pricing-actions subscription-plan-actions'>
+                        {paymentOptions.length > 0 ? (
+                          paymentOptions.map((option) => (
+                            <button
+                              key={`${item.plan.id}-${option.key}`}
+                              className={`${option.variant === 'primary' ? 'primary-button' : 'secondary-button'} tiny`}
+                              type='button'
+                              disabled={buying || limitReached}
+                              onClick={() => void handleBuyPlan(item.plan.id, option.key)}
+                            >
+                              {limitReached ? '已达上限' : option.label}
+                            </button>
+                          ))
+                        ) : (
+                          <button className='ghost-button tiny' type='button' disabled>
+                            暂无可用支付方式
+                          </button>
+                        )}
+                      </div>
+                    </article>
+                  )
+                })
               )}
             </div>
 
@@ -5412,22 +5871,31 @@ function SubscriptionsWorkspace(props: {
                     <EmptyState title='还没有订阅记录' description='购买套餐后会在这里看到订阅状态和用量。' />
                   ) : (
                     allSubscriptions.map((item) => (
-                      <div key={item.subscription.id} className='record-row'>
-                        <div>
-                          <strong>{plans.find((plan) => plan.plan.id === item.subscription.plan_id)?.plan.title || `订阅 #${item.subscription.id}`}</strong>
+                      <div key={item.subscription.id} className='record-row subscription-record-row'>
+                        <div className='subscription-record-main'>
+                          <strong>{planTitleMap.get(item.subscription.plan_id) || `订阅 #${item.subscription.id}`}</strong>
                           <span>
-                            已用 {formatQuota(item.subscription.amount_used)} / {formatQuota(item.subscription.amount_total)}
+                            已用 {formatQuotaAsUsd(item.subscription.amount_used, quotaPerUnit)} /{' '}
+                            {Number(item.subscription.amount_total || 0) > 0
+                              ? formatQuotaAsUsd(item.subscription.amount_total, quotaPerUnit)
+                              : '不限额度'}
                           </span>
+                          <small>
+                            有效至 {formatDateTime(item.subscription.end_time)}
+                            {item.subscription.next_reset_time ? ` · 下次重置 ${formatDateTime(item.subscription.next_reset_time)}` : ''}
+                          </small>
                         </div>
-                        <div className='subscription-progress-inline'>
-                          <div className='usage-bar-track'>
-                            <div
-                              className='usage-bar-fill'
-                              style={{ width: `${percentageOf(item.subscription.amount_used, item.subscription.amount_total)}%` }}
-                            />
+                        <div className='subscription-record-side'>
+                          <div className='subscription-progress-inline'>
+                            <div className='usage-bar-track'>
+                              <div
+                                className='usage-bar-fill'
+                                style={{ width: `${percentageOf(item.subscription.amount_used, item.subscription.amount_total)}%` }}
+                              />
+                            </div>
                           </div>
+                          <small className='subscription-record-status'>{resolveSubscriptionStatusLabel(item.subscription.status)}</small>
                         </div>
-                        <small>{item.subscription.status}</small>
                       </div>
                     ))
                   )}
@@ -6071,18 +6539,33 @@ function CliWorkspace(props: {
   toast: (message: string) => void
   openSettings: () => void
   active: boolean
+  serverBaseUrl: string
 }) {
-  const { client, toast, openSettings, active } = props
+  const { client, toast, openSettings, active, serverBaseUrl } = props
+  const lastProjectPathStorageKey = `oneapi-desktop-${client}-last-project-path`
+  const projectSessionMapStorageKey = `oneapi-desktop-${client}-project-session-map`
+  const lastOpenedSessionIdStorageKey = `oneapi-desktop-${client}-last-opened-session-id`
+  const lastOpenedProjectPathStorageKey = `oneapi-desktop-${client}-last-opened-session-project-path`
   const [status, setStatus] = useState<CliStatus>(() => readCachedCliStatus(client))
   const [history, setHistory] = useState<CliHistoryEntry[]>([])
   const [historyOpen, setHistoryOpen] = useState(false)
   const [favoriteModels, setFavoriteModels] = useState<string[]>(() => loadFavoriteModels(`oneapi-desktop-${client}-favorites`))
-  const [projectPath, setProjectPath] = useState('')
-  const [projectName, setProjectName] = useState('')
+  const [projectPath, setProjectPath] = useState(() => readJsonStorage<string>(lastProjectPathStorageKey, ''))
+  const [projectName, setProjectName] = useState(() =>
+    resolveProjectNameFromPath(readJsonStorage<string>(lastProjectPathStorageKey, ''))
+  )
   const [prompt, setPrompt] = useState('')
   const [running, setRunning] = useState(false)
   const [fullAccess, setFullAccess] = useState(false)
-  const [projectSessionMap, setProjectSessionMap] = useState<Record<string, string>>({})
+  const [projectSessionMap, setProjectSessionMap] = useState<Record<string, string>>(() =>
+    readJsonStorage<Record<string, string>>(projectSessionMapStorageKey, {})
+  )
+  const [lastOpenedSessionId, setLastOpenedSessionId] = useState(() =>
+    readJsonStorage<string>(lastOpenedSessionIdStorageKey, '')
+  )
+  const [lastOpenedProjectPath, setLastOpenedProjectPath] = useState(() =>
+    readJsonStorage<string>(lastOpenedProjectPathStorageKey, '')
+  )
   const [sessionProjectPathMap, setSessionProjectPathMap] = useState<Record<string, string>>(() =>
     readJsonStorage<Record<string, string>>(`oneapi-desktop-${client}-session-project-paths`, {})
   )
@@ -6159,16 +6642,30 @@ function CliWorkspace(props: {
   const requestSessionMapRef = useRef(requestSessionMap)
   const activeRequestIdRef = useRef('')
   const stoppingRunRef = useRef(false)
+  const autoHydratingSessionIdsRef = useRef<Set<string>>(new Set())
 
-  const currentProjectKey = useMemo(() => normalizeProjectKey(projectPath), [projectPath])
   const currentExtensionPreferenceKey = useMemo(
     () => resolveCliExtensionPreferenceProjectKey(projectPath),
     [projectPath]
   )
-  const activeSessionId = currentProjectKey ? projectSessionMap[currentProjectKey] || '' : ''
+  const activeSessionId = useMemo(
+    () =>
+      resolvePreferredCliSessionId({
+        projectPath,
+        projectSessionMap,
+        lastOpenedSessionId,
+        lastOpenedProjectPath,
+      }),
+    [lastOpenedProjectPath, lastOpenedSessionId, projectPath, projectSessionMap]
+  )
+  const cliStatusReady = useMemo(
+    () => isCliStatusReadyForWorkspace(status, serverBaseUrl || DEFAULT_SERVER_BASE_URL),
+    [serverBaseUrl, status]
+  )
   const activeMessages = activeSessionId ? sessionMessagesMap[activeSessionId] || [] : []
   const activeLogs = activeSessionId ? sessionLogsMap[activeSessionId] || [] : []
   const activePlan = activeSessionId ? sessionPlansMap[activeSessionId] || null : null
+  const visibleActivePlan = hasActiveCliPlan(activePlan) ? activePlan : null
   const activePartial = activeSessionId ? sessionPartialMap[activeSessionId] || '' : ''
   const activeExtensionPreferenceBucket =
     cliExtensionPreferences[currentExtensionPreferenceKey] || createEmptyCliExtensionPreferenceBucket()
@@ -6294,6 +6791,28 @@ function CliWorkspace(props: {
     [activeLogs, activeMessages, activePartial, selectedModelLabel]
   )
   useAutoFollowScroll(threadRef, [activeTimeline, running, activePartial])
+  const buildCliExportLogGroups = useCallback((logs: CliLogEntry[]) => {
+    const grouped = new Map<string, ExportCliLogGroup>()
+    for (const item of logs) {
+      const groupKey = item.requestId || `${item.createdAt}:${item.content}`
+      const current = grouped.get(groupKey) || {
+        title: item.content,
+        createdAt: item.createdAt,
+        events: [],
+      }
+      current.createdAt = Math.min(current.createdAt, item.createdAt)
+      current.events.push({
+        kind: item.logKind,
+        sourceKind: item.sourceKind,
+        message: item.content,
+        command: item.command,
+        detail: item.detail,
+        exitCode: item.exitCode,
+      })
+      grouped.set(groupKey, current)
+    }
+    return [...grouped.values()].sort((left, right) => left.createdAt - right.createdAt)
+  }, [])
   const latestAssistantMessageId = useMemo(
     () => [...activeMessages].reverse().find((item) => item.role === 'assistant')?.id || '',
     [activeMessages]
@@ -6615,6 +7134,33 @@ function CliWorkspace(props: {
   }, [client, pinnedHistoryGroups])
 
   useEffect(() => {
+    writeJsonStorage(projectSessionMapStorageKey, projectSessionMap)
+  }, [projectSessionMap, projectSessionMapStorageKey])
+
+  useEffect(() => {
+    writeJsonStorage(lastProjectPathStorageKey, projectPath)
+  }, [lastProjectPathStorageKey, projectPath])
+
+  useEffect(() => {
+    writeJsonStorage(lastOpenedSessionIdStorageKey, lastOpenedSessionId)
+  }, [lastOpenedSessionId, lastOpenedSessionIdStorageKey])
+
+  useEffect(() => {
+    writeJsonStorage(lastOpenedProjectPathStorageKey, lastOpenedProjectPath)
+  }, [lastOpenedProjectPath, lastOpenedProjectPathStorageKey])
+
+  useEffect(() => {
+    if (!activeSessionId || !projectPath.trim()) {
+      return
+    }
+    if (lastOpenedSessionId === activeSessionId && lastOpenedProjectPath === projectPath) {
+      return
+    }
+    setLastOpenedSessionId(activeSessionId)
+    setLastOpenedProjectPath(projectPath)
+  }, [activeSessionId, lastOpenedProjectPath, lastOpenedSessionId, projectPath])
+
+  useEffect(() => {
     writeJsonStorage(`oneapi-desktop-${client}-history-title-overrides`, historyTitleOverrides)
   }, [client, historyTitleOverrides])
 
@@ -6844,7 +7390,7 @@ function CliWorkspace(props: {
       }
 
       if (historyOpen && historyPanelRef.current && !historyPanelRef.current.contains(target)) {
-        setHistoryOpen(false)
+        closeCliHistoryPanel()
       }
     }
 
@@ -6885,10 +7431,52 @@ function CliWorkspace(props: {
     }
   }, [active, projectName])
 
+  useEffect(() => {
+    if (!active || !projectPath.trim()) {
+      return
+    }
+
+    const preferredSessionId = resolvePreferredCliSessionId({
+      projectPath,
+      projectSessionMap,
+      lastOpenedSessionId,
+      lastOpenedProjectPath,
+    })
+    const targetHistory = resolveCliHistorySessionForProject({
+      history,
+      projectPath,
+      preferredSessionId,
+    })
+
+    if (!targetHistory || !targetHistory.id || sessionMessagesMap[targetHistory.id]?.length) {
+      return
+    }
+
+    if (autoHydratingSessionIdsRef.current.has(targetHistory.id)) {
+      return
+    }
+
+    autoHydratingSessionIdsRef.current.add(targetHistory.id)
+    void handleOpenHistory(targetHistory).finally(() => {
+      autoHydratingSessionIdsRef.current.delete(targetHistory.id)
+    })
+  }, [active, history, lastOpenedProjectPath, lastOpenedSessionId, projectPath, projectSessionMap, sessionMessagesMap])
+
   function applyProjectPath(nextPath: string) {
     setProjectPath(nextPath)
     setProjectName(resolveProjectNameFromPath(nextPath))
   }
+
+  function closeCliHistoryPanel() {
+    setHistoryOpen(false)
+    setSessionContextMenu(null)
+  }
+
+  useEffect(() => {
+    if (!historyOpen && sessionContextMenu?.scope === 'history') {
+      setSessionContextMenu(null)
+    }
+  }, [historyOpen, sessionContextMenu])
 
   function persistHiddenSessions(next: string[]) {
     setHiddenSessionIds(next)
@@ -6911,6 +7499,106 @@ function CliWorkspace(props: {
         ? current.filter((item) => item !== groupKey)
         : [groupKey, ...current]
     )
+  }
+
+  function removeCliSessionsFromState(sessionIds: string[]) {
+    const removeSet = new Set(sessionIds)
+    setHistory((current) => current.filter((item) => !removeSet.has(item.id)))
+    persistHiddenSessions(hiddenSessionIds.filter((item) => !removeSet.has(item)))
+    setSessionMessagesMap((current) => {
+      const next = { ...current }
+      for (const id of removeSet) {
+        delete next[id]
+      }
+      return next
+    })
+    setSessionLogsMap((current) => {
+      const next = { ...current }
+      for (const id of removeSet) {
+        delete next[id]
+      }
+      return next
+    })
+    setSessionPartialMap((current) => {
+      const next = { ...current }
+      for (const id of removeSet) {
+        delete next[id]
+      }
+      return next
+    })
+    setSessionPlansMap((current) => {
+      const next = { ...current }
+      for (const id of removeSet) {
+        delete next[id]
+      }
+      return next
+    })
+    setSessionProjectPathMap((current) => {
+      const next = { ...current }
+      for (const id of removeSet) {
+        delete next[id]
+      }
+      return next
+    })
+    setHistoryTitleOverrides((current) => {
+      const next = { ...current }
+      for (const id of removeSet) {
+        delete next[id]
+      }
+      return next
+    })
+    setProjectSessionMap((current) =>
+      Object.fromEntries(
+        Object.entries(current).filter(([, sessionId]) => !removeSet.has(sessionId))
+      )
+    )
+    setRequestSessionMap((current) =>
+      Object.fromEntries(
+        Object.entries(current).filter(([, item]) => !removeSet.has(item.sessionId))
+      )
+    )
+    if (activeSessionId && removeSet.has(activeSessionId)) {
+      setPreviewFile(null)
+      setExpandedLogGroupIds([])
+      setExpandedLogEventMap({})
+    }
+  }
+
+  async function removeCliSessions(sessionIds: string[], successMessage: string) {
+    const normalizedIds = [...new Set(sessionIds.map((item) => item.trim()).filter(Boolean))]
+    if (!normalizedIds.length) {
+      return
+    }
+    await deleteCliSessions(client, normalizedIds)
+    removeCliSessionsFromState(normalizedIds)
+    await refreshCliState(true)
+    toast(successMessage)
+  }
+
+  async function exportCliSession(item: CliHistoryEntry) {
+    try {
+      const details = await getCliSession(client, item.id)
+      if (!details) {
+        throw new Error('未能读取完整会话内容。')
+      }
+      const content = buildCliSessionExportMarkdown({
+        client,
+        title: item.preview || item.title,
+        details,
+        logs: buildCliExportLogGroups(sessionLogsMap[item.id] || []),
+      })
+      const result = await exportTextFile(
+        buildSessionExportFileName(client, item.title || item.preview || '会话'),
+        content,
+        `导出${client === 'codex' ? ' Codex ' : ' Claude '}会话`
+      )
+      toast(`已导出到：${result.path}`)
+    } catch (error) {
+      if (error instanceof Error && error.message === '已取消导出。') {
+        return
+      }
+      throw error
+    }
   }
 
   function bindProjectSession(nextProjectPath: string, sessionId: string) {
@@ -7045,7 +7733,7 @@ function CliWorkspace(props: {
     window.setTimeout(() => resizePrompt(), 0)
 
     if (sessionMessagesMap[item.id]?.length) {
-      setHistoryOpen(false)
+      closeCliHistoryPanel()
       return
     }
 
@@ -7056,7 +7744,7 @@ function CliWorkspace(props: {
         return
       }
       hydrateCliSession(details, { activateProject })
-      setHistoryOpen(false)
+      closeCliHistoryPanel()
     } catch (error) {
       toast(error instanceof Error ? error.message : '读取会话失败')
     }
@@ -7096,6 +7784,7 @@ function CliWorkspace(props: {
       x: event.clientX,
       y: event.clientY,
       title: item.title || item.preview || '会话',
+      scope: 'history',
       items: [
         {
           key: 'rename',
@@ -7108,6 +7797,52 @@ function CliWorkspace(props: {
           onSelect: () =>
             openCliSessionFolder(client, item.id).catch((error) => {
               toast(error instanceof Error ? error.message : '打开会话目录失败')
+            }),
+        },
+        {
+          key: 'export',
+          label: '导出会话',
+          onSelect: () =>
+            exportCliSession(item).catch((error) => {
+              toast(error instanceof Error ? error.message : '导出会话失败')
+            }),
+        },
+        {
+          key: 'delete',
+          label: '删除会话',
+          variant: 'danger',
+          onSelect: () =>
+            removeCliSessions([item.id], '已删除该条本地会话记录。').catch((error) => {
+              toast(error instanceof Error ? error.message : '删除会话失败')
+            }),
+        },
+      ],
+    })
+  }
+
+  function handleHistoryProjectContextMenu(event: MouseEvent, projectName: string, items: CliHistoryEntry[]) {
+    event.preventDefault()
+    setSessionContextMenu({
+      x: event.clientX,
+      y: event.clientY,
+      title: projectName,
+      scope: 'history',
+      items: [
+        {
+          key: 'pin',
+          label: pinnedHistoryGroups.includes(projectName) ? '取消置顶项目' : '置顶项目',
+          onSelect: () => togglePinnedHistoryGroup(projectName),
+        },
+        {
+          key: 'delete-project',
+          label: '删除项目会话',
+          variant: 'danger',
+          onSelect: () =>
+            removeCliSessions(
+              items.map((entry) => entry.id),
+              `已删除“${projectName}”项目下的 ${items.length} 条本地会话记录。`
+            ).catch((error) => {
+              toast(error instanceof Error ? error.message : '删除项目会话失败')
             }),
         },
       ],
@@ -7133,11 +7868,6 @@ function CliWorkspace(props: {
         [sessionId || '']: (current[sessionId || ''] || []).filter((item) => item.id !== message.id),
       }))
       toast('当前消息仅从本地草稿中移除，尚未写入真实会话文件。')
-      return
-    }
-
-    if (!message.sourceFilePath || !message.sourceLineNumber) {
-      toast('当前消息还没有稳定的源文件定位信息，暂时不能删除。')
       return
     }
 
@@ -7373,7 +8103,7 @@ function CliWorkspace(props: {
   }
 
   useEffect(() => {
-    if (!active || running || prompt.trim() || !status.installed || !status.hasConfig) {
+    if (!active || running || prompt.trim() || !cliStatusReady) {
       return
     }
     if (!hasPendingCliVerification(client)) {
@@ -7404,7 +8134,7 @@ function CliWorkspace(props: {
       }
       window.clearTimeout(submitTimer)
     }
-  }, [active, client, projectPath, prompt, running, status.dataPath, status.hasConfig, status.installed, submitCliPrompt])
+  }, [active, cliStatusReady, client, projectPath, prompt, running, status.dataPath, submitCliPrompt])
 
   async function handleStopRun() {
     if (!activeRequestIdRef.current) {
@@ -7503,7 +8233,7 @@ function CliWorkspace(props: {
     <section className='workspace-page cli-page'>
       <div className={`cli-layout ${historyOpen ? 'history-open' : ''}`}>
         <article className='panel cli-main-panel cli-panel-surface'>
-          {(!status.installed || !status.hasConfig) && (
+          {!cliStatusReady && (
             <div className='inline-notice warn'>
               <span>当前环境还未完成安装或配置，请先前往设置完成一键部署。</span>
               <button className='secondary-button tiny' type='button' onClick={openSettings}>
@@ -7512,8 +8242,8 @@ function CliWorkspace(props: {
             </div>
           )}
 
-          <div className={`conversation-scroll-region ${activePlan?.items.length ? 'has-cli-plan' : ''}`}>
-            <CliPlanFloatingPanel plan={activePlan} />
+          <div className={`conversation-scroll-region ${visibleActivePlan ? 'has-cli-plan' : ''}`}>
+            <CliPlanFloatingPanel plan={visibleActivePlan} />
             <div ref={threadRef} className='cli-thread'>
               {activeTimeline.length === 0 ? (
                 <EmptyState
@@ -7875,7 +8605,7 @@ function CliWorkspace(props: {
               <div className='history-project-groups'>
                 {orderGroupedEntries(Object.entries(sessionsByProject), pinnedHistoryGroups).map(([projectName, items]) => (
                   <div key={projectName} className='history-group'>
-                    <div className='history-group-head'>
+                    <div className='history-group-head' onContextMenu={(event) => handleHistoryProjectContextMenu(event, projectName, items)}>
                       <strong>{projectName}</strong>
                       <div className='history-group-head-actions'>
                         <span>{items.length} 条</span>
@@ -7966,7 +8696,7 @@ function CliSetupCard(props: {
   const [status, setStatus] = useState<CliStatus>(buildEmptyCliStatus(client))
   const [deploying, setDeploying] = useState(false)
   const [deployLog, setDeployLog] = useState<DeployProgressPayload[]>([])
-  const [preset, setPreset] = useState<{ apiKey: string; model: string; baseUrl: string } | null>(null)
+  const [preset, setPreset] = useState<CliDeployPreset | null>(null)
   const timelineRef = useRef<HTMLDivElement | null>(null)
   const peerState = resolveCliSetupPeerState(client, activeDeployClient)
 
@@ -8064,11 +8794,17 @@ function CliSetupCard(props: {
         group: user.group || '',
         preferredNames: ['桌面端专用 Key', `${client.toUpperCase()} 桌面安装 Key`],
       })
+      const resolvedDeploySettings = resolveCliDeploySettings({
+        preset,
+        generatedApiKey: generated.key,
+        defaultBaseUrl: client === 'codex' ? DEFAULT_CODEX_BASE_URL : DEFAULT_CLAUDE_BASE_URL,
+        defaultModel: client === 'codex' ? DEFAULT_CODEX_MODEL : DEFAULT_CLAUDE_MODEL,
+      })
       await deployCli({
         client,
-        apiKey: preset?.apiKey || generated.key,
-        baseUrl: preset?.baseUrl || (client === 'codex' ? DEFAULT_CODEX_BASE_URL : DEFAULT_CLAUDE_BASE_URL),
-        model: preset?.model || (client === 'codex' ? DEFAULT_CODEX_MODEL : DEFAULT_CLAUDE_MODEL),
+        apiKey: resolvedDeploySettings.apiKey,
+        baseUrl: resolvedDeploySettings.baseUrl,
+        model: resolvedDeploySettings.model,
       })
       toast(`${client} 安装任务已开始。`)
     } catch (error) {
@@ -8147,8 +8883,9 @@ function AssistantWorkspace(props: {
   openSettings: () => void
   visible: boolean
   enabledModes: AssistantMode[]
+  serverBaseUrl: string
 }) {
-  const { mode, setMode, toast, openSettings, visible, enabledModes } = props
+  const { mode, setMode, toast, openSettings, visible, enabledModes, serverBaseUrl } = props
 
   return (
     <section className={`workspace-page assistant-page ${visible ? '' : 'workspace-hidden'}`}>
@@ -8182,16 +8919,28 @@ function AssistantWorkspace(props: {
 
       <div className='workspace-host assistant-host'>
         <div className={mode === 'chat' ? 'workspace-shell active' : 'workspace-shell'}>
-          <AssistantsChatWorkspace toast={toast} />
+          <AssistantsChatWorkspace toast={toast} active={visible && mode === 'chat'} />
         </div>
         <div className={mode === 'draw' ? 'workspace-shell active' : 'workspace-shell'}>
           <DrawWorkspace toast={toast} />
         </div>
         <div className={mode === 'codex' ? 'workspace-shell active' : 'workspace-shell'}>
-          <CliWorkspace client='codex' toast={toast} openSettings={openSettings} active={visible && mode === 'codex'} />
+          <CliWorkspace
+            client='codex'
+            toast={toast}
+            openSettings={openSettings}
+            active={visible && mode === 'codex'}
+            serverBaseUrl={serverBaseUrl}
+          />
         </div>
         <div className={mode === 'claude' ? 'workspace-shell active' : 'workspace-shell'}>
-          <CliWorkspace client='claude' toast={toast} openSettings={openSettings} active={visible && mode === 'claude'} />
+          <CliWorkspace
+            client='claude'
+            toast={toast}
+            openSettings={openSettings}
+            active={visible && mode === 'claude'}
+            serverBaseUrl={serverBaseUrl}
+          />
         </div>
       </div>
     </section>
@@ -8760,14 +9509,14 @@ export function App() {
   const [cliStatus, setCliStatus] = useState<{ codex: CliStatus; claude: CliStatus } | null>(null)
   const enabledAssistantModes = useMemo(() => {
     const next: AssistantMode[] = ['chat', 'draw']
-    if (cliStatus?.codex.installed && cliStatus?.codex.hasConfig) {
+    if (cliStatus?.codex && isCliStatusReadyForWorkspace(cliStatus.codex, serverBaseUrl || DEFAULT_SERVER_BASE_URL)) {
       next.push('codex')
     }
-    if (cliStatus?.claude.installed && cliStatus?.claude.hasConfig) {
+    if (cliStatus?.claude && isCliStatusReadyForWorkspace(cliStatus.claude, serverBaseUrl || DEFAULT_SERVER_BASE_URL)) {
       next.push('claude')
     }
     return next
-  }, [cliStatus])
+  }, [cliStatus, serverBaseUrl])
 
   useEffect(() => {
     setBootstrapping(true)
@@ -9093,6 +9842,7 @@ export function App() {
                 openSettings={() => setSideTab('me')}
                 visible={sideTab === 'assistants'}
                 enabledModes={enabledAssistantModes}
+                serverBaseUrl={serverBaseUrl}
               />
               {sideTab === 'subscriptions' && <SubscriptionsWorkspace toast={setMessage} />}
               {sideTab === 'wallet' && <WalletWorkspace user={auth.user} toast={setMessage} />}
