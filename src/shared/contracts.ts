@@ -146,6 +146,11 @@ export interface ImageGenerationResponse {
     b64_json?: string
     revised_prompt?: string
   }>
+  usage?: {
+    prompt_tokens?: number
+    completion_tokens?: number
+    total_tokens?: number
+  }
 }
 
 export interface SubscriptionPlan {

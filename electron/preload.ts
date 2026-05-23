@@ -12,6 +12,7 @@ import type {
   CliStatus,
   DesktopAttachmentSaveRequest,
   DesktopAttachmentSaveResult,
+  DesktopCopyImageRequest,
   DesktopFilePreview,
   DesktopImageEditRequest,
   DesktopSaveImageRequest,
@@ -137,6 +138,8 @@ contextBridge.exposeInMainWorld('desktopBridge', {
     ipcRenderer.invoke('desktop:image-edit', input) as Promise<ImageGenerationResponse>,
   saveImage: (input: DesktopSaveImageRequest) =>
     ipcRenderer.invoke('desktop:save-image', input) as Promise<DesktopSaveImageResult>,
+  copyImageToClipboard: (input: DesktopCopyImageRequest) =>
+    ipcRenderer.invoke('desktop:copy-image', input) as Promise<void>,
   exportTextFile: (input: DesktopExportTextFileRequest) =>
     ipcRenderer.invoke('desktop:export-text-file', input) as Promise<DesktopExportTextFileResult>,
   readFilePreview: (targetPath: string) =>

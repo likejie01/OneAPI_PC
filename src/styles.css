@@ -829,10 +829,18 @@ select {
 }
 
 .subscription-plan-badge-row {
+  display: flex;
   flex-direction: row;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+}
+
+.subscription-plan-badge-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .subscription-plan-badge {
@@ -850,6 +858,12 @@ select {
 .subscription-plan-badge.recommended {
   background: rgba(29, 107, 120, 0.14);
   color: #195662;
+}
+
+.subscription-plan-badge.annual {
+  background: linear-gradient(135deg, rgba(214, 168, 66, 0.2), rgba(255, 233, 164, 0.34));
+  color: #8d6500;
+  border-color: rgba(196, 147, 31, 0.22);
 }
 
 .subscription-plan-badge.subtle {
@@ -2725,6 +2739,7 @@ select {
 }
 
 .usage-trend-card {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -2759,6 +2774,29 @@ select {
   padding: 8px 10px;
   border-radius: 999px;
   background: rgba(23, 49, 74, 0.04);
+}
+
+.usage-trend-tooltip {
+  position: absolute;
+  z-index: 2;
+  display: grid;
+  gap: 4px;
+  min-width: 132px;
+  padding: 10px 12px;
+  border: 1px solid rgba(23, 49, 74, 0.12);
+  border-radius: 12px;
+  background: rgb(var(--surface-rgb) / 0.96);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.12);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  transform: translate(-50%, calc(-100% - 12px));
+  pointer-events: none;
+}
+
+.usage-trend-tooltip-model {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .usage-trend-legend-item span:last-child {
@@ -5953,7 +5991,9 @@ body,
   z-index: 7;
   width: min(260px, calc(100% - 24px));
   display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
   gap: 10px;
+  max-height: calc(50% - 20px);
   padding: 12px 14px;
   border: 1px solid color-mix(in srgb, var(--line) 84%, transparent);
   border-radius: 16px;
@@ -5961,6 +6001,7 @@ body,
   box-shadow: 0 14px 36px rgb(0 0 0 / 0.1);
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
+  overflow: hidden;
 }
 
 .cli-plan-floating-head {
@@ -5985,6 +6026,9 @@ body,
 .cli-plan-floating-list {
   display: grid;
   gap: 8px;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
 }
 
 .cli-plan-floating-item {

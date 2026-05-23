@@ -12,6 +12,7 @@ import type {
   CliStatus,
   DesktopAttachmentSaveRequest,
   DesktopAttachmentSaveResult,
+  DesktopCopyImageRequest,
   DesktopFilePreview,
   DesktopImageEditRequest,
   DesktopSaveImageRequest,
@@ -89,6 +90,7 @@ declare global {
       ) => Promise<DesktopAttachmentSaveResult>
       editImage: (input: DesktopImageEditRequest) => Promise<ImageGenerationResponse>
       saveImage: (input: DesktopSaveImageRequest) => Promise<DesktopSaveImageResult>
+      copyImageToClipboard: (input: DesktopCopyImageRequest) => Promise<void>
       exportTextFile: (input: DesktopExportTextFileRequest) => Promise<DesktopExportTextFileResult>
       readFilePreview: (targetPath: string) => Promise<DesktopFilePreview>
       getCliDeployPreset: (client: CliClient) => Promise<CliDeployPreset>

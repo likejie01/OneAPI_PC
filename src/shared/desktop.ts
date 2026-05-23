@@ -257,6 +257,11 @@ export interface DesktopSaveImageResult {
   path: string
 }
 
+export interface DesktopCopyImageRequest {
+  sourceUrl?: string
+  dataBase64?: string
+}
+
 export interface DesktopFilePreview {
   path: string
   name: string

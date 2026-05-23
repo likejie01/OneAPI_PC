@@ -67,6 +67,7 @@ import {
   unwrapEnvelope,
 } from './domains/auth'
 import {
+  copyImageToClipboard,
   getUserGroups,
   getUserModels,
   saveImageToDisk,
@@ -139,15 +140,18 @@ import { deriveDesktopChatDisplayState, normalizeStoredDesktopChatMessage } from
 import {
   applyCliMessageOverlays,
   buildCliExtensionAugmentedPrompt,
+  buildCliExtensionDedupeKey,
   buildCliExtensionDisplayName,
   canUseCliExtension,
   collectCliToolNames,
   decorateCliExtensions,
+  recommendCliExtensionsForPrompt,
   resolveCliSlashTriggerState,
   translateCliExtensionDescription,
   type CliExtensionViewItem,
   type CliMessageOverlay,
 } from './lib/cli-extensions'
+import { resolveVisibleDrawMessageContent } from './lib/draw-message'
 import {
   buildImageStyleAugmentedPrompt,
   decorateImageStylePresets,
@@ -166,6 +170,13 @@ import {
   formatSubscriptionDuration,
   formatSubscriptionResetPeriod,
 } from './lib/format'
+import { isRecoverableNetworkError } from './lib/network-retry'
+import {
+  commitPromptHistoryEntry,
+  createPromptHistoryState,
+  navigatePromptHistory,
+  setPromptHistoryEditingState,
+} from './lib/prompt-history'
 import {
   buildChatSessionExportMarkdown,
   buildCliSessionExportMarkdown,
@@ -176,6 +187,7 @@ import {
   type ExportCliLogGroup,
 } from './lib/session-history'
 import { readJsonStorage, writeJsonStorage } from './lib/storage'
+import { resolveSubscriptionPlanBadge } from './lib/subscription-plan'
 import dayjs from 'dayjs'
 import type {
   AssistantRecord,
@@ -184,6 +196,7 @@ import type {
   ChatContentPart,
   ChatMessage,
   ChatModelOption,
+  ImageGenerationResponse,
   PlanRecord,
   SubscriptionPaymentInfo,
   SubscriptionSelfData,
@@ -219,6 +232,8 @@ const AURORA_OPACITY_STORAGE_KEY = 'oneapi-desktop-aurora-opacity'
 const DEFAULT_AURORA_OPACITY = 100
 const ASSISTANT_FAVORITES_STORAGE_KEY = 'oneapi-desktop-chat-assistant-favorites'
 const IMAGE_STYLE_FAVORITES_STORAGE_KEY = 'oneapi-desktop-image-style-favorites'
+const CHAT_PROMPT_HISTORY_STORAGE_KEY = 'oneapi-desktop-chat-prompt-history'
+const DRAW_PROMPT_HISTORY_STORAGE_KEY = 'oneapi-desktop-draw-prompt-history'
 
 type ComposerAttachment = {
   id: string
@@ -229,6 +244,10 @@ type ComposerAttachment = {
   mimeType?: string
   dataBase64: string
   previewUrl?: string
+}
+
+function getCliPromptHistoryStorageKey(client: CliClient) {
+  return `oneapi-desktop-${client}-prompt-history`
 }
 
 const assistantModes: Array<{ key: AssistantMode; label: string }> = [
@@ -926,6 +945,45 @@ function renderComposer(props: {
   )
 }
 
+function useComposerPromptHistory(storageKey: string) {
+  const [state, setState] = useState(() =>
+    createPromptHistoryState(readJsonStorage<string[]>(storageKey, []))
+  )
+
+  useEffect(() => {
+    writeJsonStorage(storageKey, state.items)
+  }, [state.items, storageKey])
+
+  const syncInputValue = useCallback((value: string) => {
+    setState((current) => setPromptHistoryEditingState(current, value))
+  }, [])
+
+  const commitInputValue = useCallback((value: string) => {
+    setState((current) => createPromptHistoryState(commitPromptHistoryEntry(current.items, value)))
+  }, [])
+
+  const recallInputValue = useCallback((direction: 'up' | 'down', currentValue: string) => {
+    const next = navigatePromptHistory(state, direction, currentValue)
+    setState(next.state)
+    return next.nextValue
+  }, [state])
+
+  return {
+    syncInputValue,
+    commitInputValue,
+    recallInputValue,
+  }
+}
+
+function focusTextareaToEnd(textarea: HTMLTextAreaElement | null, value: string) {
+  if (!textarea) {
+    return
+  }
+
+  textarea.focus()
+  textarea.setSelectionRange(value.length, value.length)
+}
+
 function useAutoFollowScroll(
   containerRef: React.RefObject<HTMLDivElement | null>,
   dependencies: readonly unknown[]
@@ -1090,6 +1148,33 @@ type DrawSessionRecord = {
   title: string
   updatedAt: number
   messages: ChatBubbleMessage[]
+}
+
+type PendingDrawRetryRequest =
+  | {
+      kind: 'edit'
+      model: string
+      prompt: string
+      imageName: string
+      mimeType?: string
+      dataBase64: string
+      size?: string
+      quality?: string
+    }
+  | {
+      kind: 'generate'
+      model: string
+      prompt: string
+      group: string
+      size?: string
+      quality?: string
+      seed?: number
+      response_format: 'b64_json'
+    }
+
+type PendingDrawRetryState = {
+  sessionId: string
+  request: PendingDrawRetryRequest
 }
 
 const CLI_REASONING_OPTIONS = [
@@ -1563,6 +1648,14 @@ function UsageTrendChart(props: {
 }) {
   const { items } = props
   const chart = useMemo(() => buildUsageSeriesFromTimeline(items), [items])
+  const [hoveredPoint, setHoveredPoint] = useState<{
+    model: string
+    label: string
+    value: number
+    color: string
+    x: number
+    y: number
+  } | null>(null)
 
   if (!chart.labels.length || !chart.models.length) {
     return <EmptyState title='暂无模型分析数据' description='开始使用模型后，这里会自动生成时间趋势。' />
@@ -1585,7 +1678,13 @@ function UsageTrendChart(props: {
 
   return (
     <div className='usage-trend-card'>
-      <svg viewBox={`0 0 ${width} ${height}`} className='usage-trend-svg' role='img' aria-label='模型调用分析趋势图'>
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        className='usage-trend-svg'
+        role='img'
+        aria-label='模型调用分析趋势图'
+        onMouseLeave={() => setHoveredPoint(null)}
+      >
         {Array.from({ length: gridRows + 1 }).map((_, index) => {
           const y = top + (chartHeight / gridRows) * index
           return (
@@ -1611,11 +1710,35 @@ function UsageTrendChart(props: {
           return (
             <g key={model}>
               <path d={buildSmoothLinePath(points)} fill='none' stroke={USAGE_CHART_COLORS[modelIndex % USAGE_CHART_COLORS.length]} strokeWidth='2.5' strokeLinecap='round' />
-              {points.map((point, index) => (
-                <circle key={`${model}-${index}`} cx={point.x} cy={point.y} r='3' fill={USAGE_CHART_COLORS[modelIndex % USAGE_CHART_COLORS.length]}>
-                  <title>{`${model} · ${chart.formatLabel(chart.labels[index])} · ${formatQuota(values[index])}`}</title>
-                </circle>
-              ))}
+              {points.map((point, index) => {
+                const color = USAGE_CHART_COLORS[modelIndex % USAGE_CHART_COLORS.length]
+                return (
+                  <circle
+                    key={`${model}-${index}`}
+                    cx={point.x}
+                    cy={point.y}
+                    r='4'
+                    fill={color}
+                    onMouseEnter={() =>
+                      setHoveredPoint({
+                        model,
+                        label: chart.formatLabel(chart.labels[index]),
+                        value: values[index],
+                        color,
+                        x: point.x,
+                        y: point.y,
+                      })
+                    }
+                    onMouseLeave={() => {
+                      setHoveredPoint((current) =>
+                        current?.model === model && current?.label === chart.formatLabel(chart.labels[index])
+                          ? null
+                          : current
+                      )
+                    }}
+                  />
+                )
+              })}
             </g>
           )
         })}
@@ -1632,6 +1755,22 @@ function UsageTrendChart(props: {
           )
         })}
       </svg>
+      {hoveredPoint ? (
+        <div
+          className='usage-trend-tooltip'
+          style={{
+            left: `${(hoveredPoint.x / width) * 100}%`,
+            top: `${(hoveredPoint.y / height) * 100}%`,
+          }}
+        >
+          <span className='usage-trend-tooltip-model'>
+            <span className='usage-trend-swatch' style={{ backgroundColor: hoveredPoint.color }} />
+            <strong>{hoveredPoint.model}</strong>
+          </span>
+          <span>{hoveredPoint.label}</span>
+          <strong>{formatQuota(hoveredPoint.value)}</strong>
+        </div>
+      ) : null}
 
       <div className='usage-trend-legend'>
         {chart.models.map((model, index) => (
@@ -1698,13 +1837,16 @@ function ReasoningMessageContent(props: {
   )
 }
 
-function PendingImageContent() {
+function PendingImageContent(props: {
+  label?: string
+}) {
+  const { label = DRAW_PENDING_MESSAGE_LABEL } = props
   return (
     <div className='pending-image-card' aria-label='图片生成中'>
       <div className='pending-image-shimmer' />
       <div className='pending-image-meta'>
         <LoaderCircle className='spin' size={14} />
-        <span>{DRAW_PENDING_MESSAGE_LABEL}</span>
+        <span>{label}</span>
       </div>
     </div>
   )
@@ -3085,6 +3227,7 @@ function AssistantsChatWorkspace(props: {
     readJsonStorage<string>(CHAT_ACTIVE_SESSION_STORAGE_KEY, '')
   )
   const [draft, setDraft] = useState('')
+  const chatPromptHistory = useComposerPromptHistory(CHAT_PROMPT_HISTORY_STORAGE_KEY)
   const [selectedModel, setSelectedModel] = useState('')
   const [selectedGroup, setSelectedGroup] = useState('')
   const [sending, setSending] = useState(false)
@@ -3568,6 +3711,7 @@ function AssistantsChatWorkspace(props: {
     setChatSessions((current) => [next, ...current])
     setActiveSessionId(next.id)
     setDraft('')
+    chatPromptHistory.syncInputValue('')
     window.setTimeout(() => resizeDraft(), 0)
     closeChatHistoryPanel()
   }
@@ -3680,6 +3824,7 @@ function AssistantsChatWorkspace(props: {
     }))
     pendingRequestIdRef.current = requestId
     stoppingRef.current = false
+    chatPromptHistory.commitInputValue(userMessageContent)
     setDraft('')
     clearAttachments()
     window.setTimeout(() => resizeDraft(), 0)
@@ -3969,6 +4114,7 @@ function AssistantsChatWorkspace(props: {
     )
     setSelectedGroup(session.group || selectedGroup)
     setDraft('')
+    chatPromptHistory.syncInputValue('')
     window.setTimeout(() => resizeDraft(), 0)
     closeChatHistoryPanel()
   }
@@ -4174,7 +4320,26 @@ function AssistantsChatWorkspace(props: {
             placeholder: '输入你的问题、任务或上下文。',
             onChange: (value) => {
               setDraft(value)
+              chatPromptHistory.syncInputValue(value)
               resizeDraft()
+            },
+            onKeyDown: (event) => {
+              if (event.ctrlKey || event.metaKey || event.altKey) {
+                return
+              }
+              if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') {
+                return
+              }
+              const nextValue = chatPromptHistory.recallInputValue(
+                event.key === 'ArrowUp' ? 'up' : 'down',
+                draft
+              )
+              if (nextValue === draft) {
+                return
+              }
+              event.preventDefault()
+              setDraft(nextValue)
+              window.setTimeout(() => focusTextareaToEnd(draftRef.current, nextValue), 0)
             },
             onPaste: handleAttachmentPaste,
             onDrop: handleAttachmentDrop,
@@ -4636,6 +4801,7 @@ function DrawWorkspace(props: {
     return storedSessions[0]?.id || ''
   })
   const [draft, setDraft] = useState('')
+  const drawPromptHistory = useComposerPromptHistory(DRAW_PROMPT_HISTORY_STORAGE_KEY)
   const [sending, setSending] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [selectedGroup, setSelectedGroup] = useState('')
@@ -4665,6 +4831,7 @@ function DrawWorkspace(props: {
     src: string
     name: string
   } | null>(null)
+  const [pendingRetry, setPendingRetry] = useState<PendingDrawRetryState | null>(null)
   const {
     attachments,
     inputRef: attachmentInputRef,
@@ -4676,6 +4843,7 @@ function DrawWorkspace(props: {
   } = useComposerAttachments(toast)
   const { preview: attachmentPreview, setPreview: setAttachmentPreview, openPreview: openAttachmentPreview } = useAttachmentPreview(toast)
   const { ref: draftRef, resize: resizeDraft } = useAutosizeTextarea(draft)
+  const retryingPendingDrawRef = useRef(false)
   const historyPanelRef = useRef<HTMLDivElement | null>(null)
   const messageStreamRef = useRef<HTMLDivElement | null>(null)
   const drawSizeMenuRef = useRef<HTMLDivElement | null>(null)
@@ -4802,6 +4970,7 @@ function DrawWorkspace(props: {
     setDrawSessions((current) => [next, ...current])
     setActiveSessionId(next.id)
     setDraft('')
+    drawPromptHistory.syncInputValue('')
     setSelectedImageStylePreset(null)
     setImageStyleMenuOpen(false)
     clearAttachments()
@@ -4840,6 +5009,7 @@ function DrawWorkspace(props: {
     setActiveSessionId(session.id)
     closeDrawHistoryPanel()
     setDraft('')
+    drawPromptHistory.syncInputValue('')
     clearAttachments()
     window.setTimeout(() => resizeDraft(), 0)
   }
@@ -5098,6 +5268,42 @@ function DrawWorkspace(props: {
     }
   }
 
+  async function handleCopyImage(source: string) {
+    try {
+      await copyImageToClipboard({
+        sourceUrl: source.startsWith('data:') ? undefined : source,
+        dataBase64: source.startsWith('data:') ? extractDataUrlBase64(source) : undefined,
+      })
+      toast('图片已复制到剪贴板。')
+    } catch (error) {
+      toast(error instanceof Error ? error.message : '复制图片失败')
+    }
+  }
+
+  function handlePreviewImageContextMenu(event: MouseEvent<HTMLDivElement | HTMLImageElement>) {
+    if (!previewImage?.src) {
+      return
+    }
+    event.preventDefault()
+    setSessionContextMenu({
+      x: event.clientX,
+      y: event.clientY,
+      title: previewImage.name,
+      items: [
+        {
+          key: 'copy-image',
+          label: '复制图片',
+          onSelect: () => void handleCopyImage(previewImage.src),
+        },
+        {
+          key: 'download-image',
+          label: '下载图片',
+          onSelect: () => void handleDownloadImage(previewImage.src, previewImage.name),
+        },
+      ],
+    })
+  }
+
   function deleteDrawMessage(messageId: string) {
     updateDrawSession(resolvedActiveSessionId, (session) => ({
       ...session,
@@ -5123,11 +5329,122 @@ function DrawWorkspace(props: {
     }
     const expandedPrompt = buildImageStyleAugmentedPrompt(draft, selectedImageStylePreset)
     setDraft(expandedPrompt)
+    drawPromptHistory.syncInputValue(expandedPrompt)
     setSelectedImageStylePreset(null)
     setImageStyleSearch('')
     window.setTimeout(() => resizeDraft(), 0)
     window.setTimeout(() => draftRef.current?.focus(), 0)
   }
+
+  async function executeDrawRequest(request: PendingDrawRetryRequest) {
+    if (request.kind === 'edit') {
+      return sendImageEdit({
+        model: request.model,
+        prompt: request.prompt,
+        imageName: request.imageName,
+        mimeType: request.mimeType,
+        dataBase64: request.dataBase64,
+        size: request.size,
+        quality: request.quality,
+      })
+    }
+
+    const serviceKey = await ensureDesktopServiceKey({
+      name: 'OneAPI Desktop Internal Key',
+      group: request.group || '',
+      preferredNames: ['桌面端专用 Key', 'CODEX 桌面安装 Key', 'CLAUDE 桌面安装 Key'],
+    })
+
+    return sendDirectImageGeneration({
+      apiKey: serviceKey.key,
+      model: request.model,
+      prompt: request.prompt,
+      size: request.size,
+      quality: request.quality,
+      seed: request.seed,
+      response_format: request.response_format,
+    })
+  }
+
+  function buildResolvedDrawAssistantMessage(response: ImageGenerationResponse, fallbackPrompt: string) {
+    const firstImage = response.data?.[0]
+    const imageSource = resolveImageMessageSource(firstImage)
+    if (!imageSource) {
+      throw new Error('模型没有返回可展示的图片。')
+    }
+
+    const resolvedAt = getCurrentTimestamp()
+    return {
+      id: `draw-assistant-${resolvedAt}`,
+      role: 'assistant' as const,
+      content: firstImage?.revised_prompt?.trim() || fallbackPrompt,
+      createdAt: resolvedAt,
+      imageUrl: imageSource,
+      imagePrompt: firstImage?.revised_prompt?.trim() || fallbackPrompt,
+      modelLabel: DEFAULT_DRAW_MODEL,
+      usage: response.usage,
+    }
+  }
+
+  async function continuePendingDrawRequest(snapshot: PendingDrawRetryState) {
+    if (retryingPendingDrawRef.current) {
+      return
+    }
+
+    retryingPendingDrawRef.current = true
+    try {
+      const response = await executeDrawRequest(snapshot.request)
+      replacePendingDrawMessage(
+        snapshot.sessionId,
+        buildResolvedDrawAssistantMessage(response, snapshot.request.prompt)
+      )
+      setPendingRetry(null)
+      setSending(false)
+    } catch (error) {
+      if (isRecoverableNetworkError(error)) {
+        replacePendingDrawMessage(snapshot.sessionId, {
+          id: `draw-pending-retry-${getCurrentTimestamp()}`,
+          role: 'assistant',
+          content: '网络已断开，恢复后将自动继续生成...',
+          createdAt: getCurrentTimestamp(),
+          pending: true,
+          imageUrl: DRAW_PENDING_IMAGE_URL,
+          modelLabel: DEFAULT_DRAW_MODEL,
+        })
+        return
+      }
+
+      const failedAt = getCurrentTimestamp()
+      replacePendingDrawMessage(snapshot.sessionId, {
+        id: `draw-assistant-error-${failedAt}`,
+        role: 'assistant',
+        content: error instanceof Error ? error.message : '图片生成失败',
+        createdAt: failedAt,
+        modelLabel: DEFAULT_DRAW_MODEL,
+      })
+      setPendingRetry(null)
+      setSending(false)
+      toast(error instanceof Error ? error.message : '图片生成失败')
+    } finally {
+      retryingPendingDrawRef.current = false
+    }
+  }
+
+  useEffect(() => {
+    if (!pendingRetry) {
+      return
+    }
+
+    const handleOnline = () => {
+      toast('网络已恢复，正在继续获取图片结果。')
+      void continuePendingDrawRequest(pendingRetry)
+    }
+
+    window.addEventListener('online', handleOnline)
+    return () => {
+      window.removeEventListener('online', handleOnline)
+    }
+  }, [pendingRetry, toast])
 
   async function handleSendDrawMessage() {
     if ((!draft.trim() && !selectedImageStylePreset) || sending) {
@@ -5165,6 +5482,7 @@ function DrawWorkspace(props: {
       messages: [...session.messages, userMessage, pendingMessage],
     }))
 
+    drawPromptHistory.commitInputValue(nextPrompt)
     setDraft('')
     setSelectedImageStylePreset(null)
     setImageStyleMenuOpen(false)
@@ -5172,10 +5490,12 @@ function DrawWorkspace(props: {
     clearAttachments()
     window.setTimeout(() => resizeDraft(), 0)
     setSending(true)
+    let keepSending = false
 
     try {
-      const response = imageAttachment
-        ? await sendImageEdit({
+      const request: PendingDrawRetryRequest = imageAttachment
+        ? {
+            kind: 'edit',
             model: DEFAULT_DRAW_MODEL,
             prompt: nextPrompt,
             imageName: imageAttachment.name,
@@ -5183,41 +5503,55 @@ function DrawWorkspace(props: {
             dataBase64: imageAttachment.dataBase64,
             size: drawSize,
             quality: drawQuality,
-          })
-        : await (async () => {
-            const serviceKey = await ensureDesktopServiceKey({
-              name: 'OneAPI Desktop Internal Key',
-              group: selectedGroup || '',
-              preferredNames: ['桌面端专用 Key', 'CODEX 桌面安装 Key', 'CLAUDE 桌面安装 Key'],
-            })
-            return sendDirectImageGeneration({
-              apiKey: serviceKey.key,
-              model: DEFAULT_DRAW_MODEL,
-              prompt: nextPrompt,
-              size: drawSize,
-              quality: drawQuality,
-              seed: drawRandomSeed ? undefined : 1,
-              response_format: 'b64_json',
-            })
-          })()
-
-      const firstImage = response.data?.[0]
-      const imageSource = resolveImageMessageSource(firstImage)
-      if (!imageSource) {
-        throw new Error('模型没有返回可展示的图片。')
+          }
+        : {
+            kind: 'generate',
+            model: DEFAULT_DRAW_MODEL,
+            prompt: nextPrompt,
+            group: selectedGroup || '',
+            size: drawSize,
+            quality: drawQuality,
+            seed: drawRandomSeed ? undefined : 1,
+            response_format: 'b64_json',
+          }
+      const response = await executeDrawRequest(request)
+      replacePendingDrawMessage(nextSessionId, buildResolvedDrawAssistantMessage(response, nextPrompt))
+      setPendingRetry(null)
+    } catch (error) {
+      if (isRecoverableNetworkError(error)) {
+        keepSending = true
+        replacePendingDrawMessage(nextSessionId, {
+          ...pendingMessage,
+          content: '网络已断开，恢复后将自动继续生成...',
+        })
+        setPendingRetry({
+          sessionId: nextSessionId,
+          request: imageAttachment
+            ? {
+                kind: 'edit',
+                model: DEFAULT_DRAW_MODEL,
+                prompt: nextPrompt,
+                imageName: imageAttachment.name,
+                mimeType: imageAttachment.mimeType,
+                dataBase64: imageAttachment.dataBase64,
+                size: drawSize,
+                quality: drawQuality,
+              }
+            : {
+                kind: 'generate',
+                model: DEFAULT_DRAW_MODEL,
+                prompt: nextPrompt,
+                group: selectedGroup || '',
+                size: drawSize,
+                quality: drawQuality,
+                seed: drawRandomSeed ? undefined : 1,
+                response_format: 'b64_json',
+              },
+        })
+        toast('网络异常，连接恢复后会自动继续当前图片生成。')
+        return
       }
 
-      const resolvedAt = getCurrentTimestamp()
-      replacePendingDrawMessage(nextSessionId, {
-        id: `draw-assistant-${resolvedAt}`,
-        role: 'assistant',
-        content: firstImage?.revised_prompt?.trim() || nextPrompt,
-        createdAt: resolvedAt,
-        imageUrl: imageSource,
-        imagePrompt: firstImage?.revised_prompt?.trim() || nextPrompt,
-        modelLabel: DEFAULT_DRAW_MODEL,
-      })
-    } catch (error) {
       const failedAt = getCurrentTimestamp()
       replacePendingDrawMessage(nextSessionId, {
         id: `draw-assistant-error-${failedAt}`,
@@ -5226,9 +5560,12 @@ function DrawWorkspace(props: {
         createdAt: failedAt,
         modelLabel: DEFAULT_DRAW_MODEL,
       })
+      setPendingRetry(null)
       toast(error instanceof Error ? error.message : '图片生成失败')
     } finally {
-      setSending(false)
+      if (!keepSending) {
+        setSending(false)
+      }
     }
   }
 
@@ -5244,6 +5581,12 @@ function DrawWorkspace(props: {
                 messages.map((message) => {
                   const isUser = message.role === 'user'
                   const isPendingImage = message.pending && message.imageUrl === DRAW_PENDING_IMAGE_URL
+                  const visibleMessageContent = resolveVisibleDrawMessageContent({
+                    role: message.role,
+                    content: message.content,
+                    imageUrl: message.imageUrl,
+                    pending: message.pending,
+                  })
                   return (
                     <div
                       key={message.id}
@@ -5258,7 +5601,7 @@ function DrawWorkspace(props: {
                         }
                       />
                       {isPendingImage ? (
-                        <PendingImageContent />
+                        <PendingImageContent label={message.content || DRAW_PENDING_MESSAGE_LABEL} />
                       ) : message.imageUrl ? (
                         <div className='generated-image-block'>
                           <button
@@ -5283,21 +5626,26 @@ function DrawWorkspace(props: {
                               <span>下载图片</span>
                             </button>
                           </div>
-            <LazyMarkdownContent content={message.content} />
+                          {visibleMessageContent.trim() ? <LazyMarkdownContent content={visibleMessageContent} /> : null}
                         </div>
                       ) : (
-                        <LazyMarkdownContent content={message.content} />
+                        <LazyMarkdownContent content={visibleMessageContent} />
                       )}
                       <BubbleMeta
                         side={isUser ? 'right' : 'left'}
                         createdAt={message.createdAt}
+                        extra={!isUser ? <span className='message-usage'>{formatUsageSummary(message.usage)}</span> : null}
                         actions={[
-                          {
-                            key: 'copy',
-                            label: '复制',
-                            icon: Copy,
-                            onClick: () => void copyText(message.content),
-                          },
+                          ...(visibleMessageContent.trim()
+                            ? [
+                                {
+                                  key: 'copy',
+                                  label: '复制',
+                                  icon: Copy,
+                                  onClick: () => void copyText(visibleMessageContent),
+                                },
+                              ]
+                            : []),
                           {
                             key: 'delete',
                             label: '删除',
@@ -5332,13 +5680,33 @@ function DrawWorkspace(props: {
             placeholder: '输入绘图提示词；粘贴、拖拽图片后会自动进入修图模式',
             onChange: (value) => {
               setDraft(value)
+              drawPromptHistory.syncInputValue(value)
               window.setTimeout(() => resizeDraft(), 0)
             },
             onKeyDown: (event) => {
               if ((event.ctrlKey || event.metaKey) && event.key === 'Enter' && !sending) {
                 event.preventDefault()
                 void handleSendDrawMessage()
+                return
               }
+
+              if (event.ctrlKey || event.metaKey || event.altKey) {
+                return
+              }
+              if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') {
+                return
+              }
+
+              const nextValue = drawPromptHistory.recallInputValue(
+                event.key === 'ArrowUp' ? 'up' : 'down',
+                draft
+              )
+              if (nextValue === draft) {
+                return
+              }
+              event.preventDefault()
+              setDraft(nextValue)
+              window.setTimeout(() => focusTextareaToEnd(draftRef.current, nextValue), 0)
             },
             onPaste: handleAttachmentPaste,
             onDrop: handleAttachmentDrop,
@@ -5622,7 +5990,11 @@ function DrawWorkspace(props: {
 
       {previewImage && (
         <div className='modal-mask image-preview-modal-mask' onClick={() => setPreviewImage(null)}>
-          <div className='image-preview-modal' onClick={(event) => event.stopPropagation()}>
+          <div
+            className='image-preview-modal'
+            onClick={(event) => event.stopPropagation()}
+            onContextMenu={handlePreviewImageContextMenu}
+          >
             <div className='image-preview-actions'>
               <button className='ghost-button tiny' type='button' onClick={() => void handleDownloadImage(previewImage.src, previewImage.name)}>
                 <Download size={14} />
@@ -5633,8 +6005,13 @@ function DrawWorkspace(props: {
                 <span>关闭</span>
               </button>
             </div>
-            <div className='image-preview-stage'>
-              <img src={previewImage.src} alt={previewImage.name} className='image-preview-full' />
+            <div className='image-preview-stage' onContextMenu={handlePreviewImageContextMenu}>
+              <img
+                src={previewImage.src}
+                alt={previewImage.name}
+                className='image-preview-full'
+                onContextMenu={handlePreviewImageContextMenu}
+              />
             </div>
           </div>
         </div>
@@ -5782,6 +6159,7 @@ function SubscriptionsWorkspace(props: {
                   const quotaMillion = Number(item.plan.total_amount || 0) > 0 ? formatQuotaAsMillions(item.plan.total_amount) : 'unlimited'
                   const resetRule = formatSubscriptionResetPeriod(item.plan)
                   const validity = formatSubscriptionDuration(item.plan)
+                  const planBadge = resolveSubscriptionPlanBadge(item.plan)
 
                   return (
                     <article
@@ -5789,14 +6167,17 @@ function SubscriptionsWorkspace(props: {
                       className={`pricing-card subscription-plan-card ${isRecommended ? 'recommended' : ''} ${limitReached ? 'limit-reached' : ''}`}
                     >
                       <div className='subscription-plan-badge-row'>
-                        {isRecommended ? (
-                          <span className='subscription-plan-badge recommended'>
-                            <Sparkles size={14} />
-                            <span>推荐</span>
+                        <div className='subscription-plan-badge-group'>
+                          <span className={`subscription-plan-badge ${planBadge.tone === 'annual' ? 'annual' : 'subtle'}`}>
+                            {planBadge.label}
                           </span>
-                        ) : (
-                          <span className='subscription-plan-badge subtle'>套餐</span>
-                        )}
+                          {isRecommended ? (
+                            <span className='subscription-plan-badge recommended'>
+                              <Sparkles size={14} />
+                              <span>推荐</span>
+                            </span>
+                          ) : null}
+                        </div>
                         {purchaseLimit > 0 ? (
                           <span className={`subscription-plan-badge ${limitReached ? 'muted' : 'subtle'}`}>
                             限购 {purchaseCount}/{purchaseLimit}
@@ -6555,6 +6936,7 @@ function CliWorkspace(props: {
     resolveProjectNameFromPath(readJsonStorage<string>(lastProjectPathStorageKey, ''))
   )
   const [prompt, setPrompt] = useState('')
+  const cliPromptHistory = useComposerPromptHistory(getCliPromptHistoryStorageKey(client))
   const [running, setRunning] = useState(false)
   const [fullAccess, setFullAccess] = useState(false)
   const [projectSessionMap, setProjectSessionMap] = useState<Record<string, string>>(() =>
@@ -7730,6 +8112,7 @@ function CliWorkspace(props: {
       setProjectName(item.projectName || item.title)
     }
     setPrompt('')
+    cliPromptHistory.syncInputValue('')
     window.setTimeout(() => resizePrompt(), 0)
 
     if (sessionMessagesMap[item.id]?.length) {
@@ -7931,6 +8314,7 @@ function CliWorkspace(props: {
     messageExtensions?: CliExtensionEntry[]
   ) {
     setPrompt(content)
+    cliPromptHistory.syncInputValue(content)
     replaceAttachments(rehydrateCliComposerAttachments(messageAttachments))
     setSelectedExtensions(messageExtensions || [])
     window.setTimeout(() => {
@@ -7963,7 +8347,21 @@ function CliWorkspace(props: {
     const requestProjectPath = targetProjectPath
     const requestProjectKey = normalizeProjectKey(requestProjectPath)
     const currentSessionKey = activeSessionId || `draft-${client}-${Date.now()}`
-    const requestExtensions = selectedExtensions.map((item) => ({ ...item }))
+    const manualExtensions = selectedExtensions.map((item) => ({ ...item }))
+    const autoRecommendedExtensions = recommendCliExtensionsForPrompt(cleanedPrompt, cliExtensions)
+    const requestExtensions = [...manualExtensions]
+    const requestExtensionKeys = new Set(requestExtensions.map((item) => buildCliExtensionDedupeKey(item)))
+    for (const item of autoRecommendedExtensions) {
+      const dedupeKey = buildCliExtensionDedupeKey(item)
+      if (requestExtensionKeys.has(dedupeKey)) {
+        continue
+      }
+      requestExtensions.push({ ...item })
+      requestExtensionKeys.add(dedupeKey)
+      if (requestExtensions.length >= 3) {
+        break
+      }
+    }
     const promptBody = buildCliExtensionAugmentedPrompt(
       `${cleanedPrompt}${buildCliAttachmentReferenceText(targetAttachments)}`,
       requestExtensions
@@ -8003,6 +8401,7 @@ function CliWorkspace(props: {
       ...current,
       [currentSessionKey]: CLI_PENDING_MESSAGE_LABEL,
     }))
+    cliPromptHistory.commitInputValue(cleanedPrompt)
     setPrompt('')
     setSelectedExtensions([])
     clearAttachments()
@@ -8352,6 +8751,7 @@ function CliWorkspace(props: {
               placeholder: `输入要发给 ${client} 的消息。空白行输入 / 可直接呼出${client === 'codex' ? '技能/插件' : '命令/插件'}。`,
               onChange: (value) => {
                 setPrompt(value)
+                cliPromptHistory.syncInputValue(value)
                 resizePrompt()
               },
               onKeyDown: (event) => {
@@ -8359,6 +8759,19 @@ function CliWorkspace(props: {
                   event.preventDefault()
                   void handleRun()
                   return
+                }
+
+                if (!event.ctrlKey && !event.metaKey && !event.altKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
+                  const nextValue = cliPromptHistory.recallInputValue(
+                    event.key === 'ArrowUp' ? 'up' : 'down',
+                    prompt
+                  )
+                  if (nextValue !== prompt) {
+                    event.preventDefault()
+                    setPrompt(nextValue)
+                    window.setTimeout(() => focusTextareaToEnd(promptRef.current, nextValue), 0)
+                    return
+                  }
                 }
 
                 if (handleCliExtensionPaletteKeyDown(event)) {
@@ -9505,6 +9918,7 @@ export function App() {
   const [serverBaseUrlDialogOpen, setServerBaseUrlDialogOpen] = useState(false)
   const [rightCtrlHeld, setRightCtrlHeld] = useState(false)
   const [, setSidebarSecretClicks] = useState(0)
+  const [sidebarQuotaPerUnit, setSidebarQuotaPerUnit] = useState(500_000)
   const { message, setMessage } = useToastState()
   const [cliStatus, setCliStatus] = useState<{ codex: CliStatus; claude: CliStatus } | null>(null)
   const enabledAssistantModes = useMemo(() => {
@@ -9517,6 +9931,10 @@ export function App() {
     }
     return next
   }, [cliStatus, serverBaseUrl])
+  const sidebarWalletBalance = useMemo(
+    () => formatQuotaAsUsd(Number(auth.user?.quota || 0), sidebarQuotaPerUnit),
+    [auth.user?.quota, sidebarQuotaPerUnit]
+  )
 
   useEffect(() => {
     setBootstrapping(true)
@@ -9571,6 +9989,31 @@ export function App() {
       void setDesktopWindowTitle('')
     }
   }, [sideTab])
+
+  useEffect(() => {
+    if (!auth.user?.id) {
+      return
+    }
+
+    let disposed = false
+    void unwrapEnvelope(getAuthStatus())
+      .then((status) => {
+        if (disposed) {
+          return
+        }
+        const resolved = Number(status?.quota_per_unit || 0)
+        setSidebarQuotaPerUnit(resolved > 0 ? resolved : 500_000)
+      })
+      .catch(() => {
+        if (!disposed) {
+          setSidebarQuotaPerUnit(500_000)
+        }
+      })
+
+    return () => {
+      disposed = true
+    }
+  }, [auth.user?.id])
 
   useEffect(() => {
     function handleAuthExpired(event: Event) {
@@ -9806,7 +10249,7 @@ export function App() {
                 {!collapsed && (
                   <div className='sidebar-user-row' onClick={handleSidebarSecretClick}>
                     <span className='user-pill'>{auth.user.username}</span>
-                    <span className='user-pill secondary'>{auth.user.display_name || 'Root User'}</span>
+                    <span className='user-pill secondary'>{sidebarWalletBalance}</span>
                     <button
                       className='ghost-button icon-only tiny'
                       type='button'

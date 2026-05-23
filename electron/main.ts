@@ -357,6 +357,11 @@ interface DesktopSaveImageRequest {
   dataBase64?: string
 }
 
+interface DesktopCopyImageRequest {
+  sourceUrl?: string
+  dataBase64?: string
+}
+
 const cliConfig = {
   codex: {
     packageName: '@openai/codex',
@@ -1584,6 +1589,33 @@ async function saveImageToUserPath(input: DesktopSaveImageRequest) {
   return {
     path: saveResult.filePath,
   }
+}
+
+async function copyImageToClipboard(input: DesktopCopyImageRequest) {
+  let image = nativeImage.createEmpty()
+
+  if (input.dataBase64?.trim()) {
+    image = nativeImage.createFromBuffer(Buffer.from(input.dataBase64.trim(), 'base64'))
+  } else if (input.sourceUrl?.trim()) {
+    const sourceUrl = input.sourceUrl.trim()
+    if (sourceUrl.startsWith('data:')) {
+      image = nativeImage.createFromDataURL(sourceUrl)
+    } else {
+      const response = await getDesktopSession().fetch(sourceUrl)
+      if (!response.ok) {
+        throw new Error(`复制图片失败（${response.status}）`)
+      }
+      image = nativeImage.createFromBuffer(Buffer.from(await response.arrayBuffer()))
+    }
+  } else {
+    throw new Error('缺少可复制的图片数据。')
+  }
+
+  if (image.isEmpty()) {
+    throw new Error('图片数据无效，无法复制到剪贴板。')
+  }
+
+  clipboard.writeImage(image)
 }
 
 async function readCurrentCodexConfig() {
@@ -6340,4 +6372,7 @@ ipcMain.handle('desktop:image-edit', async (_event, input: DesktopImageEditReque
 })
 ipcMain.handle('desktop:save-image', async (_event, input: DesktopSaveImageRequest) => {
   return saveImageToUserPath(input)
+})
+ipcMain.handle('desktop:copy-image', async (_event, input: DesktopCopyImageRequest) => {
+  return copyImageToClipboard(input)
 })

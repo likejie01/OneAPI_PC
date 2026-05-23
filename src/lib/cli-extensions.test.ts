@@ -13,6 +13,7 @@ import {
   resolveCliSlashTriggerState,
   translateCliExtensionDescription,
   parseMarkdownFrontmatterMeta,
+  recommendCliExtensionsForPrompt,
 } from './cli-extensions.ts'
 
 test('parseMarkdownFrontmatterMeta reads name and description from frontmatter', () => {
@@ -300,4 +301,69 @@ test('collectCliToolNames extracts unique tool names from source kinds', () => {
     ]),
     ['read_file', 'edit_file']
   )
+})
+
+test('recommendCliExtensionsForPrompt selects installed debugging-related extensions for bugfix prompts', () => {
+  const result = recommendCliExtensionsForPrompt(
+    '请修复当前项目的构建报错，并补上测试确保问题不再回归',
+    [
+      {
+        id: 'debug',
+        client: 'codex',
+        kind: 'skill',
+        name: 'superpowers:systematic-debugging',
+        description: 'Root cause debugging workflow',
+        path: 'C:\\skills\\debug',
+        installed: true,
+      },
+      {
+        id: 'tdd',
+        client: 'codex',
+        kind: 'skill',
+        name: 'superpowers:test-driven-development',
+        description: 'Write failing tests first',
+        path: 'C:\\skills\\tdd',
+        installed: true,
+      },
+      {
+        id: 'front',
+        client: 'codex',
+        kind: 'skill',
+        name: 'frontend-design',
+        description: 'Build polished interfaces',
+        path: 'C:\\skills\\front',
+        installed: true,
+      },
+    ]
+  )
+
+  assert.deepEqual(result.map((item) => item.id), ['debug', 'tdd'])
+})
+
+test('recommendCliExtensionsForPrompt skips uninstalled entries even if they match strongly', () => {
+  const result = recommendCliExtensionsForPrompt(
+    '请用浏览器验证 localhost 页面并截图',
+    [
+      {
+        id: 'browser-uninstalled',
+        client: 'codex',
+        kind: 'plugin',
+        name: 'browser',
+        description: 'Browser automation for localhost',
+        path: 'C:\\plugins\\browser',
+        installed: false,
+      },
+      {
+        id: 'playwright-installed',
+        client: 'codex',
+        kind: 'skill',
+        name: 'playwright-testing',
+        description: 'browser testing and screenshot verification',
+        path: 'C:\\skills\\playwright',
+        installed: true,
+      },
+    ]
+  )
+
+  assert.deepEqual(result.map((item) => item.id), ['playwright-installed'])
 })

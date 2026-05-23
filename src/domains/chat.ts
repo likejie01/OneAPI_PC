@@ -250,6 +250,13 @@ export async function saveImageToDisk(payload: {
   return desktopBridge().saveImage(payload)
 }
 
+export async function copyImageToClipboard(payload: {
+  sourceUrl?: string
+  dataBase64?: string
+}) {
+  return desktopBridge().copyImageToClipboard(payload)
+}
+
 export async function requireEnvelopeData<T>(promise: Promise<ApiEnvelope<T>>) {
   const response = await promise
   if (!response.success) {

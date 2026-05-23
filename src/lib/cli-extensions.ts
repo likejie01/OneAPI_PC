@@ -287,3 +287,121 @@ export function resolveCliSlashTriggerState(value: string, caretIndex: number) {
     lineEnd,
   }
 }
+
+const cliExtensionRecommendationRules: Array<{
+  promptKeywords: string[]
+  extensionTargets: string[]
+  score: number
+}> = [
+  {
+    promptKeywords: ['报错', '错误', '异常', 'bug', 'debug', '修复', 'fix', '失败', '构建失败'],
+    extensionTargets: ['debug', 'systematic-debugging', 'verification', 'review'],
+    score: 9,
+  },
+  {
+    promptKeywords: ['测试', 'test', 'jest', 'vitest', 'playwright', 'e2e', '回归'],
+    extensionTargets: ['test', 'playwright', 'verification', 'test-driven-development'],
+    score: 8,
+  },
+  {
+    promptKeywords: ['前端', 'ui', '界面', '页面', '组件', 'css', 'layout', 'react', 'vue', 'tailwind', 'shadcn'],
+    extensionTargets: ['frontend', 'react', 'web', 'shadcn', 'design'],
+    score: 8,
+  },
+  {
+    promptKeywords: ['浏览器', 'browser', '截图', 'screenshot', 'localhost', '页面验证'],
+    extensionTargets: ['browser', 'playwright', 'screenshot'],
+    score: 9,
+  },
+  {
+    promptKeywords: ['mac', 'macos', 'swift', 'swiftui', 'xcode', 'appkit'],
+    extensionTargets: ['macos', 'swift', 'swiftui', 'xcode', 'appkit'],
+    score: 9,
+  },
+  {
+    promptKeywords: ['部署', '发布', '上线', 'deploy', 'docker', 'ci', 'cd', '运维', 'minio'],
+    extensionTargets: ['deploy', 'package', 'circleci', 'docker', 'ci', 'cd', 'devops'],
+    score: 8,
+  },
+]
+
+function normalizeCliText(value: string) {
+  return value.trim().toLowerCase()
+}
+
+function tokenizeCliText(value: string) {
+  const normalized = normalizeCliText(value)
+  return normalized
+    .split(/[^a-z0-9\u3400-\u9fff_-]+/i)
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+export function recommendCliExtensionsForPrompt(
+  prompt: string,
+  entries: CliExtensionEntry[],
+  maxCount = 3
+) {
+  const normalizedPrompt = normalizeCliText(prompt)
+  if (!normalizedPrompt) {
+    return []
+  }
+
+  const promptTokens = new Set(tokenizeCliText(prompt))
+
+  const ranked = entries
+    .filter((item) => canUseCliExtension(item))
+    .map((item) => {
+      const haystack = normalizeCliText(
+        [item.name, item.description, item.source || '', item.marketplace || '', item.parentPluginName || ''].join(' ')
+      )
+      let score = 0
+
+      for (const rule of cliExtensionRecommendationRules) {
+        if (!rule.promptKeywords.some((keyword) => normalizedPrompt.includes(keyword))) {
+          continue
+        }
+        if (rule.extensionTargets.some((keyword) => haystack.includes(keyword))) {
+          score += rule.score
+        }
+      }
+
+      const overlap = [...promptTokens].filter((token) => token.length > 1 && haystack.includes(token)).length
+      score += overlap
+
+      if (normalizedPrompt.includes(item.name.trim().toLowerCase())) {
+        score += 12
+      }
+
+      return {
+        item,
+        score,
+      }
+    })
+    .filter((item) => item.score > 0)
+    .sort((left, right) => {
+      if (left.score !== right.score) {
+        return right.score - left.score
+      }
+      if (left.item.kind !== right.item.kind) {
+        return left.item.kind.localeCompare(right.item.kind)
+      }
+      return left.item.name.localeCompare(right.item.name, 'zh-Hans-CN')
+    })
+
+  const selected: CliExtensionEntry[] = []
+  const seen = new Set<string>()
+  for (const entry of ranked) {
+    const dedupeKey = buildCliExtensionDedupeKey(entry.item)
+    if (seen.has(dedupeKey)) {
+      continue
+    }
+    seen.add(dedupeKey)
+    selected.push(entry.item)
+    if (selected.length >= maxCount) {
+      break
+    }
+  }
+
+  return selected
+}
