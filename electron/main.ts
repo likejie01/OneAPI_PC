@@ -19,6 +19,8 @@ import { createReadStream, createWriteStream, promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import readline from 'node:readline'
+import { Readable } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
 import { fileURLToPath } from 'node:url'
 import process from 'node:process'
 import type { ChatCompletionResponse } from '../src/shared/contracts'
@@ -56,7 +58,14 @@ import {
   pickClaudeApiKeyFromUnknown,
   resolveClaudeDesktopEnv,
 } from '../src/lib/claude-cli-config.ts'
-import { resolveCliProbeResult, shouldUseWindowsCommandShimForPath } from '../src/lib/desktop-service.ts'
+import {
+  MIN_DESKTOP_CLI_NODE_MAJOR,
+  buildWindowsCommandShimArgs,
+  isDesktopCliNodeVersionSupported,
+  resolveCliProbeResult,
+  sanitizeCliNpmEnvironment,
+  shouldUseWindowsCommandShimForPath,
+} from '../src/lib/desktop-service.ts'
 
 const DEFAULT_SERVER_BASE_URL = 'https://ai.oneapi.center'
 const DEFAULT_CODEX_BASE_URL = 'https://ai.oneapi.center/v1'
@@ -299,6 +308,8 @@ interface CliRuntimeDiagnostics {
   sessionIssue?: boolean
   authIssue?: boolean
   configIssue?: boolean
+  policyIssue?: boolean
+  dependencyIssue?: boolean
   sessionFileFound?: boolean
   sessionReadAttempts?: number
   probableCause?: string
@@ -1324,15 +1335,6 @@ function shouldUseWindowsCommandShim(command: string) {
   return shouldUseWindowsCommandShimForPath(command, process.platform)
 }
 
-function quoteWindowsCommandArg(arg: string) {
-  if (arg.length === 0) {
-    return '""'
-  }
-
-  const escaped = arg.replace(/%/g, '%%').replace(/"/g, '""')
-  return /[\s"&()<>^|]/.test(escaped) ? `"${escaped}"` : escaped
-}
-
 function createLineConsumer(listener?: (line: string) => void) {
   let buffer = ''
 
@@ -1384,7 +1386,7 @@ function spawnCommandWithHandlers(
   const useWindowsCommandShim = shouldUseWindowsCommandShim(command)
   const spawnCommand = useWindowsCommandShim ? 'cmd.exe' : command
   const spawnArgs = useWindowsCommandShim
-    ? ['/d', '/s', '/c', [command, ...args].map(quoteWindowsCommandArg).join(' ')]
+    ? buildWindowsCommandShimArgs(command, args)
     : args
 
   return new Promise<{
@@ -1400,6 +1402,7 @@ function spawnCommandWithHandlers(
         cwd: options.cwd,
         env: { ...process.env, ...options.env },
         shell: false,
+        windowsVerbatimArguments: useWindowsCommandShim,
         windowsHide: true,
       })
     } catch (error) {
@@ -3301,6 +3304,166 @@ function isGitCommitish(value: string) {
   return /^[0-9a-f]{7,40}$/i.test(value.trim())
 }
 
+function parseGitHubRepoSlug(repoUrl: string) {
+  const normalized = repoUrl.trim().replace(/\.git(?:[#?].*)?$/i, '')
+  const httpsMatch = normalized.match(/^https?:\/\/github\.com\/([^/]+)\/([^/#?]+)(?:[/#?].*)?$/i)
+  if (httpsMatch) {
+    return {
+      owner: httpsMatch[1],
+      repo: httpsMatch[2],
+    }
+  }
+
+  const sshMatch = normalized.match(/^git@github\.com:([^/]+)\/([^/#?]+)$/i)
+  if (sshMatch) {
+    return {
+      owner: sshMatch[1],
+      repo: sshMatch[2],
+    }
+  }
+
+  const shortMatch = normalized.match(/^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/)
+  if (shortMatch) {
+    return {
+      owner: shortMatch[1],
+      repo: shortMatch[2],
+    }
+  }
+
+  return null
+}
+
+function encodeGitHubArchiveRef(ref: string) {
+  return ref
+    .split('/')
+    .map((part) => encodeURIComponent(part))
+    .join('/')
+}
+
+function buildGitHubArchiveUrl(repoUrl: string, ref: string, archiveType: 'tar.gz' | 'zip') {
+  const slug = parseGitHubRepoSlug(repoUrl)
+  const normalizedRef = ref.trim()
+  if (!slug || !normalizedRef) {
+    return ''
+  }
+
+  return `https://codeload.github.com/${slug.owner}/${slug.repo}/${archiveType}/${encodeGitHubArchiveRef(normalizedRef)}`
+}
+
+async function downloadUrlToFile(url: string, targetPath: string, timeoutMs = 180000) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'OneAPI-Desktop',
+      },
+    })
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status} ${response.statusText}`.trim())
+    }
+
+    await fs.mkdir(path.dirname(targetPath), { recursive: true })
+    if (response.body) {
+      await pipeline(Readable.fromWeb(response.body as Parameters<typeof Readable.fromWeb>[0]), createWriteStream(targetPath))
+      return
+    }
+
+    const buffer = Buffer.from(await response.arrayBuffer())
+    await fs.writeFile(targetPath, buffer)
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+async function extractTarGzArchive(archivePath: string, extractRoot: string) {
+  await clearDirectory(extractRoot)
+  const extractResult = await spawnCommandWithHandlers(
+    'tar',
+    ['-xzf', archivePath, '-C', extractRoot, '--strip-components=1'],
+    {
+      timeoutMs: 300000,
+    }
+  )
+  if (extractResult.exitCode !== 0) {
+    throw new Error(extractResult.stderr.trim() || extractResult.stdout.trim() || '解压 tar.gz 归档失败。')
+  }
+}
+
+async function extractZipArchive(archivePath: string, extractRoot: string) {
+  await clearDirectory(extractRoot)
+  if (process.platform === 'win32') {
+    const extractResult = await spawnCommandWithHandlers(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-Command',
+        `Expand-Archive -LiteralPath '${archivePath.replace(/'/g, "''")}' -DestinationPath '${extractRoot.replace(/'/g, "''")}' -Force`,
+      ],
+      {
+        timeoutMs: 300000,
+      }
+    )
+    if (extractResult.exitCode !== 0) {
+      throw new Error(extractResult.stderr.trim() || extractResult.stdout.trim() || '解压 zip 归档失败。')
+    }
+    await flattenSingleNestedDirectory(extractRoot)
+    return
+  }
+
+  const extractResult = await spawnCommandWithHandlers('unzip', ['-q', archivePath, '-d', extractRoot], {
+    timeoutMs: 300000,
+  })
+  if (extractResult.exitCode !== 0) {
+    throw new Error(extractResult.stderr.trim() || extractResult.stdout.trim() || '解压 zip 归档失败。')
+  }
+  await flattenSingleNestedDirectory(extractRoot)
+}
+
+async function downloadGitHubArchiveSubdir(
+  repoUrl: string,
+  tempRoot: string,
+  options: {
+    ref?: string
+    subdir?: string
+  } = {}
+) {
+  const normalizedRef = options.ref?.trim() || ''
+  if (!parseGitHubRepoSlug(repoUrl) || !normalizedRef) {
+    return null
+  }
+
+  const extractRoot = path.join(tempRoot, 'repo-archive')
+  const tarArchivePath = path.join(tempRoot, 'repo.tar.gz')
+  const tarArchiveUrl = buildGitHubArchiveUrl(repoUrl, normalizedRef, 'tar.gz')
+  try {
+    await downloadUrlToFile(tarArchiveUrl, tarArchivePath)
+    await extractTarGzArchive(tarArchivePath, extractRoot)
+  } catch (tarError) {
+    const zipArchivePath = path.join(tempRoot, 'repo.zip')
+    const zipArchiveUrl = buildGitHubArchiveUrl(repoUrl, normalizedRef, 'zip')
+    try {
+      await downloadUrlToFile(zipArchiveUrl, zipArchivePath)
+      await extractZipArchive(zipArchivePath, extractRoot)
+    } catch (zipError) {
+      throw new Error(
+        `下载或解压 GitHub 归档失败。tar.gz: ${tarError instanceof Error ? tarError.message : String(tarError)}；zip: ${
+          zipError instanceof Error ? zipError.message : String(zipError)
+        }`,
+        { cause: zipError }
+      )
+    }
+  }
+
+  const relativePath = options.subdir?.trim() ? options.subdir.trim() : ''
+  const resolvedRoot = relativePath ? path.join(extractRoot, relativePath) : extractRoot
+  if (!(await pathExists(resolvedRoot))) {
+    throw new Error(`GitHub 归档中未找到目录：${relativePath || '.'}`)
+  }
+  return resolvedRoot
+}
+
 async function cloneGitRepoSubdir(
   repoUrl: string,
   tempRoot: string,
@@ -3314,9 +3477,22 @@ async function cloneGitRepoSubdir(
     throw new Error('缺少可用的仓库地址。')
   }
 
+  const normalizedRef = options.ref?.trim() || ''
+  let archiveError = ''
+  try {
+    const archiveSourceRoot = await downloadGitHubArchiveSubdir(normalizedUrl, tempRoot, {
+      ref: normalizedRef,
+      subdir: options.subdir,
+    })
+    if (archiveSourceRoot) {
+      return archiveSourceRoot
+    }
+  } catch (error) {
+    archiveError = error instanceof Error ? error.message : String(error)
+  }
+
   const cloneTarget = path.join(tempRoot, 'repo')
   await fs.mkdir(tempRoot, { recursive: true })
-  const normalizedRef = options.ref?.trim() || ''
   const cloneArgs = ['clone', '--depth', '1']
   if (normalizedRef && !isGitCommitish(normalizedRef)) {
     cloneArgs.push('--branch', normalizedRef)
@@ -3326,20 +3502,35 @@ async function cloneGitRepoSubdir(
     timeoutMs: 180000,
   })
   if (cloneResult.exitCode !== 0) {
-    throw new Error(cloneResult.stderr.trim() || '克隆仓库失败。')
+    const gitError = cloneResult.stderr.trim() || cloneResult.stdout.trim() || '克隆仓库失败。'
+    throw new Error(archiveError ? `${gitError}\n归档下载也失败：${archiveError}` : gitError)
   }
 
   if (normalizedRef && isGitCommitish(normalizedRef)) {
-    const checkoutResult = await spawnCommandWithHandlers('git', ['-C', cloneTarget, 'checkout', normalizedRef], {
+    let checkoutResult = await spawnCommandWithHandlers('git', ['-C', cloneTarget, 'checkout', normalizedRef], {
       timeoutMs: 180000,
     })
     if (checkoutResult.exitCode !== 0) {
-      throw new Error(checkoutResult.stderr.trim() || '切换仓库版本失败。')
+      const fetchResult = await spawnCommandWithHandlers('git', ['-C', cloneTarget, 'fetch', '--depth', '1', 'origin', normalizedRef], {
+        timeoutMs: 180000,
+      })
+      if (fetchResult.exitCode === 0) {
+        checkoutResult = await spawnCommandWithHandlers('git', ['-C', cloneTarget, 'checkout', 'FETCH_HEAD'], {
+          timeoutMs: 180000,
+        })
+      }
+    }
+    if (checkoutResult.exitCode !== 0) {
+      throw new Error(checkoutResult.stderr.trim() || checkoutResult.stdout.trim() || '切换仓库版本失败。')
     }
   }
 
   const relativePath = options.subdir?.trim() ? options.subdir.trim() : ''
-  return relativePath ? path.join(cloneTarget, relativePath) : cloneTarget
+  const resolvedRoot = relativePath ? path.join(cloneTarget, relativePath) : cloneTarget
+  if (!(await pathExists(resolvedRoot))) {
+    throw new Error(`仓库中未找到目录：${relativePath || '.'}`)
+  }
+  return resolvedRoot
 }
 
 async function cloneClaudeMarketplaceSource(
@@ -4135,6 +4326,9 @@ function summarizeCliFailure(rawText: string, stderrText: string): CliRuntimeDia
     /econnreset/i.test(combined)
   const sessionIssue =
     /failed to record rollout items/i.test(combined) ||
+    /state db returned stale rollout path/i.test(combined) ||
+    /no rollout found for thread id/i.test(combined) ||
+    /thread\/resume failed/i.test(combined) ||
     /thread .* not found/i.test(combined) ||
     /session .* not found/i.test(combined)
   const authIssue =
@@ -4149,6 +4343,15 @@ function summarizeCliFailure(rawText: string, stderrText: string): CliRuntimeDia
     /failed to parse/i.test(combined) ||
     /invalid toml/i.test(combined) ||
     (/json/i.test(combined) && /parse/i.test(combined))
+  const policyIssue =
+    /blocked by policy/i.test(combined) ||
+    /rejected: blocked/i.test(combined) ||
+    /PropertySetterNotSupportedInConstrainedLanguage/i.test(combined) ||
+    /此语言模式仅支持核心类型的属性设置/i.test(combined)
+  const dependencyIssue =
+    /ENOTCACHED/i.test(combined) ||
+    /only-if-cached/i.test(combined) ||
+    /npm error/i.test(combined)
 
   let probableCause = ''
   if (networkIssue) {
@@ -4159,6 +4362,10 @@ function summarizeCliFailure(rawText: string, stderrText: string): CliRuntimeDia
     probableCause = 'Key 或上游鉴权不通过'
   } else if (configIssue) {
     probableCause = '本地配置文件格式无效'
+  } else if (policyIssue) {
+    probableCause = 'Codex 本地执行策略拦截了部分命令'
+  } else if (dependencyIssue) {
+    probableCause = 'npm/npx 依赖安装失败，常见原因是被离线缓存模式或 registry 网络问题拦截'
   }
 
   return {
@@ -4166,6 +4373,8 @@ function summarizeCliFailure(rawText: string, stderrText: string): CliRuntimeDia
     sessionIssue,
     authIssue,
     configIssue,
+    policyIssue,
+    dependencyIssue,
     probableCause,
   }
 }
@@ -5147,18 +5356,17 @@ function extractClaudeTextFromMessage(content: unknown) {
     .trim()
 }
 
-async function runCodexPrompt(
-  webContents: WebContents,
-  input: CliRunRequest
-): Promise<CliRunResponse> {
+function buildCodexExecArgs(input: CliRunRequest, resumeSessionId?: string) {
   const args = ['exec']
 
   if (input.fullAccess) {
     args.push('--sandbox', 'danger-full-access', '--dangerously-bypass-approvals-and-sandbox')
+  } else {
+    args.push('--sandbox', 'workspace-write')
   }
 
-  if (input.sessionId) {
-    args.push('resume', '--json', '--skip-git-repo-check', input.sessionId, '-')
+  if (resumeSessionId) {
+    args.push('resume', '--json', '--skip-git-repo-check', resumeSessionId, '-')
   } else {
     args.push('--json', '-C', input.projectPath, '--skip-git-repo-check', '-')
   }
@@ -5174,18 +5382,82 @@ async function runCodexPrompt(
     `model_reasoning_effort="${parseCodexReasoningEffort(input.reasoningEffort)}"`
   )
 
+  return args
+}
+
+function isCodexStaleResumeFailure(stdout: string, stderr: string) {
+  const combined = `${stdout}\n${stderr}`
+  return (
+    /thread\/resume failed/i.test(combined) ||
+    /no rollout found for thread id/i.test(combined) ||
+    /state db returned stale rollout path/i.test(combined)
+  )
+}
+
+function buildClaudePromptArgs(input: CliRunRequest, resumeSessionId?: string) {
+  const args = [
+    '-p',
+    '--verbose',
+    '--output-format',
+    'stream-json',
+    '--include-partial-messages',
+    '--permission-mode',
+    'bypassPermissions',
+  ]
+
+  if (input.model?.trim()) {
+    args.push('--model', input.model.trim())
+  }
+
+  args.push('--effort', parseClaudeEffort(input.reasoningEffort))
+
+  if (resumeSessionId) {
+    args.push('--resume', resumeSessionId)
+  }
+
+  return args
+}
+
+function isClaudeStaleResumeFailure(stdout: string, stderr: string) {
+  const combined = `${stdout}\n${stderr}`
+  return (
+    /no conversation found/i.test(combined) ||
+    /conversation .* not found/i.test(combined) ||
+    /session .* not found/i.test(combined) ||
+    /resume .* failed/i.test(combined)
+  )
+}
+
+async function runCodexPrompt(
+  webContents: WebContents,
+  input: CliRunRequest
+): Promise<CliRunResponse> {
   const progress = createCliProgressEmitter(webContents, 'codex', input.requestId)
-  let sessionId = input.sessionId
+  const requestedSessionId = input.sessionId?.trim()
+  const resumeSessionId = requestedSessionId && await getLatestCodexSessionFile(requestedSessionId)
+    ? requestedSessionId
+    : undefined
+  let sessionId = resumeSessionId
   let partialText = ''
   let planState: CliPlanState | null = null
   const runtimeDiagnostics: CliRuntimeDiagnostics = {}
   const executablePath = await locateExecutable('codex')
   const managedRuntime = await readManagedNodeRuntime()
   const spawnCommand = resolveCliSpawnCommand('codex', executablePath)
+  let args = buildCodexExecArgs(input, resumeSessionId)
 
   progress.intent('Codex 已开始处理当前任务。', sessionId, undefined, undefined, 'request.started')
+  if (requestedSessionId && !resumeSessionId) {
+    progress.status(
+      '原 Codex 会话文件已不存在，已自动新建会话继续执行。',
+      requestedSessionId,
+      false,
+      undefined,
+      { logKind: 'status', sourceKind: 'session.resume.missing' }
+    )
+  }
 
-  const result = await spawnCommandWithHandlers(spawnCommand, args, {
+  const runCodexOnce = () => spawnCommandWithHandlers(spawnCommand, args, {
     cwd: input.projectPath,
     timeoutMs: 15 * 60 * 1000,
     env: managedRuntime ? buildRuntimeEnv(managedRuntime) : undefined,
@@ -5274,6 +5546,26 @@ async function runCodexPrompt(
       progress.stderr('Codex 输出了错误信息', sessionId, line, 'stderr')
     },
   })
+  let result = await runCodexOnce()
+  if (
+    resumeSessionId &&
+    result.exitCode !== 0 &&
+    !stoppedCliRequests.has(input.requestId) &&
+    isCodexStaleResumeFailure(result.stdout, result.stderr)
+  ) {
+    progress.status(
+      '原 Codex 会话状态已失效，已自动新建会话重试。',
+      resumeSessionId,
+      false,
+      undefined,
+      { logKind: 'status', sourceKind: 'session.resume.recovered' }
+    )
+    sessionId = undefined
+    partialText = ''
+    planState = null
+    args = buildCodexExecArgs(input)
+    result = await runCodexOnce()
+  }
   activeCliProcesses.delete(input.requestId)
   const aborted = stoppedCliRequests.delete(input.requestId)
 
@@ -5302,6 +5594,7 @@ async function runCodexPrompt(
       runtimeDiagnostics.probableCause || 'CLI 已返回内容，但本地会话文件未能在等待窗口内落盘'
   }
   const success = !aborted && result.exitCode === 0 && output.length > 0
+  const completedWithWarnings = !aborted && !success && output.length > 0 && !!runtimeDiagnostics.policyIssue
 
   if (success) {
     progress.partial(output, sessionId, true)
@@ -5320,6 +5613,15 @@ async function runCodexPrompt(
         }
       )
     }
+  } else if (completedWithWarnings) {
+    progress.partial(output, sessionId, true)
+    progress.status('Codex 已返回回复，但部分命令被本地执行策略拦截。', sessionId, true, fileChanges, {
+      logKind: 'status',
+      sourceKind: 'turn.completed.with_warnings',
+      detail: runtimeDiagnostics.probableCause || '',
+      exitCode: result.exitCode,
+      plan: planState,
+    })
   } else if (aborted) {
     progress.status('Codex 已停止本次回复。', sessionId, true, undefined, { logKind: 'status', sourceKind: 'request.aborted', plan: planState })
   } else if (result.stderr.trim()) {
@@ -5333,7 +5635,7 @@ async function runCodexPrompt(
   }
 
   return {
-    success,
+    success: success || completedWithWarnings,
     requestId: input.requestId,
     output,
     error: aborted ? '用户已停止当前回复' : result.stderr.trim(),
@@ -5347,6 +5649,7 @@ async function runCodexPrompt(
       fileChanges,
       plan: planState,
       diagnostics: runtimeDiagnostics,
+      completedWithWarnings,
     },
   }
 }
@@ -5355,28 +5658,12 @@ async function runClaudePrompt(
   webContents: WebContents,
   input: CliRunRequest
 ): Promise<CliRunResponse> {
-  const args = [
-    '-p',
-    '--verbose',
-    '--output-format',
-    'stream-json',
-    '--include-partial-messages',
-    '--permission-mode',
-    'bypassPermissions',
-  ]
-
-  if (input.model?.trim()) {
-    args.push('--model', input.model.trim())
-  }
-
-  args.push('--effort', parseClaudeEffort(input.reasoningEffort))
-
-  if (input.sessionId?.trim()) {
-    args.push('--resume', input.sessionId.trim())
-  }
-
   const progress = createCliProgressEmitter(webContents, 'claude', input.requestId)
-  let sessionId = input.sessionId
+  const requestedSessionId = input.sessionId?.trim()
+  const resumeSessionId = requestedSessionId && await getClaudeSessionFile(requestedSessionId)
+    ? requestedSessionId
+    : undefined
+  let sessionId = resumeSessionId
   let partialText = ''
   let finalResult: Record<string, unknown> | null = null
   let planState: CliPlanState | null = null
@@ -5387,6 +5674,7 @@ async function runClaudePrompt(
   const managedRuntime = await readManagedNodeRuntime()
   const claudeSettings = await readResolvedClaudeSettingsDocument().catch(() => null)
   const spawnCommand = resolveCliSpawnCommand('claude', executablePath)
+  let args = buildClaudePromptArgs(input, resumeSessionId)
 
   const emitClaudeToolUse = (toolName: string, toolInput: unknown, sourceKind: string) => {
     const described = describeCliToolUse(toolName, toolInput)
@@ -5413,8 +5701,17 @@ async function runClaudePrompt(
   }
 
   progress.intent('Claude 已开始处理当前任务。', sessionId, undefined, undefined, 'request.started')
+  if (requestedSessionId && !resumeSessionId) {
+    progress.status(
+      '原 Claude 会话文件已不存在，已自动新建会话继续执行。',
+      requestedSessionId,
+      false,
+      undefined,
+      { logKind: 'status', sourceKind: 'session.resume.missing' }
+    )
+  }
 
-  const result = await spawnCommandWithHandlers(spawnCommand, args, {
+  const runClaudeOnce = () => spawnCommandWithHandlers(spawnCommand, args, {
     cwd: input.projectPath,
     timeoutMs: 15 * 60 * 1000,
     env: buildClaudeCliEnv(managedRuntime, claudeSettings),
@@ -5504,6 +5801,29 @@ async function runClaudePrompt(
       progress.stderr('Claude 输出了错误信息', sessionId, line, 'stderr')
     },
   })
+  let result = await runClaudeOnce()
+  if (
+    resumeSessionId &&
+    result.exitCode !== 0 &&
+    !stoppedCliRequests.has(input.requestId) &&
+    isClaudeStaleResumeFailure(result.stdout, result.stderr)
+  ) {
+    progress.status(
+      '原 Claude 会话状态已失效，已自动新建会话重试。',
+      resumeSessionId,
+      false,
+      undefined,
+      { logKind: 'status', sourceKind: 'session.resume.recovered' }
+    )
+    sessionId = undefined
+    partialText = ''
+    finalResult = null
+    planState = null
+    planRecords.length = 0
+    seenToolUseEvents.clear()
+    args = buildClaudePromptArgs(input)
+    result = await runClaudeOnce()
+  }
   activeCliProcesses.delete(input.requestId)
   const aborted = stoppedCliRequests.delete(input.requestId)
 
@@ -5541,6 +5861,7 @@ async function runClaudePrompt(
       runtimeDiagnostics.probableCause || 'CLI 已返回内容，但本地会话文件未能在等待窗口内落盘'
   }
   const success = !aborted && result.exitCode === 0 && output.length > 0
+  const completedWithWarnings = !aborted && !success && output.length > 0 && !!runtimeDiagnostics.policyIssue
 
   if (success) {
     progress.partial(output, sessionId, true)
@@ -5559,6 +5880,15 @@ async function runClaudePrompt(
         }
       )
     }
+  } else if (completedWithWarnings) {
+    progress.partial(output, sessionId, true)
+    progress.status('Claude 已返回回复，但部分命令被本地执行策略拦截。', sessionId, true, fileChanges, {
+      logKind: 'status',
+      sourceKind: 'result.with_warnings',
+      detail: runtimeDiagnostics.probableCause || '',
+      exitCode: result.exitCode,
+      plan: planState,
+    })
   } else if (aborted) {
     progress.status('Claude 已停止本次回复。', sessionId, true, undefined, { logKind: 'status', sourceKind: 'request.aborted', plan: planState })
   } else if (result.stderr.trim()) {
@@ -5572,7 +5902,7 @@ async function runClaudePrompt(
   }
 
   return {
-    success,
+    success: success || completedWithWarnings,
     requestId: input.requestId,
     output,
     error: aborted ? '用户已停止当前回复' : result.stderr.trim(),
@@ -5584,6 +5914,7 @@ async function runClaudePrompt(
       fileChanges,
       plan: planState,
       diagnostics: runtimeDiagnostics,
+      completedWithWarnings,
     },
   }
 }
@@ -6075,16 +6406,47 @@ function buildNodeDownloadUrl(version: string) {
   throw new Error(`当前平台暂未实现 Node.js 自动安装：${process.platform}`)
 }
 
-async function resolveLatestLtsNodeVersion() {
-  const response = await fetch(`${NODEJS_MIRROR_BASE_URL}/index.json`)
-  if (!response.ok) {
-    throw new Error(`获取 Node.js 版本列表失败：${response.status}`)
-  }
+function buildNodeDownloadUrls(version: string) {
+  const mirrorUrl = buildNodeDownloadUrl(version)
+  return [
+    mirrorUrl,
+    mirrorUrl.replace(NODEJS_MIRROR_BASE_URL, 'https://nodejs.org/dist'),
+  ]
+}
 
-  const versions = (await response.json()) as Array<{
+async function resolveLatestLtsNodeVersion() {
+  const sources = [
+    `${NODEJS_MIRROR_BASE_URL}/index.json`,
+    'https://nodejs.org/dist/index.json',
+  ]
+  let lastError = ''
+  let versions: Array<{
     version?: string
     lts?: string | false
-  }>
+  }> = []
+
+  for (const source of sources) {
+    try {
+      const response = await fetch(source)
+      if (!response.ok) {
+        lastError = `${source}：${response.status}`
+        continue
+      }
+      versions = (await response.json()) as Array<{
+        version?: string
+        lts?: string | false
+      }>
+      if (versions.length > 0) {
+        break
+      }
+    } catch (error) {
+      lastError = `${source}：${error instanceof Error ? error.message : String(error)}`
+    }
+  }
+
+  if (!versions.length) {
+    throw new Error(`获取 Node.js 版本列表失败${lastError ? `：${lastError}` : ''}`)
+  }
 
   const latestLts = versions.find((item) => typeof item.lts === 'string' && item.version)
   if (!latestLts?.version) {
@@ -6098,21 +6460,37 @@ async function installManagedNodeRuntime(
   logger: ReturnType<typeof createDeployLogger>
 ) {
   const version = await resolveLatestLtsNodeVersion()
-  const archiveUrl = buildNodeDownloadUrl(version)
+  const archiveUrls = buildNodeDownloadUrls(version)
   const downloadDir = path.join(getToolchainRoot(), 'downloads')
-  const archiveName = path.basename(new URL(archiveUrl).pathname)
+  const archiveName = path.basename(new URL(archiveUrls[0]).pathname)
   const archivePath = path.join(downloadDir, archiveName)
   const extractRoot = getManagedNodeRoot()
 
   await fs.mkdir(downloadDir, { recursive: true })
   await clearDirectory(extractRoot)
 
-  logger.info('node', 'running', `准备下载 Node.js ${version}`, archiveUrl)
-  const response = await fetch(archiveUrl)
-  if (!response.ok) {
-    throw new Error(`下载 Node.js 失败：${response.status}`)
+  let archiveBuffer: Buffer | null = null
+  let lastDownloadError = ''
+  for (const archiveUrl of archiveUrls) {
+    logger.info('node', 'running', `准备下载 Node.js ${version}`, archiveUrl)
+    try {
+      const response = await fetch(archiveUrl)
+      if (!response.ok) {
+        lastDownloadError = `${archiveUrl}：${response.status}`
+        continue
+      }
+      archiveBuffer = Buffer.from(await response.arrayBuffer())
+      if (archiveBuffer.length > 0) {
+        break
+      }
+      lastDownloadError = `${archiveUrl}：下载内容为空`
+    } catch (error) {
+      lastDownloadError = `${archiveUrl}：${error instanceof Error ? error.message : String(error)}`
+    }
   }
-  const archiveBuffer = Buffer.from(await response.arrayBuffer())
+  if (!archiveBuffer) {
+    throw new Error(`下载 Node.js 失败${lastDownloadError ? `：${lastDownloadError}` : ''}`)
+  }
   await fs.writeFile(archivePath, archiveBuffer)
   logger.info('node', 'success', `Node.js 安装包下载完成`, `${archivePath}\n${archiveBuffer.length} bytes`)
 
@@ -6173,13 +6551,58 @@ async function installManagedNodeRuntime(
       `Node.js 安装后校验失败\nnode:\n${nodeVersionResult.stderr || nodeVersionResult.stdout}\n\nnpm:\n${npmVersionResult.stderr || npmVersionResult.stdout}`
     )
   }
+  const installedVersion =
+    nodeVersionResult.stdout.split(/\r?\n/).map((item) => item.trim()).find(Boolean) || version
+  if (!isDesktopCliNodeVersionSupported(installedVersion)) {
+    throw new Error(
+      `Node.js 安装后版本过低：${installedVersion}。Codex / Claude 一键部署需要 Node.js ${MIN_DESKTOP_CLI_NODE_MAJOR}+。`
+    )
+  }
 
-  return runtime
+  return {
+    ...runtime,
+    version: installedVersion,
+  }
 }
 
 async function ensureNodeRuntime(
   logger: ReturnType<typeof createDeployLogger>
 ): Promise<NodeRuntimeInfo> {
+  async function verifyRuntime(runtime: NodeRuntimeInfo, label: '系统' | '内置') {
+    const versionResult = await runLoggedCommand(logger, 'node', runtime.nodePath, ['--version'])
+    const npmVersionResult = await runLoggedNpmCommand(logger, 'node', runtime, ['--version'])
+    const version =
+      versionResult.stdout.split(/\r?\n/).map((item) => item.trim()).find(Boolean) || ''
+    if (versionResult.exitCode !== 0 || npmVersionResult.exitCode !== 0) {
+      logger.info(
+        'node',
+        'running',
+        `${label} Node.js 不完整，准备使用内置 Node.js`,
+        [
+          versionResult.stderr || versionResult.stdout,
+          npmVersionResult.stderr || npmVersionResult.stdout,
+        ].filter(Boolean).join('\n')
+      )
+      return null
+    }
+
+    if (!isDesktopCliNodeVersionSupported(version)) {
+      logger.info(
+        'node',
+        'running',
+        `${label} Node.js ${version || '未知版本'} 版本过低，准备使用内置 Node.js`,
+        `Codex / Claude 一键部署需要 Node.js ${MIN_DESKTOP_CLI_NODE_MAJOR}+。`
+      )
+      return null
+    }
+
+    logger.info('node', 'success', `已检测到${label} Node.js ${version || '未知版本'}`, runtime.nodePath)
+    return {
+      ...runtime,
+      version,
+    }
+  }
+
   const systemNodePath = await locateSystemExecutable('node')
   const systemNpmPath = await locateSystemExecutable(getNpmCommand())
   if (systemNodePath && systemNpmPath) {
@@ -6191,16 +6614,9 @@ async function ensureNodeRuntime(
       version: '',
       prefixPath: getManagedNpmPrefix(),
     }
-    const versionResult = await runLoggedCommand(logger, 'node', systemNodePath, ['--version'])
-    const npmVersionResult = await runLoggedNpmCommand(logger, 'node', systemRuntime, ['--version'])
-    if (versionResult.exitCode === 0 && npmVersionResult.exitCode === 0) {
-      const version =
-        versionResult.stdout.split(/\r?\n/).map((item) => item.trim()).find(Boolean) || ''
-      logger.info('node', 'success', `已检测到系统 Node.js ${version || '未知版本'}`, systemNodePath)
-      return {
-        ...systemRuntime,
-        version,
-      }
+    const verified = await verifyRuntime(systemRuntime, '系统')
+    if (verified) {
+      return verified
     }
   }
 
@@ -6215,20 +6631,13 @@ async function ensureNodeRuntime(
       version: '',
       prefixPath: getManagedNpmPrefix(),
     }
-    const versionResult = await runLoggedCommand(logger, 'node', managedNodePath, ['--version'])
-    const npmVersionResult = await runLoggedNpmCommand(logger, 'node', managedRuntime, ['--version'])
-    if (versionResult.exitCode === 0 && npmVersionResult.exitCode === 0) {
-      const version =
-        versionResult.stdout.split(/\r?\n/).map((item) => item.trim()).find(Boolean) || ''
-      logger.info('node', 'success', `已检测到内置 Node.js ${version || '未知版本'}`, managedNodePath)
-      return {
-        ...managedRuntime,
-        version,
-      }
+    const verified = await verifyRuntime(managedRuntime, '内置')
+    if (verified) {
+      return verified
     }
   }
 
-  logger.info('node', 'running', '当前系统未检测到可用 Node.js，开始安装内置 Node.js')
+  logger.info('node', 'running', '当前未检测到可用 Node.js 18+，开始安装内置 Node.js')
   return installManagedNodeRuntime(logger)
 }
 
@@ -6238,11 +6647,12 @@ function buildRuntimeEnv(runtime: NodeRuntimeInfo) {
   const pathSegments = [prefixBin, nodeDir, process.env.PATH || ''].filter(Boolean)
 
   return {
-    ...process.env,
+    ...sanitizeCliNpmEnvironment(process.env, {
+      registry: 'https://registry.npmmirror.com',
+      prefix: runtime.prefixPath,
+      cache: path.join(getToolchainRoot(), 'npm-cache'),
+    }),
     PATH: pathSegments.join(process.platform === 'win32' ? ';' : ':'),
-    npm_config_registry: 'https://registry.npmmirror.com',
-    npm_config_prefix: runtime.prefixPath,
-    npm_config_cache: path.join(getToolchainRoot(), 'npm-cache'),
   }
 }
 
@@ -6257,6 +6667,9 @@ async function readManagedNodeRuntime() {
   const versionResult = await runCommand(nodePath, ['--version'], { timeoutMs: 15000 })
   const version =
     versionResult.stdout.split(/\r?\n/).map((item) => item.trim()).find(Boolean) || ''
+  if (versionResult.exitCode !== 0 || !isDesktopCliNodeVersionSupported(version)) {
+    return null
+  }
 
   return {
     source: 'managed' as const,

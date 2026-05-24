@@ -1218,6 +1218,7 @@ const MODEL_VENDOR_FILTER_OPTIONS: Array<{ value: ModelVendorFilter; label: stri
   { value: 'all', label: '全部' },
   { value: 'openai', label: 'OpenAI' },
   { value: 'anthropic', label: 'Anthropic' },
+  { value: 'gemini', label: 'Gemini' },
   { value: 'deepseek', label: 'DeepSeek' },
   { value: 'xiaomimimo', label: 'XiaomiMIMO' },
 ]
@@ -3277,12 +3278,17 @@ function resolveCliLogGroupStatus(
       sourceKind === 'request.failed' ||
       sourceKind === 'request.aborted' ||
       sourceKind === 'result' ||
-      sourceKind === 'turn.completed'
+      sourceKind === 'result.with_warnings' ||
+      sourceKind === 'turn.completed' ||
+      sourceKind === 'turn.completed.with_warnings'
     )
   })
 
   if (terminal?.sourceKind === 'request.aborted') {
     return { tone: 'aborted', label: '已停止' as const }
+  }
+  if (terminal?.sourceKind === 'result.with_warnings' || terminal?.sourceKind === 'turn.completed.with_warnings') {
+    return { tone: 'warning', label: '已完成' as const }
   }
   if (terminal && (terminal.level === 'error' || terminal.sourceKind === 'request.failed')) {
     return { tone: 'error', label: '执行失败' as const }
@@ -7982,6 +7988,12 @@ function CliWorkspace(props: {
         }))
       }
 
+      if (payload.done && activeRequestIdRef.current === payload.requestId) {
+        activeRequestIdRef.current = ''
+        stoppingRunRef.current = false
+        setRunning(false)
+      }
+
       if (payload.kind === 'partial') {
         setSessionPartialMap((current) => ({
           ...current,
@@ -8709,7 +8721,11 @@ function CliWorkspace(props: {
       requestExtensions
     )
     const promptWithAttachments = buildCliExecutionPrompt(
-      promptBody
+      promptBody,
+      {
+        fullAccess,
+        projectPath: requestProjectPath,
+      }
     )
     const userMessage = {
       id: `user-${Date.now()}`,
@@ -8803,7 +8819,7 @@ function CliWorkspace(props: {
       if (!response.success && response.metadata?.aborted !== true) {
         toast(response.error || `${client} 执行失败`)
       }
-      await refreshCliState()
+      void refreshCliState(true)
     } catch (error) {
       if (!stoppingRunRef.current && !isAbortError(error)) {
         toast(error instanceof Error ? error.message : '执行失败')
@@ -8879,13 +8895,16 @@ function CliWorkspace(props: {
   }, [active, cliStatusReady, client, projectPath, prompt, running, status.dataPath, submitCliPrompt])
 
   async function handleStopRun() {
-    if (!activeRequestIdRef.current) {
+    const requestId = activeRequestIdRef.current
+    if (!requestId) {
       return
     }
 
     stoppingRunRef.current = true
+    activeRequestIdRef.current = ''
+    setRunning(false)
     try {
-      await stopCliPrompt(activeRequestIdRef.current)
+      await stopCliPrompt(requestId)
       toast(`已停止 ${client === 'codex' ? 'Codex' : 'Claude'} 当前回复。`)
     } catch (error) {
       toast(error instanceof Error ? error.message : '停止失败')

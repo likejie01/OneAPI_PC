@@ -5,6 +5,7 @@ import {
   buildCliRecentSessions,
   buildCliTimeline,
   filterAssistantModels,
+  filterModelsByVendor,
   resolveCompatibleModel,
 } from './assistant-workspace.ts'
 
@@ -18,6 +19,8 @@ test('filterAssistantModels keeps only compatible CLI models', () => {
     { label: 'deepseek-chat', value: 'deepseek-chat' },
     { label: 'mimo-v2.5', value: 'mimo-v2.5' },
     { label: 'mimo-v2.5-pro', value: 'mimo-v2.5-pro' },
+    { label: 'gemini-2.5-pro', value: 'gemini-2.5-pro' },
+    { label: 'gemini-2.5-flash', value: 'gemini-2.5-flash' },
   ]
 
   assert.deepEqual(
@@ -30,11 +33,34 @@ test('filterAssistantModels keeps only compatible CLI models', () => {
   )
   assert.deepEqual(
     filterAssistantModels('chat', models).map((item) => item.value),
-    ['gpt-5.4', 'gpt-5.3-codex', 'claude-sonnet-4-6', 'deepseek-v4-flash', 'deepseek-chat', 'mimo-v2.5', 'mimo-v2.5-pro']
+    [
+      'gpt-5.4',
+      'gpt-5.3-codex',
+      'claude-sonnet-4-6',
+      'deepseek-v4-flash',
+      'deepseek-chat',
+      'mimo-v2.5',
+      'mimo-v2.5-pro',
+      'gemini-2.5-pro',
+      'gemini-2.5-flash',
+    ]
   )
   assert.deepEqual(
     filterAssistantModels('draw', models).map((item) => item.value),
     ['gpt-image-2']
+  )
+})
+
+test('filterModelsByVendor exposes Gemini models under the Gemini filter', () => {
+  const models = [
+    { label: 'gemini-2.5-pro', value: 'gemini-2.5-pro' },
+    { label: 'google-gemini-pro', value: 'google-gemini-pro' },
+    { label: 'gpt-5.4', value: 'gpt-5.4' },
+  ]
+
+  assert.deepEqual(
+    filterModelsByVendor(models, 'gemini').map((item) => item.value),
+    ['gemini-2.5-pro', 'google-gemini-pro']
   )
 })
 

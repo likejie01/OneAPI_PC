@@ -10,32 +10,20 @@ import type {
   ChatContentPart,
   ChatCompletionResponse,
   ChatGroupOption,
-  ChatModelOption,
   ImageGenerationResponse,
 } from '../shared/contracts'
+import { mergePricingAndUserModels, type PricingModelLike } from '../lib/model-options'
 
 export async function getUserModels() {
-  type PricingModelResponse = {
-    model_name: string
-    supported_endpoint_types?: string[]
-  }
-
+  let pricingModels: PricingModelLike[] = []
   try {
-    const pricingResponse = await desktopEnvelope<PricingModelResponse[]>({
+    const pricingResponse = await desktopEnvelope<PricingModelLike[]>({
       method: 'GET',
       path: '/api/pricing',
     })
 
     if (pricingResponse.success && Array.isArray(pricingResponse.data) && pricingResponse.data.length) {
-      return pricingResponse.data.map(
-        (item): ChatModelOption => ({
-          label: item.model_name,
-          value: item.model_name,
-          supportedEndpointTypes: Array.isArray(item.supported_endpoint_types)
-            ? item.supported_endpoint_types
-            : undefined,
-        })
-      )
+      pricingModels = pricingResponse.data
     }
   } catch {
     // Fallback for older servers that do not expose pricing metadata consistently.
@@ -46,12 +34,7 @@ export async function getUserModels() {
     path: '/api/user/models',
   })
 
-  return (response.data ?? []).map(
-    (model): ChatModelOption => ({
-      label: model,
-      value: model,
-    })
-  )
+  return mergePricingAndUserModels(pricingModels, response.data ?? [])
 }
 
 export async function getUserGroups() {

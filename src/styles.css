@@ -2397,6 +2397,11 @@ select {
   color: #1b6f49;
 }
 
+.cli-log-status-pill.warning {
+  background: rgba(200, 139, 42, 0.16);
+  color: #8a5a12;
+}
+
 .cli-log-status-pill.error {
   background: rgba(201, 110, 75, 0.14);
   color: #ad4f2d;

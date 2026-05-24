@@ -2,7 +2,7 @@ import type { ChatModelOption } from '../shared/contracts'
 import type { CliHistoryEntry, CliLogKind, CliSessionMessage } from '../shared/desktop'
 
 export type AssistantModeKey = 'chat' | 'draw' | 'codex' | 'claude'
-export type ModelVendorFilter = 'all' | 'openai' | 'anthropic' | 'deepseek' | 'xiaomimimo'
+export type ModelVendorFilter = 'all' | 'openai' | 'anthropic' | 'gemini' | 'deepseek' | 'xiaomimimo'
 
 export type CliLogEntryLike = {
   id: string
@@ -112,6 +112,11 @@ function isMimoClaudeCompatibleModel(value: string) {
   return normalizeModelValue(value) === 'mimo-v2.5-pro'
 }
 
+function isGeminiModel(value: string) {
+  const normalized = normalizeModelValue(value)
+  return normalized.startsWith('gemini') || normalized.includes('google-gemini')
+}
+
 function toTimelineTimestamp(value: number) {
   if (!value) {
     return 0
@@ -209,6 +214,9 @@ export function resolveModelVendorFilter(value: string): Exclude<ModelVendorFilt
   }
   if (normalized.startsWith('mimo-') || normalized.includes('xiaomi') || normalized.includes('mimo')) {
     return 'xiaomimimo'
+  }
+  if (isGeminiModel(normalized)) {
+    return 'gemini'
   }
   if (normalized.includes('claude')) {
     return 'anthropic'
