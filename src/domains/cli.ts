@@ -4,6 +4,7 @@ import type {
   AssistantHistorySnapshotEntry,
   CliClient,
   CliDeployRequest,
+  CliInteractionResponseRequest,
   CliProgressPayload,
   CliRunRequest,
   CliSessionDetails,
@@ -73,6 +74,10 @@ export function runCliPrompt(input: CliRunRequest) {
 
 export function stopCliPrompt(requestId: string) {
   return desktopBridge().stopCliPrompt(requestId)
+}
+
+export function respondCliInteraction(input: CliInteractionResponseRequest) {
+  return desktopBridge().respondCliInteraction(input)
 }
 
 export function onCliProgress(listener: (payload: CliProgressPayload) => void) {

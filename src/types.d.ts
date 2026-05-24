@@ -4,6 +4,7 @@ import type {
   AssistantHistorySnapshotEntry,
   CliClient,
   CliDeployRequest,
+  CliInteractionResponseRequest,
   CliHistoryEntry,
   CliProgressPayload,
   CliSessionDetails,
@@ -79,6 +80,7 @@ declare global {
       openCliSessionFolder: (client: CliClient, sessionId: string) => Promise<void>
       runCliPrompt: (input: CliRunRequest) => Promise<CliRunResponse>
       stopCliPrompt: (requestId: string) => Promise<void>
+      respondCliInteraction: (input: CliInteractionResponseRequest) => Promise<void>
       onCliProgress: (
         listener: (payload: CliProgressPayload) => void
       ) => () => void

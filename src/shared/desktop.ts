@@ -250,6 +250,24 @@ export interface CliRunResponse {
   metadata: Record<string, unknown>
 }
 
+export type CliInteractionAction = 'approve' | 'approve_always' | 'reject'
+
+export interface CliInteractionPrompt {
+  id: string
+  kind: 'approval'
+  title: string
+  message: string
+  command?: string
+  autoApproveEligible?: boolean
+  status: 'pending' | 'approved' | 'approved_always' | 'rejected' | 'auto_approved'
+}
+
+export interface CliInteractionResponseRequest {
+  requestId: string
+  interactionId: string
+  action: CliInteractionAction
+}
+
 export interface CliProgressPayload {
   client: CliClient
   requestId: string
@@ -265,6 +283,7 @@ export interface CliProgressPayload {
   command?: string
   exitCode?: number
   plan?: CliPlanState | null
+  interaction?: CliInteractionPrompt
 }
 
 export interface CliDeployRequest {

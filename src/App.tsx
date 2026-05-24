@@ -96,6 +96,7 @@ import {
   onTranslateSelectionRequested,
   pickProjectDirectory,
   readDesktopFilePreview,
+  respondCliInteraction,
   runCliPrompt,
   setDesktopWindowTitle,
   stopCliPrompt,
@@ -158,6 +159,7 @@ import {
   buildCliExtensionAugmentedPrompt,
   buildCliExtensionDedupeKey,
   buildCliExtensionDisplayName,
+  buildCliExtensionInsertText,
   canUseCliExtension,
   collectCliToolNames,
   decorateCliExtensions,
@@ -167,6 +169,7 @@ import {
   type CliExtensionViewItem,
   type CliMessageOverlay,
 } from './lib/cli-extensions'
+import { listCliBuiltinCommands, matchCliBuiltinCommand, type CliBuiltinCommand } from './lib/cli-commands'
 import { resolveVisibleDrawMessageContent } from './lib/draw-message'
 import { shouldDismissContextMenu } from './lib/context-menu'
 import {
@@ -190,6 +193,7 @@ import {
 import { getDesktopUpdateDayKey, shouldAutoCheckDesktopUpdate } from './lib/app-update'
 import { buildCliExecutionPrompt } from './lib/cli-prompt'
 import { isRecoverableNetworkError } from './lib/network-retry'
+import { estimateCliSessionContextUsage, isDirectCliCommandPrompt } from './lib/cli-runtime'
 import {
   commitPromptHistoryEntry,
   createPromptHistoryState,
@@ -224,6 +228,8 @@ import type {
 } from './shared/contracts'
 import type {
   CliClient,
+  CliInteractionAction,
+  CliInteractionPrompt,
   DesktopAnnouncement,
   CliDeployPreset,
   CliExtensionEntry,
@@ -779,6 +785,7 @@ type CliLogEntry = {
   detail?: string
   command?: string
   exitCode?: number
+  interaction?: CliInteractionPrompt
 }
 
 type CliExtensionPreferenceBucket = {
@@ -2200,6 +2207,24 @@ function getCliExtensionKindLabel(item: CliExtensionEntry) {
   return '插件'
 }
 
+function getCliBuiltinCommandKindLabel() {
+  return '命令'
+}
+
+type CliPaletteItem =
+  | {
+      id: string
+      section: 'command'
+      source: 'builtin'
+      builtin: CliBuiltinCommand
+    }
+  | {
+      id: string
+      section: 'command' | 'skill' | 'plugin'
+      source: 'extension'
+      extension: CliExtensionViewItem
+    }
+
 function CliPlanFloatingPanel(props: {
   plan: CliPlanState | null
 }) {
@@ -2262,13 +2287,13 @@ function MessageCliExtensionChips(props: {
 function CliExtensionPalette(props: {
   client: CliClient
   loading: boolean
-  filteredExtensions: CliExtensionViewItem[]
+  paletteItems: CliPaletteItem[]
   highlightedIndex: number
   searchValue: string
   onSearchChange: (value: string) => void
-  onSelect: (item: CliExtensionViewItem) => void
-  onInsert: (item: CliExtensionViewItem) => void
-  onCopyName: (item: CliExtensionViewItem) => void
+  onSelect: (item: CliPaletteItem) => void
+  onInsert: (item: CliPaletteItem) => void
+  onCopyName: (item: CliPaletteItem) => void
   onHoverIndex: (index: number) => void
   onRefresh: () => void
   installingIds: string[]
@@ -2285,7 +2310,7 @@ function CliExtensionPalette(props: {
   const {
     client,
     loading,
-    filteredExtensions,
+    paletteItems,
     highlightedIndex,
     searchValue,
     onSearchChange,
@@ -2306,6 +2331,7 @@ function CliExtensionPalette(props: {
     menuHostRef,
   } = props
   const menuRef = useRef<HTMLDivElement | null>(null)
+  const hasCommandSection = paletteItems.some((item) => item.section === 'command')
   const tooltipHideTimerRef = useRef<number | null>(null)
   const [hoveredTooltip, setHoveredTooltip] = useState<{
     left: number
@@ -2385,7 +2411,11 @@ function CliExtensionPalette(props: {
       onMouseLeave={scheduleTooltipHide}
     >
       <div className='picker-menu-head cli-extension-menu-head'>
-        <strong>{client === 'codex' ? 'Codex 技能与插件' : 'Claude 技能与插件'}</strong>
+        <strong>
+          {client === 'codex'
+            ? hasCommandSection ? 'Codex 命令 / 技能 / 插件' : 'Codex 技能 / 插件'
+            : hasCommandSection ? 'Claude 命令 / 技能 / 插件' : 'Claude 技能 / 插件'}
+        </strong>
         <input
           className='cli-extension-search'
           value={searchValue}
@@ -2408,8 +2438,8 @@ function CliExtensionPalette(props: {
           {loading
             ? '正在刷新扩展列表...'
             : searchActive
-              ? `搜索中，命中 ${filteredExtensions.length} 项`
-              : `共 ${filteredExtensions.length} 项`}
+              ? `搜索中，命中 ${paletteItems.length} 项`
+              : `共 ${paletteItems.length} 项`}
         </span>
         <label className='cli-extension-auto-toggle'>
           <span>自动调用</span>
@@ -2503,122 +2533,164 @@ function CliExtensionPalette(props: {
       <div className='cli-extension-list'>
         {loading ? (
           <div className='cli-extension-empty'>正在读取本机与官方扩展...</div>
-        ) : filteredExtensions.length === 0 ? (
+        ) : paletteItems.length === 0 ? (
           <div className='cli-extension-empty'>未找到匹配的技能、命令或插件。</div>
-        ) : filteredExtensions.map((item, index) => {
-          const translatedDescription = translateCliExtensionDescription(item.name, item.description)
-          const compactDescription = translatedDescription || item.description || '未提供描述'
-          const installed = canUseCliExtension(item)
-          const installing = installingIds.includes(item.id)
+        ) : paletteItems.map((paletteItem, index) => {
+          const item = paletteItem.source === 'extension' ? paletteItem.extension : null
+          const builtin = paletteItem.source === 'builtin' ? paletteItem.builtin : null
+          const translatedDescription = item
+            ? translateCliExtensionDescription(item.name, item.description)
+            : builtin?.description || ''
+          const compactDescription = translatedDescription || item?.description || builtin?.description || '未提供描述'
+          const installed = item ? canUseCliExtension(item) : true
+          const installing = item ? installingIds.includes(item.id) : false
+          const previousSection = paletteItems[index - 1]?.section
+          const showSectionDivider = index === 0 || previousSection !== paletteItem.section
+          const sectionLabel = paletteItem.section === 'command' ? 'command' : paletteItem.section === 'skill' ? 'skill' : 'plugin'
           return (
-            <button
-              key={item.id}
-              type='button'
-              className={`cli-extension-card ${index === highlightedIndex ? 'selected' : ''} ${installed ? '' : 'uninstalled'}`}
-              onMouseEnter={() => onHoverIndex(index)}
-              onClick={() => {
-                if (installed) {
-                  onSelect(item)
-                }
-              }}
-              onContextMenu={(event) => {
-                if (installed) {
-                  onContextMenu(event, item)
-                }
-              }}
-              aria-selected={index === highlightedIndex}
-            >
-              <div className='cli-extension-name-row'>
-                <div className='cli-extension-name-meta'>
-                  <strong>
-                    {item.displayName}
-                    {item.official ? <span className='cli-extension-badge'>官</span> : null}
-                  </strong>
-                  <span className='cli-extension-meta'>
-                    {getCliExtensionKindLabel(item)}
-                    {item.source ? ` · ${item.source}` : ''}
-                    {!installed ? ' · 未安装' : ''}
-                  </span>
+            <div key={paletteItem.id}>
+              {showSectionDivider ? (
+                <div className='cli-extension-section-divider'>
+                  <span>{sectionLabel}</span>
                 </div>
-                <div className='cli-extension-inline-actions'>
-                  {installed ? (
-                    <>
-                      <button
-                        className='ghost-button icon-only tiny cli-extension-inline-action cli-extension-detail-trigger'
-                        type='button'
-                        title='查看详情'
-                        aria-label='查看详情'
-                        onMouseEnter={(event) => {
-                          event.stopPropagation()
-                          openDetailTooltip(event.currentTarget, item)
-                        }}
-                        onMouseLeave={scheduleTooltipHide}
-                        onFocus={(event) => openDetailTooltip(event.currentTarget, item)}
-                        onBlur={scheduleTooltipHide}
-                        onClick={(event) => {
-                          event.preventDefault()
-                          event.stopPropagation()
-                        }}
-                      >
-                        <CircleHelp size={13} />
-                      </button>
-                      <button
-                        className={`ghost-button icon-only tiny cli-extension-inline-action model-favorite ${item.favorite ? 'active' : ''}`}
-                        type='button'
-                        title={item.favorite ? '取消收藏' : '收藏并置顶'}
-                        aria-label={item.favorite ? '取消收藏' : '收藏并置顶'}
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          onToggleFavorite(item)
-                        }}
-                      >
-                        <Star size={13} />
-                      </button>
-                      <button
-                        className='ghost-button icon-only tiny cli-extension-inline-action'
-                        type='button'
-                        title='复制名称'
-                        aria-label='复制名称'
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          onCopyName(item)
-                        }}
-                      >
-                        <Copy size={13} />
-                      </button>
-                      <button
-                        className='ghost-button icon-only tiny cli-extension-inline-action'
-                        type='button'
-                        title='插入'
-                        aria-label='插入'
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          onInsert(item)
-                        }}
-                      >
-                        <Plus size={13} />
-                      </button>
-                    </>
-                  ) : (
-                    <button
-                      className='secondary-button tiny cli-extension-install-button'
-                      type='button'
-                      disabled={installing}
-                      onClick={(event) => {
-                        event.stopPropagation()
-                        onInstall(item)
-                      }}
-                    >
-                      {installing ? <LoaderCircle className='spin' size={13} /> : <Download size={13} />}
-                      <span>{installing ? '安装中' : '安装'}</span>
-                    </button>
-                  )}
+              ) : null}
+              <button
+                type='button'
+                className={`cli-extension-card ${index === highlightedIndex ? 'selected' : ''} ${installed ? '' : 'uninstalled'}`}
+                onMouseEnter={() => onHoverIndex(index)}
+                onClick={() => {
+                  if (installed) {
+                    onSelect(paletteItem)
+                  }
+                }}
+                onContextMenu={(event) => {
+                  if (item && installed) {
+                    onContextMenu(event, item)
+                  }
+                }}
+                aria-selected={index === highlightedIndex}
+              >
+                <div className='cli-extension-name-row'>
+                  <div className='cli-extension-name-meta'>
+                    <strong>
+                      {item ? item.displayName : builtin?.command}
+                      {item?.official ? <span className='cli-extension-badge'>官</span> : null}
+                    </strong>
+                    <span className='cli-extension-meta'>
+                      {item ? getCliExtensionKindLabel(item) : getCliBuiltinCommandKindLabel()}
+                      {item?.source ? ` · ${item.source}` : ''}
+                      {!installed ? ' · 未安装' : ''}
+                    </span>
+                  </div>
+                  <div className='cli-extension-inline-actions'>
+                    {item ? (
+                      installed ? (
+                        <>
+                          <button
+                            className='ghost-button icon-only tiny cli-extension-inline-action cli-extension-detail-trigger'
+                            type='button'
+                            title='查看详情'
+                            aria-label='查看详情'
+                            onMouseEnter={(event) => {
+                              event.stopPropagation()
+                              openDetailTooltip(event.currentTarget, item)
+                            }}
+                            onMouseLeave={scheduleTooltipHide}
+                            onFocus={(event) => openDetailTooltip(event.currentTarget, item)}
+                            onBlur={scheduleTooltipHide}
+                            onClick={(event) => {
+                              event.preventDefault()
+                              event.stopPropagation()
+                            }}
+                          >
+                            <CircleHelp size={13} />
+                          </button>
+                          <button
+                            className={`ghost-button icon-only tiny cli-extension-inline-action model-favorite ${item.favorite ? 'active' : ''}`}
+                            type='button'
+                            title={item.favorite ? '取消收藏' : '收藏并置顶'}
+                            aria-label={item.favorite ? '取消收藏' : '收藏并置顶'}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              onToggleFavorite(item)
+                            }}
+                          >
+                            <Star size={13} />
+                          </button>
+                          <button
+                            className='ghost-button icon-only tiny cli-extension-inline-action'
+                            type='button'
+                            title='复制名称'
+                            aria-label='复制名称'
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              onCopyName(paletteItem)
+                            }}
+                          >
+                            <Copy size={13} />
+                          </button>
+                          <button
+                            className='ghost-button icon-only tiny cli-extension-inline-action'
+                            type='button'
+                            title='插入'
+                            aria-label='插入'
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              onInsert(paletteItem)
+                            }}
+                          >
+                            <Plus size={13} />
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          className='secondary-button tiny cli-extension-install-button'
+                          type='button'
+                          disabled={installing}
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            onInstall(item)
+                          }}
+                        >
+                          {installing ? <LoaderCircle className='spin' size={13} /> : <Download size={13} />}
+                          <span>{installing ? '安装中' : '安装'}</span>
+                        </button>
+                      )
+                    ) : (
+                      <>
+                        <button
+                          className='ghost-button icon-only tiny cli-extension-inline-action'
+                          type='button'
+                          title='复制命令'
+                          aria-label='复制命令'
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            onCopyName(paletteItem)
+                          }}
+                        >
+                          <Copy size={13} />
+                        </button>
+                        <button
+                          className='ghost-button icon-only tiny cli-extension-inline-action'
+                          type='button'
+                          title='插入'
+                          aria-label='插入'
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            onInsert(paletteItem)
+                          }}
+                        >
+                          <Plus size={13} />
+                        </button>
+                      </>
+                    )}
+                  </div>
                 </div>
-              </div>
-              <div className='cli-extension-desc-line' title={compactDescription}>
-                {compactDescription}
-              </div>
-            </button>
+                <div className='cli-extension-desc-line' title={compactDescription}>
+                  {item ? compactDescription : `${builtin?.title || ''} · ${compactDescription}`}
+                </div>
+              </button>
+            </div>
           )
         })}
       </div>
@@ -2925,6 +2997,9 @@ function CliLogBubble(props: {
   onToggleEvent: (eventId: string) => void
   onOpenFile: (ownerId: string, path: string) => void
   onCopy: () => void
+  onDelete: () => void
+  onRespondInteraction: (requestId: string, interactionId: string, action: CliInteractionAction) => void
+  respondingInteractionIds: string[]
   requestedExtensions?: CliExtensionEntry[]
   previewFile?: {
     ownerId: string
@@ -2933,19 +3008,40 @@ function CliLogBubble(props: {
     content: string
   } | null
 }) {
-  const { item, expanded, onToggle, expandedEventIds, onToggleEvent, onOpenFile, onCopy, requestedExtensions = [], previewFile } = props
+  const {
+    item,
+    expanded,
+    onToggle,
+    expandedEventIds,
+    onToggleEvent,
+    onOpenFile,
+    onCopy,
+    onDelete,
+    onRespondInteraction,
+    respondingInteractionIds,
+    requestedExtensions = [],
+    previewFile,
+  } = props
   const uniqueFiles = Array.from(new Map(item.files.map((file) => [file.path, file])).values())
   const executedToolNames = collectCliToolNames(item.events.map((eventItem) => eventItem.sourceKind))
   const logStatus = resolveCliLogGroupStatus(item.events)
   const commandCount = item.events.filter((eventItem) => eventItem.kind === 'command').length
 
   return (
-    <div className={`message-bubble system cli-log-bubble ${item.level === 'error' ? 'error' : ''}`}>
+    <div className={`message-bubble system cli-log-bubble ${logStatus.tone === 'error' ? 'error' : ''}`}>
       <button className='cli-log-card-head' type='button' onClick={onToggle}>
-        <span className='message-role'>{item.level === 'error' ? '运行异常' : '运行日志'}</span>
+        <span className='message-role'>{logStatus.tone === 'error' ? '运行异常' : '运行日志'}</span>
         <strong>{`已执行 ${item.events.length} 步`}</strong>
         <small>{expanded ? '点击收起' : '点击展开'}</small>
       </button>
+      <div className='cli-log-card-actions'>
+        <button className='ghost-button icon-only tiny' type='button' onClick={onCopy} title='复制日志' aria-label='复制日志'>
+          <Copy size={14} />
+        </button>
+        <button className='ghost-button icon-only tiny' type='button' onClick={onDelete} title='删除日志' aria-label='删除日志'>
+          <Trash2 size={14} />
+        </button>
+      </div>
       <MessageCliExtensionChips items={requestedExtensions} label='本轮指定扩展' />
       {executedToolNames.length > 0 ? (
         <div className='message-extension-strip compact'>
@@ -2968,6 +3064,9 @@ function CliLogBubble(props: {
             !!eventItem.detail?.trim() ||
             eventFiles.length > 0
           const eventExpanded = expandedEventIds.includes(eventItem.id)
+          const interaction = eventItem.interaction
+          const interactionPending = interaction?.status === 'pending'
+          const interactionBusy = interaction ? respondingInteractionIds.includes(interaction.id) : false
 
           return (
             <div key={eventItem.id} className={`cli-log-event-row ${eventItem.kind} ${eventItem.level}`}>
@@ -3001,6 +3100,56 @@ function CliLogBubble(props: {
                     </button>
                   ) : null}
                 </div>
+                {interaction ? (
+                  <div className={`cli-interaction-card ${interaction.status}`}>
+                    <div className='cli-interaction-copy'>
+                      <strong>{interaction.message}</strong>
+                      {interaction.command?.trim() ? (
+                        <pre className='cli-log-detail-window'>{interaction.command}</pre>
+                      ) : null}
+                    </div>
+                    {interactionPending && item.requestId ? (
+                      <div className='cli-interaction-actions'>
+                        <button
+                          className='ghost-button tiny'
+                          type='button'
+                          disabled={interactionBusy}
+                          onClick={() => onRespondInteraction(item.requestId || '', interaction.id, 'approve')}
+                        >
+                          确认
+                        </button>
+                        <button
+                          className='ghost-button tiny'
+                          type='button'
+                          disabled={interactionBusy}
+                          onClick={() => onRespondInteraction(item.requestId || '', interaction.id, 'approve_always')}
+                        >
+                          一直确认
+                        </button>
+                        <button
+                          className='ghost-button tiny danger'
+                          type='button'
+                          disabled={interactionBusy}
+                          onClick={() => onRespondInteraction(item.requestId || '', interaction.id, 'reject')}
+                        >
+                          拒绝
+                        </button>
+                      </div>
+                    ) : (
+                      <span className='cli-interaction-status'>
+                        {interaction.status === 'auto_approved'
+                          ? '已自动确认'
+                          : interaction.status === 'approved_always'
+                            ? '已持续放行'
+                            : interaction.status === 'approved'
+                              ? '已确认'
+                              : interaction.status === 'rejected'
+                                ? '已拒绝'
+                                : '等待确认'}
+                      </span>
+                    )}
+                  </div>
+                ) : null}
                 {eventExpanded && (
                   <div className='cli-log-event-details'>
                     {eventItem.command?.trim() ? (
@@ -3255,12 +3404,14 @@ function serializeCliLogEvent(item: {
   command?: string
   detail?: string
   exitCode?: number
+  interaction?: CliInteractionPrompt
 }) {
   const kindLabel = resolveCliLogKindLabel(item.kind)
   return [
     kindLabel ? `[${kindLabel}] ${item.message}` : item.message,
     item.sourceKind ? `sourceKind: ${item.sourceKind}` : '',
     item.command ? `command:\n${item.command}` : '',
+    item.interaction ? `interactionStatus: ${item.interaction.status}` : '',
     item.detail ? `detail:\n${item.detail}` : '',
     item.exitCode !== undefined ? `exitCode: ${item.exitCode}` : '',
   ].filter(Boolean).join('\n\n')
@@ -3271,8 +3422,14 @@ function resolveCliLogGroupStatus(
     kind: CliLogKind
     level: 'status' | 'error'
     sourceKind?: string
+    interaction?: CliInteractionPrompt
   }>
 ) {
+  const pendingInteraction = [...events].reverse().find((item) => item.interaction?.status === 'pending')
+  if (pendingInteraction) {
+    return { tone: 'warning', label: '等待确认' as const }
+  }
+
   const terminal = [...events].reverse().find((item) => {
     const sourceKind = item.sourceKind || ''
     return (
@@ -7258,6 +7415,7 @@ function CliWorkspace(props: {
     readJsonStorage<Record<string, CliPlanState | null>>(`oneapi-desktop-${client}-session-plans`, {})
   )
   const [sessionPartialMap, setSessionPartialMap] = useState<Record<string, string>>({})
+  const [respondingInteractionIds, setRespondingInteractionIds] = useState<string[]>([])
   const [expandedLogGroupIds, setExpandedLogGroupIds] = useState<string[]>([])
   const [expandedLogEventMap, setExpandedLogEventMap] = useState<Record<string, string[]>>({})
   const [previewFile, setPreviewFile] = useState<{
@@ -7325,6 +7483,7 @@ function CliWorkspace(props: {
   const activeRequestIdRef = useRef('')
   const stoppingRunRef = useRef(false)
   const autoHydratingSessionIdsRef = useRef<Set<string>>(new Set())
+  const autoCompactSessionStateRef = useRef<Record<string, number>>({})
 
   const currentExtensionPreferenceKey = useMemo(
     () => resolveCliExtensionPreferenceProjectKey(projectPath),
@@ -7428,6 +7587,53 @@ function CliWorkspace(props: {
     extensionSearch,
     selectedExtensions,
   ])
+  const builtinCliCommands = useMemo(
+    () =>
+      listCliBuiltinCommands(client).filter((item) => {
+        const normalizedSearch = extensionSearch.trim().toLowerCase()
+        if (!normalizedSearch) {
+          return true
+        }
+        return [item.command, item.title, item.description].some((value) =>
+          value.toLowerCase().includes(normalizedSearch)
+        )
+      }),
+    [client, extensionSearch]
+  )
+  const displayedCliExtensions = useMemo(
+    () =>
+      filteredCliExtensions.filter((item) =>
+        extensionsMenuAnchor === 'button' ? item.kind !== 'command' : true
+      ),
+    [extensionsMenuAnchor, filteredCliExtensions]
+  )
+  const paletteItems = useMemo<CliPaletteItem[]>(() => {
+    const items: CliPaletteItem[] = []
+    if (extensionsMenuAnchor === 'composer') {
+      items.push(
+        ...builtinCliCommands.map((builtin) => ({
+          id: `builtin:${builtin.id}`,
+          section: 'command' as const,
+          source: 'builtin' as const,
+          builtin,
+        }))
+      )
+    }
+    const groupedExtensions = [
+      ...displayedCliExtensions.filter((extension) => extension.kind === 'command'),
+      ...displayedCliExtensions.filter((extension) => extension.kind === 'skill'),
+      ...displayedCliExtensions.filter((extension) => extension.kind === 'plugin'),
+    ]
+    items.push(
+      ...groupedExtensions.map((extension) => ({
+        id: extension.id,
+        section: extension.kind,
+        source: 'extension' as const,
+        extension,
+      }))
+    )
+    return items
+  }, [builtinCliCommands, displayedCliExtensions, extensionsMenuAnchor])
   const composerTokenItems = useMemo(
     () =>
       selectedExtensions.map((item) => ({
@@ -7441,8 +7647,8 @@ function CliWorkspace(props: {
       })),
     [promptRef, selectedExtensions]
   )
-  const effectiveHighlightedExtensionIndex = filteredCliExtensions.length
-    ? Math.min(highlightedExtensionIndex, filteredCliExtensions.length - 1)
+  const effectiveHighlightedExtensionIndex = paletteItems.length
+    ? Math.min(highlightedExtensionIndex, paletteItems.length - 1)
     : 0
   const requestExtensionMap = useMemo(
     () =>
@@ -7717,7 +7923,45 @@ function CliWorkspace(props: {
     void refreshCliExtensions(true)
   }, [refreshCliExtensions])
 
-  const insertCliExtension = useCallback((item: CliExtensionEntry) => {
+  const insertCliCommandText = useCallback((commandText: string) => {
+    const textarea = promptRef.current
+    const currentValue = prompt
+    if (!textarea) {
+      setPrompt((current) => `${current}${current && !current.endsWith('\n') ? '\n' : ''}${commandText} `)
+      closeCliExtensionsMenu(true)
+      return
+    }
+    const start = textarea.selectionStart ?? currentValue.length
+    const end = textarea.selectionEnd ?? currentValue.length
+    const nextValue = `${currentValue.slice(0, start)}${commandText} ${currentValue.slice(end)}`
+    setPrompt(nextValue)
+    cliPromptHistory.syncInputValue(nextValue)
+    closeCliExtensionsMenu(true)
+    window.setTimeout(() => {
+      syncTextareaHeight(promptRef.current)
+      promptRef.current?.focus()
+      const cursor = start + commandText.length + 1
+      promptRef.current?.setSelectionRange(cursor, cursor)
+    }, 0)
+  }, [cliPromptHistory, closeCliExtensionsMenu, prompt, promptRef])
+
+  const insertCliPaletteItem = useCallback((paletteItem: CliPaletteItem) => {
+    if (paletteItem.source === 'builtin') {
+      insertCliCommandText(paletteItem.builtin.command)
+      return
+    }
+    const item = paletteItem.extension
+    if (item.kind === 'command') {
+      const insertText = buildCliExtensionInsertText({
+        client,
+        kind: item.kind,
+        name: item.name,
+      })
+      if (insertText) {
+        insertCliCommandText(insertText.trim())
+      }
+      return
+    }
     if (!canUseCliExtension(item)) {
       return
     }
@@ -7731,14 +7975,14 @@ function CliWorkspace(props: {
     window.setTimeout(() => {
       resizePrompt()
     }, 0)
-  }, [closeCliExtensionsMenu, resizePrompt])
+  }, [client, closeCliExtensionsMenu, insertCliCommandText, resizePrompt])
 
   const selectHighlightedCliExtension = useCallback(() => {
-    const target = filteredCliExtensions[effectiveHighlightedExtensionIndex]
-    if (target && canUseCliExtension(target)) {
-      insertCliExtension(target)
+    const target = paletteItems[effectiveHighlightedExtensionIndex]
+    if (target) {
+      insertCliPaletteItem(target)
     }
-  }, [effectiveHighlightedExtensionIndex, filteredCliExtensions, insertCliExtension])
+  }, [effectiveHighlightedExtensionIndex, insertCliPaletteItem, paletteItems])
 
   const handleInstallCliExtension = useCallback(async (item: CliExtensionViewItem) => {
     if (!item.installable || !item.installKey) {
@@ -7774,20 +8018,20 @@ function CliWorkspace(props: {
       return true
     }
 
-    if (!filteredCliExtensions.length) {
+    if (!paletteItems.length) {
       return false
     }
 
     if (event.key === 'ArrowDown') {
       event.preventDefault()
-      setHighlightedExtensionIndex((current) => (current + 1) % filteredCliExtensions.length)
+      setHighlightedExtensionIndex((current) => (current + 1) % paletteItems.length)
       return true
     }
 
     if (event.key === 'ArrowUp') {
       event.preventDefault()
       setHighlightedExtensionIndex((current) =>
-        current <= 0 ? filteredCliExtensions.length - 1 : current - 1
+        current <= 0 ? paletteItems.length - 1 : current - 1
       )
       return true
     }
@@ -7799,7 +8043,7 @@ function CliWorkspace(props: {
     }
 
     return false
-  }, [closeCliExtensionsMenu, extensionsMenuOpen, filteredCliExtensions, selectHighlightedCliExtension])
+  }, [closeCliExtensionsMenu, extensionsMenuOpen, paletteItems, selectHighlightedCliExtension])
 
   const translateCliExtensionDetail = useCallback(async (item: CliExtensionViewItem) => {
     const originalDescription = item.description.trim()
@@ -8026,6 +8270,7 @@ function CliWorkspace(props: {
           detail: payload.detail,
           command: payload.command,
           exitCode: payload.exitCode,
+          interaction: payload.interaction,
         } satisfies CliLogEntry
         const previous = current[targetSessionId] || []
         const lastEntry = previous.at(-1)
@@ -8037,6 +8282,7 @@ function CliWorkspace(props: {
           lastEntry.detail === nextEntry.detail &&
           lastEntry.command === nextEntry.command &&
           lastEntry.exitCode === nextEntry.exitCode &&
+          JSON.stringify(lastEntry.interaction || null) === JSON.stringify(nextEntry.interaction || null) &&
           JSON.stringify(lastEntry.files || []) === JSON.stringify(nextEntry.files || [])
         ) {
           return current
@@ -8341,6 +8587,34 @@ function CliWorkspace(props: {
         [groupId]: currentGroup.includes(eventId)
           ? currentGroup.filter((item) => item !== eventId)
           : [...currentGroup, eventId],
+      }
+    })
+  }
+
+  function updateCliInteractionStatus(
+    sessionId: string,
+    interactionId: string,
+    status: CliInteractionPrompt['status']
+  ) {
+    if (!sessionId || !interactionId) {
+      return
+    }
+    setSessionLogsMap((current) => {
+      const previous = current[sessionId] || []
+      const nextLogs = previous.map((entry) =>
+        entry.interaction?.id === interactionId
+          ? {
+              ...entry,
+              interaction: {
+                ...entry.interaction,
+                status,
+              },
+            }
+          : entry
+      )
+      return {
+        ...current,
+        [sessionId]: nextLogs,
       }
     })
   }
@@ -8681,6 +8955,58 @@ function CliWorkspace(props: {
     }
   }
 
+  function handleDeleteCliLogGroup(item: Extract<CliTimelineEntry, { kind: 'log' }>) {
+    if (!activeSessionId) {
+      return
+    }
+
+    const eventIds = new Set(item.events.map((event) => event.id))
+    setSessionLogsMap((current) => ({
+      ...current,
+      [activeSessionId]: (current[activeSessionId] || []).filter((entry) =>
+        item.requestId
+          ? entry.requestId !== item.requestId
+          : !eventIds.has(entry.id)
+      ),
+    }))
+    toast('已删除该组运行日志。')
+  }
+
+  async function handleRespondCliInteraction(
+    requestId: string,
+    interactionId: string,
+    action: CliInteractionAction
+  ) {
+    if (!activeSessionId || !requestId || !interactionId) {
+      return
+    }
+
+    const optimisticStatus: CliInteractionPrompt['status'] =
+      action === 'reject'
+        ? 'rejected'
+        : action === 'approve_always'
+          ? 'approved_always'
+          : 'approved'
+
+    setRespondingInteractionIds((current) =>
+      current.includes(interactionId) ? current : [...current, interactionId]
+    )
+    updateCliInteractionStatus(activeSessionId, interactionId, optimisticStatus)
+
+    try {
+      await respondCliInteraction({
+        requestId,
+        interactionId,
+        action,
+      })
+    } catch (error) {
+      updateCliInteractionStatus(activeSessionId, interactionId, 'pending')
+      toast(error instanceof Error ? error.message : 'CLI 确认请求处理失败。')
+    } finally {
+      setRespondingInteractionIds((current) => current.filter((item) => item !== interactionId))
+    }
+  }
+
   async function handlePreviewFile(ownerId: string, targetPath: string) {
     if (!isInlinePreviewableFile(targetPath)) {
       await openDesktopTarget(targetPath)
@@ -8730,6 +9056,7 @@ function CliWorkspace(props: {
       targetProjectPath?: string
       nextAttachments?: ComposerAttachment[]
       silentValidation?: boolean
+      directCommand?: boolean
     } = {}
   ) => {
     const targetProjectPath = options.targetProjectPath?.trim() || projectPath.trim()
@@ -8747,9 +9074,12 @@ function CliWorkspace(props: {
     const requestProjectPath = targetProjectPath
     const requestProjectKey = normalizeProjectKey(requestProjectPath)
     const currentSessionKey = activeSessionId || `draft-${client}-${Date.now()}`
+    const directCommand = options.directCommand || isDirectCliCommandPrompt(cleanedPrompt)
     const manualExtensions = selectedExtensions.map((item) => ({ ...item }))
     const autoRecommendedExtensions = autoInvokeExtensions
-      ? recommendCliExtensionsForPrompt(cleanedPrompt, cliExtensions)
+      ? directCommand
+        ? []
+        : recommendCliExtensionsForPrompt(cleanedPrompt, cliExtensions)
       : []
     const requestExtensions = [...manualExtensions]
     const requestExtensionKeys = new Set(requestExtensions.map((item) => buildCliExtensionDedupeKey(item)))
@@ -8764,17 +9094,18 @@ function CliWorkspace(props: {
         break
       }
     }
-    const promptBody = buildCliExtensionAugmentedPrompt(
-      `${cleanedPrompt}${buildCliAttachmentReferenceText(targetAttachments)}`,
-      requestExtensions
-    )
-    const promptWithAttachments = buildCliExecutionPrompt(
-      promptBody,
-      {
-        fullAccess,
-        projectPath: requestProjectPath,
-      }
-    )
+    const promptWithAttachments = directCommand
+      ? cleanedPrompt
+      : buildCliExecutionPrompt(
+          buildCliExtensionAugmentedPrompt(
+            `${cleanedPrompt}${buildCliAttachmentReferenceText(targetAttachments)}`,
+            requestExtensions
+          ),
+          {
+            fullAccess,
+            projectPath: requestProjectPath,
+          }
+        )
     const userMessage = {
       id: `user-${Date.now()}`,
       role: 'user' as const,
@@ -8782,7 +9113,7 @@ function CliWorkspace(props: {
       createdAt: Date.now(),
       requestId,
       attachments: toMessageAttachments(targetAttachments),
-      selectedExtensions: requestExtensions,
+      selectedExtensions: directCommand ? [] : requestExtensions,
     }
 
     setProjectSessionMap((current) => ({
@@ -8934,6 +9265,39 @@ function CliWorkspace(props: {
   }
 
   useEffect(() => {
+    if (!active || running || prompt.trim() || !activeSessionId) {
+      return
+    }
+
+    const lastMessage = activeMessages.at(-1)
+    if (!lastMessage || lastMessage.role !== 'assistant') {
+      return
+    }
+    const latestUserMessage = [...activeMessages].reverse().find((item) => item.role === 'user')
+    if (latestUserMessage && matchCliBuiltinCommand(client, latestUserMessage.content)?.id === 'compact') {
+      return
+    }
+
+    const usage = estimateCliSessionContextUsage(client, activeMessages, activePlan)
+    if (usage.ratio < 0.5) {
+      return
+    }
+
+    const lastTriggeredCount = autoCompactSessionStateRef.current[activeSessionId] || 0
+    if (activeMessages.length <= lastTriggeredCount) {
+      return
+    }
+
+    autoCompactSessionStateRef.current[activeSessionId] = activeMessages.length
+    toast(`检测到上下文估算已使用 ${Math.round(usage.ratio * 100)}%，已自动执行 /compact。`)
+    void submitCliPrompt('/compact', {
+      silentValidation: true,
+      nextAttachments: [],
+      directCommand: true,
+    })
+  }, [active, activeMessages, activePlan, activeSessionId, client, prompt, running, submitCliPrompt, toast])
+
+  useEffect(() => {
     if (!active || running || prompt.trim() || !cliStatusReady) {
       return
     }
@@ -8988,16 +9352,18 @@ function CliWorkspace(props: {
     <CliExtensionPalette
       client={client}
       loading={extensionsLoading}
-      filteredExtensions={filteredCliExtensions}
+      paletteItems={paletteItems}
       highlightedIndex={effectiveHighlightedExtensionIndex}
       searchValue={extensionSearch}
       onSearchChange={(value) => {
         setExtensionSearch(value)
         setHighlightedExtensionIndex(0)
       }}
-      onSelect={insertCliExtension}
-      onInsert={insertCliExtension}
-      onCopyName={(item) => void copyText(item.name)}
+      onSelect={insertCliPaletteItem}
+      onInsert={insertCliPaletteItem}
+      onCopyName={(item) =>
+        void copyText(item.source === 'builtin' ? item.builtin.command : item.extension.name)
+      }
       onHoverIndex={setHighlightedExtensionIndex}
       onRefresh={() => void refreshCliExtensions()}
       installingIds={installingExtensionIds}
@@ -9049,7 +9415,12 @@ function CliWorkspace(props: {
             {
               key: 'insert',
               label: '插入到输入框',
-              onSelect: () => insertCliExtension(item),
+              onSelect: () => insertCliPaletteItem({
+                id: item.id,
+                section: item.kind,
+                source: 'extension',
+                extension: item,
+              }),
             },
           ],
         })
@@ -9100,6 +9471,9 @@ function CliWorkspace(props: {
                       onToggleEvent={(eventId) => toggleLogEvent(item.id, eventId)}
                       onOpenFile={(ownerId, path) => void handlePreviewFile(ownerId, path)}
                       onCopy={() => void copyText(item.events.map((eventItem) => serializeCliLogEvent(eventItem)).join('\n\n'))}
+                      onDelete={() => handleDeleteCliLogGroup(item)}
+                      onRespondInteraction={handleRespondCliInteraction}
+                      respondingInteractionIds={respondingInteractionIds}
                       requestedExtensions={item.requestId ? requestExtensionMap[item.requestId] : undefined}
                       previewFile={previewFile}
                     />
@@ -9185,7 +9559,7 @@ function CliWorkspace(props: {
               onAttachmentInputChange: handleAttachmentInputChange,
               textareaRef: promptRef,
               value: prompt,
-              placeholder: `输入要发给 ${client} 的消息。空白行输入 / 可直接呼出${client === 'codex' ? '技能/插件' : '命令/插件'}。`,
+              placeholder: `输入要发给 ${client} 的消息。空白行输入 / 可呼出命令 / 技能 / 插件。`,
               onChange: (value) => {
                 setPrompt(value)
                 cliPromptHistory.syncInputValue(value)
@@ -9400,10 +9774,10 @@ function CliWorkspace(props: {
                           openCliExtensionsMenu('button')
                         }
                       }}
-                      title={client === 'codex' ? '技能与插件' : '命令与插件'}
+                      title='技能与插件'
                     >
                       <Blocks size={16} />
-                      <strong>{client === 'codex' ? '技能/插件' : '命令/插件'}</strong>
+                      <strong>技能/插件</strong>
                     </button>
                   </div>
                 ),

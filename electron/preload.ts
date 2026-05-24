@@ -4,6 +4,7 @@ import type {
   AssistantHistorySnapshotEntry,
   CliClient,
   CliDeployRequest,
+  CliInteractionResponseRequest,
   CliHistoryEntry,
   CliProgressPayload,
   CliSessionDetails,
@@ -120,6 +121,8 @@ contextBridge.exposeInMainWorld('desktopBridge', {
     ipcRenderer.invoke('desktop:run-cli', input) as Promise<CliRunResponse>,
   stopCliPrompt: (requestId: string) =>
     ipcRenderer.invoke('desktop:stop-cli', requestId) as Promise<void>,
+  respondCliInteraction: (input: CliInteractionResponseRequest) =>
+    ipcRenderer.invoke('desktop:respond-cli-interaction', input) as Promise<void>,
   onCliProgress: (listener: (payload: CliProgressPayload) => void) => {
     const channel = 'desktop:cli-progress'
     const wrapped = (_event: unknown, payload: CliProgressPayload) => listener(payload)

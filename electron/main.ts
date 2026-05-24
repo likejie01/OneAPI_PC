@@ -28,6 +28,8 @@ import type {
   CliExtensionEntry,
   CliExtensionInstallRequest,
   CliExtensionInstallResult,
+  CliInteractionPrompt,
+  CliInteractionResponseRequest,
   CliPlanState,
   DesktopAppMeta,
   DesktopChatStreamPayload,
@@ -66,6 +68,15 @@ import {
   sanitizeCliNpmEnvironment,
   shouldUseWindowsCommandShimForPath,
 } from '../src/lib/desktop-service.ts'
+import {
+  buildCliInteractionResponse,
+  classifyCliStderrLine,
+  detectCliInteractionFromText,
+  detectCliInteractionFromToolUse,
+  summarizeCliFailure,
+  shouldAutoRetryCliRequest,
+  type CliRuntimeDiagnostics as SharedCliRuntimeDiagnostics,
+} from '../src/lib/cli-runtime.ts'
 
 const DEFAULT_SERVER_BASE_URL = 'https://ai.oneapi.center'
 const DEFAULT_CODEX_BASE_URL = 'https://ai.oneapi.center/v1'
@@ -95,6 +106,15 @@ let activeTitleDrag:
   | null = null
 const activeApiRequests = new Map<string, AbortController>()
 const activeCliProcesses = new Map<string, ChildProcess>()
+const activeCliRequestStates = new Map<string, {
+  client: CliClient
+  child: ChildProcess
+  webContents: WebContents
+  fullAccess: boolean
+  autoApprove: boolean
+  interactions: Map<string, CliInteractionPrompt>
+  interactionKeys: Set<string>
+}>()
 const stoppedCliRequests = new Set<string>()
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
 type ThemeMode = 'light' | 'dark'
@@ -303,16 +323,9 @@ interface CliRunResponse {
   metadata: Record<string, unknown>
 }
 
-interface CliRuntimeDiagnostics {
-  networkIssue?: boolean
-  sessionIssue?: boolean
-  authIssue?: boolean
-  configIssue?: boolean
-  policyIssue?: boolean
-  dependencyIssue?: boolean
+interface CliRuntimeDiagnostics extends SharedCliRuntimeDiagnostics {
   sessionFileFound?: boolean
   sessionReadAttempts?: number
-  probableCause?: string
 }
 
 interface CliProgressPayload {
@@ -330,6 +343,7 @@ interface CliProgressPayload {
   command?: string
   exitCode?: number
   plan?: CliPlanState | null
+  interaction?: CliInteractionPrompt
 }
 
 interface CliDeployRequest {
@@ -1380,6 +1394,7 @@ function spawnCommandWithHandlers(
     onStderrLine?: (line: string) => void
     onSpawn?: (child: ChildProcess) => void
     stdinData?: string
+    keepStdinOpen?: boolean
   } = {}
 ) {
   const timeoutMs = options.timeoutMs ?? 30000
@@ -1426,8 +1441,12 @@ function spawnCommandWithHandlers(
 
     try {
       if (typeof options.stdinData === 'string') {
-        child.stdin?.end(options.stdinData)
-      } else {
+        if (options.keepStdinOpen) {
+          child.stdin?.write(options.stdinData)
+        } else {
+          child.stdin?.end(options.stdinData)
+        }
+      } else if (!options.keepStdinOpen) {
         child.stdin?.end()
       }
     } catch {
@@ -4280,73 +4299,6 @@ function extractCodexAssistantTextFromEvent(parsed: Record<string, unknown>) {
   return ''
 }
 
-function summarizeCliFailure(rawText: string, stderrText: string): CliRuntimeDiagnostics {
-  const combined = `${rawText}\n${stderrText}`.trim()
-  const networkIssue =
-    /stream disconnected before completion/i.test(combined) ||
-    /error sending request for url/i.test(combined) ||
-    /reconnecting\.\.\./i.test(combined) ||
-    /timed out/i.test(combined) ||
-    /tls/i.test(combined) ||
-    /certificate/i.test(combined) ||
-    /dns/i.test(combined) ||
-    /econnrefused/i.test(combined) ||
-    /econnreset/i.test(combined)
-  const sessionIssue =
-    /failed to record rollout items/i.test(combined) ||
-    /state db returned stale rollout path/i.test(combined) ||
-    /no rollout found for thread id/i.test(combined) ||
-    /thread\/resume failed/i.test(combined) ||
-    /thread .* not found/i.test(combined) ||
-    /session .* not found/i.test(combined)
-  const authIssue =
-    /authentication failed/i.test(combined) ||
-    /request not allowed/i.test(combined) ||
-    /forbidden/i.test(combined) ||
-    /unauthorized/i.test(combined) ||
-    /401/i.test(combined) ||
-    /403/i.test(combined)
-  const configIssue =
-    /expected value at line/i.test(combined) ||
-    /failed to parse/i.test(combined) ||
-    /invalid toml/i.test(combined) ||
-    (/json/i.test(combined) && /parse/i.test(combined))
-  const policyIssue =
-    /blocked by policy/i.test(combined) ||
-    /rejected: blocked/i.test(combined) ||
-    /PropertySetterNotSupportedInConstrainedLanguage/i.test(combined) ||
-    /此语言模式仅支持核心类型的属性设置/i.test(combined)
-  const dependencyIssue =
-    /ENOTCACHED/i.test(combined) ||
-    /only-if-cached/i.test(combined) ||
-    /npm error/i.test(combined)
-
-  let probableCause = ''
-  if (networkIssue) {
-    probableCause = '网络 / 代理 / TLS / 反向代理流式转发异常'
-  } else if (sessionIssue) {
-    probableCause = '本地会话状态目录异常，或会话落盘未完成'
-  } else if (authIssue) {
-    probableCause = 'Key 或上游鉴权不通过'
-  } else if (configIssue) {
-    probableCause = '本地配置文件格式无效'
-  } else if (policyIssue) {
-    probableCause = 'Codex 本地执行策略拦截了部分命令'
-  } else if (dependencyIssue) {
-    probableCause = 'npm/npx 依赖安装失败，常见原因是被离线缓存模式或 registry 网络问题拦截'
-  }
-
-  return {
-    networkIssue,
-    sessionIssue,
-    authIssue,
-    configIssue,
-    policyIssue,
-    dependencyIssue,
-    probableCause,
-  }
-}
-
 function uniqueMessages(messages: CliSessionMessage[]) {
   const seen = new Set<string>()
   return messages.filter((item) => {
@@ -5020,6 +4972,7 @@ function createCliProgressEmitter(
         command?: string
         exitCode?: number
         plan?: CliPlanState | null
+        interaction?: CliInteractionPrompt
       }
     ) {
       const trimmed = input.message.trim()
@@ -5042,6 +4995,7 @@ function createCliProgressEmitter(
         command: input.command,
         exitCode: input.exitCode,
         plan: input.plan,
+        interaction: input.interaction,
       } satisfies CliProgressPayload)
     },
     status(
@@ -5056,6 +5010,7 @@ function createCliProgressEmitter(
         command?: string
         exitCode?: number
         plan?: CliPlanState | null
+        interaction?: CliInteractionPrompt
       } = {}
     ) {
       this.send({ kind: 'status', message, sessionId, done, files, ...options })
@@ -5072,6 +5027,7 @@ function createCliProgressEmitter(
         command?: string
         exitCode?: number
         plan?: CliPlanState | null
+        interaction?: CliInteractionPrompt
       } = {}
     ) {
       this.send({
@@ -5295,6 +5251,130 @@ function buildCliToolUseEventKey(name: string, described: ReturnType<typeof desc
   ].join('::')
 }
 
+function buildCliInteractionKey(input: {
+  kind: string
+  title: string
+  message: string
+  command?: string
+}) {
+  return [
+    input.kind.trim(),
+    input.title.trim(),
+    input.message.trim(),
+    input.command?.trim() || '',
+  ].join('::')
+}
+
+function cloneCliInteractionPrompt(
+  interaction: Omit<CliInteractionPrompt, 'status'> & { status?: CliInteractionPrompt['status'] }
+): CliInteractionPrompt {
+  return {
+    ...interaction,
+    status: interaction.status || 'pending',
+  }
+}
+
+function writeCliInteractionResponse(
+  requestId: string,
+  interactionId: string,
+  action: CliInteractionResponseRequest['action']
+) {
+  const state = activeCliRequestStates.get(requestId)
+  const interaction = state?.interactions.get(interactionId)
+  if (!state?.child.stdin || !interaction) {
+    return false
+  }
+
+  try {
+    state.child.stdin.write(buildCliInteractionResponse(action))
+    if (action === 'approve_always') {
+      state.autoApprove = true
+    }
+    state.interactions.delete(interactionId)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function emitCliInteractionPrompt(input: {
+  client: CliClient
+  requestId: string
+  sessionId?: string
+  progress: ReturnType<typeof createCliProgressEmitter>
+  interaction: Omit<CliInteractionPrompt, 'id' | 'status'>
+}) {
+  const state = activeCliRequestStates.get(input.requestId)
+  if (!state) {
+    return
+  }
+
+  const interactionKey = buildCliInteractionKey(input.interaction)
+  if (state.interactionKeys.has(interactionKey)) {
+    return
+  }
+  state.interactionKeys.add(interactionKey)
+
+  if (state.fullAccess && input.interaction.autoApproveEligible) {
+    input.progress.status('全权限模式已自动确认本次权限请求。', input.sessionId, false, undefined, {
+      logKind: 'status',
+      sourceKind: 'interaction.auto_approved',
+      detail: input.interaction.message,
+      command: input.interaction.command,
+      interaction: {
+        ...cloneCliInteractionPrompt({
+          ...input.interaction,
+          id: `${input.requestId}-auto-${Date.now()}`,
+          status: 'auto_approved',
+        }),
+      },
+    })
+    try {
+      state.child.stdin?.write(buildCliInteractionResponse('approve'))
+    } catch {
+      /* empty */
+    }
+    return
+  }
+
+  if (state.autoApprove && input.interaction.autoApproveEligible) {
+    input.progress.status('已按“持续确认”设置自动放行本次权限请求。', input.sessionId, false, undefined, {
+      logKind: 'status',
+      sourceKind: 'interaction.auto_approved.always',
+      detail: input.interaction.message,
+      command: input.interaction.command,
+      interaction: {
+        ...cloneCliInteractionPrompt({
+          ...input.interaction,
+          id: `${input.requestId}-always-${Date.now()}`,
+          status: 'approved_always',
+        }),
+      },
+    })
+    try {
+      state.child.stdin?.write(buildCliInteractionResponse('approve'))
+    } catch {
+      /* empty */
+    }
+    return
+  }
+
+  const interactionId = `${input.requestId}-interaction-${Date.now()}-${state.interactions.size + 1}`
+  const pendingInteraction = cloneCliInteractionPrompt({
+    ...input.interaction,
+    id: interactionId,
+    status: 'pending',
+  })
+  state.interactions.set(interactionId, pendingInteraction)
+  input.progress.status(input.interaction.title, input.sessionId, false, undefined, {
+    logKind: 'status',
+    sourceKind: 'interaction.pending',
+    detail: input.interaction.message,
+    command: input.interaction.command,
+    interaction: pendingInteraction,
+  })
+}
+
 function extractToolUseEntries(content: unknown) {
   if (!Array.isArray(content)) {
     return []
@@ -5347,25 +5427,23 @@ function buildCodexExecArgs(input: CliRunRequest, resumeSessionId?: string) {
   if (input.fullAccess) {
     args.push('--sandbox', 'danger-full-access', '--dangerously-bypass-approvals-and-sandbox')
   } else {
-    args.push('--sandbox', 'workspace-write')
-  }
-
-  if (resumeSessionId) {
-    args.push('resume', '--json', '--skip-git-repo-check', resumeSessionId, '-')
-  } else {
-    args.push('--json', '-C', input.projectPath, '--skip-git-repo-check', '-')
+    args.push('--sandbox', 'workspace-write', '--ask-for-approval', 'on-request')
   }
 
   if (input.model?.trim()) {
-    args.splice(args.length - 1, 0, '--model', input.model.trim())
+    args.push('--model', input.model.trim())
   }
 
-  args.splice(
-    args.length - 1,
-    0,
+  args.push(
     '--config',
     `model_reasoning_effort="${parseCodexReasoningEffort(input.reasoningEffort)}"`
   )
+
+  if (resumeSessionId) {
+    args.push('resume', '--json', '--skip-git-repo-check', resumeSessionId, input.prompt)
+  } else {
+    args.push('--json', '-C', input.projectPath, '--skip-git-repo-check', input.prompt)
+  }
 
   return args
 }
@@ -5387,8 +5465,12 @@ function buildClaudePromptArgs(input: CliRunRequest, resumeSessionId?: string) {
     'stream-json',
     '--include-partial-messages',
     '--permission-mode',
-    'bypassPermissions',
+    input.fullAccess ? 'bypassPermissions' : 'default',
   ]
+
+  if (input.fullAccess) {
+    args.push('--dangerously-skip-permissions')
+  }
 
   if (input.model?.trim()) {
     args.push('--model', input.model.trim())
@@ -5399,6 +5481,8 @@ function buildClaudePromptArgs(input: CliRunRequest, resumeSessionId?: string) {
   if (resumeSessionId) {
     args.push('--resume', resumeSessionId)
   }
+
+  args.push(input.prompt)
 
   return args
 }
@@ -5447,13 +5531,32 @@ async function runCodexPrompt(
     cwd: input.projectPath,
     timeoutMs: 15 * 60 * 1000,
     env: managedRuntime ? buildRuntimeEnv(managedRuntime) : undefined,
-    stdinData: input.prompt,
+    keepStdinOpen: true,
     onSpawn: (child) => {
       activeCliProcesses.set(input.requestId, child)
+      activeCliRequestStates.set(input.requestId, {
+        client: 'codex',
+        child,
+        webContents,
+        fullAccess: !!input.fullAccess,
+        autoApprove: false,
+        interactions: new Map(),
+        interactionKeys: new Set(),
+      })
     },
     onStdoutLine: (line) => {
       const parsed = parseJsonLine(line)
       if (!parsed) {
+        const interaction = detectCliInteractionFromText(line)
+        if (interaction) {
+          emitCliInteractionPrompt({
+            client: 'codex',
+            requestId: input.requestId,
+            sessionId,
+            progress,
+            interaction,
+          })
+        }
         return
       }
 
@@ -5503,6 +5606,16 @@ async function runCodexPrompt(
       for (const candidate of contentCandidates) {
         const toolEntries = extractToolUseEntries(candidate)
         for (const toolEntry of toolEntries) {
+          const interaction = detectCliInteractionFromToolUse(toolEntry.name, toolEntry.input)
+          if (interaction) {
+            emitCliInteractionPrompt({
+              client: 'codex',
+              requestId: input.requestId,
+              sessionId,
+              progress,
+              interaction,
+            })
+          }
           const described = describeCliToolUse(toolEntry.name, toolEntry.input)
           if (!described.meaningful) {
             continue
@@ -5538,15 +5651,26 @@ async function runCodexPrompt(
       }
     },
     onStderrLine: (line) => {
-      if (line.toLowerCase().includes('warn')) {
-        progress.stderr('Codex 输出了警告信息', sessionId, line, 'stderr.warn')
-        return
+      const interaction = detectCliInteractionFromText(line)
+      if (interaction) {
+        emitCliInteractionPrompt({
+          client: 'codex',
+          requestId: input.requestId,
+          sessionId,
+          progress,
+          interaction,
+        })
       }
-
-      progress.stderr('Codex 输出了错误信息', sessionId, line, 'stderr')
+      const classified = classifyCliStderrLine(line)
+      progress.status(classified.title, sessionId, false, undefined, {
+        logKind: classified.logKind,
+        sourceKind: classified.sourceKind,
+        detail: line,
+      })
     },
   })
   let result = await runCodexOnce()
+  let attempt = 0
   if (
     resumeSessionId &&
     result.exitCode !== 0 &&
@@ -5565,9 +5689,31 @@ async function runCodexPrompt(
     planState = null
     lastToolIntentText = ''
     args = buildCodexExecArgs(input)
+    attempt += 1
     result = await runCodexOnce()
   }
+  let retryDiagnostics = summarizeCliFailure(result.stdout, result.stderr)
+  if (
+    shouldAutoRetryCliRequest({
+      diagnostics: retryDiagnostics,
+      attempt,
+      aborted: stoppedCliRequests.has(input.requestId),
+      exitCode: result.exitCode,
+      output: '',
+    })
+  ) {
+    progress.status('检测到上游瞬时异常，已自动重试一次。', sessionId, false, undefined, {
+      logKind: 'status',
+      sourceKind: 'request.retry.transient',
+      detail: retryDiagnostics.probableCause || '',
+    })
+    partialText = ''
+    lastToolIntentText = ''
+    result = await runCodexOnce()
+    retryDiagnostics = summarizeCliFailure(result.stdout, result.stderr)
+  }
   activeCliProcesses.delete(input.requestId)
+  activeCliRequestStates.delete(input.requestId)
   const aborted = stoppedCliRequests.delete(input.requestId)
 
   const events = parseJsonObjectsFromText(result.stdout)
@@ -5588,7 +5734,7 @@ async function runCodexPrompt(
   runtimeDiagnostics.sessionReadAttempts = 40
   const sessionOutput = session?.messages.filter((item) => item.role === 'assistant').at(-1)?.content ?? ''
   const output = sessionOutput || partialText.trim()
-  Object.assign(runtimeDiagnostics, summarizeCliFailure(result.stdout, result.stderr))
+  Object.assign(runtimeDiagnostics, retryDiagnostics)
   if (!session && output) {
     runtimeDiagnostics.sessionIssue = true
     runtimeDiagnostics.probableCause =
@@ -5728,13 +5874,32 @@ async function runClaudePrompt(
     cwd: input.projectPath,
     timeoutMs: 15 * 60 * 1000,
     env: buildClaudeCliEnv(managedRuntime, claudeSettings),
-    stdinData: input.prompt,
+    keepStdinOpen: true,
     onSpawn: (child) => {
       activeCliProcesses.set(input.requestId, child)
+      activeCliRequestStates.set(input.requestId, {
+        client: 'claude',
+        child,
+        webContents,
+        fullAccess: !!input.fullAccess,
+        autoApprove: false,
+        interactions: new Map(),
+        interactionKeys: new Set(),
+      })
     },
     onStdoutLine: (line) => {
       const parsed = parseJsonLine(line)
       if (!parsed) {
+        const interaction = detectCliInteractionFromText(line)
+        if (interaction) {
+          emitCliInteractionPrompt({
+            client: 'claude',
+            requestId: input.requestId,
+            sessionId,
+            progress,
+            interaction,
+          })
+        }
         return
       }
 
@@ -5778,6 +5943,16 @@ async function runClaudePrompt(
           if (!toolEntry.name) {
             continue
           }
+          const interaction = detectCliInteractionFromToolUse(toolEntry.name, toolEntry.input)
+          if (interaction) {
+            emitCliInteractionPrompt({
+              client: 'claude',
+              requestId: input.requestId,
+              sessionId,
+              progress,
+              interaction,
+            })
+          }
           emitClaudeToolUse(toolEntry.name, toolEntry.input, `assistant.tool_use.${toolEntry.name}`)
         }
         return
@@ -5792,6 +5967,16 @@ async function runClaudePrompt(
         ) {
           const block = event.content_block as Record<string, unknown>
           if (block.type === 'tool_use' && typeof block.name === 'string') {
+            const interaction = detectCliInteractionFromToolUse(block.name, block.input)
+            if (interaction) {
+              emitCliInteractionPrompt({
+                client: 'claude',
+                requestId: input.requestId,
+                sessionId,
+                progress,
+                interaction,
+              })
+            }
             emitClaudeToolUse(block.name, block.input, `stream.tool_use.${block.name}`)
           }
         }
@@ -5815,10 +6000,26 @@ async function runClaudePrompt(
       }
     },
     onStderrLine: (line) => {
-      progress.stderr('Claude 输出了错误信息', sessionId, line, 'stderr')
+      const interaction = detectCliInteractionFromText(line)
+      if (interaction) {
+        emitCliInteractionPrompt({
+          client: 'claude',
+          requestId: input.requestId,
+          sessionId,
+          progress,
+          interaction,
+        })
+      }
+      const classified = classifyCliStderrLine(line)
+      progress.status(classified.title, sessionId, false, undefined, {
+        logKind: classified.logKind,
+        sourceKind: classified.sourceKind,
+        detail: line,
+      })
     },
   })
   let result = await runClaudeOnce()
+  let attempt = 0
   if (
     resumeSessionId &&
     result.exitCode !== 0 &&
@@ -5840,9 +6041,35 @@ async function runClaudePrompt(
     seenToolUseEvents.clear()
     lastToolIntentText = ''
     args = buildClaudePromptArgs(input)
+    attempt += 1
     result = await runClaudeOnce()
   }
+  let retryDiagnostics = summarizeCliFailure(result.stdout, result.stderr)
+  if (
+    shouldAutoRetryCliRequest({
+      diagnostics: retryDiagnostics,
+      attempt,
+      aborted: stoppedCliRequests.has(input.requestId),
+      exitCode: result.exitCode,
+      output: '',
+    })
+  ) {
+    progress.status('检测到上游瞬时异常，已自动重试一次。', sessionId, false, undefined, {
+      logKind: 'status',
+      sourceKind: 'request.retry.transient',
+      detail: retryDiagnostics.probableCause || '',
+    })
+    partialText = ''
+    finalResult = null
+    planState = null
+    planRecords.length = 0
+    seenToolUseEvents.clear()
+    lastToolIntentText = ''
+    result = await runClaudeOnce()
+    retryDiagnostics = summarizeCliFailure(result.stdout, result.stderr)
+  }
   activeCliProcesses.delete(input.requestId)
+  activeCliRequestStates.delete(input.requestId)
   const aborted = stoppedCliRequests.delete(input.requestId)
 
   if (!finalResult) {
@@ -5872,7 +6099,7 @@ async function runClaudePrompt(
             : undefined
         )
   const output = transcriptOutput || parsedOutput || partialText.trim()
-  Object.assign(runtimeDiagnostics, summarizeCliFailure(result.stdout, result.stderr))
+  Object.assign(runtimeDiagnostics, retryDiagnostics)
   if (!session && output) {
     runtimeDiagnostics.sessionIssue = true
     runtimeDiagnostics.probableCause =
@@ -7127,6 +7354,48 @@ ipcMain.handle('desktop:run-cli', async (event, request: CliRunRequest) => {
 ipcMain.handle('desktop:stop-cli', async (_event, requestId: string) => {
   stoppedCliRequests.add(requestId)
   await stopChildProcess(activeCliProcesses.get(requestId))
+})
+ipcMain.handle('desktop:respond-cli-interaction', async (_event, input: CliInteractionResponseRequest) => {
+  const state = activeCliRequestStates.get(input.requestId)
+  if (!state) {
+    throw new Error('当前 CLI 任务已结束，无法再处理该确认请求。')
+  }
+
+  const interaction = state.interactions.get(input.interactionId)
+  if (!interaction) {
+    throw new Error('该确认请求已处理或不存在。')
+  }
+
+  const responded = writeCliInteractionResponse(input.requestId, input.interactionId, input.action)
+  if (!responded) {
+    throw new Error('CLI 交互响应发送失败。')
+  }
+
+  createCliProgressEmitter(state.webContents, state.client, input.requestId).status(
+    input.action === 'reject'
+      ? '已拒绝本次 CLI 确认请求。'
+      : input.action === 'approve_always'
+        ? '已确认本次请求，并对当前任务后续同类请求持续放行。'
+        : '已确认本次 CLI 请求。',
+    undefined,
+    false,
+    undefined,
+    {
+      logKind: 'status',
+      sourceKind: 'interaction.responded',
+      detail: interaction.message,
+      command: interaction.command,
+      interaction: {
+        ...interaction,
+        status:
+          input.action === 'reject'
+            ? 'rejected'
+            : input.action === 'approve_always'
+              ? 'approved_always'
+              : 'approved',
+      },
+    }
+  )
 })
 ipcMain.handle('desktop:set-window-title', async (_event, projectName?: string) => {
   const targetWindow = BrowserWindow.getFocusedWindow() ?? mainWindow

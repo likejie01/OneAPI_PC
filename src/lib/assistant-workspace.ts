@@ -1,5 +1,5 @@
 import type { ChatModelOption } from '../shared/contracts'
-import type { CliHistoryEntry, CliLogKind, CliSessionMessage } from '../shared/desktop'
+import type { CliHistoryEntry, CliInteractionPrompt, CliLogKind, CliSessionMessage } from '../shared/desktop'
 
 export type AssistantModeKey = 'chat' | 'draw' | 'codex' | 'claude'
 export type ModelVendorFilter = 'all' | 'openai' | 'anthropic' | 'gemini' | 'deepseek' | 'xiaomimimo'
@@ -17,6 +17,7 @@ export type CliLogEntryLike = {
   detail?: string
   command?: string
   exitCode?: number
+  interaction?: CliInteractionPrompt
 }
 
 export type CliTimelineLogEvent = {
@@ -30,6 +31,7 @@ export type CliTimelineLogEvent = {
   detail?: string
   command?: string
   exitCode?: number
+  interaction?: CliInteractionPrompt
 }
 
 export type CliFileChange = {
@@ -343,6 +345,7 @@ export function buildCliTimeline(input: {
       detail: item.detail,
       command: item.command,
       exitCode: item.exitCode,
+      ...(item.interaction ? { interaction: item.interaction } : {}),
     }
     const lastGroup = groups.at(-1)
     const sameRequest =
