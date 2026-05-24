@@ -27,8 +27,8 @@ test('formatSubscriptionResetPeriod formats standard and custom reset cycles', (
 })
 
 test('formatQuotaAsMillions renders quota in million units', () => {
-  assert.equal(formatQuotaAsMillions(80_000_000), '80.0m')
-  assert.equal(formatQuotaAsMillions(1_250_000), '1.25m')
+  assert.equal(formatQuotaAsMillions(80_000_000), '80.0M')
+  assert.equal(formatQuotaAsMillions(1_250_000), '1.25M')
 })
 
 test('formatPlainPrice renders a numeric price label without the currency symbol', () => {

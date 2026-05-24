@@ -1,20 +1,28 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Copy, Globe, Link2 } from 'lucide-react'
-import { normalizeMarkdownCodeBlockContent } from '../lib/markdown-code'
+import { MermaidDiagram } from './MermaidDiagram'
+import {
+  isMermaidMarkdownCodeBlock,
+  normalizeMarkdownCodeBlockContent,
+  shouldRenderMarkdownCodeBlock,
+} from '../lib/markdown-code'
 import { extractMessageLinkChips } from '../lib/message-links'
+import { resolveSelectionContextMenuText } from '../lib/context-menu'
 
 interface MarkdownMessageContentProps {
   content: string
   onOpenLocalPath: (targetPath: string) => void | Promise<void>
   onOpenExternal: (targetUrl: string) => void | Promise<void>
+  onSelectionContextMenu?: (event: ReactMouseEvent<HTMLDivElement>, selectedText: string) => void
 }
 
 export function MarkdownMessageContent(props: MarkdownMessageContentProps) {
-  const { content, onOpenExternal, onOpenLocalPath } = props
+  const { content, onOpenExternal, onOpenLocalPath, onSelectionContextMenu } = props
   const [copiedCode, setCopiedCode] = useState<string | null>(null)
   const extractedContent = useMemo(() => extractMessageLinkChips(content), [content])
+  const rootRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     if (!copiedCode) {
@@ -25,7 +33,21 @@ export function MarkdownMessageContent(props: MarkdownMessageContentProps) {
   }, [copiedCode])
 
   return (
-    <div className='markdown-body'>
+    <div
+      className='markdown-body'
+      ref={rootRef}
+      onContextMenu={(event) => {
+        if (!onSelectionContextMenu) {
+          return
+        }
+        const selectedText = resolveSelectionContextMenuText(rootRef.current, window.getSelection())
+        if (!selectedText) {
+          return
+        }
+        event.preventDefault()
+        onSelectionContextMenu(event, selectedText)
+      }}
+    >
       {extractedContent.chips.length > 0 ? (
         <div className='message-link-chip-strip'>
           {extractedContent.chips.map((item) => (
@@ -88,9 +110,17 @@ export function MarkdownMessageContent(props: MarkdownMessageContentProps) {
             code: ({ className, children, ...rest }) => {
               const rawText = String(children ?? '')
               const normalizedText = normalizeMarkdownCodeBlockContent(rawText)
-              const isBlock = /(^|\s)language-/.test(className || '') || /\n/.test(rawText)
+
+              if (isMermaidMarkdownCodeBlock(className)) {
+                return normalizedText.trim() ? <MermaidDiagram chart={normalizedText} /> : null
+              }
+
+              const isBlock = shouldRenderMarkdownCodeBlock(className, rawText)
 
               if (!isBlock) {
+                if (/(^|\s)language-/.test(className || '') || /\n/.test(rawText)) {
+                  return null
+                }
                 return <code className={className} {...rest}>{children}</code>
               }
 

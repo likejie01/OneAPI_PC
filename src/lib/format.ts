@@ -117,7 +117,7 @@ export function formatQuotaAsMillions(value?: number) {
   return `${new Intl.NumberFormat('en-US', {
     minimumFractionDigits: millions >= 100 ? 0 : millions >= 10 ? 1 : 2,
     maximumFractionDigits: millions >= 100 ? 0 : millions >= 10 ? 1 : 2,
-  }).format(millions)}m`
+  }).format(millions)}M`
 }
 
 export function clipText(value: string, max = 80) {

@@ -101,6 +101,13 @@ import {
   stopCliPrompt,
   syncAssistantHistory,
 } from './domains/cli'
+import {
+  checkForUpdates,
+  getUpdateState,
+  installUpdate,
+  onUpdateState,
+  startUpdateDownload,
+} from './domains/update'
 import { createDesktopCliKey, ensureDesktopServiceKey, fetchApiKeySecret, getApiKeys } from './domains/keys'
 import { generateAccessToken, getSelfProfile, requireSuccess, verifyCurrentPassword } from './domains/profile'
 import {
@@ -115,11 +122,14 @@ import {
   redeemTopupCode,
 } from './domains/wallet'
 import {
+  applyCliHistoryTitleOverrides,
   buildCliRecentSessions,
   buildCliTimeline,
   type CliTimelineEntry,
   filterAssistantModels,
+  filterModelsByVendor,
   isImageGenerationModel as isImageGenerationModelOption,
+  type ModelVendorFilter,
   prioritizeFavoriteModels,
   resolveCompatibleModel,
 } from './lib/assistant-workspace'
@@ -138,6 +148,10 @@ import {
 import { AUTH_EXPIRED_EVENT, clearStoredDesktopUserId, saveStoredDesktopUserId } from './lib/desktop-client'
 import { deriveDesktopChatDisplayState, normalizeStoredDesktopChatMessage } from './lib/chat-reasoning'
 import {
+  applyAssistantSelectionToEmptyChatSession,
+  shouldCreateAssistantSwitchChatSession,
+} from './lib/chat-session'
+import {
   applyCliMessageOverlays,
   buildCliExtensionAugmentedPrompt,
   buildCliExtensionDedupeKey,
@@ -152,6 +166,7 @@ import {
   type CliMessageOverlay,
 } from './lib/cli-extensions'
 import { resolveVisibleDrawMessageContent } from './lib/draw-message'
+import { shouldDismissContextMenu } from './lib/context-menu'
 import {
   buildImageStyleAugmentedPrompt,
   decorateImageStylePresets,
@@ -170,6 +185,8 @@ import {
   formatSubscriptionDuration,
   formatSubscriptionResetPeriod,
 } from './lib/format'
+import { getDesktopUpdateDayKey, shouldAutoCheckDesktopUpdate } from './lib/app-update'
+import { buildCliExecutionPrompt } from './lib/cli-prompt'
 import { isRecoverableNetworkError } from './lib/network-retry'
 import {
   commitPromptHistoryEntry,
@@ -205,6 +222,7 @@ import type {
 } from './shared/contracts'
 import type {
   CliClient,
+  DesktopAnnouncement,
   CliDeployPreset,
   CliExtensionEntry,
   CliHistoryEntry,
@@ -214,6 +232,7 @@ import type {
   CliSessionDetails,
   CliSessionMessage,
   CliStatus,
+  DesktopUpdateState,
   DeployProgressPayload,
 } from './shared/desktop'
 import { useAuthStore } from './stores/auth-store'
@@ -234,6 +253,8 @@ const ASSISTANT_FAVORITES_STORAGE_KEY = 'oneapi-desktop-chat-assistant-favorites
 const IMAGE_STYLE_FAVORITES_STORAGE_KEY = 'oneapi-desktop-image-style-favorites'
 const CHAT_PROMPT_HISTORY_STORAGE_KEY = 'oneapi-desktop-chat-prompt-history'
 const DRAW_PROMPT_HISTORY_STORAGE_KEY = 'oneapi-desktop-draw-prompt-history'
+const DESKTOP_UPDATE_AUTO_CHECK_DAY_KEY = 'oneapi-desktop-update-auto-check-day'
+const DESKTOP_ANNOUNCEMENT_READ_IDS_KEY = 'oneapi-desktop-announcement-read-ids'
 
 type ComposerAttachment = {
   id: string
@@ -419,19 +440,6 @@ function buildCliAttachmentReferenceText(attachments: ComposerAttachment[]) {
 
   const lines = attachments.map((item, index) => `${index + 1}. ${item.name} -> ${item.filePath}`)
   return `\n\n附件引用：\n${lines.join('\n')}\n请结合这些附件路径处理本次任务。`
-}
-
-const CLI_EXECUTION_POLICY = [
-  '执行策略：',
-  '1. 先选择最小修改量、最高成功率、最少副作用的方案。',
-  '2. 如果当前方案失败，先分析失败原因，再列出可替代方案。',
-  '3. 将替代方案按“最小修改量、最高有效性、最低风险”的顺序排序后继续尝试。',
-  '4. 只有在问题解决，或已穷尽所有合理方案仍无法解决时，才结束任务。',
-  '5. 回复中要明确写出失败原因、尝试顺序、最终采用的方案或无法解决的结论。',
-].join('\n')
-
-function buildCliExecutionPrompt(prompt: string) {
-  return `${CLI_EXECUTION_POLICY}\n\n用户任务：\n${prompt.trim()}`
 }
 
 function toMessageAttachments(attachments: ComposerAttachment[]) {
@@ -774,6 +782,7 @@ type CliLogEntry = {
 type CliExtensionPreferenceBucket = {
   favoriteIds: string[]
   notes: Record<string, string>
+  autoInvokeEnabled: boolean
 }
 
 type CliExtensionPreferenceStore = Record<string, CliExtensionPreferenceBucket>
@@ -887,20 +896,6 @@ function renderComposer(props: {
               ))}
             </div>
           )}
-          <textarea
-            ref={textareaRef}
-            value={value}
-            rows={AUTO_TEXTAREA_MIN_ROWS}
-            onChange={(event) => onChange(event.target.value)}
-            onKeyDown={onKeyDown}
-            onPaste={onPaste}
-            onDragOver={(event) => {
-              event.preventDefault()
-            }}
-            onDrop={onDrop}
-            onInput={(event) => syncTextareaHeight(event.currentTarget)}
-            placeholder={placeholder}
-          />
           {fileAssets.length > 0 && (
             <div className='composer-asset-strip'>
               {fileAssets.map((item) => (
@@ -929,6 +924,20 @@ function renderComposer(props: {
               ))}
             </div>
           )}
+          <textarea
+            ref={textareaRef}
+            value={value}
+            rows={AUTO_TEXTAREA_MIN_ROWS}
+            onChange={(event) => onChange(event.target.value)}
+            onKeyDown={onKeyDown}
+            onPaste={onPaste}
+            onDragOver={(event) => {
+              event.preventDefault()
+            }}
+            onDrop={onDrop}
+            onInput={(event) => syncTextareaHeight(event.currentTarget)}
+            placeholder={placeholder}
+          />
         </div>
       </div>
       <div className='composer-toolbar'>
@@ -1205,6 +1214,13 @@ const CHAT_PENDING_MESSAGE_LABEL = 'Thinking...'
 const CLI_PENDING_MESSAGE_LABEL = 'Coding...'
 const DRAW_PENDING_MESSAGE_LABEL = 'Thinking...'
 const DRAW_PENDING_IMAGE_URL = '__oneapi_draw_pending__'
+const MODEL_VENDOR_FILTER_OPTIONS: Array<{ value: ModelVendorFilter; label: string }> = [
+  { value: 'all', label: '全部' },
+  { value: 'openai', label: 'OpenAI' },
+  { value: 'anthropic', label: 'Anthropic' },
+  { value: 'deepseek', label: 'DeepSeek' },
+  { value: 'xiaomimimo', label: 'XiaomiMIMO' },
+]
 const CHAT_CONTEXT_WINDOW_OPTIONS = [
   { label: '10 条', value: 10 },
   { label: '20 条', value: 20 },
@@ -1225,6 +1241,11 @@ type ChatContextWindow = (typeof CHAT_CONTEXT_WINDOW_OPTIONS)[number]['value']
 
 function isImageGenerationModel(value: string) {
   return isImageGenerationModelOption(value)
+}
+
+function shouldAttachPromptCacheKey(model: string) {
+  const normalized = model.trim().toLowerCase()
+  return normalized.startsWith('deepseek') || normalized.startsWith('mimo')
 }
 
 function normalizeTimestampMs(value: number) {
@@ -1508,13 +1529,18 @@ function formatUsageSummary(usage?: ChatMessage['usage']) {
   const total = Number(usage.total_tokens || 0)
   const prompt = Number(usage.prompt_tokens || 0)
   const completion = Number(usage.completion_tokens || 0)
+  const cacheHitTokens = Math.max(
+    Number(usage.prompt_tokens_details?.cached_tokens || 0),
+    Number(usage.input_tokens_details?.cached_tokens || 0),
+    Number(usage.prompt_cache_hit_tokens || 0)
+  )
 
   if (total > 0) {
-    return `Tokens ${total}${prompt || completion ? ` · 输入 ${prompt} · 输出 ${completion}` : ''}`
+    return `Tokens ${total}${prompt || completion ? ` · 输入 ${prompt} · 输出 ${completion}` : ''}${cacheHitTokens > 0 ? ` · 缓存命中 ${cacheHitTokens}` : ''}`
   }
 
-  if (prompt > 0 || completion > 0) {
-    return `输入 ${prompt} · 输出 ${completion}`
+  if (prompt > 0 || completion > 0 || cacheHitTokens > 0) {
+    return `输入 ${prompt} · 输出 ${completion}${cacheHitTokens > 0 ? ` · 缓存命中 ${cacheHitTokens}` : ''}`
   }
 
   return ''
@@ -1801,8 +1827,9 @@ function PendingMessageContent(props: {
 function LazyMarkdownContent(props: {
   content: string
   className?: string
+  onSelectionContextMenu?: (event: MouseEvent<HTMLDivElement>, selectedText: string) => void
 }) {
-  const { content, className } = props
+  const { content, className, onSelectionContextMenu } = props
 
   return (
     <Suspense fallback={<div className={className || 'markdown-body'}>{content}</div>}>
@@ -1810,6 +1837,7 @@ function LazyMarkdownContent(props: {
         content={content}
         onOpenLocalPath={openDesktopTarget}
         onOpenExternal={(target) => window.desktopBridge?.openExternal(target)}
+        onSelectionContextMenu={onSelectionContextMenu}
       />
     </Suspense>
   )
@@ -1835,6 +1863,22 @@ function ReasoningMessageContent(props: {
       </div>
     </details>
   )
+}
+
+function formatDownloadSize(value?: number) {
+  const size = Number(value || 0)
+  if (!Number.isFinite(size) || size <= 0) {
+    return '0 B'
+  }
+  const units = ['B', 'KB', 'MB', 'GB']
+  let current = size
+  let unitIndex = 0
+  while (current >= 1024 && unitIndex < units.length - 1) {
+    current /= 1024
+    unitIndex += 1
+  }
+  const digits = current >= 100 || unitIndex === 0 ? 0 : current >= 10 ? 1 : 2
+  return `${current.toFixed(digits)} ${units[unitIndex]}`
 }
 
 function PendingImageContent(props: {
@@ -1904,6 +1948,10 @@ function showAttachmentContextMenu(
   })
 }
 
+function resolveChatRetryFallbackText(hasReasoningContent: boolean) {
+  return hasReasoningContent ? '模型已完成思考，但本次没有返回可显示的正文内容。' : CHAT_PENDING_MESSAGE_LABEL
+}
+
 type SessionRenameDraft = {
   id: string
   value: string
@@ -1954,25 +2002,46 @@ function SessionContextMenu(props: {
   onClose: () => void
 }) {
   const { menu, onClose } = props
+  const menuRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     if (!menu) {
       return
     }
 
+    function handlePointerDown(event: PointerEvent) {
+      if (shouldDismissContextMenu(menuRef.current, event.target)) {
+        onClose()
+      }
+    }
+
+    function handleFocusIn(event: FocusEvent) {
+      if (shouldDismissContextMenu(menuRef.current, event.target)) {
+        onClose()
+      }
+    }
+
     function handleClose() {
       onClose()
     }
 
-    window.addEventListener('pointerdown', handleClose)
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        onClose()
+      }
+    }
+
+    window.addEventListener('pointerdown', handlePointerDown)
     window.addEventListener('blur', handleClose)
-    window.addEventListener('focusin', handleClose)
+    window.addEventListener('focusin', handleFocusIn)
+    window.addEventListener('keydown', handleKeyDown)
     window.addEventListener('resize', handleClose)
     window.addEventListener('scroll', handleClose, true)
     return () => {
-      window.removeEventListener('pointerdown', handleClose)
+      window.removeEventListener('pointerdown', handlePointerDown)
       window.removeEventListener('blur', handleClose)
-      window.removeEventListener('focusin', handleClose)
+      window.removeEventListener('focusin', handleFocusIn)
+      window.removeEventListener('keydown', handleKeyDown)
       window.removeEventListener('resize', handleClose)
       window.removeEventListener('scroll', handleClose, true)
     }
@@ -1984,6 +2053,7 @@ function SessionContextMenu(props: {
 
   return (
     <div
+      ref={menuRef}
       className='session-context-menu'
       style={{
         left: Math.max(12, menu.x),
@@ -2014,15 +2084,23 @@ function SessionContextMenu(props: {
 function AttachmentPreviewModal(props: {
   preview: AttachmentPreviewState | null
   onClose: () => void
+  onImageContextMenu?: (event: MouseEvent<HTMLImageElement | HTMLDivElement>, preview: Extract<AttachmentPreviewState, { mode: 'image' }>) => void
 }) {
-  const { preview, onClose } = props
+  const { preview, onClose, onImageContextMenu } = props
   if (!preview) {
     return null
   }
 
   let previewContent: ReactNode
   if (preview.mode === 'image') {
-    previewContent = <img src={preview.src} alt={preview.name} className='image-preview-full' />
+    previewContent = (
+      <img
+        src={preview.src}
+        alt={preview.name}
+        className='image-preview-full'
+        onContextMenu={(event) => onImageContextMenu?.(event, preview)}
+      />
+    )
   } else if (preview.mode === 'iframe') {
     previewContent = <iframe src={preview.src} title={preview.name} className='attachment-preview-frame' />
   } else if (preview.mode === 'markdown') {
@@ -2051,7 +2129,10 @@ function AttachmentPreviewModal(props: {
             <span>关闭</span>
           </button>
         </div>
-        <div className='image-preview-stage attachment-preview-stage'>
+        <div
+          className='image-preview-stage attachment-preview-stage'
+          onContextMenu={preview.mode === 'image' ? (event) => onImageContextMenu?.(event, preview) : undefined}
+        >
           {previewContent}
         </div>
       </div>
@@ -2194,6 +2275,8 @@ function CliExtensionPalette(props: {
   onToggleFavorite: (item: CliExtensionViewItem) => void
   onTranslateDetail: (item: CliExtensionViewItem) => Promise<string>
   onContextMenu: (event: MouseEvent, item: CliExtensionViewItem) => void
+  autoInvokeEnabled: boolean
+  onAutoInvokeChange: (enabled: boolean) => void
   menuHostRef?: React.RefObject<HTMLDivElement | null>
 }) {
   const {
@@ -2215,6 +2298,8 @@ function CliExtensionPalette(props: {
     onToggleFavorite,
     onTranslateDetail,
     onContextMenu,
+    autoInvokeEnabled,
+    onAutoInvokeChange,
     menuHostRef,
   } = props
   const menuRef = useRef<HTMLDivElement | null>(null)
@@ -2323,6 +2408,14 @@ function CliExtensionPalette(props: {
               ? `搜索中，命中 ${filteredExtensions.length} 项`
               : `共 ${filteredExtensions.length} 项`}
         </span>
+        <label className='cli-extension-auto-toggle'>
+          <span>自动调用</span>
+          <input
+            type='checkbox'
+            checked={autoInvokeEnabled}
+            onChange={(event) => onAutoInvokeChange(event.target.checked)}
+          />
+        </label>
       </div>
       {hoveredTooltip ? (
         <div
@@ -2840,6 +2933,8 @@ function CliLogBubble(props: {
   const { item, expanded, onToggle, expandedEventIds, onToggleEvent, onOpenFile, onCopy, requestedExtensions = [], previewFile } = props
   const uniqueFiles = Array.from(new Map(item.files.map((file) => [file.path, file])).values())
   const executedToolNames = collectCliToolNames(item.events.map((eventItem) => eventItem.sourceKind))
+  const logStatus = resolveCliLogGroupStatus(item.events)
+  const commandCount = item.events.filter((eventItem) => eventItem.kind === 'command').length
 
   return (
     <div className={`message-bubble system cli-log-bubble ${item.level === 'error' ? 'error' : ''}`}>
@@ -2948,6 +3043,18 @@ function CliLogBubble(props: {
           )
         })}
       </div>
+      <div className='cli-log-status-bar'>
+        <span className={`cli-log-status-pill ${logStatus.tone}`}>{logStatus.label}</span>
+        <small>
+          {[
+            commandCount > 0 ? `命令 ${commandCount}` : '',
+            `步骤 ${item.events.length}`,
+            `最后更新 ${formatCliLogTime(item.createdAt)}`,
+          ]
+            .filter(Boolean)
+            .join(' · ')}
+        </small>
+      </div>
       {uniqueFiles.length > 0 && !expanded && (
         <div className='cli-log-files'>
           {uniqueFiles.slice(0, 4).map((fileItem) => (
@@ -2997,6 +3104,7 @@ function createEmptyCliExtensionPreferenceBucket(): CliExtensionPreferenceBucket
   return {
     favoriteIds: [],
     notes: {},
+    autoInvokeEnabled: true,
   }
 }
 
@@ -3155,6 +3263,37 @@ function serializeCliLogEvent(item: {
   ].filter(Boolean).join('\n\n')
 }
 
+function resolveCliLogGroupStatus(
+  events: Array<{
+    kind: CliLogKind
+    level: 'status' | 'error'
+    sourceKind?: string
+  }>
+) {
+  const terminal = [...events].reverse().find((item) => {
+    const sourceKind = item.sourceKind || ''
+    return (
+      item.level === 'error' ||
+      sourceKind === 'request.failed' ||
+      sourceKind === 'request.aborted' ||
+      sourceKind === 'result' ||
+      sourceKind === 'turn.completed'
+    )
+  })
+
+  if (terminal?.sourceKind === 'request.aborted') {
+    return { tone: 'aborted', label: '已停止' as const }
+  }
+  if (terminal && (terminal.level === 'error' || terminal.sourceKind === 'request.failed')) {
+    return { tone: 'error', label: '执行失败' as const }
+  }
+  if (terminal?.sourceKind === 'result' || terminal?.sourceKind === 'turn.completed') {
+    return { tone: 'success', label: '已完成' as const }
+  }
+
+  return { tone: 'running', label: '进行中' as const }
+}
+
 function PasswordField(props: {
   value: string
   placeholder: string
@@ -3248,6 +3387,7 @@ function AssistantsChatWorkspace(props: {
   const [renamingChatSession, setRenamingChatSession] = useState<SessionRenameDraft>(null)
   const [assistantMenuOpen, setAssistantMenuOpen] = useState(false)
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
+  const [modelVendorFilter, setModelVendorFilter] = useState<ModelVendorFilter>('all')
   const [reasoningMenuOpen, setReasoningMenuOpen] = useState(false)
   const [contextMenuOpen, setContextMenuOpen] = useState(false)
   const [assistantSearch, setAssistantSearch] = useState('')
@@ -3318,6 +3458,10 @@ function AssistantsChatWorkspace(props: {
     [favoriteModels, models]
   )
   const chatModeModels = compatibleChatModels
+  const visibleChatModeModels = useMemo(
+    () => filterModelsByVendor(chatModeModels, modelVendorFilter),
+    [chatModeModels, modelVendorFilter]
+  )
   const selectedReasoningLabel =
     CLI_REASONING_OPTIONS.find((item) => item.value === reasoningEffort)?.label || reasoningEffort
   const selectedContextWindowLabel =
@@ -3538,12 +3682,6 @@ function AssistantsChatWorkspace(props: {
   }, [])
 
   useEffect(() => {
-    if (!historyOpen && sessionContextMenu?.scope === 'history') {
-      setSessionContextMenu(null)
-    }
-  }, [historyOpen, sessionContextMenu])
-
-  useEffect(() => {
     const hasPending = chatSessions.some((session) => session.messages.some((item) => item.pending))
     if (persistChatSessionsTimerRef.current) {
       window.clearTimeout(persistChatSessionsTimerRef.current)
@@ -3714,6 +3852,42 @@ function AssistantsChatWorkspace(props: {
     chatPromptHistory.syncInputValue('')
     window.setTimeout(() => resizeDraft(), 0)
     closeChatHistoryPanel()
+  }
+
+  function handleSwitchAssistant(nextAssistantId: string) {
+    const nextAssistant = assistants.find((item) => item.id === nextAssistantId)
+    if (!nextAssistant) {
+      return
+    }
+
+    const nextModel = selectedModel || resolvePreferredModel(models, DEFAULT_CHAT_MODEL, nextAssistant.model)
+
+    setActiveAssistantId(nextAssistantId)
+    saveActiveAssistantId(nextAssistantId)
+    setSelectedModel(nextModel)
+
+    if (shouldCreateAssistantSwitchChatSession(activeSession, nextAssistantId)) {
+      const nextSession = createDefaultChatSession(nextAssistantId, nextModel, selectedGroup)
+      setChatSessions((current) => [nextSession, ...current])
+      setActiveSessionId(nextSession.id)
+    } else if (activeSession && activeSession.assistantId !== nextAssistantId) {
+      setChatSessions((current) =>
+        current
+          .map((item) =>
+            item.id === resolvedActiveSessionId
+              ? applyAssistantSelectionToEmptyChatSession(item, nextAssistantId, nextModel, selectedGroup)
+              : item
+          )
+          .sort((left, right) => right.updatedAt - left.updatedAt)
+      )
+    }
+
+    setDraft('')
+    chatPromptHistory.syncInputValue('')
+    window.setTimeout(() => resizeDraft(), 0)
+    setAssistantMenuMode('list')
+    setAssistantMenuOpen(false)
+    setAssistantSearch('')
   }
 
   function toggleFavoriteModel(value: string) {
@@ -3902,26 +4076,30 @@ function AssistantsChatWorkspace(props: {
         }))
       } else {
         const systemMessage = toAssistantSystemMessage(activeAssistant)
+        const chatRequestPayload = {
+          model: resolvedModel,
+          group: selectedGroup || undefined,
+          promptCacheKey: shouldAttachPromptCacheKey(resolvedModel)
+            ? resolvedActiveSessionId
+            : undefined,
+          temperature: activeAssistant?.temperature ?? 0.7,
+          reasoningEffort,
+          messages: [
+            ...(systemMessage ? [systemMessage] : []),
+            ...requestHistory.map((item) => ({
+              role: item.role,
+              content:
+                item.id === userMessage.id
+                  ? buildChatAttachmentContent(item.content, attachments)
+                  : item.content,
+            })),
+          ],
+        }
         const abortController = new AbortController()
         pendingStreamAbortRef.current = abortController
 
         await streamChatCompletion(
-          {
-            model: resolvedModel,
-            group: selectedGroup || undefined,
-            temperature: activeAssistant?.temperature ?? 0.7,
-            reasoningEffort,
-            messages: [
-              ...(systemMessage ? [systemMessage] : []),
-              ...requestHistory.map((item) => ({
-                role: item.role,
-                content:
-                  item.id === userMessage.id
-                    ? buildChatAttachmentContent(item.content, attachments)
-                    : item.content,
-              })),
-            ],
-          },
+          chatRequestPayload,
           {
             requestId,
             signal: abortController.signal,
@@ -3944,9 +4122,29 @@ function AssistantsChatWorkspace(props: {
           streamedReasoningText,
           true
         )
-        const finalVisibleContent = finalDisplayState.visibleContent
-        const finalReasoningContent = finalDisplayState.reasoningContent.trim()
-        const hasFinalVisibleContent = finalVisibleContent.trim().length > 0
+        let finalVisibleContent = finalDisplayState.visibleContent
+        let finalReasoningContent = finalDisplayState.reasoningContent.trim()
+        let hasFinalVisibleContent = finalVisibleContent.trim().length > 0
+
+        if (!hasFinalVisibleContent && !stoppingRef.current) {
+          try {
+            const retryResponse = await sendChatCompletion(chatRequestPayload, { requestId: `${requestId}-fallback` })
+            const retryDisplayState = deriveDesktopChatDisplayState(
+              retryResponse.choices[0]?.message?.content || '',
+              ''
+            )
+            if (retryDisplayState.visibleContent.trim()) {
+              finalVisibleContent = retryDisplayState.visibleContent
+              hasFinalVisibleContent = true
+            }
+            if (!finalReasoningContent && retryDisplayState.reasoningContent.trim()) {
+              finalReasoningContent = retryDisplayState.reasoningContent.trim()
+            }
+            streamedUsageData = streamedUsageData || retryResponse.usage
+          } catch {
+            /* keep streamed result */
+          }
+        }
 
         syncActiveSession((session) => ({
           ...session,
@@ -3962,9 +4160,7 @@ function AssistantsChatWorkspace(props: {
                   content:
                     hasFinalVisibleContent
                       ? finalVisibleContent
-                      : finalReasoningContent
-                        ? ''
-                        : CHAT_PENDING_MESSAGE_LABEL,
+                      : resolveChatRetryFallbackText(!!finalReasoningContent),
                   createdAt: Date.now(),
                   reasoningContent: finalReasoningContent || undefined,
                   reasoningPending: false,
@@ -4037,6 +4233,56 @@ function AssistantsChatWorkspace(props: {
     } catch {
       toast('复制失败，请检查系统剪贴板权限。')
     }
+  }
+
+  const handleMessageSelectionContextMenu = useCallback((event: MouseEvent<HTMLDivElement>, selectedText: string) => {
+    setSessionContextMenu({
+      x: event.clientX,
+      y: event.clientY,
+      title: '选中文本',
+      items: [
+        {
+          key: 'copy-selection',
+          label: '复制',
+          onSelect: () => copyText(selectedText),
+        },
+        {
+          key: 'translate-selection',
+          label: '翻译选中文本',
+          onSelect: () => requestChatSelectionTranslation(selectedText),
+        },
+      ],
+    })
+  }, [copyText, requestChatSelectionTranslation])
+
+  function handleAttachmentPreviewContextMenu(
+    event: MouseEvent<HTMLImageElement | HTMLDivElement>,
+    preview: Extract<AttachmentPreviewState, { mode: 'image' }>
+  ) {
+    event.preventDefault()
+    setSessionContextMenu({
+      x: event.clientX,
+      y: event.clientY,
+      title: preview.name,
+      items: [
+        {
+          key: 'copy-image',
+          label: '复制图片',
+          onSelect: async () => {
+            await copyImageToClipboard({
+              filePath: preview.path,
+              sourceUrl: preview.src.startsWith('file:') ? undefined : preview.src,
+            })
+            toast('图片已复制到剪贴板。')
+          },
+        },
+        {
+          key: 'open-folder',
+          label: '打开文件夹',
+          onSelect: () => openDesktopFolder(preview.path, true),
+        },
+      ],
+    })
   }
 
   function deleteChatMessage(messageId: string) {
@@ -4254,7 +4500,10 @@ function AssistantsChatWorkspace(props: {
                   ) : (
                     item.pending && (!item.content.trim() || item.content === CHAT_PENDING_MESSAGE_LABEL)
                       ? <PendingMessageContent label={CHAT_PENDING_MESSAGE_LABEL.replace(/\.+$/, '')} />
-                      : <LazyMarkdownContent content={item.content} />
+                      : <LazyMarkdownContent
+                          content={item.content}
+                          onSelectionContextMenu={handleMessageSelectionContextMenu}
+                        />
                   )}
                   <BubbleMeta
                     side={item.role === 'user' ? 'right' : 'left'}
@@ -4403,13 +4652,7 @@ function AssistantsChatWorkspace(props: {
                                   <button
                                     type='button'
                                     className={`picker-option assistant-picker-option ${item.id === activeAssistantId ? 'active' : ''}`}
-                                    onClick={() => {
-                                      setActiveAssistantId(item.id)
-                                      saveActiveAssistantId(item.id)
-                                      setAssistantMenuMode('list')
-                                      setAssistantMenuOpen(false)
-                                      setAssistantSearch('')
-                                    }}
+                                    onClick={() => handleSwitchAssistant(item.id)}
                                   >
                                     <strong>{item.name}</strong>
                                     <span>{item.description}</span>
@@ -4492,33 +4735,49 @@ function AssistantsChatWorkspace(props: {
                           <strong>AI 选择</strong>
                           <span>切换当前对话所用模型</span>
                         </div>
-                        <div className='picker-menu-list'>
-                          {chatModeModels.map((item) => (
+                        <div className='picker-filter-row'>
+                          {MODEL_VENDOR_FILTER_OPTIONS.map((item) => (
                             <button
                               key={item.value}
+                              className={`picker-filter-chip ${modelVendorFilter === item.value ? 'active' : ''}`}
                               type='button'
-                              className={`picker-option model-option ${item.value === selectedModel ? 'active' : ''}`}
-                              onClick={() => {
-                                setSelectedModel(item.value)
-                                setModelMenuOpen(false)
-                              }}
+                              onClick={() => setModelVendorFilter(item.value)}
                             >
-                              <div className='model-option-head'>
-                                <strong>{item.label}</strong>
-                                <button
-                                  className={`ghost-button icon-only tiny model-favorite ${item.favorite ? 'active' : ''}`}
-                                  type='button'
-                                  onClick={(event) => {
-                                    event.stopPropagation()
-                                    toggleFavoriteModel(item.value)
-                                  }}
-                                  aria-label={item.favorite ? '取消收藏' : '收藏'}
-                                >
-                                  <Star size={13} />
-                                </button>
-                              </div>
+                              <span>{item.label}</span>
                             </button>
                           ))}
+                        </div>
+                        <div className='picker-menu-list'>
+                          {visibleChatModeModels.length ? (
+                            visibleChatModeModels.map((item) => (
+                              <button
+                                key={item.value}
+                                type='button'
+                                className={`picker-option model-option ${item.value === selectedModel ? 'active' : ''}`}
+                                onClick={() => {
+                                  setSelectedModel(item.value)
+                                  setModelMenuOpen(false)
+                                }}
+                              >
+                                <div className='model-option-head'>
+                                  <strong>{item.label}</strong>
+                                  <button
+                                    className={`ghost-button icon-only tiny model-favorite ${item.favorite ? 'active' : ''}`}
+                                    type='button'
+                                    onClick={(event) => {
+                                      event.stopPropagation()
+                                      toggleFavoriteModel(item.value)
+                                    }}
+                                    aria-label={item.favorite ? '取消收藏' : '收藏'}
+                                  >
+                                    <Star size={13} />
+                                  </button>
+                                </div>
+                              </button>
+                            ))
+                          ) : (
+                            <div className='picker-empty-state'>当前筛选下没有可用模型</div>
+                          )}
                         </div>
                       </div>
                     )}
@@ -4765,7 +5024,11 @@ function AssistantsChatWorkspace(props: {
           </div>
         </aside>
       </div>
-      <AttachmentPreviewModal preview={attachmentPreview} onClose={() => setAttachmentPreview(null)} />
+      <AttachmentPreviewModal
+        preview={attachmentPreview}
+        onClose={() => setAttachmentPreview(null)}
+        onImageContextMenu={handleAttachmentPreviewContextMenu}
+      />
       <TranslationResultModal
         open={!!translationState}
         sourceText={translationState?.sourceText || ''}
@@ -4947,12 +5210,6 @@ function DrawWorkspace(props: {
     window.addEventListener('oneapi:open-draw-history', handleOpenHistory as EventListener)
     return () => window.removeEventListener('oneapi:open-draw-history', handleOpenHistory as EventListener)
   }, [])
-
-  useEffect(() => {
-    if (!historyOpen && sessionContextMenu?.scope === 'history') {
-      setSessionContextMenu(null)
-    }
-  }, [historyOpen, sessionContextMenu])
 
   function updateDrawSession(sessionId: string, updater: (session: DrawSessionRecord) => DrawSessionRecord) {
     setDrawSessions((current) =>
@@ -5250,6 +5507,36 @@ function DrawWorkspace(props: {
     } catch {
       toast('复制失败，请检查系统剪贴板权限。')
     }
+  }
+
+  function handleAttachmentPreviewContextMenu(
+    event: MouseEvent<HTMLImageElement | HTMLDivElement>,
+    preview: Extract<AttachmentPreviewState, { mode: 'image' }>
+  ) {
+    event.preventDefault()
+    setSessionContextMenu({
+      x: event.clientX,
+      y: event.clientY,
+      title: preview.name,
+      items: [
+        {
+          key: 'copy-image',
+          label: '复制图片',
+          onSelect: async () => {
+            await copyImageToClipboard({
+              filePath: preview.path,
+              sourceUrl: preview.src.startsWith('file:') ? undefined : preview.src,
+            })
+            toast('图片已复制到剪贴板。')
+          },
+        },
+        {
+          key: 'open-folder',
+          label: '打开文件夹',
+          onSelect: () => openDesktopFolder(preview.path, true),
+        },
+      ],
+    })
   }
 
   async function handleDownloadImage(source: string, name: string) {
@@ -6016,7 +6303,11 @@ function DrawWorkspace(props: {
           </div>
         </div>
       )}
-      <AttachmentPreviewModal preview={attachmentPreview} onClose={() => setAttachmentPreview(null)} />
+      <AttachmentPreviewModal
+        preview={attachmentPreview}
+        onClose={() => setAttachmentPreview(null)}
+        onImageContextMenu={handleAttachmentPreviewContextMenu}
+      />
       <SessionContextMenu menu={sessionContextMenu} onClose={() => setSessionContextMenu(null)} />
     </section>
   )
@@ -6986,6 +7277,7 @@ function CliWorkspace(props: {
   const [selectedModel, setSelectedModel] = useState('')
   const [reasoningEffort, setReasoningEffort] = useState(client === 'claude' ? 'high' : 'medium')
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
+  const [cliModelVendorFilter, setCliModelVendorFilter] = useState<ModelVendorFilter>('all')
   const [effortMenuOpen, setEffortMenuOpen] = useState(false)
   const [extensionsMenuOpen, setExtensionsMenuOpen] = useState(false)
   const [extensionsMenuAnchor, setExtensionsMenuAnchor] = useState<'composer' | 'button'>('button')
@@ -7044,13 +7336,20 @@ function CliWorkspace(props: {
     () => isCliStatusReadyForWorkspace(status, serverBaseUrl || DEFAULT_SERVER_BASE_URL),
     [serverBaseUrl, status]
   )
-  const activeMessages = activeSessionId ? sessionMessagesMap[activeSessionId] || [] : []
-  const activeLogs = activeSessionId ? sessionLogsMap[activeSessionId] || [] : []
+  const activeMessages = useMemo(
+    () => (activeSessionId ? sessionMessagesMap[activeSessionId] || [] : []),
+    [activeSessionId, sessionMessagesMap]
+  )
+  const activeLogs = useMemo(
+    () => (activeSessionId ? sessionLogsMap[activeSessionId] || [] : []),
+    [activeSessionId, sessionLogsMap]
+  )
   const activePlan = activeSessionId ? sessionPlansMap[activeSessionId] || null : null
   const visibleActivePlan = hasActiveCliPlan(activePlan) ? activePlan : null
   const activePartial = activeSessionId ? sessionPartialMap[activeSessionId] || '' : ''
   const activeExtensionPreferenceBucket =
     cliExtensionPreferences[currentExtensionPreferenceKey] || createEmptyCliExtensionPreferenceBucket()
+  const autoInvokeExtensions = activeExtensionPreferenceBucket.autoInvokeEnabled !== false
   const reasoningOptions = client === 'claude' ? CLAUDE_REASONING_OPTIONS : CLI_REASONING_OPTIONS
   const preferredCliModel = client === 'codex' ? DEFAULT_CODEX_MODEL : DEFAULT_CLAUDE_MODEL
   const fallbackCliModels = useMemo(
@@ -7068,6 +7367,24 @@ function CliWorkspace(props: {
         filterAssistantModels(client, withFavoriteFlag(cliModels, favoriteModels), fallbackCliModels)
       ),
     [client, cliModels, favoriteModels, fallbackCliModels]
+  )
+  const cliModelVendorFilterOptions = useMemo(
+    () =>
+      MODEL_VENDOR_FILTER_OPTIONS.filter((item) => {
+        if (item.value === 'all') {
+          return compatibleCliModels.length > 0
+        }
+        return filterModelsByVendor(compatibleCliModels, item.value).length > 0
+      }),
+    [compatibleCliModels]
+  )
+  const effectiveCliModelVendorFilter = useMemo(
+    () => (cliModelVendorFilterOptions.some((item) => item.value === cliModelVendorFilter) ? cliModelVendorFilter : 'all'),
+    [cliModelVendorFilter, cliModelVendorFilterOptions]
+  )
+  const visibleCliModels = useMemo(
+    () => filterModelsByVendor(compatibleCliModels, effectiveCliModelVendorFilter),
+    [compatibleCliModels, effectiveCliModelVendorFilter]
   )
   const selectedModelLabel =
     compatibleCliModels.find((item) => item.value === selectedModel)?.label || selectedModel || preferredCliModel
@@ -7130,17 +7447,15 @@ function CliWorkspace(props: {
     [activeMessages]
   )
   const recentSessions = useMemo(
-    () =>
-      buildCliRecentSessions({
+    () => {
+      const mergedHistory = buildCliRecentSessions({
         history,
         sessionMessagesMap,
         sessionLogsMap,
         sessionProjectPathMap,
-      }).map((item) => ({
-        ...item,
-        title: historyTitleOverrides[item.id] || item.title,
-        preview: historyTitleOverrides[item.id] || item.preview,
-      })),
+      })
+      return applyCliHistoryTitleOverrides(mergedHistory, historyTitleOverrides)
+    },
     [history, historyTitleOverrides, sessionLogsMap, sessionMessagesMap, sessionProjectPathMap]
   )
   const visibleRecentSessions = useMemo(
@@ -7301,6 +7616,13 @@ function CliWorkspace(props: {
     )
   }, [currentExtensionPreferenceKey, updateCliExtensionPreferenceBucket])
 
+  const setCliExtensionAutoInvokeEnabled = useCallback((enabled: boolean) => {
+    updateCliExtensionPreferenceBucket(currentExtensionPreferenceKey, (bucket) => ({
+      ...bucket,
+      autoInvokeEnabled: enabled,
+    }))
+  }, [currentExtensionPreferenceKey, updateCliExtensionPreferenceBucket])
+
   const moveCliSessionOverlay = useCallback((fromSessionId: string, toSessionId: string) => {
     if (!fromSessionId || !toSessionId || fromSessionId === toSessionId) {
       return
@@ -7367,8 +7689,9 @@ function CliWorkspace(props: {
       const buttonRect = extensionsButtonRef.current?.getBoundingClientRect()
       const shellRect = composerShell?.getBoundingClientRect()
       if (buttonRect && shellRect) {
-        const paletteWidth = Math.min(400, Math.max(shellRect.width - 16, 280))
-        const requestedLeft = buttonRect.right - shellRect.left - paletteWidth
+        const paletteWidth = Math.min(360, Math.max(320, Math.min(shellRect.width - 16, 360)))
+        const buttonCenter = buttonRect.left - shellRect.left + buttonRect.width / 2
+        const requestedLeft = buttonCenter - paletteWidth / 2
         const maxLeft = Math.max(0, shellRect.width - paletteWidth)
         setExtensionsOverlayStyle({
           left: Math.max(0, Math.min(requestedLeft, maxLeft)),
@@ -7522,25 +7845,6 @@ function CliWorkspace(props: {
   useEffect(() => {
     writeJsonStorage(lastProjectPathStorageKey, projectPath)
   }, [lastProjectPathStorageKey, projectPath])
-
-  useEffect(() => {
-    writeJsonStorage(lastOpenedSessionIdStorageKey, lastOpenedSessionId)
-  }, [lastOpenedSessionId, lastOpenedSessionIdStorageKey])
-
-  useEffect(() => {
-    writeJsonStorage(lastOpenedProjectPathStorageKey, lastOpenedProjectPath)
-  }, [lastOpenedProjectPath, lastOpenedProjectPathStorageKey])
-
-  useEffect(() => {
-    if (!activeSessionId || !projectPath.trim()) {
-      return
-    }
-    if (lastOpenedSessionId === activeSessionId && lastOpenedProjectPath === projectPath) {
-      return
-    }
-    setLastOpenedSessionId(activeSessionId)
-    setLastOpenedProjectPath(projectPath)
-  }, [activeSessionId, lastOpenedProjectPath, lastOpenedSessionId, projectPath])
 
   useEffect(() => {
     writeJsonStorage(`oneapi-desktop-${client}-history-title-overrides`, historyTitleOverrides)
@@ -7768,7 +8072,9 @@ function CliWorkspace(props: {
       }
 
       if (extensionsMenuOpen && extensionsPaletteRef.current && !extensionsPaletteRef.current.contains(target)) {
-        closeCliExtensionsMenu(false)
+        if (!extensionsButtonRef.current || !extensionsButtonRef.current.contains(target)) {
+          closeCliExtensionsMenu(false)
+        }
       }
 
       if (historyOpen && historyPanelRef.current && !historyPanelRef.current.contains(target)) {
@@ -7778,7 +8084,13 @@ function CliWorkspace(props: {
 
     function handleFocusIn(event: FocusEvent) {
       const target = event.target as Node | null
-      if (extensionsMenuOpen && target && extensionsPaletteRef.current && !extensionsPaletteRef.current.contains(target)) {
+      if (
+        extensionsMenuOpen &&
+        target &&
+        extensionsPaletteRef.current &&
+        !extensionsPaletteRef.current.contains(target) &&
+        (!extensionsButtonRef.current || !extensionsButtonRef.current.contains(target))
+      ) {
         closeCliExtensionsMenu(false)
       }
     }
@@ -7853,12 +8165,6 @@ function CliWorkspace(props: {
     setHistoryOpen(false)
     setSessionContextMenu(null)
   }
-
-  useEffect(() => {
-    if (!historyOpen && sessionContextMenu?.scope === 'history') {
-      setSessionContextMenu(null)
-    }
-  }, [historyOpen, sessionContextMenu])
 
   function persistHiddenSessions(next: string[]) {
     setHiddenSessionIds(next)
@@ -7988,6 +8294,10 @@ function CliWorkspace(props: {
     if (!nextProjectKey || !sessionId) {
       return
     }
+    setLastOpenedSessionId((current) => (current === sessionId ? current : sessionId))
+    setLastOpenedProjectPath((current) => (current === nextProjectPath ? current : nextProjectPath))
+    writeJsonStorage(lastOpenedSessionIdStorageKey, sessionId)
+    writeJsonStorage(lastOpenedProjectPathStorageKey, nextProjectPath)
     setSessionProjectPathMap((current) => ({
       ...current,
       [sessionId]: nextProjectPath,
@@ -8241,6 +8551,36 @@ function CliWorkspace(props: {
     }
   }
 
+  function handleAttachmentPreviewContextMenu(
+    event: MouseEvent<HTMLImageElement | HTMLDivElement>,
+    preview: Extract<AttachmentPreviewState, { mode: 'image' }>
+  ) {
+    event.preventDefault()
+    setSessionContextMenu({
+      x: event.clientX,
+      y: event.clientY,
+      title: preview.name,
+      items: [
+        {
+          key: 'copy-image',
+          label: '复制图片',
+          onSelect: async () => {
+            await copyImageToClipboard({
+              filePath: preview.path,
+              sourceUrl: preview.src.startsWith('file:') ? undefined : preview.src,
+            })
+            toast('图片已复制到剪贴板。')
+          },
+        },
+        {
+          key: 'open-folder',
+          label: '打开文件夹',
+          onSelect: () => openDesktopFolder(preview.path, true),
+        },
+      ],
+    })
+  }
+
   async function handleDeleteCliMessage(message: CliMessage) {
     const sessionId = activeSessionId
     const resumeSessionId = getCliResumeSessionId(sessionId)
@@ -8348,7 +8688,9 @@ function CliWorkspace(props: {
     const requestProjectKey = normalizeProjectKey(requestProjectPath)
     const currentSessionKey = activeSessionId || `draft-${client}-${Date.now()}`
     const manualExtensions = selectedExtensions.map((item) => ({ ...item }))
-    const autoRecommendedExtensions = recommendCliExtensionsForPrompt(cleanedPrompt, cliExtensions)
+    const autoRecommendedExtensions = autoInvokeExtensions
+      ? recommendCliExtensionsForPrompt(cleanedPrompt, cliExtensions)
+      : []
     const requestExtensions = [...manualExtensions]
     const requestExtensionKeys = new Set(requestExtensions.map((item) => buildCliExtensionDedupeKey(item)))
     for (const item of autoRecommendedExtensions) {
@@ -8479,6 +8821,7 @@ function CliWorkspace(props: {
   }, [
     activeSessionId,
     attachments,
+    autoInvokeExtensions,
     clearAttachments,
     client,
     compatibleCliModels,
@@ -8571,6 +8914,8 @@ function CliWorkspace(props: {
       onKeyDown={handleCliExtensionPaletteKeyDown}
       onToggleFavorite={toggleFavoriteCliExtension}
       onTranslateDetail={translateCliExtensionDetail}
+      autoInvokeEnabled={autoInvokeExtensions}
+      onAutoInvokeChange={setCliExtensionAutoInvokeEnabled}
       menuHostRef={extensionsPaletteRef}
       onContextMenu={(event, item) => {
         event.preventDefault()
@@ -8856,33 +9201,49 @@ function CliWorkspace(props: {
                           <strong>AI 版本</strong>
                           <span>切换当前 CLI 会话模型</span>
                         </div>
-                        <div className='picker-menu-list'>
-                          {compatibleCliModels.map((item: ChatModelOption) => (
+                        <div className='picker-filter-row'>
+                          {cliModelVendorFilterOptions.map((item) => (
                             <button
                               key={item.value}
+                              className={`picker-filter-chip ${effectiveCliModelVendorFilter === item.value ? 'active' : ''}`}
                               type='button'
-                              className={`picker-option ${item.value === selectedModel ? 'active' : ''}`}
-                              onClick={() => {
-                                setSelectedModel(item.value)
-                                setModelMenuOpen(false)
-                              }}
+                              onClick={() => setCliModelVendorFilter(item.value)}
                             >
-                              <div className='model-option-head'>
-                                <strong>{item.label}</strong>
-                                <button
-                                  className={`ghost-button icon-only tiny model-favorite ${item.favorite ? 'active' : ''}`}
-                                  type='button'
-                                  onClick={(event) => {
-                                    event.stopPropagation()
-                                    toggleFavoriteModel(item.value)
-                                  }}
-                                  aria-label={item.favorite ? '取消收藏' : '收藏'}
-                                >
-                                  <Star size={13} />
-                                </button>
-                              </div>
+                              <span>{item.label}</span>
                             </button>
                           ))}
+                        </div>
+                        <div className='picker-menu-list'>
+                          {visibleCliModels.length ? (
+                            visibleCliModels.map((item: ChatModelOption) => (
+                              <button
+                                key={item.value}
+                                type='button'
+                                className={`picker-option ${item.value === selectedModel ? 'active' : ''}`}
+                                onClick={() => {
+                                  setSelectedModel(item.value)
+                                  setModelMenuOpen(false)
+                                }}
+                              >
+                                <div className='model-option-head'>
+                                  <strong>{item.label}</strong>
+                                  <button
+                                    className={`ghost-button icon-only tiny model-favorite ${item.favorite ? 'active' : ''}`}
+                                    type='button'
+                                    onClick={(event) => {
+                                      event.stopPropagation()
+                                      toggleFavoriteModel(item.value)
+                                    }}
+                                    aria-label={item.favorite ? '取消收藏' : '收藏'}
+                                  >
+                                    <Star size={13} />
+                                  </button>
+                                </div>
+                              </button>
+                            ))
+                          ) : (
+                            <div className='picker-empty-state'>当前筛选下没有可用模型</div>
+                          )}
                         </div>
                       </div>
                     )}
@@ -9059,7 +9420,7 @@ function CliWorkspace(props: {
                           <SessionTitleEditor
                             editing={renamingHistorySession?.id === item.id}
                             value={renamingHistorySession?.id === item.id ? renamingHistorySession.value : ''}
-                            displayValue={item.preview || item.title}
+                            displayValue={item.title || item.preview}
                             maxLength={74}
                             onChange={(value) => setRenamingHistorySession({ id: item.id, value })}
                             onCommit={() => commitHistorySessionRename(item.id)}
@@ -9091,7 +9452,11 @@ function CliWorkspace(props: {
           </div>
         </aside>
       </div>
-      <AttachmentPreviewModal preview={attachmentPreview} onClose={() => setAttachmentPreview(null)} />
+      <AttachmentPreviewModal
+        preview={attachmentPreview}
+        onClose={() => setAttachmentPreview(null)}
+        onImageContextMenu={handleAttachmentPreviewContextMenu}
+      />
       <SessionContextMenu menu={sessionContextMenu} onClose={() => setSessionContextMenu(null)} />
     </section>
   )
@@ -9227,6 +9592,15 @@ function CliSetupCard(props: {
     }
   }
 
+  async function copyLogDetail(content: string) {
+    try {
+      await navigator.clipboard.writeText(content)
+      toast('已复制到剪贴板。')
+    } catch {
+      toast('复制失败，请检查系统剪贴板权限。')
+    }
+  }
+
   return (
     <article
       className={[
@@ -9277,7 +9651,20 @@ function CliSetupCard(props: {
                 <strong>{item.message}</strong>
                 <span>{formatDateTime(item.createdAt)}</span>
                 {item.command ? <pre className='timeline-code'>{item.command}</pre> : null}
-                {item.detail ? <pre className='timeline-detail'>{maskSecretText(item.detail)}</pre> : null}
+                {item.detail ? (
+                  <div className='timeline-detail-wrap'>
+                    <button
+                      type='button'
+                      className='markdown-code-copy timeline-copy-button'
+                      aria-label='复制日志详情'
+                      title='复制日志详情'
+                      onClick={() => void copyLogDetail(maskSecretText(item.detail))}
+                    >
+                      <Copy size={13} />
+                    </button>
+                    <pre className='timeline-detail'>{maskSecretText(item.detail)}</pre>
+                  </div>
+                ) : null}
                 {typeof item.exitCode === 'number' ? <small>exit code: {item.exitCode}</small> : null}
               </div>
             </div>
@@ -9912,13 +10299,25 @@ export function App() {
   })
   const [platformLabel, setPlatformLabel] = useState('Windows')
   const [productName, setProductName] = useState('OneAPI Desktop')
+  const [appVersion, setAppVersion] = useState('0.1.0')
   const [iconPath, setIconPath] = useState('')
   const [serverBaseUrl, setServerBaseUrl] = useState('')
   const [serverBaseUrlDraft, setServerBaseUrlDraft] = useState('')
   const [serverBaseUrlDialogOpen, setServerBaseUrlDialogOpen] = useState(false)
+  const [updatePopoverOpen, setUpdatePopoverOpen] = useState(false)
+  const [updateState, setUpdateState] = useState<DesktopUpdateState>({
+    status: 'idle',
+    currentVersion: '0.1.0',
+    announcements: [],
+  })
+  const [activeAnnouncement, setActiveAnnouncement] = useState<DesktopAnnouncement | null>(null)
+  const [readAnnouncementIds, setReadAnnouncementIds] = useState<string[]>(() =>
+    readJsonStorage<string[]>(DESKTOP_ANNOUNCEMENT_READ_IDS_KEY, [])
+  )
   const [rightCtrlHeld, setRightCtrlHeld] = useState(false)
   const [, setSidebarSecretClicks] = useState(0)
   const [sidebarQuotaPerUnit, setSidebarQuotaPerUnit] = useState(500_000)
+  const updatePopoverRef = useRef<HTMLDivElement | null>(null)
   const { message, setMessage } = useToastState()
   const [cliStatus, setCliStatus] = useState<{ codex: CliStatus; claude: CliStatus } | null>(null)
   const enabledAssistantModes = useMemo(() => {
@@ -9949,9 +10348,16 @@ export function App() {
       .then((meta) => {
         setPlatformLabel(meta.platform === 'darwin' ? 'macOS' : 'Windows')
         setProductName(meta.productName)
+        setAppVersion(meta.version)
         setIconPath(meta.iconPath)
         setServerBaseUrl(meta.serverBaseUrl)
         setServerBaseUrlDraft(meta.serverBaseUrl)
+      })
+      .catch(() => undefined)
+
+    getUpdateState()
+      .then((state) => {
+        setUpdateState(state)
       })
       .catch(() => undefined)
 
@@ -10067,6 +10473,26 @@ export function App() {
     }
   }, [])
 
+  useEffect(() => {
+    function handlePointerDown(event: PointerEvent) {
+      if (!updatePopoverOpen) {
+        return
+      }
+      const target = event.target as Node | null
+      if (!target) {
+        return
+      }
+      if (updatePopoverRef.current && !updatePopoverRef.current.contains(target)) {
+        setUpdatePopoverOpen(false)
+      }
+    }
+
+    window.addEventListener('pointerdown', handlePointerDown)
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown)
+    }
+  }, [updatePopoverOpen])
+
   async function handleSaveServerBaseUrl() {
     try {
       const result = await window.desktopBridge?.setServerBaseUrl(serverBaseUrlDraft.trim())
@@ -10101,6 +10527,62 @@ export function App() {
       return next
     })
   }
+
+  function handleSidebarUserRowClick() {
+    handleSidebarSecretClick()
+    if (!rightCtrlHeld) {
+      setUpdatePopoverOpen((current) => !current)
+    }
+  }
+
+  async function handleUpdatePrimaryAction() {
+    try {
+      if (updateState.status === 'available') {
+        await startUpdateDownload()
+        return
+      }
+      if (updateState.status === 'downloaded') {
+        await installUpdate()
+        return
+      }
+      if (updateState.status === 'downloading' || updateState.status === 'checking') {
+        return
+      }
+      await checkForUpdates({ userInitiated: true })
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : '更新操作失败')
+    }
+  }
+
+  const updatePrimaryActionLabel =
+    updateState.status === 'available'
+      ? '后台下载'
+      : updateState.status === 'downloaded'
+        ? '现在安装'
+        : updateState.status === 'downloading'
+          ? '下载中...'
+          : updateState.status === 'checking'
+            ? '检查中...'
+            : '检查更新'
+
+  const hasAvailableDesktopUpdate = Boolean(
+    updateState.latestVersion &&
+      updateState.latestVersion !== appVersion &&
+      ['available', 'downloading', 'downloaded'].includes(updateState.status)
+  )
+  const announcements = updateState.announcements || []
+  const unreadAnnouncements = useMemo(
+    () => announcements.filter((item) => !readAnnouncementIds.includes(item.id)),
+    [announcements, readAnnouncementIds]
+  )
+  const unreadAnnouncementCount = unreadAnnouncements.length
+  const showAnnouncementCount = unreadAnnouncementCount > 0
+  const showUpdateDot = !showAnnouncementCount && hasAvailableDesktopUpdate
+  const updateProgressLabel = updateState.totalBytes
+    ? `${formatDownloadSize(updateState.downloadedBytes)} / ${formatDownloadSize(updateState.totalBytes)}`
+    : updateState.progress
+      ? `${Math.max(0, Math.min(100, updateState.progress)).toFixed(0)}%`
+      : ''
 
   useEffect(() => {
     if (!enabledAssistantModes.includes(assistantMode)) {
@@ -10137,6 +10619,40 @@ export function App() {
     }
   }, [])
 
+  useEffect(() => onUpdateState((payload) => {
+    setUpdateState(payload)
+  }), [])
+
+  useEffect(() => {
+    const nextIds = readAnnouncementIds.filter((id) => announcements.some((item) => item.id === id))
+    if (nextIds.length === readAnnouncementIds.length) {
+      return
+    }
+    const timer = window.setTimeout(() => {
+      setReadAnnouncementIds(nextIds)
+      writeJsonStorage(DESKTOP_ANNOUNCEMENT_READ_IDS_KEY, nextIds)
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [announcements, readAnnouncementIds])
+
+  useEffect(() => {
+    const runAutoCheck = () => {
+      const minimumCheckHour = updateState.minimumCheckHour ?? 12
+      const lastCheckedDayKey = readJsonStorage<string>(DESKTOP_UPDATE_AUTO_CHECK_DAY_KEY, '')
+      const now = new Date()
+      if (!shouldAutoCheckDesktopUpdate(now, minimumCheckHour, lastCheckedDayKey)) {
+        return
+      }
+      const todayKey = getDesktopUpdateDayKey(now)
+      writeJsonStorage(DESKTOP_UPDATE_AUTO_CHECK_DAY_KEY, todayKey)
+      void checkForUpdates({ userInitiated: false }).catch(() => undefined)
+    }
+
+    const timerId = window.setInterval(runAutoCheck, 60 * 60 * 1000)
+    runAutoCheck()
+    return () => window.clearInterval(timerId)
+  }, [updateState.minimumCheckHour])
+
   async function handleLogout() {
     const currentUserId = auth.user?.id
     try {
@@ -10162,6 +10678,23 @@ export function App() {
         </div>
       </DesktopWindowFrame>
     )
+  }
+
+  function markAnnouncementAsRead(announcementId: string) {
+    setReadAnnouncementIds((current) => {
+      if (current.includes(announcementId)) {
+        return current
+      }
+      const next = [...current, announcementId]
+      writeJsonStorage(DESKTOP_ANNOUNCEMENT_READ_IDS_KEY, next)
+      return next
+    })
+  }
+
+  function handleAnnouncementOpen(item: DesktopAnnouncement) {
+    markAnnouncementAsRead(item.id)
+    setActiveAnnouncement(item)
+    setUpdatePopoverOpen(false)
   }
 
   if (!auth.user) {
@@ -10247,18 +10780,100 @@ export function App() {
             <div className='sidebar-footer'>
               <div className='sidebar-account'>
                 {!collapsed && (
-                  <div className='sidebar-user-row' onClick={handleSidebarSecretClick}>
-                    <span className='user-pill'>{auth.user.username}</span>
-                    <span className='user-pill secondary'>{sidebarWalletBalance}</span>
-                    <button
-                      className='ghost-button icon-only tiny'
-                      type='button'
-                      onClick={() => void handleLogout()}
-                      title='退出'
-                      aria-label='退出'
-                    >
-                      <LogOut size={16} />
-                    </button>
+                  <div className='sidebar-user-stack' ref={updatePopoverRef}>
+                    <div className='sidebar-user-row' onClick={handleSidebarUserRowClick}>
+                      <span className={`user-pill ${showUpdateDot ? 'has-update-dot' : ''}`}>
+                        {auth.user.username}
+                        {showAnnouncementCount ? (
+                          <span className='user-pill-count-badge'>
+                            {unreadAnnouncementCount > 99 ? '99+' : unreadAnnouncementCount}
+                          </span>
+                        ) : null}
+                      </span>
+                      <span className='user-pill secondary'>{sidebarWalletBalance}</span>
+                      <button
+                        className='ghost-button icon-only tiny'
+                        type='button'
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          void handleLogout()
+                        }}
+                        title='退出'
+                        aria-label='退出'
+                      >
+                        <LogOut size={16} />
+                      </button>
+                    </div>
+                    {updatePopoverOpen && (
+                      <div className='desktop-update-popover'>
+                        <div className='desktop-notice-section'>
+                          <div className='desktop-notice-section-head'>
+                            <strong>公告</strong>
+                            <small>{announcements.length ? `共 ${announcements.length} 条` : '暂无公告'}</small>
+                          </div>
+                          {announcements.length ? (
+                            <div className='desktop-announcement-list'>
+                              {announcements.map((item) => {
+                                const unread = !readAnnouncementIds.includes(item.id)
+                                return (
+                                  <button
+                                    key={item.id}
+                                    type='button'
+                                    className={`desktop-announcement-item ${unread ? 'unread' : ''}`}
+                                    onClick={() => handleAnnouncementOpen(item)}
+                                  >
+                                    <span className='desktop-announcement-copy'>
+                                      <strong>{item.title}</strong>
+                                      <small>{item.published_at || '点击查看详情'}</small>
+                                    </span>
+                                    {unread ? <span className='desktop-update-pill'>新</span> : null}
+                                  </button>
+                                )
+                              })}
+                            </div>
+                          ) : null}
+                        </div>
+
+                        <div className='desktop-notice-section desktop-notice-section-update'>
+                          <div className='desktop-update-inline-row'>
+                            <div className='desktop-update-inline-copy'>
+                              <strong>版本更新</strong>
+                              <small>
+                                当前 {appVersion}
+                                {updateState.latestVersion ? ` / 最新 ${updateState.latestVersion}` : ''}
+                                {updateState.release?.released_at ? ` · ${updateState.release.released_at}` : ''}
+                              </small>
+                            </div>
+                            <button
+                              className='secondary-button tiny desktop-update-action'
+                              type='button'
+                              onClick={() => void handleUpdatePrimaryAction()}
+                              disabled={updateState.status === 'downloading' || updateState.status === 'checking'}
+                            >
+                              {updateState.status === 'checking' || updateState.status === 'downloading' ? (
+                                <LoaderCircle className='spin' size={14} />
+                              ) : updateState.status === 'downloaded' ? (
+                                <Download size={14} />
+                              ) : null}
+                              {updatePrimaryActionLabel}
+                            </button>
+                          </div>
+                          {updateState.message ? <p className='desktop-update-message'>{updateState.message}</p> : null}
+                          {updateState.status === 'downloading' ? (
+                            <div className='desktop-update-progress'>
+                              <div className='desktop-update-progress-bar'>
+                                <span
+                                  style={{
+                                    width: `${Math.max(0, Math.min(100, updateState.progress || 0))}%`,
+                                  }}
+                                />
+                              </div>
+                              <small>{updateProgressLabel}</small>
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
                 {collapsed && (
@@ -10326,6 +10941,34 @@ export function App() {
               <button className='primary-button' type='button' onClick={() => void handleSaveServerBaseUrl()}>
                 保存并重载
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeAnnouncement && (
+        <div className='modal-mask' onClick={() => setActiveAnnouncement(null)}>
+          <div className='modal-card announcement-modal-card' onClick={(event) => event.stopPropagation()}>
+            <div className='announcement-modal-head'>
+              <div>
+                <span className='eyebrow dark'>公告</span>
+                <h2>{activeAnnouncement.title}</h2>
+                {activeAnnouncement.published_at ? (
+                  <p className='desktop-update-meta'>{activeAnnouncement.published_at}</p>
+                ) : null}
+              </div>
+              <button
+                className='ghost-button icon-only tiny'
+                type='button'
+                onClick={() => setActiveAnnouncement(null)}
+                aria-label='关闭公告'
+                title='关闭公告'
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className='announcement-modal-body'>
+              <LazyMarkdownContent content={activeAnnouncement.content} className='announcement-markdown' />
             </div>
           </div>
         </div>

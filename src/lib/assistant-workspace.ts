@@ -2,6 +2,7 @@ import type { ChatModelOption } from '../shared/contracts'
 import type { CliHistoryEntry, CliLogKind, CliSessionMessage } from '../shared/desktop'
 
 export type AssistantModeKey = 'chat' | 'draw' | 'codex' | 'claude'
+export type ModelVendorFilter = 'all' | 'openai' | 'anthropic' | 'deepseek' | 'xiaomimimo'
 
 export type CliLogEntryLike = {
   id: string
@@ -76,6 +77,41 @@ function normalizeModelValue(value: string) {
   return value.trim().toLowerCase()
 }
 
+function supportsEndpoint(model: ChatModelOption | undefined, endpoint: string) {
+  const endpoints = model?.supportedEndpointTypes
+  return Array.isArray(endpoints) && endpoints.includes(endpoint)
+}
+
+function isOpenAITextCompatibleModel(value: string) {
+  const normalized = normalizeModelValue(value)
+  return (
+    normalized.includes('codex') ||
+    normalized.startsWith('gpt-') ||
+    normalized.startsWith('chatgpt') ||
+    normalized.startsWith('o1') ||
+    normalized.startsWith('o3') ||
+    normalized.startsWith('o4')
+  )
+}
+
+function isDeepSeekCodexCompatibleModel(value: string) {
+  const normalized = normalizeModelValue(value)
+  return normalized === 'deepseek-v4-flash' || normalized === 'deepseek-v4-pro'
+}
+
+function isDeepSeekClaudeCompatibleModel(value: string) {
+  return isDeepSeekCodexCompatibleModel(value)
+}
+
+function isMimoCodexCompatibleModel(value: string) {
+  const normalized = normalizeModelValue(value)
+  return normalized === 'mimo-v2.5' || normalized === 'mimo-v2.5-pro'
+}
+
+function isMimoClaudeCompatibleModel(value: string) {
+  return normalizeModelValue(value) === 'mimo-v2.5-pro'
+}
+
 function toTimelineTimestamp(value: number) {
   if (!value) {
     return 0
@@ -83,20 +119,113 @@ function toTimelineTimestamp(value: number) {
   return value > 10_000_000_000 ? Math.floor(value) : Math.floor(value * 1000)
 }
 
-export function isCodexModel(value: string) {
-  const normalized = normalizeModelValue(value)
+export function isCodexModel(model: ChatModelOption | string) {
+  const normalized = normalizeModelValue(typeof model === 'string' ? model : model.value)
+  if (normalized.startsWith('deepseek')) {
+    if (!isDeepSeekCodexCompatibleModel(normalized)) {
+      return false
+    }
+    if (typeof model !== 'string' && Array.isArray(model.supportedEndpointTypes) && model.supportedEndpointTypes.length) {
+      return (
+        supportsEndpoint(model, 'openai-response') || supportsEndpoint(model, 'openai-response-compact')
+      )
+    }
+    return true
+  }
+  if (normalized.startsWith('mimo-') || normalized.includes('xiaomi') || normalized.includes('mimo')) {
+    if (!isMimoCodexCompatibleModel(normalized)) {
+      return false
+    }
+    if (typeof model !== 'string' && Array.isArray(model.supportedEndpointTypes) && model.supportedEndpointTypes.length) {
+      return (
+        supportsEndpoint(model, 'openai-response') || supportsEndpoint(model, 'openai-response-compact')
+      )
+    }
+    return true
+  }
+
+  if (typeof model !== 'string') {
+    if (
+      supportsEndpoint(model, 'openai-response') ||
+      supportsEndpoint(model, 'openai-response-compact')
+    ) {
+      return !isImageGenerationModel(model.value)
+    }
+    if (supportsEndpoint(model, 'openai') && isOpenAITextCompatibleModel(model.value)) {
+      return !isImageGenerationModel(model.value)
+    }
+    if (Array.isArray(model.supportedEndpointTypes) && model.supportedEndpointTypes.length) {
+      return false
+    }
+  }
   if (isImageGenerationModel(normalized)) {
     return false
   }
-  return normalized.includes('codex') || normalized.startsWith('gpt-')
+  return isOpenAITextCompatibleModel(normalized)
 }
 
-export function isClaudeModel(value: string) {
-  return normalizeModelValue(value).includes('claude')
+export function isClaudeModel(model: ChatModelOption | string) {
+  const normalized = normalizeModelValue(typeof model === 'string' ? model : model.value)
+  if (normalized.startsWith('deepseek')) {
+    if (!isDeepSeekClaudeCompatibleModel(normalized)) {
+      return false
+    }
+    if (typeof model !== 'string' && Array.isArray(model.supportedEndpointTypes) && model.supportedEndpointTypes.length) {
+      return supportsEndpoint(model, 'anthropic')
+    }
+    return true
+  }
+  if (normalized.startsWith('mimo-') || normalized.includes('xiaomi') || normalized.includes('mimo')) {
+    if (!isMimoClaudeCompatibleModel(normalized)) {
+      return false
+    }
+    if (typeof model !== 'string' && Array.isArray(model.supportedEndpointTypes) && model.supportedEndpointTypes.length) {
+      return supportsEndpoint(model, 'anthropic')
+    }
+    return true
+  }
+  if (typeof model !== 'string') {
+    if (supportsEndpoint(model, 'anthropic')) {
+      return !isImageGenerationModel(model.value)
+    }
+    if (Array.isArray(model.supportedEndpointTypes) && model.supportedEndpointTypes.length) {
+      return false
+    }
+  }
+  return normalized.includes('claude')
 }
 
 export function isImageGenerationModel(value: string) {
   return normalizeModelValue(value) === 'gpt-image-2'
+}
+
+export function resolveModelVendorFilter(value: string): Exclude<ModelVendorFilter, 'all'> | null {
+  const normalized = normalizeModelValue(value)
+  if (!normalized) {
+    return null
+  }
+  if (normalized.startsWith('deepseek')) {
+    return 'deepseek'
+  }
+  if (normalized.startsWith('mimo-') || normalized.includes('xiaomi') || normalized.includes('mimo')) {
+    return 'xiaomimimo'
+  }
+  if (normalized.includes('claude')) {
+    return 'anthropic'
+  }
+  if (
+    isOpenAITextCompatibleModel(normalized)
+  ) {
+    return 'openai'
+  }
+  return null
+}
+
+export function filterModelsByVendor(models: ChatModelOption[], vendor: ModelVendorFilter) {
+  if (vendor === 'all') {
+    return models
+  }
+  return models.filter((item) => resolveModelVendorFilter(item.value) === vendor)
 }
 
 function uniqueModels(items: ChatModelOption[]) {
@@ -119,11 +248,11 @@ export function filterAssistantModels(
   const source = uniqueModels([...models, ...fallbackModels])
 
   if (mode === 'codex') {
-    return source.filter((item) => isCodexModel(item.value))
+    return source.filter((item) => isCodexModel(item))
   }
 
   if (mode === 'claude') {
-    return source.filter((item) => isClaudeModel(item.value))
+    return source.filter((item) => isClaudeModel(item))
   }
 
   if (mode === 'draw') {
@@ -320,20 +449,38 @@ export function buildCliRecentSessions(input: {
       continue
     }
 
-    const projectPath = input.sessionProjectPathMap[sessionId] || ''
+    const existing = merged.get(sessionId)
+    const projectPath = input.sessionProjectPathMap[sessionId] || existing?.projectPath || ''
+    const projectName =
+      (projectPath ? projectPath.split(/[\\/]/).filter(Boolean).at(-1) : '') ||
+      existing?.projectName ||
+      '未命名项目'
     const preview = resolvePreview(messages)
     const updatedAt = resolveUpdatedAt(messages, input.sessionLogsMap[sessionId] || [])
-    const title = preview || (projectPath ? projectPath.split(/[\\/]/).filter(Boolean).at(-1) || '最近会话' : '最近会话')
+    const title =
+      existing?.title ||
+      preview ||
+      (projectPath ? projectPath.split(/[\\/]/).filter(Boolean).at(-1) || '最近会话' : '最近会话')
 
     merged.set(sessionId, {
       id: sessionId,
       title,
       preview,
       updatedAt,
-      projectName: projectPath ? projectPath.split(/[\\/]/).filter(Boolean).at(-1) || '未命名项目' : '未命名项目',
+      projectName,
       projectPath: projectPath || undefined,
     })
   }
 
   return [...merged.values()].sort((left, right) => right.updatedAt - left.updatedAt)
+}
+
+export function applyCliHistoryTitleOverrides(
+  history: CliHistoryEntry[],
+  titleOverrides: Record<string, string>
+) {
+  return history.map((item) => ({
+    ...item,
+    title: titleOverrides[item.id] || item.title,
+  }))
 }

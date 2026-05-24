@@ -27,12 +27,17 @@ import type {
   CliExtensionInstallRequest,
   CliExtensionInstallResult,
   CliPlanState,
+  DesktopAppMeta,
   DesktopChatStreamPayload,
   DesktopChatStreamRequest,
   DesktopDeleteCliMessageRequest,
   DesktopDeleteCliSessionsRequest,
+  DesktopReleaseManifest,
+  DesktopReleasePlatform,
+  DesktopUpdateState,
   DesktopExportTextFileRequest,
 } from '../src/shared/desktop'
+import { compareDesktopVersions } from '../src/lib/app-update.ts'
 import { parseDesktopChatStreamDataLine } from '../src/lib/chat-reasoning.ts'
 import {
   buildClaudePlanStateFromRecords,
@@ -47,6 +52,10 @@ import {
   type BundledCodexCuratedSkillCatalog,
   type BundledPluginMarketplaceCatalog,
 } from '../src/lib/cli-marketplace-catalog.ts'
+import {
+  pickClaudeApiKeyFromUnknown,
+  resolveClaudeDesktopEnv,
+} from '../src/lib/claude-cli-config.ts'
 import { resolveCliProbeResult, shouldUseWindowsCommandShimForPath } from '../src/lib/desktop-service.ts'
 
 const DEFAULT_SERVER_BASE_URL = 'https://ai.oneapi.center'
@@ -81,6 +90,11 @@ const stoppedCliRequests = new Set<string>()
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
 type ThemeMode = 'light' | 'dark'
 const bundledCliCatalogCache = new Map<string, unknown>()
+let desktopUpdateState: DesktopUpdateState = {
+  status: 'idle',
+  currentVersion: app.getVersion(),
+}
+let updateDownloadPromise: Promise<DesktopUpdateState> | null = null
 
 function applyThemeMode(mode: ThemeMode) {
   nativeTheme.themeSource = mode
@@ -360,6 +374,7 @@ interface DesktopSaveImageRequest {
 interface DesktopCopyImageRequest {
   sourceUrl?: string
   dataBase64?: string
+  filePath?: string
 }
 
 const cliConfig = {
@@ -515,13 +530,285 @@ if (!hasSingleInstanceLock) {
   })
 }
 
-function getAppMeta() {
+function getAppMeta(): DesktopAppMeta {
   return {
     platform: process.platform,
     productName: app.name,
     serverBaseUrl,
     iconPath: APP_ICON_PATH,
+    version: app.getVersion(),
   }
+}
+
+function getUpdateCacheDirectory() {
+  return path.join(app.getPath('userData'), 'updates')
+}
+
+function emitDesktopUpdateState() {
+  for (const win of BrowserWindow.getAllWindows()) {
+    win.webContents.send('desktop:update-state', desktopUpdateState)
+  }
+}
+
+function setDesktopUpdateState(next: Partial<DesktopUpdateState>) {
+  desktopUpdateState = {
+    ...desktopUpdateState,
+    ...next,
+    currentVersion: app.getVersion(),
+  }
+  emitDesktopUpdateState()
+  return desktopUpdateState
+}
+
+function getDesktopReleaseForCurrentPlatform(
+  manifest: DesktopReleaseManifest
+): DesktopReleasePlatform | undefined {
+  return process.platform === 'darwin' ? manifest.macos : manifest.windows
+}
+
+function normalizeDesktopAnnouncements(manifest: DesktopReleaseManifest) {
+  const raw = Array.isArray(manifest.announcements) ? manifest.announcements : []
+  return raw
+    .map((entry, index) => {
+      if (!entry || typeof entry !== 'object') {
+        return null
+      }
+      const title = typeof entry.title === 'string' ? entry.title.trim() : ''
+      const content = typeof entry.content === 'string' ? entry.content.trim() : ''
+      const publishedAt = typeof entry.published_at === 'string' ? entry.published_at.trim() : ''
+      const id =
+        typeof entry.id === 'string' && entry.id.trim()
+          ? entry.id.trim()
+          : `${publishedAt || 'announcement'}:${title || `item-${index + 1}`}`
+
+      if (!title && !content) {
+        return null
+      }
+
+      return {
+        id,
+        title: title || `公告 ${index + 1}`,
+        content,
+        published_at: publishedAt || undefined,
+      }
+    })
+    .filter((item): item is NonNullable<typeof item> => Boolean(item))
+}
+
+async function fetchDesktopReleaseManifest(): Promise<DesktopReleaseManifest> {
+  const response = await getDesktopSession().fetch(buildUrl('/api/download/desktop-release'))
+  if (!response.ok) {
+    const data = await parseResponse(response)
+    throw new Error(getResponseErrorMessage(data, response.status, '获取版本清单失败'))
+  }
+
+  const data = await parseResponse(response)
+  const manifest =
+    typeof data === 'object' &&
+    data &&
+    'data' in data &&
+    typeof data.data === 'object' &&
+    data.data
+      ? (data.data as DesktopReleaseManifest)
+      : (data as DesktopReleaseManifest)
+
+  return manifest
+}
+
+function resolveReleasePackageFileName(release: DesktopReleasePlatform | undefined) {
+  const rawUrl = release?.installer?.url || ''
+  const configured = release?.installer?.file_name?.trim()
+  if (configured) {
+    return configured
+  }
+  try {
+    const target = new URL(rawUrl)
+    return decodeURIComponent(path.basename(target.pathname)) || 'desktop-update.bin'
+  } catch {
+    return rawUrl ? path.basename(rawUrl) : 'desktop-update.bin'
+  }
+}
+
+async function checkForDesktopUpdate(options: {
+  userInitiated?: boolean
+} = {}) {
+  setDesktopUpdateState({
+    status: 'checking',
+    message: options.userInitiated ? '正在检查更新...' : undefined,
+    checkedAt: Date.now(),
+  })
+
+  try {
+    const manifest = await fetchDesktopReleaseManifest()
+    const release = getDesktopReleaseForCurrentPlatform(manifest)
+    const latestVersion = release?.version?.trim() || ''
+    const minimumCheckHour = manifest.minimum_check_hour ?? 12
+    const announcements = normalizeDesktopAnnouncements(manifest)
+
+    if (!release || !latestVersion) {
+      return setDesktopUpdateState({
+        status: options.userInitiated ? 'error' : 'idle',
+        latestVersion: '',
+        release: undefined,
+        announcements,
+        minimumCheckHour,
+        message: options.userInitiated ? '后台尚未配置当前平台的版本清单。' : undefined,
+        installerPath: '',
+      })
+    }
+
+    const currentVersion = app.getVersion()
+    const comparison = compareDesktopVersions(currentVersion, latestVersion)
+    const installerPath = desktopUpdateState.installerPath || ''
+    const hasDownloadedInstaller =
+      comparison < 0 &&
+      installerPath &&
+      desktopUpdateState.latestVersion === latestVersion
+
+    if (comparison >= 0) {
+      return setDesktopUpdateState({
+        status: 'up_to_date',
+        latestVersion,
+        release,
+        announcements,
+        minimumCheckHour,
+        installerPath: '',
+        progress: 100,
+        message: options.userInitiated ? '当前已是最新版本。' : undefined,
+      })
+    }
+
+    return setDesktopUpdateState({
+      status: hasDownloadedInstaller ? 'downloaded' : 'available',
+      latestVersion,
+      release,
+      announcements,
+      minimumCheckHour,
+      progress: hasDownloadedInstaller ? 100 : 0,
+      message: hasDownloadedInstaller ? '更新包已下载完成。' : '发现新版本，可后台下载。',
+    })
+  } catch (error) {
+    return setDesktopUpdateState({
+      status: 'error',
+      message: error instanceof Error ? error.message : '检查更新失败',
+    })
+  }
+}
+
+async function startDesktopUpdateDownload() {
+  if (desktopUpdateState.status === 'downloading' && updateDownloadPromise) {
+    return updateDownloadPromise
+  }
+
+  const release = desktopUpdateState.release
+  const downloadUrl = release?.installer?.url?.trim() || ''
+  const latestVersion = release?.version?.trim() || desktopUpdateState.latestVersion || ''
+  if (!downloadUrl || !latestVersion) {
+    throw new Error('当前没有可下载的更新包。')
+  }
+
+  updateDownloadPromise = (async () => {
+    try {
+      const fileName = resolveReleasePackageFileName(release)
+      const targetDir = path.join(getUpdateCacheDirectory(), latestVersion)
+      const targetPath = path.join(targetDir, fileName)
+      await fs.mkdir(targetDir, { recursive: true })
+
+      setDesktopUpdateState({
+        status: 'downloading',
+        latestVersion,
+        progress: 0,
+        downloadedBytes: 0,
+        totalBytes: 0,
+        message: '正在后台下载更新包...',
+      })
+
+      const response = await getDesktopSession().fetch(buildUrl(downloadUrl))
+      if (!response.ok) {
+        const data = await parseResponse(response)
+        throw new Error(getResponseErrorMessage(data, response.status, '下载更新包失败'))
+      }
+
+      const totalBytes = Number.parseInt(response.headers.get('content-length') || '0', 10) || 0
+      const reader = response.body?.getReader()
+      if (!reader) {
+        throw new Error('当前环境不支持更新包下载。')
+      }
+
+      const writer = createWriteStream(targetPath)
+      let downloadedBytes = 0
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) {
+            break
+          }
+          if (!value) {
+            continue
+          }
+          downloadedBytes += value.length
+          writer.write(Buffer.from(value))
+          setDesktopUpdateState({
+            status: 'downloading',
+            latestVersion,
+            downloadedBytes,
+            totalBytes,
+            progress: totalBytes > 0 ? Math.min(100, (downloadedBytes / totalBytes) * 100) : 0,
+            message: '正在后台下载更新包...',
+          })
+        }
+      } finally {
+        await new Promise<void>((resolve, reject) => {
+          writer.once('error', reject)
+          writer.end(() => resolve())
+        })
+      }
+
+      return setDesktopUpdateState({
+        status: 'downloaded',
+        latestVersion,
+        installerPath: targetPath,
+        downloadedBytes,
+        totalBytes: totalBytes || downloadedBytes,
+        progress: 100,
+        message: '更新包已下载完成。',
+      })
+    } catch (error) {
+      return setDesktopUpdateState({
+        status: 'error',
+        message: error instanceof Error ? error.message : '下载更新包失败',
+      })
+    } finally {
+      updateDownloadPromise = null
+    }
+  })()
+
+  return updateDownloadPromise
+}
+
+async function installDesktopUpdate() {
+  const installerPath = desktopUpdateState.installerPath?.trim() || ''
+  if (!installerPath) {
+    throw new Error('更新包尚未下载完成。')
+  }
+
+  await fs.access(installerPath)
+  if (process.platform === 'darwin') {
+    const openResult = await shell.openPath(installerPath)
+    if (openResult) {
+      throw new Error(openResult)
+    }
+    return
+  }
+
+  const child = spawn(installerPath, [], {
+    detached: true,
+    stdio: 'ignore',
+  })
+  child.unref()
+  isQuitting = true
+  app.quit()
 }
 
 function attachContextMenu(win: BrowserWindow) {
@@ -735,6 +1022,7 @@ async function requestChatStream(sender: WebContents, input: DesktopChatStreamRe
       body: JSON.stringify({
         model: input.model,
         group: input.group,
+        prompt_cache_key: input.promptCacheKey,
         reasoning_effort: input.reasoningEffort,
         messages: input.messages,
         temperature: input.temperature,
@@ -1592,9 +1880,11 @@ async function saveImageToUserPath(input: DesktopSaveImageRequest) {
 }
 
 async function copyImageToClipboard(input: DesktopCopyImageRequest) {
-  let image = nativeImage.createEmpty()
+  let image: ReturnType<typeof nativeImage.createEmpty>
 
-  if (input.dataBase64?.trim()) {
+  if (input.filePath?.trim()) {
+    image = nativeImage.createFromPath(input.filePath.trim())
+  } else if (input.dataBase64?.trim()) {
     image = nativeImage.createFromBuffer(Buffer.from(input.dataBase64.trim(), 'base64'))
   } else if (input.sourceUrl?.trim()) {
     const sourceUrl = input.sourceUrl.trim()
@@ -1731,6 +2021,7 @@ function createCodexProviderSection(apiKey: string, baseUrl: string): TomlSectio
       '[model_providers.oneapi_desktop]',
       'name = "oneapi_desktop"',
       `base_url = "${resolvedBaseUrl}"`,
+      `api_key = "${apiKey}"`,
       `experimental_bearer_token = "${apiKey}"`,
       'wire_api = "responses"',
     ],
@@ -1967,19 +2258,6 @@ function pickClaudeApiKey(env?: Record<string, string>) {
   return env?.ANTHROPIC_AUTH_TOKEN?.trim() || env?.ANTHROPIC_API_KEY?.trim() || ''
 }
 
-function pickClaudeApiKeyFromUnknown(input: unknown) {
-  if (!input || typeof input !== 'object') {
-    return ''
-  }
-
-  const source = input as Record<string, unknown>
-  return (
-    (typeof source.ANTHROPIC_AUTH_TOKEN === 'string' && source.ANTHROPIC_AUTH_TOKEN.trim()) ||
-    (typeof source.ANTHROPIC_API_KEY === 'string' && source.ANTHROPIC_API_KEY.trim()) ||
-    ''
-  )
-}
-
 async function resolveClaudeFallbackApiKey() {
   const claudeAuth = await readClaudeAuthDocument().catch(() => null)
   const fromClaudeAuth = pickClaudeApiKeyFromUnknown(claudeAuth)
@@ -2023,37 +2301,25 @@ async function resolveClaudeFallbackApiKey() {
 async function readResolvedClaudeSettingsDocument(targetPath = cliConfig.claude.configPath) {
   const parsed = await readCurrentClaudeSettingsDocument(targetPath).catch(() => ({} as ClaudeSettingsDocument))
   const currentEnv = (typeof parsed.env === 'object' && parsed.env ? parsed.env : {}) as Record<string, string>
-  const currentKey = pickClaudeApiKey(currentEnv)
-  if (currentKey) {
-    return {
-      ...parsed,
-      env: {
-        ...currentEnv,
-        ANTHROPIC_API_KEY: resolveDesktopCliKeyRecord(currentKey),
-        ANTHROPIC_AUTH_TOKEN: resolveDesktopCliKeyRecord(currentKey),
-      },
-    } satisfies ClaudeSettingsDocument
-  }
-
+  const claudeAuth = await readClaudeAuthDocument().catch(() => null)
   const fallbackKey = await resolveClaudeFallbackApiKey()
-  if (!fallbackKey) {
-    return {
-      ...parsed,
-      env: currentEnv,
-    } satisfies ClaudeSettingsDocument
-  }
-
+  const resolvedEnv = resolveClaudeDesktopEnv({
+    currentEnv,
+    authDocument: claudeAuth,
+    fallbackApiKey: fallbackKey,
+    defaultBaseUrl: DEFAULT_CLAUDE_BASE_URL,
+  })
+  const changed = JSON.stringify(resolvedEnv) !== JSON.stringify(currentEnv)
   const nextDocument: ClaudeSettingsDocument = {
     ...parsed,
-    env: {
-      ...currentEnv,
-      ANTHROPIC_API_KEY: fallbackKey,
-      ANTHROPIC_AUTH_TOKEN: fallbackKey,
-    },
+    env: resolvedEnv,
   }
 
-  await fs.mkdir(path.dirname(targetPath), { recursive: true })
-  await fs.writeFile(targetPath, JSON.stringify(nextDocument, null, 2), 'utf8')
+  if (changed) {
+    await fs.mkdir(path.dirname(targetPath), { recursive: true })
+    await fs.writeFile(targetPath, JSON.stringify(nextDocument, null, 2), 'utf8')
+  }
+
   return nextDocument
 }
 
@@ -4309,7 +4575,7 @@ async function listClaudeHistory(limit = 12): Promise<CliHistoryEntry[]> {
   const projectsRoot = path.join(os.homedir(), '.claude', 'projects')
   const files = await walkFiles(
     projectsRoot,
-    (filePath) => filePath.endsWith('.jsonl')
+    (filePath) => filePath.endsWith('.jsonl') && !filePath.includes(`${path.sep}subagents${path.sep}`)
   )
   const recentFiles = (
     await Promise.all(
@@ -4352,9 +4618,36 @@ async function getClaudeSessionFile(sessionId: string) {
   const projectsRoot = path.join(os.homedir(), '.claude', 'projects')
   const files = await walkFiles(
     projectsRoot,
-    (filePath) => filePath.endsWith('.jsonl') && path.basename(filePath) === `${sessionId}.jsonl`
+    (filePath) =>
+      filePath.endsWith('.jsonl') &&
+      path.basename(filePath) === `${sessionId}.jsonl` &&
+      !filePath.includes(`${path.sep}subagents${path.sep}`)
   )
   return files[0] ?? ''
+}
+
+function decodeClaudeProjectPathFromFilePath(filePath: string) {
+  const projectsRoot = path.join(os.homedir(), '.claude', 'projects')
+  const relative = path.relative(projectsRoot, filePath)
+  if (!relative || relative.startsWith('..')) {
+    return ''
+  }
+
+  const [encodedRoot] = relative.split(path.sep)
+  if (!encodedRoot?.trim()) {
+    return ''
+  }
+
+  const segments = encodedRoot.split('--').filter(Boolean)
+  if (!segments.length) {
+    return ''
+  }
+
+  if (segments[0].length === 1) {
+    return `${segments[0]}:\\${segments.slice(1).join('\\')}`
+  }
+
+  return segments.join(path.sep)
 }
 
 function parseClaudeSession(lines: string[]): {
@@ -4468,13 +4761,17 @@ async function getClaudeSession(sessionId: string): Promise<CliSessionDetails | 
     }
   }
 
+  if (!projectPath) {
+    projectPath = decodeClaudeProjectPathFromFilePath(filePath)
+  }
+
   const parsedSession = parseClaudeSession(lines)
   return {
     id: sessionId,
     client: 'claude',
     preview: parsedSession.messages.at(-1)?.content ?? '',
     updatedAt: parsedSession.messages.at(-1)?.createdAt ?? 0,
-    projectName: projectPath ? path.basename(projectPath) : path.basename(path.dirname(filePath)) || '未命名项目',
+    projectName: projectPath ? path.basename(projectPath) : '未命名项目',
     projectPath,
     messages: parsedSession.messages.map((message) => ({
       ...message,
@@ -4695,6 +4992,14 @@ function safeStringify(value: unknown) {
   }
 }
 
+function normalizeCliLogText(value: string, maxLength = 120) {
+  const normalized = value.replace(/\s+/g, ' ').trim()
+  if (!normalized) {
+    return ''
+  }
+  return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 1)}…` : normalized
+}
+
 function extractCommandFromUnknown(value: unknown): string {
   if (!value || typeof value !== 'object') {
     return ''
@@ -4731,16 +5036,69 @@ function extractCliFilesFromUnknown(value: unknown): CliFileChange[] {
   return []
 }
 
+function extractPurposeFromUnknown(value: unknown): string {
+  if (!value || typeof value !== 'object') {
+    return ''
+  }
+
+  const source = value as Record<string, unknown>
+  const candidates = [
+    'description',
+    'purpose',
+    'reason',
+    'summary',
+    'explanation',
+    'task',
+    'prompt',
+    'query',
+  ]
+  for (const key of candidates) {
+    if (typeof source[key] === 'string' && source[key]?.trim()) {
+      return normalizeCliLogText(source[key].trim())
+    }
+  }
+
+  return ''
+}
+
+function summarizeCommandForCliLog(command: string, maxLength = 88) {
+  const normalized = normalizeCliLogText(command, maxLength)
+  if (!normalized) {
+    return ''
+  }
+  return normalized
+}
+
+function normalizeCliToolDetail(detail: string) {
+  const normalized = detail.trim()
+  if (!normalized || normalized === '{}' || normalized === '[]' || normalized === 'null') {
+    return ''
+  }
+  return normalized
+}
+
 function describeCliToolUse(name: string, input: unknown) {
   const command = extractCommandFromUnknown(input)
   const files = extractCliFilesFromUnknown(input)
-  const detail = input && typeof input === 'object' ? safeStringify(input) : ''
+  const purpose = extractPurposeFromUnknown(input) || summarizeCommandForCliLog(command)
+  const detail = normalizeCliToolDetail(input && typeof input === 'object' ? safeStringify(input) : '')
   return {
-    message: name ? `正在执行 ${name}` : '正在执行工具调用',
+    message: `${name ? `正在执行 ${name}` : '正在执行工具调用'}${purpose ? `：${purpose}` : ''}`,
     command,
     detail,
     files,
+    purpose,
+    meaningful: !!(command || detail || files.length || purpose),
   }
+}
+
+function buildCliToolUseEventKey(name: string, described: ReturnType<typeof describeCliToolUse>) {
+  return [
+    name.trim(),
+    described.command.trim(),
+    described.detail.trim(),
+    described.files.map((item) => item.path).join('|'),
+  ].join('::')
 }
 
 function extractToolUseEntries(content: unknown) {
@@ -4787,24 +5145,6 @@ function extractClaudeTextFromMessage(content: unknown) {
     })
     .join('')
     .trim()
-}
-
-function extractClaudeToolName(content: unknown) {
-  if (!Array.isArray(content)) {
-    return ''
-  }
-
-  const tool = content.find(
-    (item) =>
-      typeof item === 'object' &&
-      item &&
-      'type' in item &&
-      item.type === 'tool_use' &&
-      'name' in item &&
-      typeof item.name === 'string'
-  ) as { name?: string } | undefined
-
-  return tool?.name?.trim() ?? ''
 }
 
 async function runCodexPrompt(
@@ -5041,11 +5381,36 @@ async function runClaudePrompt(
   let finalResult: Record<string, unknown> | null = null
   let planState: CliPlanState | null = null
   const planRecords: Array<Record<string, unknown>> = []
+  const seenToolUseEvents = new Set<string>()
   const runtimeDiagnostics: CliRuntimeDiagnostics = {}
   const executablePath = await locateExecutable('claude')
   const managedRuntime = await readManagedNodeRuntime()
   const claudeSettings = await readResolvedClaudeSettingsDocument().catch(() => null)
   const spawnCommand = resolveCliSpawnCommand('claude', executablePath)
+
+  const emitClaudeToolUse = (toolName: string, toolInput: unknown, sourceKind: string) => {
+    const described = describeCliToolUse(toolName, toolInput)
+    if (!described.meaningful) {
+      return
+    }
+    const eventKey = buildCliToolUseEventKey(toolName, described)
+    if (seenToolUseEvents.has(eventKey)) {
+      return
+    }
+    seenToolUseEvents.add(eventKey)
+    if (described.command) {
+      progress.command(
+        described.message,
+        described.command,
+        sessionId,
+        described.detail,
+        described.files,
+        sourceKind
+      )
+      return
+    }
+    progress.tool(described.message, sessionId, described.detail, described.files, sourceKind)
+  }
 
   progress.intent('Claude 已开始处理当前任务。', sessionId, undefined, undefined, 'request.started')
 
@@ -5086,10 +5451,6 @@ async function runClaudePrompt(
           progress.intent('Claude 会话初始化完成。', sessionId, 'system.init', undefined, 'system.init')
           return
         }
-
-        if (parsed.subtype === 'hook_started' && typeof parsed.hook_name === 'string') {
-          progress.tool(`正在执行 ${parsed.hook_name}`, sessionId, safeStringify(parsed), undefined, `system.hook_started.${parsed.hook_name}`)
-        }
         return
       }
 
@@ -5098,18 +5459,12 @@ async function runClaudePrompt(
           typeof parsed.message === 'object' && parsed.message
             ? (parsed.message as { content?: unknown })
             : undefined
-        const toolName = extractClaudeToolName(
-          parsedMessage?.content
-        )
-        if (toolName) {
-          const toolEntry = extractToolUseEntries(parsedMessage?.content)[0]
-          const described = describeCliToolUse(toolName, toolEntry?.input)
-          const sourceKind = `assistant.tool_use.${toolName}`
-          if (described.command) {
-            progress.command(described.message, described.command, sessionId, described.detail, described.files, sourceKind)
-          } else {
-            progress.tool(described.message, sessionId, described.detail, described.files, sourceKind)
+        const toolEntries = extractToolUseEntries(parsedMessage?.content)
+        for (const toolEntry of toolEntries) {
+          if (!toolEntry.name) {
+            continue
           }
+          emitClaudeToolUse(toolEntry.name, toolEntry.input, `assistant.tool_use.${toolEntry.name}`)
         }
         return
       }
@@ -5123,13 +5478,7 @@ async function runClaudePrompt(
         ) {
           const block = event.content_block as Record<string, unknown>
           if (block.type === 'tool_use' && typeof block.name === 'string') {
-            const described = describeCliToolUse(block.name, block.input)
-            const sourceKind = `stream.tool_use.${block.name}`
-            if (described.command) {
-              progress.command(described.message, described.command, sessionId, described.detail, described.files, sourceKind)
-            } else {
-              progress.tool(described.message, sessionId, described.detail, described.files, sourceKind)
-            }
+            emitClaudeToolUse(block.name, block.input, `stream.tool_use.${block.name}`)
           }
         }
 
@@ -5274,6 +5623,8 @@ async function writeCodexConfig(request: CliDeployRequest) {
         ...currentAuth,
         auth_mode: 'apikey',
         OPENAI_API_KEY: resolveDesktopCliKeyRecord(request.apiKey),
+        OPENAI_BASE_URL: normalizeCodexBaseUrl(request.baseUrl),
+        OPENAI_API_BASE: normalizeCodexBaseUrl(request.baseUrl),
       },
       null,
       2
@@ -6170,6 +6521,12 @@ function startActiveTitleDrag(targetWindow: BrowserWindow, screenX: number, scre
 
 ipcMain.handle('app:get-platform', () => process.platform)
 ipcMain.handle('app:get-meta', () => getAppMeta())
+ipcMain.handle('app:get-update-state', () => desktopUpdateState)
+ipcMain.handle('app:check-update', async (_event, input?: { userInitiated?: boolean }) =>
+  checkForDesktopUpdate(input)
+)
+ipcMain.handle('app:start-update-download', async () => startDesktopUpdateDownload())
+ipcMain.handle('app:install-update', async () => installDesktopUpdate())
 ipcMain.handle('app:get-server-base-url', () => serverBaseUrl)
 ipcMain.handle('app:window-minimize', (event) => {
   BrowserWindow.fromWebContents(event.sender)?.minimize()

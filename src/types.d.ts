@@ -20,6 +20,7 @@ import type {
   CliDeployPreset,
   CliExtensionEntry,
   DeployProgressPayload,
+  DesktopAppMeta,
   DesktopApiRequest,
   DesktopApiResponse,
   DesktopChatStreamPayload,
@@ -30,6 +31,7 @@ import type {
   DesktopExportTextFileRequest,
   DesktopExportTextFileResult,
   DesktopTranslateSelectionPayload,
+  DesktopUpdateState,
 } from './shared/desktop'
 import type { ImageGenerationResponse } from './shared/contracts'
 
@@ -37,12 +39,11 @@ declare global {
   interface Window {
     desktopBridge?: {
       getPlatform: () => Promise<string>
-      getAppMeta: () => Promise<{
-        platform: string
-        productName: string
-        serverBaseUrl: string
-        iconPath: string
-      }>
+      getAppMeta: () => Promise<DesktopAppMeta>
+      getUpdateState: () => Promise<DesktopUpdateState>
+      checkForUpdates: (input?: { userInitiated?: boolean }) => Promise<DesktopUpdateState>
+      startUpdateDownload: () => Promise<DesktopUpdateState>
+      installUpdate: () => Promise<void>
       minimizeWindow: () => Promise<void>
       toggleMaximizeWindow: () => Promise<{ maximized: boolean }>
       startWindowDrag: (screenX: number, screenY: number) => Promise<void>
@@ -110,6 +111,9 @@ declare global {
       ) => () => void
       onTranslateSelectionRequested: (
         listener: (payload: DesktopTranslateSelectionPayload) => void
+      ) => () => void
+      onUpdateState: (
+        listener: (payload: DesktopUpdateState) => void
       ) => () => void
     }
   }

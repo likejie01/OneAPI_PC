@@ -22,6 +22,7 @@ import type {
   CliExtensionInstallRequest,
   CliExtensionInstallResult,
   DeployProgressPayload,
+  DesktopAppMeta,
   DesktopApiRequest,
   DesktopApiResponse,
   DesktopChatStreamPayload,
@@ -32,18 +33,21 @@ import type {
   DesktopExportTextFileRequest,
   DesktopExportTextFileResult,
   DesktopTranslateSelectionPayload,
+  DesktopUpdateState,
 } from '../src/shared/desktop'
 import type { ImageGenerationResponse } from '../src/shared/contracts'
 
 contextBridge.exposeInMainWorld('desktopBridge', {
   getPlatform: () => ipcRenderer.invoke('app:get-platform') as Promise<string>,
   getAppMeta: () =>
-    ipcRenderer.invoke('app:get-meta') as Promise<{
-      platform: string
-      productName: string
-      serverBaseUrl: string
-      iconPath: string
-    }>,
+    ipcRenderer.invoke('app:get-meta') as Promise<DesktopAppMeta>,
+  getUpdateState: () =>
+    ipcRenderer.invoke('app:get-update-state') as Promise<DesktopUpdateState>,
+  checkForUpdates: (input?: { userInitiated?: boolean }) =>
+    ipcRenderer.invoke('app:check-update', input) as Promise<DesktopUpdateState>,
+  startUpdateDownload: () =>
+    ipcRenderer.invoke('app:start-update-download') as Promise<DesktopUpdateState>,
+  installUpdate: () => ipcRenderer.invoke('app:install-update') as Promise<void>,
   minimizeWindow: () => ipcRenderer.invoke('app:window-minimize') as Promise<void>,
   toggleMaximizeWindow: () =>
     ipcRenderer.invoke('app:window-toggle-maximize') as Promise<{ maximized: boolean }>,
@@ -169,6 +173,14 @@ contextBridge.exposeInMainWorld('desktopBridge', {
   onTranslateSelectionRequested: (listener: (payload: DesktopTranslateSelectionPayload) => void) => {
     const channel = 'desktop:translate-selection-requested'
     const wrapped = (_event: unknown, payload: DesktopTranslateSelectionPayload) => listener(payload)
+    ipcRenderer.on(channel, wrapped)
+    return () => {
+      ipcRenderer.removeListener(channel, wrapped)
+    }
+  },
+  onUpdateState: (listener: (payload: DesktopUpdateState) => void) => {
+    const channel = 'desktop:update-state'
+    const wrapped = (_event: unknown, payload: DesktopUpdateState) => listener(payload)
     ipcRenderer.on(channel, wrapped)
     return () => {
       ipcRenderer.removeListener(channel, wrapped)

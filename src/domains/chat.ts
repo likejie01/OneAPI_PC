@@ -15,6 +15,32 @@ import type {
 } from '../shared/contracts'
 
 export async function getUserModels() {
+  type PricingModelResponse = {
+    model_name: string
+    supported_endpoint_types?: string[]
+  }
+
+  try {
+    const pricingResponse = await desktopEnvelope<PricingModelResponse[]>({
+      method: 'GET',
+      path: '/api/pricing',
+    })
+
+    if (pricingResponse.success && Array.isArray(pricingResponse.data) && pricingResponse.data.length) {
+      return pricingResponse.data.map(
+        (item): ChatModelOption => ({
+          label: item.model_name,
+          value: item.model_name,
+          supportedEndpointTypes: Array.isArray(item.supported_endpoint_types)
+            ? item.supported_endpoint_types
+            : undefined,
+        })
+      )
+    }
+  } catch {
+    // Fallback for older servers that do not expose pricing metadata consistently.
+  }
+
   const response = await desktopEnvelope<string[]>({
     method: 'GET',
     path: '/api/user/models',
@@ -47,6 +73,7 @@ export async function getUserGroups() {
 export async function sendChatCompletion(payload: {
   model: string
   group?: string
+  promptCacheKey?: string
   reasoningEffort?: string
   messages: Array<{
     role: 'system' | 'user' | 'assistant'
@@ -56,13 +83,14 @@ export async function sendChatCompletion(payload: {
 }, options: {
   requestId?: string
 } = {}) {
-  const { reasoningEffort, ...rest } = payload
+  const { reasoningEffort, promptCacheKey, ...rest } = payload
   return desktopRequest<ChatCompletionResponse>({
     method: 'POST',
     path: '/pg/chat/completions',
     requestId: options.requestId,
     body: {
       ...rest,
+      prompt_cache_key: promptCacheKey,
       reasoning_effort: reasoningEffort,
       stream: false,
     },
@@ -73,6 +101,7 @@ export async function streamChatCompletion(
   payload: {
     model: string
     group?: string
+    promptCacheKey?: string
     reasoningEffort?: string
     messages: Array<{
       role: 'system' | 'user' | 'assistant'
@@ -88,7 +117,7 @@ export async function streamChatCompletion(
     onDone?: (usage?: ChatCompletionResponse['usage']) => void
   }
 ) {
-  const { reasoningEffort, ...rest } = payload
+  const { reasoningEffort, promptCacheKey, ...rest } = payload
   const bridge = desktopBridge()
   const requestId =
     handlers.requestId ||
@@ -159,6 +188,7 @@ export async function streamChatCompletion(
         requestId,
         userId,
         ...rest,
+        promptCacheKey,
         reasoningEffort,
       })
       .catch((error) => {
@@ -253,6 +283,7 @@ export async function saveImageToDisk(payload: {
 export async function copyImageToClipboard(payload: {
   sourceUrl?: string
   dataBase64?: string
+  filePath?: string
 }) {
   return desktopBridge().copyImageToClipboard(payload)
 }

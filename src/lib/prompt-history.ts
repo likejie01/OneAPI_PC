@@ -38,7 +38,11 @@ export function navigatePromptHistory(
     }
   }
 
-  let nextIndex = state.browseIndex
+  const nextIndex = !browsing
+    ? 0
+    : direction === 'up'
+      ? Math.min(state.items.length - 1, state.browseIndex + 1)
+      : Math.max(0, state.browseIndex - 1)
   if (!browsing) {
     if (direction !== 'up') {
       return {
@@ -46,11 +50,6 @@ export function navigatePromptHistory(
         nextValue: currentValue,
       }
     }
-    nextIndex = 0
-  } else if (direction === 'up') {
-    nextIndex = Math.min(state.items.length - 1, state.browseIndex + 1)
-  } else {
-    nextIndex = Math.max(0, state.browseIndex - 1)
   }
 
   const nextValue = state.items[nextIndex] || currentValue

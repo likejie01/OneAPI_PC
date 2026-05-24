@@ -120,10 +120,16 @@ function formatUsageSummary(usage?: ChatMessage['usage']) {
   if (!usage) {
     return ''
   }
+  const cacheHitTokens = Math.max(
+    Number(usage.prompt_tokens_details?.cached_tokens || 0),
+    Number(usage.input_tokens_details?.cached_tokens || 0),
+    Number(usage.prompt_cache_hit_tokens || 0)
+  )
   const parts = [
     typeof usage.prompt_tokens === 'number' ? `prompt ${usage.prompt_tokens}` : '',
     typeof usage.completion_tokens === 'number' ? `completion ${usage.completion_tokens}` : '',
     typeof usage.total_tokens === 'number' ? `total ${usage.total_tokens}` : '',
+    cacheHitTokens > 0 ? `cache ${cacheHitTokens}` : '',
   ].filter(Boolean)
   return parts.length ? `Token：${parts.join(' / ')}` : ''
 }

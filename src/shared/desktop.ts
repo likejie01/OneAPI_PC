@@ -5,6 +5,14 @@ export type AssistantHistoryScope = 'chat' | 'draw'
 export type DeployStatus = 'pending' | 'running' | 'success' | 'error'
 export type CliPlanStatus = 'pending' | 'in_progress' | 'completed'
 export type DeployLogKind = 'info' | 'command' | 'stdout' | 'stderr' | 'result'
+export type DesktopUpdateStatus =
+  | 'idle'
+  | 'checking'
+  | 'available'
+  | 'downloading'
+  | 'downloaded'
+  | 'up_to_date'
+  | 'error'
 import type { ChatCompletionResponse, ChatContentPart } from './contracts'
 export type CliLogKind =
   | 'intent'
@@ -37,6 +45,7 @@ export interface DesktopChatStreamRequest {
   userId?: string
   model: string
   group?: string
+  promptCacheKey?: string
   reasoningEffort?: string
   messages: Array<{
     role: 'system' | 'user' | 'assistant'
@@ -52,6 +61,58 @@ export interface DesktopChatStreamPayload {
   message?: string
   status?: number
   usage?: ChatCompletionResponse['usage']
+}
+
+export interface DesktopAppMeta {
+  platform: string
+  productName: string
+  serverBaseUrl: string
+  iconPath: string
+  version: string
+}
+
+export interface DesktopReleasePackage {
+  url?: string
+  file_name?: string
+  size?: number
+  updated_at?: string
+}
+
+export interface DesktopReleasePlatform {
+  version?: string
+  released_at?: string
+  notes?: string
+  installer?: DesktopReleasePackage
+  portable?: DesktopReleasePackage
+}
+
+export interface DesktopReleaseManifest {
+  minimum_check_hour?: number
+  announcements?: DesktopAnnouncement[]
+  windows?: DesktopReleasePlatform
+  macos?: DesktopReleasePlatform
+}
+
+export interface DesktopAnnouncement {
+  id: string
+  title: string
+  content: string
+  published_at?: string
+}
+
+export interface DesktopUpdateState {
+  status: DesktopUpdateStatus
+  currentVersion: string
+  latestVersion?: string
+  checkedAt?: number
+  progress?: number
+  downloadedBytes?: number
+  totalBytes?: number
+  message?: string
+  installerPath?: string
+  minimumCheckHour?: number
+  release?: DesktopReleasePlatform
+  announcements?: DesktopAnnouncement[]
 }
 
 export interface CliHistoryEntry {
@@ -260,6 +321,7 @@ export interface DesktopSaveImageResult {
 export interface DesktopCopyImageRequest {
   sourceUrl?: string
   dataBase64?: string
+  filePath?: string
 }
 
 export interface DesktopFilePreview {

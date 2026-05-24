@@ -87,6 +87,15 @@ export interface ChatMessage {
     prompt_tokens?: number
     completion_tokens?: number
     total_tokens?: number
+    prompt_cache_hit_tokens?: number
+    prompt_tokens_details?: {
+      cached_tokens?: number
+      cached_creation_tokens?: number
+    }
+    input_tokens_details?: {
+      cached_tokens?: number
+      cached_creation_tokens?: number
+    }
   }
 }
 
@@ -114,6 +123,7 @@ export interface ChatModelOption {
   value: string
   provider?: 'openai' | 'codex' | 'claude'
   favorite?: boolean
+  supportedEndpointTypes?: string[]
 }
 
 export interface ChatGroupOption {
@@ -136,6 +146,13 @@ export interface ChatCompletionResponse {
     prompt_tokens?: number
     completion_tokens?: number
     total_tokens?: number
+    prompt_cache_hit_tokens?: number
+    prompt_tokens_details?: {
+      cached_tokens?: number
+    }
+    input_tokens_details?: {
+      cached_tokens?: number
+    }
   }
 }
 
@@ -150,6 +167,13 @@ export interface ImageGenerationResponse {
     prompt_tokens?: number
     completion_tokens?: number
     total_tokens?: number
+    prompt_cache_hit_tokens?: number
+    prompt_tokens_details?: {
+      cached_tokens?: number
+    }
+    input_tokens_details?: {
+      cached_tokens?: number
+    }
   }
 }
 
