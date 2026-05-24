@@ -47,6 +47,90 @@ function buildInstallKey(pluginName: string, marketplaceName: string) {
   return `${pluginName}@${marketplaceName}`
 }
 
+function normalizeSourceText(value: string) {
+  return value.trim().replace(/\\/g, '/').replace(/\.git$/i, '').toLowerCase()
+}
+
+function readRawSourceString(source: string | Record<string, unknown> | undefined, key: string) {
+  return source && typeof source === 'object' && typeof source[key] === 'string'
+    ? (source[key] as string).trim()
+    : ''
+}
+
+function buildPluginSourceIdentity(marketplace: BundledPluginMarketplaceCatalog, plugin: BundledCatalogPluginEntry) {
+  const rawSource = plugin.source
+  if (rawSource && typeof rawSource === 'object') {
+    const repo = readRawSourceString(rawSource, 'url') || readRawSourceString(rawSource, 'repo')
+    const sourcePath = readRawSourceString(rawSource, 'path') || plugin.subdir
+    if (repo) {
+      return [
+        normalizeSourceText(repo),
+        normalizeSubdir(sourcePath).toLowerCase(),
+      ].filter(Boolean).join('#')
+    }
+  }
+
+  if (typeof rawSource === 'string' && rawSource.trim()) {
+    return [
+      normalizeSourceText(marketplace.repoUrl),
+      normalizeSubdir(rawSource).toLowerCase(),
+    ].join('#')
+  }
+
+  return [
+    normalizeSourceText(marketplace.repoUrl),
+    normalizeSubdir(plugin.subdir).toLowerCase(),
+  ].join('#')
+}
+
+function isPluginInstalled(plugin: BundledCatalogPluginEntry, marketplaceName: string, installedPluginKeys: Set<string>) {
+  return installedPluginKeys.has(buildInstallKey(plugin.name, marketplaceName))
+}
+
+function compareCatalogPluginCandidate(
+  left: BundledCatalogPluginEntry,
+  right: BundledCatalogPluginEntry,
+  marketplaceName: string,
+  installedPluginKeys: Set<string>
+) {
+  const leftInstalled = isPluginInstalled(left, marketplaceName, installedPluginKeys) ? 1 : 0
+  const rightInstalled = isPluginInstalled(right, marketplaceName, installedPluginKeys) ? 1 : 0
+  if (leftInstalled !== rightInstalled) {
+    return rightInstalled - leftInstalled
+  }
+
+  const leftOfficial = left.official !== false ? 1 : 0
+  const rightOfficial = right.official !== false ? 1 : 0
+  if (leftOfficial !== rightOfficial) {
+    return rightOfficial - leftOfficial
+  }
+
+  const leftPinned = left.source && typeof left.source === 'object' && readRawSourceString(left.source, 'sha') ? 1 : 0
+  const rightPinned = right.source && typeof right.source === 'object' && readRawSourceString(right.source, 'sha') ? 1 : 0
+  if (leftPinned !== rightPinned) {
+    return rightPinned - leftPinned
+  }
+
+  const leftNameLength = (left.displayName?.trim() || left.name).length
+  const rightNameLength = (right.displayName?.trim() || right.name).length
+  return rightNameLength - leftNameLength
+}
+
+function dedupeMarketplacePlugins(
+  marketplace: BundledPluginMarketplaceCatalog,
+  installedPluginKeys: Set<string>
+) {
+  const bySource = new Map<string, BundledCatalogPluginEntry>()
+  for (const plugin of marketplace.plugins) {
+    const identity = buildPluginSourceIdentity(marketplace, plugin)
+    const existing = bySource.get(identity)
+    if (!existing || compareCatalogPluginCandidate(existing, plugin, marketplace.name, installedPluginKeys) > 0) {
+      bySource.set(identity, plugin)
+    }
+  }
+  return [...bySource.values()]
+}
+
 function buildCatalogPath(parts: string[]) {
   return `catalog://${parts.map((part) => part.trim().replace(/\\/g, '/')).join('/')}`
 }
@@ -114,7 +198,7 @@ export function buildBundledMarketplaceEntries(
 ) {
   const entries: CliExtensionEntry[] = []
 
-  for (const plugin of marketplace.plugins) {
+  for (const plugin of dedupeMarketplacePlugins(marketplace, installedPluginKeys)) {
     const installKey = buildInstallKey(plugin.name, marketplace.name)
     const installed = installedPluginKeys.has(installKey)
     const pluginPath = buildCatalogPath([client, 'plugin', marketplace.name, normalizeSubdir(plugin.subdir)])
@@ -137,6 +221,10 @@ export function buildBundledMarketplaceEntries(
       installKey,
       catalogSource,
     })
+
+    if (!installed) {
+      continue
+    }
 
     for (const skill of plugin.skills || []) {
       const skillPath = buildCatalogPath([

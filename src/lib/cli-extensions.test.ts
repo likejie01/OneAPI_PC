@@ -184,6 +184,33 @@ test('buildCliExtensionDedupeKey collapses installed and uninstalled variants fo
   )
 })
 
+test('buildCliExtensionDedupeKey collapses plugin aliases with the same catalog source', () => {
+  assert.equal(
+    buildCliExtensionDedupeKey({
+      id: 'plugin-rc',
+      kind: 'plugin',
+      name: 'rc',
+      installKey: 'rc@claude-plugins-official',
+      catalogSource: {
+        repoUrl: 'https://github.com/RevenueCat/rc-claude-code-plugin.git',
+        subdir: 'revenuecat',
+      },
+    }),
+    buildCliExtensionDedupeKey({
+      id: 'plugin-revenuecat',
+      kind: 'plugin',
+      name: 'revenuecat',
+      installKey: 'revenuecat@claude-plugins-official',
+      catalogSource: {
+        repoUrl: 'https://github.com/RevenueCat/rc-claude-code-plugin.git',
+        rawSource: {
+          path: 'revenuecat',
+        },
+      },
+    })
+  )
+})
+
 test('decorateCliExtensions keeps installed entries ahead of uninstalled entries and applies notes', () => {
   const resolved = decorateCliExtensions(
     [

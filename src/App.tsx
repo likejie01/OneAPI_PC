@@ -123,6 +123,7 @@ import {
 } from './domains/wallet'
 import {
   applyCliHistoryTitleOverrides,
+  appendCliFallbackAssistantMessage,
   buildCliRecentSessions,
   buildCliTimeline,
   type CliTimelineEntry,
@@ -144,6 +145,7 @@ import {
 } from './lib/assistants'
 import {
   getCliResumeSessionId,
+  isDraftCliSessionId,
 } from './lib/cli-session'
 import { AUTH_EXPIRED_EVENT, clearStoredDesktopUserId, saveStoredDesktopUserId } from './lib/desktop-client'
 import { deriveDesktopChatDisplayState, normalizeStoredDesktopChatMessage } from './lib/chat-reasoning'
@@ -8148,6 +8150,9 @@ function CliWorkspace(props: {
       lastOpenedSessionId,
       lastOpenedProjectPath,
     })
+    if (isDraftCliSessionId(preferredSessionId)) {
+      return
+    }
     const targetHistory = resolveCliHistorySessionForProject({
       history,
       projectPath,
@@ -8366,7 +8371,7 @@ function CliWorkspace(props: {
 
     setSessionMessagesMap((current) => ({
       ...current,
-      [details.id]: normalizedMessages,
+      [details.id]: mergeCliMessages(current[details.id] || [], normalizedMessages),
     }))
     setSessionLogsMap((current) => ({
       ...current,
@@ -8422,6 +8427,49 @@ function CliWorkspace(props: {
       await ensureProjectSession(selected)
       toast(`已切换到项目：${resolveProjectNameFromPath(selected) || selected}`)
     }
+  }
+
+  function createCliSession() {
+    const nextProjectPath = projectPath.trim()
+    if (running) {
+      toast(`请先停止当前 ${client === 'codex' ? 'Codex' : 'Claude'} 回复。`)
+      return
+    }
+    if (!nextProjectPath) {
+      toast('请选择项目目录后再新建会话。')
+      return
+    }
+
+    const nextSessionId = `draft-${client}-${Date.now()}`
+    bindProjectSession(nextProjectPath, nextSessionId)
+    setSessionMessagesMap((current) => ({
+      ...current,
+      [nextSessionId]: [],
+    }))
+    setSessionLogsMap((current) => ({
+      ...current,
+      [nextSessionId]: [],
+    }))
+    setSessionPartialMap((current) => ({
+      ...current,
+      [nextSessionId]: '',
+    }))
+    setSessionPlansMap((current) => ({
+      ...current,
+      [nextSessionId]: null,
+    }))
+    setExpandedLogGroupIds([])
+    setExpandedLogEventMap({})
+    setPrompt('')
+    cliPromptHistory.syncInputValue('')
+    setSelectedExtensions([])
+    clearAttachments()
+    setPreviewFile(null)
+    window.setTimeout(() => {
+      resizePrompt()
+      promptRef.current?.focus()
+    }, 0)
+    closeCliHistoryPanel()
   }
 
   async function handleOpenHistory(item: CliHistoryEntry, activateProject = true) {
@@ -8816,6 +8864,30 @@ function CliWorkspace(props: {
         /* ignore session hydration errors and keep fallback transcript */
       }
 
+      if (response.output.trim() && response.metadata?.aborted !== true) {
+        const responseFileChanges = Array.isArray(response.metadata?.fileChanges)
+          ? response.metadata.fileChanges as CliSessionMessage['fileChanges']
+          : undefined
+        setSessionMessagesMap((current) => {
+          const previous = current[nextSessionId] || []
+          const nextMessages = appendCliFallbackAssistantMessage(previous, {
+            id: `assistant-${requestId}`,
+            content: response.output,
+            createdAt: Date.now(),
+            requestId,
+            modelLabel: selectedModelLabel,
+            fileChanges: responseFileChanges,
+          })
+          if (nextMessages === previous) {
+            return current
+          }
+          return {
+            ...current,
+            [nextSessionId]: nextMessages,
+          }
+        })
+      }
+
       if (!response.success && response.metadata?.aborted !== true) {
         toast(response.error || `${client} 执行失败`)
       }
@@ -8850,6 +8922,7 @@ function CliWorkspace(props: {
     resizePrompt,
     running,
     selectedModel,
+    selectedModelLabel,
     selectedExtensions,
     toast,
     fullAccess,
@@ -9360,6 +9433,16 @@ function CliWorkspace(props: {
             <div>
             </div>
               <div className='inline-actions'>
+                <button
+                  className='secondary-button tiny'
+                  type='button'
+                  onClick={createCliSession}
+                  disabled={running}
+                  title='新建独立会话'
+                >
+                  <Plus size={16} />
+                  <span>新会话</span>
+                </button>
                 <button className='ghost-button icon-only tiny' type='button' onClick={() => void refreshCliState()} title='刷新最近会话' aria-label='刷新最近会话'>
                   <RotateCcw size={14} />
                 </button>

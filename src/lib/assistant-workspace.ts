@@ -423,6 +423,55 @@ export function buildCliTimeline(input: {
   return timeline
 }
 
+function normalizeMessageContent(value: string) {
+  return value.replace(/\s+/g, ' ').trim()
+}
+
+export function appendCliFallbackAssistantMessage(
+  messages: CliSessionMessage[],
+  fallback: {
+    id: string
+    content: string
+    createdAt: number
+    requestId?: string
+    modelLabel?: string
+    fileChanges?: CliFileChange[]
+  }
+) {
+  const content = fallback.content.trim()
+  if (!content) {
+    return messages
+  }
+
+  const normalizedContent = normalizeMessageContent(content)
+  const exists = messages.some((message) => {
+    if (message.role !== 'assistant') {
+      return false
+    }
+    if (fallback.requestId && message.requestId === fallback.requestId) {
+      return true
+    }
+    return normalizeMessageContent(message.content) === normalizedContent
+  })
+
+  if (exists) {
+    return messages
+  }
+
+  return [
+    ...messages,
+    {
+      id: fallback.id,
+      role: 'assistant' as const,
+      content,
+      createdAt: fallback.createdAt,
+      requestId: fallback.requestId,
+      modelLabel: fallback.modelLabel,
+      fileChanges: fallback.fileChanges,
+    },
+  ].sort((left, right) => toTimelineTimestamp(left.createdAt) - toTimelineTimestamp(right.createdAt))
+}
+
 function normalizeWhitespace(value: string) {
   return value.replace(/\s+/g, ' ').trim()
 }

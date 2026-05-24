@@ -89,7 +89,7 @@ test('buildBundledMarketplaceEntries keeps raw source metadata for claude market
     ],
   }
 
-  const entries = buildBundledMarketplaceEntries('claude', catalog, new Set())
+  const entries = buildBundledMarketplaceEntries('claude', catalog, new Set(['agent-sdk-dev@claude-plugins-official']))
   const plugin = entries.find((item) => item.kind === 'plugin')
   const command = entries.find((item) => item.kind === 'command')
 
@@ -98,4 +98,65 @@ test('buildBundledMarketplaceEntries keeps raw source metadata for claude market
   assert.equal(plugin?.catalogSource?.rawSource, './plugins/agent-sdk-dev')
   assert.equal(command?.parentPluginName, 'agent-sdk-dev')
   assert.equal(command?.installKey, 'agent-sdk-dev@claude-plugins-official')
+})
+
+test('buildBundledMarketplaceEntries collapses official aliases for the same plugin source', () => {
+  const catalog: BundledPluginMarketplaceCatalog = {
+    name: 'claude-plugins-official',
+    repoUrl: 'https://github.com/anthropics/claude-plugins-official.git',
+    sha: 'ghi789',
+    plugins: [
+      {
+        name: 'rc',
+        description: 'RevenueCat',
+        subdir: 'revenuecat',
+        source: {
+          url: 'https://github.com/RevenueCat/rc-claude-code-plugin.git',
+          path: 'revenuecat',
+          sha: 'abc',
+        },
+      },
+      {
+        name: 'revenuecat',
+        description: 'RevenueCat',
+        subdir: 'revenuecat',
+        source: {
+          url: 'https://github.com/RevenueCat/rc-claude-code-plugin.git',
+          path: 'revenuecat',
+          sha: 'abc',
+        },
+      },
+    ],
+  }
+
+  const entries = buildBundledMarketplaceEntries('claude', catalog, new Set())
+  assert.deepEqual(entries.map((item) => item.name), ['revenuecat'])
+})
+
+test('buildBundledMarketplaceEntries only expands callable children after plugin installation', () => {
+  const catalog: BundledPluginMarketplaceCatalog = {
+    name: 'openai-curated',
+    repoUrl: 'https://github.com/openai/plugins.git',
+    sha: 'def456',
+    plugins: [
+      {
+        name: 'build-web-apps',
+        description: 'Build web apps',
+        subdir: 'plugins/build-web-apps',
+        skills: [
+          {
+            name: 'frontend-app-builder',
+            description: 'Build frontend apps',
+            relativePath: 'skills/frontend-app-builder/SKILL.md',
+          },
+        ],
+      },
+    ],
+  }
+
+  const uninstalledEntries = buildBundledMarketplaceEntries('codex', catalog, new Set())
+  assert.deepEqual(uninstalledEntries.map((item) => item.kind), ['plugin'])
+
+  const installedEntries = buildBundledMarketplaceEntries('codex', catalog, new Set(['build-web-apps@openai-curated']))
+  assert.deepEqual(installedEntries.map((item) => item.kind), ['plugin', 'skill'])
 })

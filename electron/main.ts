@@ -2635,7 +2635,7 @@ async function listCodexMarketplaceExtensionsFromSource(
     })
 
     const skillsDir = path.join(pluginRoot, 'skills')
-    if (await pathExists(skillsDir)) {
+    if (installed && await pathExists(skillsDir)) {
       entries.push(...await listSkillEntriesFromRoot({
         client: 'codex',
         root: skillsDir,
@@ -2643,7 +2643,7 @@ async function listCodexMarketplaceExtensionsFromSource(
         marketplace: source.marketplace,
         installed,
         official: meta.official,
-        installable: !installed,
+        installable: false,
         installKey: meta.installKey,
         parentPluginId: pluginId,
         parentPluginName: meta.manifestName,
@@ -2692,7 +2692,7 @@ async function listCodexCachedExtensions(enabledPluginKeys: Set<string>) {
     })
 
     const skillsDir = path.join(pluginRoot, 'skills')
-    if (await pathExists(skillsDir)) {
+    if (installed && await pathExists(skillsDir)) {
       entries.push(...await listSkillEntriesFromRoot({
         client: 'codex',
         root: skillsDir,
@@ -2700,7 +2700,7 @@ async function listCodexCachedExtensions(enabledPluginKeys: Set<string>) {
         marketplace,
         installed,
         official: meta.official,
-        installable: !installed,
+        installable: false,
         installKey: meta.installKey,
         parentPluginId: pluginId,
         parentPluginName: meta.manifestName,
@@ -3102,46 +3102,8 @@ async function listClaudeMarketplaceExtensions() {
           installKey,
         })
 
-        if (installed) {
-          continue
-        }
-
-        if (typeof sourceValue !== 'string' || !sourceValue.startsWith('./')) {
-          continue
-        }
-
-        const sourceRoot = path.join(marketplaceRoot, sourceValue)
-        const skillsDir = path.join(sourceRoot, 'skills')
-        if (await pathExists(skillsDir)) {
-          entries.push(...await listSkillEntriesFromRoot({
-            client: 'claude',
-            root: skillsDir,
-            sourceLabel: pluginName,
-            marketplace: marketplaceName,
-            installed: false,
-            official,
-            installable: true,
-            installKey,
-            parentPluginId: pluginId,
-            parentPluginName: pluginName,
-            relativeRootForFallback: skillsDir,
-          }))
-        }
-
-        const commandsDir = path.join(sourceRoot, 'commands')
-        if (await pathExists(commandsDir)) {
-          entries.push(...await listCommandEntriesFromRoot({
-            root: commandsDir,
-            sourceLabel: pluginName,
-            marketplace: marketplaceName,
-            installed: false,
-            official,
-            installable: true,
-            installKey,
-            parentPluginId: pluginId,
-            parentPluginName: pluginName,
-          }))
-        }
+        // 未安装的市场插件只展示插件本体。子技能/命令只有安装后才是可调用对象，
+        // 提前展开会造成同名 configure 等条目重复出现，并让安装状态看起来互相串联。
       }
     }
   }
@@ -3535,7 +3497,8 @@ async function cloneGitRepoSubdir(
 
 async function cloneClaudeMarketplaceSource(
   source: Record<string, unknown>,
-  tempRoot: string
+  tempRoot: string,
+  fallbackPath = ''
 ) {
   const rawUrl =
     (typeof source.url === 'string' && source.url.trim()) ||
@@ -3549,7 +3512,7 @@ async function cloneClaudeMarketplaceSource(
     (typeof source.sha === 'string' && source.sha.trim()) ||
     (typeof source.ref === 'string' && source.ref.trim()) ||
     ''
-  const relativePath = typeof source.path === 'string' && source.path.trim() ? source.path.trim() : ''
+  const relativePath = typeof source.path === 'string' && source.path.trim() ? source.path.trim() : fallbackPath.trim()
   return cloneGitRepoSubdir(repoUrl, tempRoot, {
     ref,
     subdir: relativePath,
@@ -3602,7 +3565,8 @@ async function resolveClaudeMarketplacePluginSource(pluginKey: string) {
   if (rawSource && typeof rawSource === 'object') {
     const sourceSpec = rawSource as Record<string, unknown>
     const tempRoot = path.join(os.tmpdir(), 'oneapi-claude-plugin-install', randomUUID())
-    const sourceRoot = await cloneClaudeMarketplaceSource(sourceSpec, tempRoot)
+    const fallbackPath = typeof plugin.subdir === 'string' ? plugin.subdir.trim() : ''
+    const sourceRoot = await cloneClaudeMarketplaceSource(sourceSpec, tempRoot, fallbackPath)
     return {
       plugin,
       pluginName,
@@ -3646,7 +3610,11 @@ async function resolveClaudeMarketplacePluginSourceFromCatalogEntry(entry: CliEx
 
   if (rawSource && typeof rawSource === 'object') {
     const tempRoot = path.join(os.tmpdir(), 'oneapi-claude-plugin-install', randomUUID())
-    const sourceRoot = await cloneClaudeMarketplaceSource(rawSource as Record<string, unknown>, tempRoot)
+    const sourceRoot = await cloneClaudeMarketplaceSource(
+      rawSource as Record<string, unknown>,
+      tempRoot,
+      catalogSource.subdir || ''
+    )
     const sourceSpec = rawSource as Record<string, unknown>
     return {
       pluginName,
@@ -5286,6 +5254,23 @@ function normalizeCliToolDetail(detail: string) {
   return normalized
 }
 
+function summarizeCliIntentForLog(value: string, maxLength = 260) {
+  const normalized = value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !/^```/.test(line))
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (!normalized || shouldIgnoreCodexMessage(normalized)) {
+    return ''
+  }
+  if (normalized.length <= maxLength) {
+    return normalized
+  }
+  return `${normalized.slice(0, maxLength - 1).trim()}…`
+}
+
 function describeCliToolUse(name: string, input: unknown) {
   const command = extractCommandFromUnknown(input)
   const files = extractCliFilesFromUnknown(input)
@@ -5440,6 +5425,7 @@ async function runCodexPrompt(
   let sessionId = resumeSessionId
   let partialText = ''
   let planState: CliPlanState | null = null
+  let lastToolIntentText = ''
   const runtimeDiagnostics: CliRuntimeDiagnostics = {}
   const executablePath = await locateExecutable('codex')
   const managedRuntime = await readManagedNodeRuntime()
@@ -5518,6 +5504,20 @@ async function runCodexPrompt(
         const toolEntries = extractToolUseEntries(candidate)
         for (const toolEntry of toolEntries) {
           const described = describeCliToolUse(toolEntry.name, toolEntry.input)
+          if (!described.meaningful) {
+            continue
+          }
+          const intentText = summarizeCliIntentForLog(partialText)
+          if (intentText && intentText !== lastToolIntentText) {
+            lastToolIntentText = intentText
+            progress.intent(
+              `执行目的：${intentText}`,
+              sessionId,
+              intentText,
+              undefined,
+              toolEntry.name?.trim() ? `intent.before_tool.${toolEntry.name.trim()}` : 'intent.before_tool'
+            )
+          }
           const sourceKind = toolEntry.name?.trim() ? `tool_use.${toolEntry.name.trim()}` : 'tool_use'
           if (described.command) {
             progress.command(described.message, described.command, sessionId, described.detail, described.files, sourceKind)
@@ -5563,6 +5563,7 @@ async function runCodexPrompt(
     sessionId = undefined
     partialText = ''
     planState = null
+    lastToolIntentText = ''
     args = buildCodexExecArgs(input)
     result = await runCodexOnce()
   }
@@ -5669,6 +5670,7 @@ async function runClaudePrompt(
   let planState: CliPlanState | null = null
   const planRecords: Array<Record<string, unknown>> = []
   const seenToolUseEvents = new Set<string>()
+  let lastToolIntentText = ''
   const runtimeDiagnostics: CliRuntimeDiagnostics = {}
   const executablePath = await locateExecutable('claude')
   const managedRuntime = await readManagedNodeRuntime()
@@ -5686,6 +5688,17 @@ async function runClaudePrompt(
       return
     }
     seenToolUseEvents.add(eventKey)
+    const intentText = summarizeCliIntentForLog(partialText)
+    if (intentText && intentText !== lastToolIntentText) {
+      lastToolIntentText = intentText
+      progress.intent(
+        `执行目的：${intentText}`,
+        sessionId,
+        intentText,
+        undefined,
+        toolName.trim() ? `intent.before_tool.${toolName.trim()}` : 'intent.before_tool'
+      )
+    }
     if (described.command) {
       progress.command(
         described.message,
@@ -5756,6 +5769,10 @@ async function runClaudePrompt(
           typeof parsed.message === 'object' && parsed.message
             ? (parsed.message as { content?: unknown })
             : undefined
+        const assistantText = extractClaudeTextFromMessage(parsedMessage?.content)
+        if (assistantText) {
+          partialText = assistantText
+        }
         const toolEntries = extractToolUseEntries(parsedMessage?.content)
         for (const toolEntry of toolEntries) {
           if (!toolEntry.name) {
@@ -5821,6 +5838,7 @@ async function runClaudePrompt(
     planState = null
     planRecords.length = 0
     seenToolUseEvents.clear()
+    lastToolIntentText = ''
     args = buildClaudePromptArgs(input)
     result = await runClaudeOnce()
   }

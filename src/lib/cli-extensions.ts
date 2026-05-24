@@ -16,8 +16,26 @@ export function canUseCliExtension(item: Pick<CliExtensionEntry, 'installed'>) {
 }
 
 export function buildCliExtensionDedupeKey(
-  item: Pick<CliExtensionEntry, 'kind' | 'installKey' | 'name' | 'id'>
+  item: Pick<CliExtensionEntry, 'kind' | 'installKey' | 'name' | 'id' | 'catalogSource'>
 ) {
+  const catalogSource = item.catalogSource
+  if (item.kind === 'plugin' && catalogSource?.repoUrl) {
+    const rawSource = catalogSource.rawSource
+    const rawPath =
+      typeof rawSource === 'object' && rawSource
+        ? typeof rawSource.path === 'string'
+          ? rawSource.path
+          : ''
+        : typeof rawSource === 'string'
+          ? rawSource
+          : ''
+    const sourcePath = (rawPath || catalogSource.subdir || '').trim().replace(/^\.\/+/, '').replace(/\\/g, '/').toLowerCase()
+    const repo = catalogSource.repoUrl.trim().replace(/\.git$/i, '').toLowerCase()
+    if (repo && sourcePath) {
+      return `plugin-source:${repo}#${sourcePath}`
+    }
+  }
+
   const normalizedInstallKey = item.installKey?.trim().toLowerCase() || ''
   if (item.kind === 'plugin' && normalizedInstallKey) {
     return `plugin:${normalizedInstallKey}`

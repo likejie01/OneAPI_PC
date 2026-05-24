@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   applyCliHistoryTitleOverrides,
+  appendCliFallbackAssistantMessage,
   buildCliRecentSessions,
   buildCliTimeline,
   filterAssistantModels,
@@ -259,6 +260,43 @@ test('buildCliTimeline inserts grouped logs before assistant reply of same turn'
     timeline.map((item) => item.id),
     ['user-1', 'log-1', 'assistant-1']
   )
+})
+
+test('appendCliFallbackAssistantMessage persists CLI output when session hydration has no assistant message', () => {
+  const messages = [
+    { id: 'user-1', role: 'user' as const, content: 'hello', createdAt: 10, requestId: 'req-1' },
+  ]
+
+  const next = appendCliFallbackAssistantMessage(messages, {
+    id: 'assistant-req-1',
+    content: 'done',
+    createdAt: 11,
+    requestId: 'req-1',
+    modelLabel: 'deepseek-v4-pro',
+  })
+
+  assert.deepEqual(
+    next.map((item) => ({ id: item.id, role: item.role, content: item.content, requestId: item.requestId })),
+    [
+      { id: 'user-1', role: 'user', content: 'hello', requestId: 'req-1' },
+      { id: 'assistant-req-1', role: 'assistant', content: 'done', requestId: 'req-1' },
+    ]
+  )
+})
+
+test('appendCliFallbackAssistantMessage does not duplicate hydrated assistant replies', () => {
+  const messages = [
+    { id: 'assistant-1', role: 'assistant' as const, content: 'done', createdAt: 12, requestId: 'req-1' },
+  ]
+
+  const next = appendCliFallbackAssistantMessage(messages, {
+    id: 'assistant-req-1',
+    content: 'done',
+    createdAt: 13,
+    requestId: 'req-1',
+  })
+
+  assert.equal(next, messages)
 })
 
 test('buildCliTimeline keeps grouped logs after the user bubble even when log timestamps skew earlier', () => {
