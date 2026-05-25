@@ -61,11 +61,41 @@ export function buildWindowsCommandShimArgs(command: string, args: string[]) {
   ]
 }
 
+export function supportsCodexAskForApprovalFlag(helpText: string) {
+  return /^\s*--ask-for-approval\b/m.test(helpText)
+}
+
+export function buildCodexSandboxArgs(
+  fullAccess: boolean,
+  supportsAskForApproval: boolean
+) {
+  if (fullAccess) {
+    return ['--sandbox', 'danger-full-access', '--dangerously-bypass-approvals-and-sandbox']
+  }
+
+  const args = ['--sandbox', 'workspace-write']
+  if (supportsAskForApproval) {
+    args.push('--ask-for-approval', 'on-request')
+  }
+  return args
+}
+
 const NPM_CACHE_MODE_ENV_KEYS = new Set([
   'npm_config_offline',
   'npm_config_prefer_offline',
   'npm_config_prefer_online',
   'npm_config_cache_mode',
+])
+
+const NPM_PROXY_ENV_KEYS = new Set([
+  'all_proxy',
+  'http_proxy',
+  'https_proxy',
+  'no_proxy',
+  'npm_config_proxy',
+  'npm_config_http_proxy',
+  'npm_config_https_proxy',
+  'npm_config_noproxy',
 ])
 
 export function sanitizeCliNpmEnvironment(
@@ -78,7 +108,8 @@ export function sanitizeCliNpmEnvironment(
 ) {
   const next: Record<string, string | undefined> = {}
   for (const [key, value] of Object.entries(env)) {
-    if (NPM_CACHE_MODE_ENV_KEYS.has(key.toLowerCase())) {
+    const normalizedKey = key.toLowerCase()
+    if (NPM_CACHE_MODE_ENV_KEYS.has(normalizedKey) || NPM_PROXY_ENV_KEYS.has(normalizedKey)) {
       continue
     }
     next[key] = value
@@ -87,6 +118,18 @@ export function sanitizeCliNpmEnvironment(
   next.npm_config_offline = 'false'
   next.npm_config_prefer_offline = 'false'
   next.npm_config_prefer_online = 'true'
+  next.HTTP_PROXY = ''
+  next.HTTPS_PROXY = ''
+  next.ALL_PROXY = ''
+  next.NO_PROXY = '*'
+  next.http_proxy = ''
+  next.https_proxy = ''
+  next.all_proxy = ''
+  next.no_proxy = '*'
+  next.npm_config_proxy = ''
+  next.npm_config_http_proxy = ''
+  next.npm_config_https_proxy = ''
+  next.npm_config_noproxy = '*'
   if (options.registry) {
     next.npm_config_registry = options.registry
   }

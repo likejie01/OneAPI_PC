@@ -241,6 +241,7 @@ export async function sendDirectImageGeneration(payload: {
 }
 
 export async function sendImageEdit(payload: {
+  apiKey: string
   model: string
   prompt: string
   imageName: string

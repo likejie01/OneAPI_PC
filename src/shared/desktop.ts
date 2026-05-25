@@ -276,6 +276,8 @@ export interface CliProgressPayload {
   logKind?: CliLogKind
   sourceKind?: string
   message: string
+  assistantChunk?: string
+  indentLevel?: number
   createdAt: number
   done?: boolean
   files?: CliFileChange[]
@@ -318,6 +320,7 @@ export interface DesktopAttachmentSaveResult {
 
 export interface DesktopImageEditRequest {
   userId?: string
+  apiKey?: string
   model: string
   prompt: string
   imageName: string

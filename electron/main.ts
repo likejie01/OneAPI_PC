@@ -41,7 +41,10 @@ import type {
   DesktopUpdateState,
   DesktopExportTextFileRequest,
 } from '../src/shared/desktop'
-import { compareDesktopVersions } from '../src/lib/app-update.ts'
+import {
+  buildDesktopReleaseManifestUrlCandidates,
+  compareDesktopVersions,
+} from '../src/lib/app-update.ts'
 import { parseDesktopChatStreamDataLine } from '../src/lib/chat-reasoning.ts'
 import {
   buildClaudePlanStateFromRecords,
@@ -62,11 +65,13 @@ import {
 } from '../src/lib/claude-cli-config.ts'
 import {
   MIN_DESKTOP_CLI_NODE_MAJOR,
+  buildCodexSandboxArgs,
   buildWindowsCommandShimArgs,
   isDesktopCliNodeVersionSupported,
   resolveCliProbeResult,
   sanitizeCliNpmEnvironment,
   shouldUseWindowsCommandShimForPath,
+  supportsCodexAskForApprovalFlag,
 } from '../src/lib/desktop-service.ts'
 import {
   buildCliInteractionResponse,
@@ -336,6 +341,8 @@ interface CliProgressPayload {
   logKind?: CliLogKind
   sourceKind?: string
   message: string
+  assistantChunk?: string
+  indentLevel?: number
   createdAt: number
   done?: boolean
   files?: CliFileChange[]
@@ -374,6 +381,7 @@ interface DesktopAttachmentSaveRequest {
 
 interface DesktopImageEditRequest {
   userId?: string
+  apiKey?: string
   model: string
   prompt: string
   imageName: string
@@ -621,23 +629,34 @@ function normalizeDesktopAnnouncements(manifest: DesktopReleaseManifest) {
 }
 
 async function fetchDesktopReleaseManifest(): Promise<DesktopReleaseManifest> {
-  const response = await getDesktopSession().fetch(buildUrl('/api/download/desktop-release'))
-  if (!response.ok) {
-    const data = await parseResponse(response)
-    throw new Error(getResponseErrorMessage(data, response.status, '获取版本清单失败'))
+  const candidates = buildDesktopReleaseManifestUrlCandidates(serverBaseUrl, DEFAULT_SERVER_BASE_URL)
+  let lastError: Error | null = null
+
+  for (const targetUrl of candidates) {
+    try {
+      const response = await getDesktopSession().fetch(targetUrl)
+      if (!response.ok) {
+        const data = await parseResponse(response)
+        throw new Error(getResponseErrorMessage(data, response.status, '获取版本清单失败'))
+      }
+
+      const data = await parseResponse(response)
+      const manifest =
+        typeof data === 'object' &&
+        data &&
+        'data' in data &&
+        typeof data.data === 'object' &&
+        data.data
+          ? (data.data as DesktopReleaseManifest)
+          : (data as DesktopReleaseManifest)
+
+      return manifest
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error('获取版本清单失败')
+    }
   }
 
-  const data = await parseResponse(response)
-  const manifest =
-    typeof data === 'object' &&
-    data &&
-    'data' in data &&
-    typeof data.data === 'object' &&
-    data.data
-      ? (data.data as DesktopReleaseManifest)
-      : (data as DesktopReleaseManifest)
-
-  return manifest
+  throw lastError || new Error('获取版本清单失败')
 }
 
 function resolveReleasePackageFileName(release: DesktopReleasePlatform | undefined) {
@@ -699,11 +718,11 @@ async function checkForDesktopUpdate(options: {
         minimumCheckHour,
         installerPath: '',
         progress: 100,
-        message: options.userInitiated ? '当前已是最新版本。' : undefined,
+        message: '当前已是最新版。',
       })
     }
 
-    return setDesktopUpdateState({
+    const nextState = setDesktopUpdateState({
       status: hasDownloadedInstaller ? 'downloaded' : 'available',
       latestVersion,
       release,
@@ -712,6 +731,12 @@ async function checkForDesktopUpdate(options: {
       progress: hasDownloadedInstaller ? 100 : 0,
       message: hasDownloadedInstaller ? '更新包已下载完成。' : '发现新版本，可后台下载。',
     })
+
+    if (hasDownloadedInstaller) {
+      return nextState
+    }
+
+    return startDesktopUpdateDownload()
   } catch (error) {
     return setDesktopUpdateState({
       status: 'error',
@@ -1718,6 +1743,9 @@ async function readFilePreview(targetPath: string) {
 
 async function requestImageEdit(input: DesktopImageEditRequest) {
   const headers = new Headers()
+  if (input.apiKey?.trim()) {
+    headers.set('Authorization', `Bearer ${input.apiKey.trim()}`)
+  }
   if (input.userId?.trim()) {
     headers.set('New-Api-User', input.userId.trim())
   }
@@ -4968,6 +4996,8 @@ function createCliProgressEmitter(
         files?: CliFileChange[]
         logKind?: CliLogKind
         sourceKind?: string
+        assistantChunk?: string
+        indentLevel?: number
         detail?: string
         command?: string
         exitCode?: number
@@ -4988,6 +5018,8 @@ function createCliProgressEmitter(
         logKind: input.logKind,
         sourceKind: input.sourceKind,
         message: trimmed,
+        assistantChunk: input.assistantChunk?.trim() || undefined,
+        indentLevel: input.indentLevel,
         createdAt: Date.now(),
         done: input.done,
         files: input.files,
@@ -5006,6 +5038,8 @@ function createCliProgressEmitter(
       options: {
         logKind?: CliLogKind
         sourceKind?: string
+        assistantChunk?: string
+        indentLevel?: number
         detail?: string
         command?: string
         exitCode?: number
@@ -5023,6 +5057,8 @@ function createCliProgressEmitter(
       options: {
         logKind?: CliLogKind
         sourceKind?: string
+        assistantChunk?: string
+        indentLevel?: number
         detail?: string
         command?: string
         exitCode?: number
@@ -5042,6 +5078,9 @@ function createCliProgressEmitter(
         command: options.command,
         exitCode: options.exitCode,
         plan: options.plan,
+        assistantChunk: options.assistantChunk,
+        indentLevel: options.indentLevel,
+        interaction: options.interaction,
       })
     },
     partial(message: string, sessionId?: string, done = false, plan?: CliPlanState | null) {
@@ -5051,14 +5090,43 @@ function createCliProgressEmitter(
       lastPartial = message
       this.send({ kind: 'partial', message, sessionId, done, plan })
     },
-    intent(message: string, sessionId?: string, detail?: string, files?: CliFileChange[], sourceKind?: string) {
-      this.status(message, sessionId, false, files, { logKind: 'intent', detail, sourceKind })
+    intent(
+      message: string,
+      sessionId?: string,
+      detail?: string,
+      files?: CliFileChange[],
+      sourceKind?: string,
+      assistantChunk?: string,
+      indentLevel?: number
+    ) {
+      this.status(message, sessionId, false, files, {
+        logKind: 'intent',
+        detail,
+        sourceKind,
+        assistantChunk,
+        indentLevel,
+      })
     },
-    tool(message: string, sessionId?: string, detail?: string, files?: CliFileChange[], sourceKind?: string) {
-      this.status(message, sessionId, false, files, { logKind: 'tool', detail, sourceKind })
+    tool(
+      message: string,
+      sessionId?: string,
+      detail?: string,
+      files?: CliFileChange[],
+      sourceKind?: string,
+      indentLevel?: number
+    ) {
+      this.status(message, sessionId, false, files, { logKind: 'tool', detail, sourceKind, indentLevel })
     },
-    command(message: string, command: string, sessionId?: string, detail?: string, files?: CliFileChange[], sourceKind?: string) {
-      this.status(message, sessionId, false, files, { logKind: 'command', command, detail, sourceKind })
+    command(
+      message: string,
+      command: string,
+      sessionId?: string,
+      detail?: string,
+      files?: CliFileChange[],
+      sourceKind?: string,
+      indentLevel?: number
+    ) {
+      this.status(message, sessionId, false, files, { logKind: 'command', command, detail, sourceKind, indentLevel })
     },
     stdout(message: string, sessionId?: string, detail?: string, sourceKind?: string) {
       this.status(message, sessionId, false, undefined, { logKind: 'stdout', detail, sourceKind })
@@ -5066,8 +5134,16 @@ function createCliProgressEmitter(
     stderr(message: string, sessionId?: string, detail?: string, sourceKind?: string) {
       this.error(message, sessionId, false, undefined, { logKind: 'stderr', detail, sourceKind })
     },
-    result(message: string, sessionId?: string, exitCode?: number, detail?: string, files?: CliFileChange[], sourceKind?: string) {
-      this.status(message, sessionId, false, files, { logKind: 'result', exitCode, detail, sourceKind })
+    result(
+      message: string,
+      sessionId?: string,
+      exitCode?: number,
+      detail?: string,
+      files?: CliFileChange[],
+      sourceKind?: string,
+      indentLevel?: number
+    ) {
+      this.status(message, sessionId, false, files, { logKind: 'result', exitCode, detail, sourceKind, indentLevel })
     },
     plan(message: string, plan: CliPlanState | null, sessionId?: string, sourceKind = 'plan.update') {
       this.status(message, sessionId, false, undefined, { logKind: 'status', sourceKind, plan })
@@ -5375,17 +5451,52 @@ function emitCliInteractionPrompt(input: {
   })
 }
 
+function extractTextPartContent(part: unknown) {
+  if (typeof part === 'string') {
+    return part
+  }
+  if (!part || typeof part !== 'object') {
+    return ''
+  }
+
+  const typedPart = part as {
+    type?: string
+    text?: unknown
+    content?: unknown
+  }
+
+  if (typedPart.type === 'tool_use' || typedPart.type === 'tool_result' || typedPart.type === 'progress') {
+    return ''
+  }
+  if (typeof typedPart.text === 'string') {
+    return typedPart.text
+  }
+  if (typeof typedPart.content === 'string' && typedPart.type !== 'tool_result') {
+    return typedPart.content
+  }
+  return ''
+}
+
 function extractToolUseEntries(content: unknown) {
   if (!Array.isArray(content)) {
     return []
   }
 
+  let pendingText = ''
+
   return content.flatMap((part) => {
+    const textPart = extractTextPartContent(part)
+    if (textPart) {
+      pendingText += textPart
+      return []
+    }
+
     if (!part || typeof part !== 'object') {
       return []
     }
 
     const typedPart = part as {
+      id?: string
       type?: string
       name?: string
       input?: unknown
@@ -5395,10 +5506,14 @@ function extractToolUseEntries(content: unknown) {
       return []
     }
 
-    return [{
+    const nextEntry = {
+      id: typedPart.id?.trim() || '',
       name: typedPart.name?.trim() || '',
       input: typedPart.input,
-    }]
+      textBefore: pendingText.trim(),
+    }
+    pendingText = ''
+    return [nextEntry]
   })
 }
 
@@ -5421,14 +5536,14 @@ function extractClaudeTextFromMessage(content: unknown) {
     .trim()
 }
 
-function buildCodexExecArgs(input: CliRunRequest, resumeSessionId?: string) {
+function buildCodexExecArgs(
+  input: CliRunRequest,
+  resumeSessionId?: string,
+  supportsAskForApproval = false
+) {
   const args = ['exec']
 
-  if (input.fullAccess) {
-    args.push('--sandbox', 'danger-full-access', '--dangerously-bypass-approvals-and-sandbox')
-  } else {
-    args.push('--sandbox', 'workspace-write', '--ask-for-approval', 'on-request')
-  }
+  args.push(...buildCodexSandboxArgs(!!input.fullAccess, supportsAskForApproval))
 
   if (input.model?.trim()) {
     args.push('--model', input.model.trim())
@@ -5446,6 +5561,28 @@ function buildCodexExecArgs(input: CliRunRequest, resumeSessionId?: string) {
   }
 
   return args
+}
+
+const codexAskForApprovalSupportCache = new Map<string, boolean>()
+
+async function detectCodexAskForApprovalSupport(
+  executablePath: string,
+  managedRuntime?: NodeRuntimeInfo | null
+) {
+  const cacheKey = executablePath.trim()
+  if (codexAskForApprovalSupportCache.has(cacheKey)) {
+    return codexAskForApprovalSupportCache.get(cacheKey) || false
+  }
+
+  const helpResult = await runCommand(executablePath, ['exec', '--help'], {
+    timeoutMs: 15000,
+    env: managedRuntime ? buildRuntimeEnv(managedRuntime) : undefined,
+  })
+  const supported = helpResult.exitCode === 0 && supportsCodexAskForApprovalFlag(
+    `${helpResult.stdout}\n${helpResult.stderr}`
+  )
+  codexAskForApprovalSupportCache.set(cacheKey, supported)
+  return supported
 }
 
 function isCodexStaleResumeFailure(stdout: string, stderr: string) {
@@ -5510,11 +5647,30 @@ async function runCodexPrompt(
   let partialText = ''
   let planState: CliPlanState | null = null
   let lastToolIntentText = ''
+  let consumedAssistantChars = 0
   const runtimeDiagnostics: CliRuntimeDiagnostics = {}
   const executablePath = await locateExecutable('codex')
   const managedRuntime = await readManagedNodeRuntime()
   const spawnCommand = resolveCliSpawnCommand('codex', executablePath)
-  let args = buildCodexExecArgs(input, resumeSessionId)
+  const supportsAskForApproval = await detectCodexAskForApprovalSupport(executablePath, managedRuntime)
+  let args = buildCodexExecArgs(input, resumeSessionId, supportsAskForApproval)
+  const takeAssistantChunk = (snapshot: string, explicitChunk = '') => {
+    const normalizedExplicitChunk = explicitChunk.trim()
+    if (snapshot.length < consumedAssistantChars) {
+      consumedAssistantChars = 0
+    }
+    if (normalizedExplicitChunk) {
+      const matchedIndex = snapshot.indexOf(normalizedExplicitChunk, consumedAssistantChars)
+      if (matchedIndex >= consumedAssistantChars) {
+        consumedAssistantChars = matchedIndex + normalizedExplicitChunk.length
+      }
+      return normalizedExplicitChunk
+    }
+
+    const nextChunk = snapshot.slice(consumedAssistantChars).trim()
+    consumedAssistantChars = snapshot.length
+    return nextChunk
+  }
 
   progress.intent('Codex 已开始处理当前任务。', sessionId, undefined, undefined, 'request.started')
   if (requestedSessionId && !resumeSessionId) {
@@ -5620,15 +5776,17 @@ async function runCodexPrompt(
           if (!described.meaningful) {
             continue
           }
-          const intentText = summarizeCliIntentForLog(partialText)
-          if (intentText && intentText !== lastToolIntentText) {
+          const assistantChunk = takeAssistantChunk(partialText, toolEntry.textBefore)
+          const intentText = summarizeCliIntentForLog(assistantChunk || partialText)
+          if (assistantChunk || (intentText && intentText !== lastToolIntentText)) {
             lastToolIntentText = intentText
             progress.intent(
-              `执行目的：${intentText}`,
+              assistantChunk ? '执行目的' : `执行目的：${intentText}`,
               sessionId,
-              intentText,
+              assistantChunk || intentText,
               undefined,
-              toolEntry.name?.trim() ? `intent.before_tool.${toolEntry.name.trim()}` : 'intent.before_tool'
+              toolEntry.name?.trim() ? `intent.before_tool.${toolEntry.name.trim()}` : 'intent.before_tool',
+              assistantChunk || undefined
             )
           }
           const sourceKind = toolEntry.name?.trim() ? `tool_use.${toolEntry.name.trim()}` : 'tool_use'
@@ -5688,7 +5846,8 @@ async function runCodexPrompt(
     partialText = ''
     planState = null
     lastToolIntentText = ''
-    args = buildCodexExecArgs(input)
+    consumedAssistantChars = 0
+    args = buildCodexExecArgs(input, undefined, supportsAskForApproval)
     attempt += 1
     result = await runCodexOnce()
   }
@@ -5709,6 +5868,7 @@ async function runCodexPrompt(
     })
     partialText = ''
     lastToolIntentText = ''
+    consumedAssistantChars = 0
     result = await runCodexOnce()
     retryDiagnostics = summarizeCliFailure(result.stdout, result.stderr)
   }
@@ -5816,15 +5976,44 @@ async function runClaudePrompt(
   let planState: CliPlanState | null = null
   const planRecords: Array<Record<string, unknown>> = []
   const seenToolUseEvents = new Set<string>()
+  const toolUseIndentLevels = new Map<string, number>()
   let lastToolIntentText = ''
+  let consumedAssistantChars = 0
   const runtimeDiagnostics: CliRuntimeDiagnostics = {}
   const executablePath = await locateExecutable('claude')
   const managedRuntime = await readManagedNodeRuntime()
   const claudeSettings = await readResolvedClaudeSettingsDocument().catch(() => null)
   const spawnCommand = resolveCliSpawnCommand('claude', executablePath)
   let args = buildClaudePromptArgs(input, resumeSessionId)
+  const takeAssistantChunk = (snapshot: string, explicitChunk = '') => {
+    const normalizedExplicitChunk = explicitChunk.trim()
+    if (snapshot.length < consumedAssistantChars) {
+      consumedAssistantChars = 0
+    }
+    if (normalizedExplicitChunk) {
+      const matchedIndex = snapshot.indexOf(normalizedExplicitChunk, consumedAssistantChars)
+      if (matchedIndex >= consumedAssistantChars) {
+        consumedAssistantChars = matchedIndex + normalizedExplicitChunk.length
+      }
+      return normalizedExplicitChunk
+    }
 
-  const emitClaudeToolUse = (toolName: string, toolInput: unknown, sourceKind: string) => {
+    const nextChunk = snapshot.slice(consumedAssistantChars).trim()
+    consumedAssistantChars = snapshot.length
+    return nextChunk
+  }
+
+  const emitClaudeToolUse = (
+    toolName: string,
+    toolInput: unknown,
+    sourceKind: string,
+    options: {
+      toolUseId?: string
+      indentLevel?: number
+      assistantSnapshot?: string
+      assistantChunk?: string
+    } = {}
+  ) => {
     const described = describeCliToolUse(toolName, toolInput)
     if (!described.meaningful) {
       return
@@ -5834,15 +6023,22 @@ async function runClaudePrompt(
       return
     }
     seenToolUseEvents.add(eventKey)
-    const intentText = summarizeCliIntentForLog(partialText)
-    if (intentText && intentText !== lastToolIntentText) {
+    const indentLevel = Math.max(0, options.indentLevel || 0)
+    if (options.toolUseId) {
+      toolUseIndentLevels.set(options.toolUseId, indentLevel)
+    }
+    const assistantChunk = takeAssistantChunk(options.assistantSnapshot || partialText, options.assistantChunk || '')
+    const intentText = summarizeCliIntentForLog(assistantChunk || options.assistantSnapshot || partialText)
+    if (assistantChunk || (intentText && intentText !== lastToolIntentText)) {
       lastToolIntentText = intentText
       progress.intent(
-        `执行目的：${intentText}`,
+        assistantChunk ? '执行目的' : `执行目的：${intentText}`,
         sessionId,
-        intentText,
+        assistantChunk || intentText,
         undefined,
-        toolName.trim() ? `intent.before_tool.${toolName.trim()}` : 'intent.before_tool'
+        toolName.trim() ? `intent.before_tool.${toolName.trim()}` : 'intent.before_tool',
+        assistantChunk || undefined,
+        indentLevel
       )
     }
     if (described.command) {
@@ -5852,11 +6048,12 @@ async function runClaudePrompt(
         sessionId,
         described.detail,
         described.files,
-        sourceKind
+        sourceKind,
+        indentLevel
       )
       return
     }
-    progress.tool(described.message, sessionId, described.detail, described.files, sourceKind)
+    progress.tool(described.message, sessionId, described.detail, described.files, sourceKind, indentLevel)
   }
 
   progress.intent('Claude 已开始处理当前任务。', sessionId, undefined, undefined, 'request.started')
@@ -5953,9 +6150,52 @@ async function runClaudePrompt(
               interaction,
             })
           }
-          emitClaudeToolUse(toolEntry.name, toolEntry.input, `assistant.tool_use.${toolEntry.name}`)
+          emitClaudeToolUse(toolEntry.name, toolEntry.input, `assistant.tool_use.${toolEntry.name}`, {
+            toolUseId: toolEntry.id,
+            assistantSnapshot: partialText,
+            assistantChunk: toolEntry.textBefore,
+          })
         }
         return
+      }
+
+      if (parsed.type === 'progress' && typeof parsed.data === 'object' && parsed.data) {
+        const progressData = parsed.data as Record<string, unknown>
+        if (progressData.type === 'agent_progress') {
+          const parentToolUseId = typeof parsed.parentToolUseID === 'string' ? parsed.parentToolUseID.trim() : ''
+          const indentLevel = parentToolUseId ? (toolUseIndentLevels.get(parentToolUseId) ?? 0) + 1 : 1
+          const nestedMessage =
+            typeof progressData.message === 'object' && progressData.message
+              ? progressData.message as Record<string, unknown>
+              : null
+          const nestedPrompt = typeof progressData.prompt === 'string' ? progressData.prompt.trim() : ''
+
+          if (nestedPrompt) {
+            progress.intent('子任务目标', sessionId, nestedPrompt, undefined, 'agent_progress.prompt', nestedPrompt, indentLevel)
+          }
+
+          if (nestedMessage?.type === 'assistant') {
+            const nestedPayload =
+              typeof nestedMessage.message === 'object' && nestedMessage.message
+                ? nestedMessage.message as { content?: unknown }
+                : undefined
+            const nestedAssistantText = extractClaudeTextFromMessage(nestedPayload?.content)
+            const nestedToolEntries = extractToolUseEntries(nestedPayload?.content)
+            for (const toolEntry of nestedToolEntries) {
+              if (!toolEntry.name) {
+                continue
+              }
+              emitClaudeToolUse(toolEntry.name, toolEntry.input, `agent_progress.tool_use.${toolEntry.name}`, {
+                toolUseId: toolEntry.id,
+                indentLevel,
+                assistantSnapshot: nestedAssistantText,
+                assistantChunk: toolEntry.textBefore,
+              })
+            }
+          }
+
+          return
+        }
       }
 
       if (parsed.type === 'stream_event' && typeof parsed.event === 'object' && parsed.event) {
@@ -5974,10 +6214,13 @@ async function runClaudePrompt(
                 requestId: input.requestId,
                 sessionId,
                 progress,
-                interaction,
-              })
-            }
-            emitClaudeToolUse(block.name, block.input, `stream.tool_use.${block.name}`)
+              interaction,
+            })
+          }
+            emitClaudeToolUse(block.name, block.input, `stream.tool_use.${block.name}`, {
+              toolUseId: typeof block.id === 'string' ? block.id : '',
+              assistantSnapshot: partialText,
+            })
           }
         }
 
@@ -6039,7 +6282,9 @@ async function runClaudePrompt(
     planState = null
     planRecords.length = 0
     seenToolUseEvents.clear()
+    toolUseIndentLevels.clear()
     lastToolIntentText = ''
+    consumedAssistantChars = 0
     args = buildClaudePromptArgs(input)
     attempt += 1
     result = await runClaudeOnce()
@@ -6064,7 +6309,9 @@ async function runClaudePrompt(
     planState = null
     planRecords.length = 0
     seenToolUseEvents.clear()
+    toolUseIndentLevels.clear()
     lastToolIntentText = ''
+    consumedAssistantChars = 0
     result = await runClaudeOnce()
     retryDiagnostics = summarizeCliFailure(result.stdout, result.stderr)
   }

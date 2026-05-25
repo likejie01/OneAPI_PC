@@ -210,6 +210,8 @@ test('buildCliTimeline groups adjacent logs from same request', () => {
         kind: 'status',
         sourceKind: undefined,
         message: 'step 1',
+        assistantChunk: undefined,
+        indentLevel: undefined,
         createdAt: 10000000,
         detail: undefined,
         command: undefined,
@@ -222,6 +224,8 @@ test('buildCliTimeline groups adjacent logs from same request', () => {
         kind: 'status',
         sourceKind: undefined,
         message: 'step 2',
+        assistantChunk: undefined,
+        indentLevel: undefined,
         createdAt: 11000000,
         detail: undefined,
         command: undefined,
@@ -234,6 +238,8 @@ test('buildCliTimeline groups adjacent logs from same request', () => {
         kind: 'error',
         sourceKind: undefined,
         message: 'boom',
+        assistantChunk: undefined,
+        indentLevel: undefined,
         createdAt: 12000000,
         detail: undefined,
         command: undefined,
@@ -314,6 +320,49 @@ test('buildCliTimeline keeps grouped logs after the user bubble even when log ti
   assert.deepEqual(
     timeline.map((item) => item.id),
     ['user-1', 'log-1', 'assistant-1']
+  )
+})
+
+test('buildCliTimeline strips assistant intent chunks already attached to logs', () => {
+  const timeline = buildCliTimeline({
+    messages: [
+      { id: 'user-1', role: 'user', content: 'hello', createdAt: 1, requestId: 'req-1' },
+      {
+        id: 'assistant-1',
+        role: 'assistant',
+        content: '先检查项目结构。\n然后读取 package.json。\n已经完成修复。',
+        createdAt: 4,
+        modelLabel: 'Codex',
+        requestId: 'req-1',
+      },
+    ],
+    logs: [
+      {
+        id: 'log-1',
+        requestId: 'req-1',
+        level: 'status',
+        content: '执行目的',
+        assistantChunk: '先检查项目结构。',
+        createdAt: 2,
+      },
+      {
+        id: 'log-2',
+        requestId: 'req-1',
+        level: 'status',
+        content: '执行目的',
+        assistantChunk: '然后读取 package.json。',
+        createdAt: 3,
+      },
+    ],
+  })
+
+  assert.deepEqual(
+    timeline.map((item) => item.id),
+    ['user-1', 'log-1', 'assistant-1']
+  )
+  assert.equal(
+    timeline.find((item) => item.id === 'assistant-1' && item.kind === 'message')?.content,
+    '已经完成修复。'
   )
 })
 

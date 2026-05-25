@@ -3,6 +3,22 @@ function normalizeDesktopVersionPart(value: string) {
   return match ? Number.parseInt(match[0], 10) : 0
 }
 
+function normalizeDesktopUpdateBaseUrl(value: string) {
+  const trimmed = value.trim().replace(/\/+$/, '')
+  if (!trimmed) {
+    return ''
+  }
+  try {
+    const target = new URL(trimmed)
+    if (!/^https?:$/i.test(target.protocol)) {
+      return ''
+    }
+    return target.toString().replace(/\/+$/, '')
+  } catch {
+    return ''
+  }
+}
+
 export function compareDesktopVersions(currentVersion: string, nextVersion: string) {
   const currentParts = currentVersion.split('.').map(normalizeDesktopVersionPart)
   const nextParts = nextVersion.split('.').map(normalizeDesktopVersionPart)
@@ -18,6 +34,20 @@ export function compareDesktopVersions(currentVersion: string, nextVersion: stri
   }
 
   return 0
+}
+
+export function buildDesktopReleaseManifestUrlCandidates(
+  currentServerBaseUrl: string,
+  defaultServerBaseUrl: string
+) {
+  const candidates = [
+    currentServerBaseUrl,
+    defaultServerBaseUrl,
+  ]
+    .map((value) => normalizeDesktopUpdateBaseUrl(value))
+    .filter(Boolean)
+
+  return [...new Set(candidates)].map((baseUrl) => `${baseUrl}/api/download/desktop-release`)
 }
 
 export function getDesktopUpdateDayKey(now: Date) {

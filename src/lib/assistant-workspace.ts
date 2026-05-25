@@ -12,6 +12,8 @@ export type CliLogEntryLike = {
   logKind?: CliLogKind
   sourceKind?: string
   content: string
+  assistantChunk?: string
+  indentLevel?: number
   createdAt: number
   files?: CliFileChange[]
   detail?: string
@@ -26,6 +28,8 @@ export type CliTimelineLogEvent = {
   kind: CliLogKind
   sourceKind?: string
   message: string
+  assistantChunk?: string
+  indentLevel?: number
   createdAt: number
   files: CliFileChange[]
   detail?: string
@@ -124,6 +128,50 @@ function toTimelineTimestamp(value: number) {
     return 0
   }
   return value > 10_000_000_000 ? Math.floor(value) : Math.floor(value * 1000)
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function stripLeadingAssistantChunk(content: string, chunk: string) {
+  const normalizedChunk = chunk.trim()
+  if (!normalizedChunk) {
+    return { content, stripped: false }
+  }
+
+  const prefixPattern = new RegExp(`^\\s*${escapeRegExp(normalizedChunk).replace(/\s+/g, '\\s+')}\\s*`)
+  if (!prefixPattern.test(content)) {
+    return { content, stripped: false }
+  }
+
+  return {
+    content: content.replace(prefixPattern, '').trimStart(),
+    stripped: true,
+  }
+}
+
+function stripConsumedAssistantChunks(
+  content: string,
+  chunks: string[],
+  startIndex: number
+) {
+  let nextContent = content
+  let nextIndex = startIndex
+
+  while (nextIndex < chunks.length) {
+    const stripped = stripLeadingAssistantChunk(nextContent, chunks[nextIndex] || '')
+    if (!stripped.stripped) {
+      break
+    }
+    nextContent = stripped.content
+    nextIndex += 1
+  }
+
+  return {
+    content: nextContent,
+    nextIndex,
+  }
 }
 
 export function isCodexModel(model: ChatModelOption | string) {
@@ -340,6 +388,8 @@ export function buildCliTimeline(input: {
       kind: item.logKind || (item.level === 'error' ? 'error' : 'status'),
       sourceKind: item.sourceKind,
       message: item.content,
+      assistantChunk: item.assistantChunk,
+      indentLevel: item.indentLevel,
       createdAt: normalizedCreatedAt,
       files: eventFiles,
       detail: item.detail,
@@ -378,19 +428,60 @@ export function buildCliTimeline(input: {
     return groups
   }, [])
 
+  const requestAssistantChunks = groupedLogs.reduce<Map<string, string[]>>((map, item) => {
+    if (!item.requestId) {
+      return map
+    }
+
+    const chunks = item.events
+      .map((eventItem) => eventItem.assistantChunk?.trim() || '')
+      .filter(Boolean)
+    if (!chunks.length) {
+      return map
+    }
+
+    const previous = map.get(item.requestId) || []
+    map.set(item.requestId, [...previous, ...chunks])
+    return map
+  }, new Map<string, string[]>())
+
+  const requestAssistantChunkCursor = new Map<string, number>()
   const entries: CliTimelineEntry[] = input.messages
-    .map((item) => ({
-      id: item.id,
-      kind: 'message' as const,
-      role: item.role,
-      content: item.content,
-      createdAt: toTimelineTimestamp(item.createdAt),
-      requestId: item.requestId,
-      modelLabel: item.modelLabel,
-      attachments: item.attachments,
-      selectedExtensions: item.selectedExtensions,
-      fileChanges: item.fileChanges,
-    }))
+    .map((item) => {
+      let content = item.content
+      if (item.role === 'assistant' && item.requestId) {
+        const chunks = requestAssistantChunks.get(item.requestId) || []
+        const cursor = requestAssistantChunkCursor.get(item.requestId) || 0
+        if (chunks.length > cursor) {
+          const stripped = stripConsumedAssistantChunks(content, chunks, cursor)
+          content = stripped.content
+          requestAssistantChunkCursor.set(item.requestId, stripped.nextIndex)
+        }
+      }
+
+      return {
+        id: item.id,
+        kind: 'message' as const,
+        role: item.role,
+        content,
+        createdAt: toTimelineTimestamp(item.createdAt),
+        requestId: item.requestId,
+        modelLabel: item.modelLabel,
+        attachments: item.attachments,
+        selectedExtensions: item.selectedExtensions,
+        fileChanges: item.fileChanges,
+      }
+    })
+    .filter((item) => {
+      if (item.role !== 'assistant') {
+        return true
+      }
+      return !!(
+        item.content.trim() ||
+        item.attachments?.length ||
+        item.fileChanges?.length
+      )
+    })
     .sort((left, right) => left.createdAt - right.createdAt)
 
   if (input.partial?.trim()) {

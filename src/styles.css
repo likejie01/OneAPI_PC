@@ -1291,6 +1291,9 @@ select {
 
 .message-stream,
 .cli-thread {
+  --conversation-user-gutter: 200px;
+  --conversation-ai-gutter: 200px;
+  --conversation-bubble-max-width: calc(100% - var(--conversation-ai-gutter));
   flex: 1;
   min-height: 0;
   overflow: auto;
@@ -1324,7 +1327,7 @@ select {
   width: auto;
   display: inline-flex;
   flex-direction: column;
-  max-width: calc(100% - 100px);
+  max-width: var(--conversation-bubble-max-width);
   padding: 10px 12px 9px;
   border-radius: 18px;
   border: 1px solid var(--line);
@@ -1336,19 +1339,19 @@ select {
 .message-bubble.user {
   align-self: flex-end;
   background: rgba(255, 255, 255, 0.92);
-  margin-left: 100px;
+  margin-left: var(--conversation-user-gutter);
 }
 
 .message-bubble.assistant {
   align-self: flex-start;
   background: rgba(255, 255, 255, 0.92);
-  margin-right: 100px;
+  margin-right: var(--conversation-ai-gutter);
 }
 
 .message-bubble.system {
   align-self: flex-start;
   background: rgba(238, 242, 244, 0.96);
-  margin-right: 100px;
+  margin-right: var(--conversation-ai-gutter);
 }
 
 .cli-thread .message-bubble.user {
@@ -1832,6 +1835,10 @@ select {
   color: #133f4b;
 }
 
+.cli-extension-filter-row {
+  padding: 0 16px 8px;
+}
+
 .picker-empty-state {
   padding: 10px 12px;
   border-radius: 12px;
@@ -2272,8 +2279,8 @@ select {
 
 .message-stream > .empty-card,
 .cli-thread > .empty-card {
-  width: calc(100% - 100px);
-  max-width: calc(100% - 100px);
+  width: var(--conversation-bubble-max-width);
+  max-width: var(--conversation-bubble-max-width);
   align-self: flex-start;
 }
 
@@ -2298,9 +2305,10 @@ select {
 
 .cli-log-bubble {
   align-self: flex-start;
-  width: calc(100% - 100px);
-  max-width: calc(100% - 100px);
+  width: auto;
+  max-width: var(--conversation-bubble-max-width);
   margin: 0;
+  margin-right: var(--conversation-ai-gutter);
   background: rgba(238, 242, 244, 0.96);
 }
 
@@ -2464,6 +2472,7 @@ select {
   grid-template-columns: 12px minmax(0, 1fr);
   gap: 10px;
   align-items: flex-start;
+  padding-left: calc(var(--cli-log-indent-level, 0) * 18px);
 }
 
 .cli-log-event-dot {
@@ -2498,6 +2507,18 @@ select {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.cli-log-event-intent-text {
+  padding: 9px 11px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 14%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--text);
+  font-size: 12.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .cli-log-event-head {
@@ -3731,6 +3752,13 @@ select {
   .message-bubble {
     max-width: 92%;
   }
+
+  .message-stream,
+  .cli-thread {
+    --conversation-user-gutter: 32px;
+    --conversation-ai-gutter: 32px;
+    --conversation-bubble-max-width: 92%;
+  }
 }
 
 :root {
@@ -4450,6 +4478,135 @@ textarea:focus {
 .billing-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
+}
+
+.wallet-section-tabs {
+  margin-bottom: 4px;
+}
+
+.service-status-grid {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.service-status-card {
+  display: grid;
+  gap: 10px;
+  padding: 16px 18px;
+  border-radius: 18px;
+  border: 1px solid rgba(23, 49, 74, 0.08);
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.service-status-history {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 10px;
+  flex-wrap: wrap;
+}
+
+.service-status-history-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  display: inline-flex;
+  box-shadow: 0 0 0 1px rgba(23, 49, 74, 0.08);
+  transition: transform 160ms ease, box-shadow 160ms ease, filter 160ms ease;
+}
+
+.service-status-history-dot:hover {
+  transform: translateY(-1px) scale(1.28);
+  filter: saturate(1.08);
+  box-shadow:
+    0 0 0 1px rgba(23, 49, 74, 0.12),
+    0 0 0 5px rgba(61, 153, 112, 0.08);
+}
+
+.service-status-history-dot.success {
+  background: #3d9970;
+}
+
+.service-status-history-dot.warn {
+  background: #d6922a;
+}
+
+.service-status-history-dot.danger {
+  background: #d24e4e;
+}
+
+.service-status-history-dot.muted {
+  background: rgba(23, 49, 74, 0.2);
+}
+
+.service-status-card-head,
+.service-status-card-meta {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.service-status-card-head > div,
+.service-status-card-meta {
+  flex-wrap: wrap;
+}
+
+.service-status-card-head span,
+.service-status-card-meta small,
+.service-status-card p {
+  color: var(--muted);
+}
+
+.service-status-card p {
+  margin: 0;
+  line-height: 1.6;
+}
+
+@media (max-width: 1360px) {
+  .service-status-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 980px) {
+  .service-status-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.service-status-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.service-status-pill.success {
+  background: rgba(61, 153, 112, 0.14);
+  color: #206c4a;
+}
+
+.service-status-pill.warn {
+  background: rgba(214, 146, 42, 0.14);
+  color: #946100;
+}
+
+.service-status-pill.danger {
+  background: rgba(210, 78, 78, 0.14);
+  color: #a33737;
+}
+
+.service-status-pill.muted {
+  background: rgba(23, 49, 74, 0.08);
+  color: var(--muted);
 }
 
 .billing-card {
