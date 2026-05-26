@@ -13,6 +13,7 @@ import {
   Tray,
   type WebContents,
 } from 'electron'
+import { NsisUpdater, type ProgressInfo, type UpdateDownloadedEvent } from 'electron-updater'
 import { randomUUID } from 'node:crypto'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createReadStream, createWriteStream, promises as fs } from 'node:fs'
@@ -44,6 +45,8 @@ import type {
 import {
   buildDesktopReleaseManifestUrlCandidates,
   compareDesktopVersions,
+  resolveDesktopUpdateFeedUrl,
+  resolveDesktopUpdateUrl,
 } from '../src/lib/app-update.ts'
 import { parseDesktopChatStreamDataLine } from '../src/lib/chat-reasoning.ts'
 import {
@@ -63,6 +66,8 @@ import {
   pickClaudeApiKeyFromUnknown,
   resolveClaudeDesktopEnv,
 } from '../src/lib/claude-cli-config.ts'
+import { extractCliUserTask } from '../src/lib/cli-prompt.ts'
+import { isCliSessionReadyForLatestTurn } from '../src/lib/cli-session-readiness.ts'
 import {
   MIN_DESKTOP_CLI_NODE_MAJOR,
   buildCodexSandboxArgs,
@@ -129,6 +134,9 @@ let desktopUpdateState: DesktopUpdateState = {
   currentVersion: app.getVersion(),
 }
 let updateDownloadPromise: Promise<DesktopUpdateState> | null = null
+let windowsDesktopUpdater: NsisUpdater | null = null
+let windowsDesktopUpdaterFeedUrl = ''
+let desktopUpdateInstallStrategy: 'manual' | 'updater' | null = null
 
 function applyThemeMode(mode: ThemeMode) {
   nativeTheme.themeSource = mode
@@ -634,7 +642,15 @@ async function fetchDesktopReleaseManifest(): Promise<DesktopReleaseManifest> {
 
   for (const targetUrl of candidates) {
     try {
-      const response = await getDesktopSession().fetch(targetUrl)
+      const absoluteTargetUrl = resolveDesktopUpdateUrl(targetUrl, serverBaseUrl, DEFAULT_SERVER_BASE_URL)
+      if (!absoluteTargetUrl) {
+        throw new Error(`版本清单地址无效：${targetUrl}`)
+      }
+      const response = await fetch(absoluteTargetUrl, {
+        headers: {
+          'User-Agent': 'OneAPI-Desktop',
+        },
+      })
       if (!response.ok) {
         const data = await parseResponse(response)
         throw new Error(getResponseErrorMessage(data, response.status, '获取版本清单失败'))
@@ -673,6 +689,98 @@ function resolveReleasePackageFileName(release: DesktopReleasePlatform | undefin
   }
 }
 
+function canUseDifferentialDesktopUpdate(release: DesktopReleasePlatform | undefined) {
+  if (process.platform !== 'win32' || !app.isPackaged) {
+    return false
+  }
+  return Boolean(resolveDesktopUpdateFeedUrl(release?.installer?.url?.trim() || ''))
+}
+
+function setDesktopUpdateErrorState(error: unknown, fallbackMessage: string) {
+  return setDesktopUpdateState({
+    status: 'error',
+    message: error instanceof Error ? error.message : fallbackMessage,
+  })
+}
+
+function configureWindowsDesktopUpdater(release: DesktopReleasePlatform) {
+  const installerUrl = resolveDesktopUpdateUrl(
+    release.installer?.url?.trim() || '',
+    serverBaseUrl,
+    DEFAULT_SERVER_BASE_URL
+  )
+  const feedUrl = resolveDesktopUpdateFeedUrl(installerUrl)
+  if (!feedUrl) {
+    throw new Error('当前更新包缺少可用的增量更新源。')
+  }
+
+  if (windowsDesktopUpdater && windowsDesktopUpdaterFeedUrl === feedUrl) {
+    return windowsDesktopUpdater
+  }
+
+  const updater = new NsisUpdater({
+    provider: 'generic',
+    url: feedUrl,
+    channel: 'latest',
+    useMultipleRangeRequest: true,
+  })
+  updater.autoDownload = false
+  updater.autoInstallOnAppQuit = false
+  updater.autoRunAppAfterInstall = true
+  updater.disableWebInstaller = true
+  updater.logger = null
+  updater.on('download-progress', (progress: ProgressInfo) => {
+    setDesktopUpdateState({
+      status: 'downloading',
+      latestVersion: desktopUpdateState.latestVersion,
+      downloadedBytes: progress.transferred,
+      totalBytes: progress.total,
+      progress: progress.percent,
+      message: '正在自动下载增量更新包...',
+    })
+  })
+  updater.on('update-downloaded', (event: UpdateDownloadedEvent) => {
+    desktopUpdateInstallStrategy = 'updater'
+    setDesktopUpdateState({
+      status: 'downloaded',
+      latestVersion: event.version || desktopUpdateState.latestVersion,
+      installerPath: event.downloadedFile,
+      downloadedBytes: desktopUpdateState.totalBytes || desktopUpdateState.downloadedBytes || 0,
+      totalBytes: desktopUpdateState.totalBytes || desktopUpdateState.downloadedBytes || 0,
+      progress: 100,
+      message: '增量更新包已下载完成。',
+    })
+  })
+  updater.on('error', (error: Error) => {
+    setDesktopUpdateErrorState(error, '增量更新失败')
+  })
+
+  windowsDesktopUpdater = updater
+  windowsDesktopUpdaterFeedUrl = feedUrl
+  return updater
+}
+
+async function startDifferentialDesktopUpdateDownload(release: DesktopReleasePlatform) {
+  const updater = configureWindowsDesktopUpdater(release)
+  desktopUpdateInstallStrategy = 'updater'
+  setDesktopUpdateState({
+    status: 'downloading',
+    latestVersion: release.version?.trim() || desktopUpdateState.latestVersion,
+    progress: 0,
+    downloadedBytes: 0,
+    totalBytes: 0,
+    message: '正在自动下载增量更新包...',
+  })
+
+  const result = await updater.checkForUpdates()
+  if (!result?.isUpdateAvailable) {
+    throw new Error('增量更新源未返回可用版本信息。')
+  }
+
+  await updater.downloadUpdate(result.cancellationToken)
+  return desktopUpdateState
+}
+
 async function checkForDesktopUpdate(options: {
   userInitiated?: boolean
 } = {}) {
@@ -690,6 +798,7 @@ async function checkForDesktopUpdate(options: {
     const announcements = normalizeDesktopAnnouncements(manifest)
 
     if (!release || !latestVersion) {
+      desktopUpdateInstallStrategy = null
       return setDesktopUpdateState({
         status: options.userInitiated ? 'error' : 'idle',
         latestVersion: '',
@@ -710,6 +819,7 @@ async function checkForDesktopUpdate(options: {
       desktopUpdateState.latestVersion === latestVersion
 
     if (comparison >= 0) {
+      desktopUpdateInstallStrategy = null
       return setDesktopUpdateState({
         status: 'up_to_date',
         latestVersion,
@@ -751,7 +861,11 @@ async function startDesktopUpdateDownload() {
   }
 
   const release = desktopUpdateState.release
-  const downloadUrl = release?.installer?.url?.trim() || ''
+  const downloadUrl = resolveDesktopUpdateUrl(
+    release?.installer?.url?.trim() || '',
+    serverBaseUrl,
+    DEFAULT_SERVER_BASE_URL
+  )
   const latestVersion = release?.version?.trim() || desktopUpdateState.latestVersion || ''
   if (!downloadUrl || !latestVersion) {
     throw new Error('当前没有可下载的更新包。')
@@ -759,6 +873,15 @@ async function startDesktopUpdateDownload() {
 
   updateDownloadPromise = (async () => {
     try {
+      if (canUseDifferentialDesktopUpdate(release)) {
+        try {
+          return await startDifferentialDesktopUpdateDownload(release as DesktopReleasePlatform)
+        } catch {
+          desktopUpdateInstallStrategy = null
+        }
+      }
+
+      desktopUpdateInstallStrategy = 'manual'
       const fileName = resolveReleasePackageFileName(release)
       const targetDir = path.join(getUpdateCacheDirectory(), latestVersion)
       const targetPath = path.join(targetDir, fileName)
@@ -825,10 +948,7 @@ async function startDesktopUpdateDownload() {
         message: '更新包已下载完成。',
       })
     } catch (error) {
-      return setDesktopUpdateState({
-        status: 'error',
-        message: error instanceof Error ? error.message : '下载更新包失败',
-      })
+      return setDesktopUpdateErrorState(error, '下载更新包失败')
     } finally {
       updateDownloadPromise = null
     }
@@ -838,6 +958,12 @@ async function startDesktopUpdateDownload() {
 }
 
 async function installDesktopUpdate() {
+  if (process.platform === 'win32' && desktopUpdateInstallStrategy === 'updater' && windowsDesktopUpdater) {
+    isQuitting = true
+    windowsDesktopUpdater.quitAndInstall(false, true)
+    return
+  }
+
   const installerPath = desktopUpdateState.installerPath?.trim() || ''
   if (!installerPath) {
     throw new Error('更新包尚未下载完成。')
@@ -4121,25 +4247,7 @@ function normalizeWhitespace(value: string) {
 }
 
 function sanitizeCliUserPrompt(raw: string) {
-  const normalized = raw.replace(/\r\n/g, '\n').trim()
-  if (!normalized) {
-    return ''
-  }
-
-  const policyMarker = '执行策略：'
-  const taskMarker = '用户任务：'
-  let next = normalized
-
-  if (next.startsWith(policyMarker) && next.includes(taskMarker)) {
-    next = next.slice(next.indexOf(taskMarker) + taskMarker.length).trim()
-  }
-
-  const attachmentIndex = next.indexOf('附件引用：')
-  if (attachmentIndex >= 0) {
-    next = next.slice(0, attachmentIndex).trim()
-  }
-
-  return next.trim()
+  return extractCliUserTask(raw)
 }
 
 function toEpochSeconds(value: unknown) {
@@ -4944,7 +5052,18 @@ async function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-async function waitForCliSession(client: CliClient, sessionId?: string) {
+function normalizeCliSessionUserContent(value: string) {
+  return normalizeWhitespace(sanitizeCliUserPrompt(value))
+}
+
+async function waitForCliSession(
+  client: CliClient,
+  sessionId?: string,
+  options: {
+    expectedUserContent?: string
+    minUpdatedAtMs?: number
+  } = {}
+) {
   if (!sessionId) {
     return null
   }
@@ -4955,7 +5074,11 @@ async function waitForCliSession(client: CliClient, sessionId?: string) {
         ? await getCodexSession(sessionId)
         : await getClaudeSession(sessionId)
 
-    if (details?.messages.length) {
+    if (details?.messages.length && isCliSessionReadyForLatestTurn(details, {
+      expectedUserContent: options.expectedUserContent,
+      minUpdatedAtMs: options.minUpdatedAtMs || 0,
+      normalizeUserContent: normalizeCliSessionUserContent,
+    })) {
       return details
     }
 
@@ -5638,6 +5761,7 @@ async function runCodexPrompt(
   webContents: WebContents,
   input: CliRunRequest
 ): Promise<CliRunResponse> {
+  const requestStartedAtMs = Date.now()
   const progress = createCliProgressEmitter(webContents, 'codex', input.requestId)
   const requestedSessionId = input.sessionId?.trim()
   const resumeSessionId = requestedSessionId && await getLatestCodexSessionFile(requestedSessionId)
@@ -5889,7 +6013,10 @@ async function runCodexPrompt(
     sessionId = threadEvent.thread_id
   }
 
-  const session = await waitForCliSession('codex', sessionId)
+  const session = await waitForCliSession('codex', sessionId, {
+    expectedUserContent: input.prompt,
+    minUpdatedAtMs: requestStartedAtMs,
+  })
   runtimeDiagnostics.sessionFileFound = !!session
   runtimeDiagnostics.sessionReadAttempts = 40
   const sessionOutput = session?.messages.filter((item) => item.role === 'assistant').at(-1)?.content ?? ''
@@ -5965,6 +6092,7 @@ async function runClaudePrompt(
   webContents: WebContents,
   input: CliRunRequest
 ): Promise<CliRunResponse> {
+  const requestStartedAtMs = Date.now()
   const progress = createCliProgressEmitter(webContents, 'claude', input.requestId)
   const requestedSessionId = input.sessionId?.trim()
   const resumeSessionId = requestedSessionId && await getClaudeSessionFile(requestedSessionId)
@@ -6332,7 +6460,10 @@ async function runClaudePrompt(
     sessionId = finalResult.session_id
   }
 
-  const session = await waitForCliSession('claude', sessionId)
+  const session = await waitForCliSession('claude', sessionId, {
+    expectedUserContent: input.prompt,
+    minUpdatedAtMs: requestStartedAtMs,
+  })
   runtimeDiagnostics.sessionFileFound = !!session
   runtimeDiagnostics.sessionReadAttempts = 40
   const transcriptOutput =

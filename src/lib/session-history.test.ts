@@ -82,6 +82,39 @@ test('mergeCliMessages keeps fallback assistant replies when later hydration onl
   assert.equal(merged[0].sourceLineNumber, 1)
 })
 
+test('mergeCliMessages dedupes wrapped user prompts against sanitized session hydration', () => {
+  const draftOnly: CliSessionMessage = {
+    id: 'draft-user-1',
+    role: 'user',
+    content: '请修复更新失败',
+    createdAt: 1700000001000,
+    requestId: 'req-fix-update',
+  }
+  const hydrated: CliSessionMessage = {
+    id: 'hydrated-user-1',
+    role: 'user',
+    content: `用户任务：
+请修复更新失败
+
+以下内容是执行约束，不是需要你单独回答的用户问题；请直接完成上面的用户任务，不要复述这些约束。
+
+权限上下文：
+当前为全权限模式，可在用户任务需要时执行项目外读写。
+
+执行策略：
+1. 先选择最小修改量、最高成功率、最少副作用的方案。`,
+    createdAt: 1700000003000,
+    requestId: 'req-fix-update',
+    sourceLineNumber: 9,
+  }
+
+  const merged = mergeCliMessages([draftOnly], [hydrated])
+
+  assert.equal(merged.length, 1)
+  assert.equal(merged[0].content, hydrated.content)
+  assert.equal(merged[0].sourceLineNumber, 9)
+})
+
 test('hasActiveCliPlan hides fully completed plans', () => {
   assert.equal(
     hasActiveCliPlan({

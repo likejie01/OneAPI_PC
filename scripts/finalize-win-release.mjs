@@ -1,4 +1,5 @@
 import fs from 'node:fs'
+import crypto from 'node:crypto'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { execFileSync } from 'node:child_process'
@@ -15,6 +16,8 @@ const oldBlockmapPath = path.join(releaseDir, 'OneAPI PC Setup 0.1.0.exe.blockma
 const finalInstallerPath = path.join(releaseDir, 'OneAPI_PC_Setup-1-0.exe')
 const finalPortablePath = path.join(releaseDir, 'OneAPI_PC-1-0.exe')
 const finalBlockmapPath = path.join(releaseDir, 'OneAPI_PC_Setup-1-0.exe.blockmap')
+const finalLatestYamlPath = path.join(releaseDir, 'latest.yml')
+const packageJsonPath = path.join(projectRoot, 'package.json')
 
 const removeIfExists = (targetPath) => {
   if (!fs.existsSync(targetPath)) {
@@ -29,6 +32,48 @@ const moveIfExists = (sourcePath, destinationPath) => {
   }
   removeIfExists(destinationPath)
   fs.renameSync(sourcePath, destinationPath)
+}
+
+const readPackageVersion = () => {
+  const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'))
+  const version = typeof packageJson.version === 'string' ? packageJson.version.trim() : ''
+  if (!version) {
+    throw new Error(`missing version in ${packageJsonPath}`)
+  }
+  return version
+}
+
+const calculateSha512 = (targetPath) =>
+  new Promise((resolve, reject) => {
+    const hash = crypto.createHash('sha512')
+    const stream = fs.createReadStream(targetPath)
+    stream.on('error', reject)
+    stream.on('data', (chunk) => hash.update(chunk))
+    stream.on('end', () => resolve(hash.digest('base64')))
+  })
+
+const writeLatestYaml = async () => {
+  if (!fs.existsSync(finalInstallerPath)) {
+    throw new Error(`missing installer artifact: ${finalInstallerPath}`)
+  }
+
+  const version = readPackageVersion()
+  const sha512 = await calculateSha512(finalInstallerPath)
+  const stat = fs.statSync(finalInstallerPath)
+  const installerFileName = path.basename(finalInstallerPath)
+  const yaml = [
+    `version: ${version}`,
+    'files:',
+    `  - url: ${installerFileName}`,
+    `    sha512: ${sha512}`,
+    `    size: ${stat.size}`,
+    `path: ${installerFileName}`,
+    `sha512: ${sha512}`,
+    `releaseDate: '${stat.mtime.toISOString()}'`,
+    '',
+  ].join('\n')
+
+  fs.writeFileSync(finalLatestYamlPath, yaml, 'utf8')
 }
 
 moveIfExists(oldInstallerPath, finalInstallerPath)
@@ -54,5 +99,7 @@ execFileSync(
     stdio: 'inherit',
   },
 )
+
+await writeLatestYaml()
 
 console.log(`finalized Windows release in ${path.relative(projectRoot, releaseDir)}`)

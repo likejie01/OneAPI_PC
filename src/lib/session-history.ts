@@ -7,6 +7,7 @@ import type {
   CliSessionDetails,
   CliSessionMessage,
 } from '../shared/desktop'
+import { extractCliUserTask } from './cli-prompt.ts'
 
 type ExportAttachment = NonNullable<ChatMessage['attachments']>[number]
 
@@ -44,8 +45,20 @@ function normalizeTimestampMs(value: number) {
   return value > 10_000_000_000 ? Math.floor(value) : Math.floor(value * 1000)
 }
 
+function normalizeCliMergeContent(message: Pick<CliSessionMessage, 'role' | 'content'>) {
+  const rawContent = message.content.trim()
+  if (message.role !== 'user') {
+    return rawContent
+  }
+  return extractCliUserTask(rawContent).trim() || rawContent
+}
+
 function buildCliMessageKey(message: Pick<CliSessionMessage, 'role' | 'createdAt' | 'content'>) {
   return `${message.role}:${normalizeTimestampMs(message.createdAt)}:${message.content}`
+}
+
+function buildCliRequestKey(message: Pick<CliSessionMessage, 'role' | 'requestId'>) {
+  return message.requestId?.trim() ? `${message.role}:request:${message.requestId.trim()}` : ''
 }
 
 function preferDefined<T>(primary: T | undefined, fallback: T | undefined) {
@@ -79,13 +92,31 @@ function mergeCliMessagePair(left: CliSessionMessage, right: CliSessionMessage) 
 
 export function mergeCliMessages(left: CliSessionMessage[], right: CliSessionMessage[]) {
   const merged = new Map<string, CliSessionMessage>()
+  const userContentIndex = new Map<string, string>()
 
   for (const item of [...left, ...right]) {
     const normalizedItem = {
       ...item,
       createdAt: normalizeTimestampMs(item.createdAt),
     } satisfies CliSessionMessage
-    const key = buildCliMessageKey(normalizedItem)
+    let key = ''
+    if (normalizedItem.role === 'user') {
+      const contentKey = `user:content:${normalizeCliMergeContent(normalizedItem)}`
+      const existingKey = userContentIndex.get(contentKey)
+      if (existingKey) {
+        const existingMessage = merged.get(existingKey)
+        if (existingMessage && Math.abs(existingMessage.createdAt - normalizedItem.createdAt) <= 30_000) {
+          key = existingKey
+        }
+      }
+      if (!key) {
+        key = buildCliRequestKey(normalizedItem) || buildCliMessageKey(normalizedItem)
+        userContentIndex.set(contentKey, key)
+      }
+    }
+    if (!key) {
+      key = buildCliRequestKey(normalizedItem) || buildCliMessageKey(normalizedItem)
+    }
     const existing = merged.get(key)
     merged.set(key, existing ? mergeCliMessagePair(existing, normalizedItem) : normalizedItem)
   }

@@ -224,7 +224,11 @@ export function buildCliExtensionPromptBlock(items: Array<{
     return `${prefix}如任务需要，请调用已安装插件 "${item.name}"。`
   })
 
-  return ['扩展调用要求：', ...lines].join('\n')
+  return ['以下内容是 OneAPI 客户端附加的扩展调用要求', ...lines].join('\n')
+}
+
+function buildCliVisiblePromptPreview(prompt: string) {
+  return prompt.replace(/\s+/g, ' ').trim()
 }
 
 export function buildCliExtensionAugmentedPrompt(
@@ -240,7 +244,18 @@ export function buildCliExtensionAugmentedPrompt(
   if (!extensionBlock) {
     return cleanedPrompt
   }
-  return `${extensionBlock}\n\n${cleanedPrompt}`
+  const visiblePreview = buildCliVisiblePromptPreview(cleanedPrompt)
+  if (visiblePreview === cleanedPrompt) {
+    return `${cleanedPrompt}\n\n${extensionBlock}`
+  }
+  return [
+    visiblePreview,
+    '',
+    '以下内容是用户真实需求原文（保留格式）',
+    cleanedPrompt,
+    '',
+    extensionBlock,
+  ].join('\n')
 }
 
 function buildCliOverlayMatchKey(role: CliSessionMessage['role'], content: string) {

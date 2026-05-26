@@ -193,8 +193,17 @@ import {
   formatSubscriptionDuration,
   formatSubscriptionResetPeriod,
 } from './lib/format'
-import { getDesktopUpdateDayKey, shouldAutoCheckDesktopUpdate } from './lib/app-update'
+import {
+  getDesktopUpdateDayKey,
+  resolveDesktopUpdateStatusSummary,
+  shouldAutoCheckDesktopUpdate,
+} from './lib/app-update'
 import { buildCliExecutionPrompt } from './lib/cli-prompt'
+import {
+  buildPendingDrawRetryRequest,
+  resolvePendingDrawRequestGroup,
+  type PendingDrawRetryRequest,
+} from './lib/draw-request'
 import { isRecoverableNetworkError } from './lib/network-retry'
 import { estimateCliSessionContextUsage, isDirectCliCommandPrompt } from './lib/cli-runtime'
 import {
@@ -1208,28 +1217,6 @@ type DrawSessionRecord = {
   updatedAt: number
   messages: ChatBubbleMessage[]
 }
-
-type PendingDrawRetryRequest =
-  | {
-      kind: 'edit'
-      model: string
-      prompt: string
-      imageName: string
-      mimeType?: string
-      dataBase64: string
-      size?: string
-      quality?: string
-    }
-  | {
-      kind: 'generate'
-      model: string
-      prompt: string
-      group: string
-      size?: string
-      quality?: string
-      seed?: number
-      response_format: 'b64_json'
-    }
 
 type PendingDrawRetryState = {
   sessionId: string
@@ -3123,6 +3110,10 @@ function CliLogBubble(props: {
   const executedToolNames = collectCliToolNames(item.events.map((eventItem) => eventItem.sourceKind))
   const logStatus = resolveCliLogGroupStatus(item.events)
   const commandCount = item.events.filter((eventItem) => eventItem.kind === 'command').length
+  const intentItems = item.events
+    .map((eventItem) => eventItem.assistantChunk?.trim() || '')
+    .filter(Boolean)
+    .filter((value, index, values) => values.indexOf(value) === index)
 
   return (
     <div className={`message-bubble system cli-log-bubble ${logStatus.tone === 'error' ? 'error' : ''}`}>
@@ -3143,6 +3134,16 @@ function CliLogBubble(props: {
               </div>
             ))}
           </div>
+        </div>
+      ) : null}
+      {intentItems.length > 0 ? (
+        <div className='cli-log-intent-summary'>
+          <span>AI 执行目的</span>
+          <ul>
+            {intentItems.map((intentItem) => (
+              <li key={intentItem}>{intentItem}</li>
+            ))}
+          </ul>
         </div>
       ) : null}
       <div className='cli-log-event-list'>
@@ -5992,7 +5993,7 @@ function DrawWorkspace(props: {
     if (request.kind === 'edit') {
       const serviceKey = await ensureDesktopServiceKey({
         name: 'OneAPI Desktop Internal Key',
-        group: selectedGroup || '',
+        group: resolvePendingDrawRequestGroup(request, selectedGroup || ''),
         preferredNames: ['桌面端专用 Key', 'CODEX 桌面安装 Key', 'CLAUDE 桌面安装 Key'],
       })
 
@@ -6152,27 +6153,15 @@ function DrawWorkspace(props: {
     let keepSending = false
 
     try {
-      const request: PendingDrawRetryRequest = imageAttachment
-        ? {
-            kind: 'edit',
-            model: DEFAULT_DRAW_MODEL,
-            prompt: nextPrompt,
-            imageName: imageAttachment.name,
-            mimeType: imageAttachment.mimeType,
-            dataBase64: imageAttachment.dataBase64,
-            size: drawSize,
-            quality: drawQuality,
-          }
-        : {
-            kind: 'generate',
-            model: DEFAULT_DRAW_MODEL,
-            prompt: nextPrompt,
-            group: selectedGroup || '',
-            size: drawSize,
-            quality: drawQuality,
-            seed: drawRandomSeed ? undefined : 1,
-            response_format: 'b64_json',
-          }
+      const request = buildPendingDrawRetryRequest({
+        model: DEFAULT_DRAW_MODEL,
+        prompt: nextPrompt,
+        group: selectedGroup || '',
+        size: drawSize,
+        quality: drawQuality,
+        seed: drawRandomSeed ? undefined : 1,
+        imageAttachment,
+      })
       const response = await executeDrawRequest(request)
       replacePendingDrawMessage(nextSessionId, buildResolvedDrawAssistantMessage(response, nextPrompt))
       setPendingRetry(null)
@@ -6185,27 +6174,15 @@ function DrawWorkspace(props: {
         })
         setPendingRetry({
           sessionId: nextSessionId,
-          request: imageAttachment
-            ? {
-                kind: 'edit',
-                model: DEFAULT_DRAW_MODEL,
-                prompt: nextPrompt,
-                imageName: imageAttachment.name,
-                mimeType: imageAttachment.mimeType,
-                dataBase64: imageAttachment.dataBase64,
-                size: drawSize,
-                quality: drawQuality,
-              }
-            : {
-                kind: 'generate',
-                model: DEFAULT_DRAW_MODEL,
-                prompt: nextPrompt,
-                group: selectedGroup || '',
-                size: drawSize,
-                quality: drawQuality,
-                seed: drawRandomSeed ? undefined : 1,
-                response_format: 'b64_json',
-              },
+          request: buildPendingDrawRetryRequest({
+            model: DEFAULT_DRAW_MODEL,
+            prompt: nextPrompt,
+            group: selectedGroup || '',
+            size: drawSize,
+            quality: drawQuality,
+            seed: drawRandomSeed ? undefined : 1,
+            imageAttachment,
+          }),
         })
         toast('网络异常，连接恢复后会自动继续当前图片生成。')
         return
@@ -7179,7 +7156,6 @@ function WalletWorkspace(props: {
         <div className='panel-header compact'>
           <div>
             <h2>用量账单</h2>
-            <p>钱包余额、账单记录与模型消耗趋势</p>
           </div>
         </div>
 
@@ -7397,7 +7373,6 @@ function ServiceStatusWorkspace(props: {
         <div className='panel-header compact'>
           <div>
             <h2>服务状态</h2>
-            <p>按渠道查看运行状态、延迟和最近历史</p>
           </div>
           <div className='inline-actions'>
             <button
@@ -11560,20 +11535,10 @@ export function App() {
             ? '检查中...'
             : '检查更新'
 
-  const updateStatusSummary =
-    updateState.status === 'up_to_date'
-      ? '当前已是最新版。'
-      : updateState.status === 'downloaded'
-        ? '更新包已下载完成，点击“现在安装”开始安装。'
-        : updateState.status === 'downloading'
-          ? '发现新版本，正在自动下载更新包。'
-          : updateState.status === 'checking'
-            ? '正在检查最新版本信息...'
-            : updateState.status === 'error'
-              ? '检查更新失败，请稍后重试。'
-              : updateState.status === 'available'
-                ? '发现新版本，准备开始下载。'
-                : '点击“检查更新”获取最新版本。'
+  const updateStatusSummary = resolveDesktopUpdateStatusSummary({
+    status: updateState.status,
+    message: updateState.message,
+  })
 
   const hasAvailableDesktopUpdate = Boolean(
     updateState.latestVersion &&

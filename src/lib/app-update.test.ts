@@ -3,6 +3,9 @@ import assert from 'node:assert/strict'
 import {
   buildDesktopReleaseManifestUrlCandidates,
   compareDesktopVersions,
+  resolveDesktopUpdateFeedUrl,
+  resolveDesktopUpdateUrl,
+  resolveDesktopUpdateStatusSummary,
   shouldAutoCheckDesktopUpdate,
 } from './app-update.ts'
 
@@ -43,5 +46,56 @@ test('buildDesktopReleaseManifestUrlCandidates ignores invalid relative current 
   assert.deepEqual(
     buildDesktopReleaseManifestUrlCandidates('/api', 'https://ai.oneapi.center'),
     ['https://ai.oneapi.center/api/download/desktop-release']
+  )
+})
+
+test('resolveDesktopUpdateFeedUrl returns the parent directory for installer url', () => {
+  assert.equal(
+    resolveDesktopUpdateFeedUrl('http://38.22.235.199:9000/oneapi/release/OneAPI_PC_Setup-1-0.exe'),
+    'http://38.22.235.199:9000/oneapi/release'
+  )
+  assert.equal(resolveDesktopUpdateFeedUrl(''), '')
+})
+
+test('resolveDesktopUpdateUrl keeps absolute links and resolves relative links against configured server base', () => {
+  assert.equal(
+    resolveDesktopUpdateUrl(
+      'https://downloads.example.com/release/latest.yml',
+      'https://custom.example.com/console',
+      'https://ai.oneapi.center'
+    ),
+    'https://downloads.example.com/release/latest.yml'
+  )
+  assert.equal(
+    resolveDesktopUpdateUrl(
+      './api/download/desktop-release',
+      'https://custom.example.com/console',
+      'https://ai.oneapi.center'
+    ),
+    'https://custom.example.com/console/api/download/desktop-release'
+  )
+  assert.equal(
+    resolveDesktopUpdateUrl(
+      '/minio/oneapi/release/OneAPI_PC_Setup-1-0.exe',
+      'https://custom.example.com/console',
+      'https://ai.oneapi.center'
+    ),
+    'https://custom.example.com/minio/oneapi/release/OneAPI_PC_Setup-1-0.exe'
+  )
+})
+
+test('resolveDesktopUpdateStatusSummary exposes the underlying error detail', () => {
+  assert.equal(
+    resolveDesktopUpdateStatusSummary({
+      status: 'error',
+      message: 'Invalid URL (GET /api/download/desktop-release)',
+    }),
+    '检查更新失败：Invalid URL (GET /api/download/desktop-release)'
+  )
+  assert.equal(
+    resolveDesktopUpdateStatusSummary({
+      status: 'error',
+    }),
+    '检查更新失败，请稍后重试。'
   )
 })

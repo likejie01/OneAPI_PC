@@ -2521,6 +2521,34 @@ select {
   word-break: break-word;
 }
 
+.cli-log-intent-summary {
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 14%, transparent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cli-log-intent-summary span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.cli-log-intent-summary ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text);
+  font-size: 12.5px;
+  line-height: 1.65;
+}
+
+.cli-log-intent-summary li + li {
+  margin-top: 5px;
+}
+
 .cli-log-event-head {
   display: flex;
   align-items: flex-start;

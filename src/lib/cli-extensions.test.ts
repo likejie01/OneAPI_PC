@@ -15,6 +15,7 @@ import {
   parseMarkdownFrontmatterMeta,
   recommendCliExtensionsForPrompt,
 } from './cli-extensions.ts'
+import { buildCliExecutionPrompt } from './cli-prompt.ts'
 
 test('parseMarkdownFrontmatterMeta reads name and description from frontmatter', () => {
   const parsed = parseMarkdownFrontmatterMeta(`---
@@ -86,14 +87,14 @@ test('buildCliExtensionPromptBlock serializes selected extensions for runtime pr
       },
     ]),
     [
-      '扩展调用要求：',
+      '以下内容是 OneAPI 客户端附加的扩展调用要求',
       '1. 本次任务请主动使用已安装技能 "Frontend Design"。',
       '2. 如任务需要，请调用已安装插件 "superpowers"。',
     ].join('\n')
   )
 })
 
-test('buildCliExtensionAugmentedPrompt prepends extension instructions before user prompt', () => {
+test('buildCliExtensionAugmentedPrompt appends extension instructions after user prompt', () => {
   assert.equal(
     buildCliExtensionAugmentedPrompt(
       '修复当前项目中的构建报错',
@@ -109,12 +110,68 @@ test('buildCliExtensionAugmentedPrompt prepends extension instructions before us
       ]
     ),
     [
-      '扩展调用要求：',
-      '1. 本次任务请主动使用已安装技能 "superpowers:systematic-debugging"。',
-      '',
       '修复当前项目中的构建报错',
+      '',
+      '以下内容是 OneAPI 客户端附加的扩展调用要求',
+      '1. 本次任务请主动使用已安装技能 "superpowers:systematic-debugging"。',
     ].join('\n')
   )
+})
+
+test('full cli prompt chain starts with real user demand when extensions are selected', () => {
+  const realDemand = '移动端需要支持调用 PC 端已安装的 skill/plugin，并按三期功能规划执行'
+  const prompt = buildCliExecutionPrompt(
+    buildCliExtensionAugmentedPrompt(realDemand, [
+      {
+        id: 'codex:skill:superpowers:brainstorming',
+        client: 'codex',
+        kind: 'skill',
+        name: 'superpowers:brainstorming',
+        description: '',
+        path: 'C:\\skills\\brainstorming',
+      },
+    ])
+  )
+
+  assert.equal(prompt.startsWith(realDemand), true)
+  assert.equal(prompt.startsWith('扩展调用要求：'), false)
+  assert.equal(prompt.startsWith('用户任务：'), false)
+  assert.equal(prompt.startsWith('执行策略：'), false)
+  assert.match(prompt, /以下内容是 OneAPI 客户端附加的扩展调用要求/)
+})
+
+test('full cli prompt chain makes multiline demand visible before extension references', () => {
+  const realDemand = [
+    '那接下来直接做手机端的内容：',
+    '1、手机端直接做完整功能',
+    '2、手机端需要支持调用 PC 端已安装的 skill/plugin',
+  ].join('\n')
+  const visibleDemand = '那接下来直接做手机端的内容： 1、手机端直接做完整功能 2、手机端需要支持调用 PC 端已安装的 skill/plugin'
+  const prompt = buildCliExecutionPrompt(
+    buildCliExtensionAugmentedPrompt(realDemand, [
+      {
+        id: 'codex:plugin:build-macos-apps',
+        client: 'codex',
+        kind: 'plugin',
+        name: 'Build macOS Apps',
+        description: '',
+        path: 'C:\\plugins\\build-macos-apps',
+      },
+      {
+        id: 'codex:skill:appkit-interop',
+        client: 'codex',
+        kind: 'skill',
+        name: 'appkit-interop',
+        description: '',
+        path: 'C:\\skills\\appkit-interop',
+      },
+    ])
+  )
+
+  assert.equal(prompt.startsWith(visibleDemand), true)
+  assert.match(prompt, /以下内容是用户真实需求原文（保留格式）\n那接下来直接做手机端的内容：\n1、手机端直接做完整功能/)
+  assert.match(prompt, /插件 "Build macOS Apps"/)
+  assert.match(prompt, /技能 "appkit-interop"/)
 })
 
 test('resolveCliSlashTriggerState only triggers on blank current line slash', () => {
