@@ -55,6 +55,8 @@ import {
   parseClaudePlanMutationFromRecord,
   parseCodexPlanStateFromRecord,
 } from '../src/lib/cli-plan.ts'
+import { buildExecutionCycleEvents } from '../src/process/execution-orchestrator/run-request.ts'
+import { buildFinalPrompt } from '../src/process/prompt-assembler/build-final-prompt.ts'
 import { buildCliExtensionDedupeKey, parseMarkdownFrontmatterMeta } from '../src/lib/cli-extensions.ts'
 import {
   buildBundledCodexCuratedSkillEntries,
@@ -87,12 +89,15 @@ import {
   shouldAutoRetryCliRequest,
   type CliRuntimeDiagnostics as SharedCliRuntimeDiagnostics,
 } from '../src/lib/cli-runtime.ts'
+import { resolveInteractionDecision } from '../src/process/execution-orchestrator/interaction-policy.ts'
 
 const DEFAULT_SERVER_BASE_URL = 'https://ai.oneapi.center'
 const DEFAULT_CODEX_BASE_URL = 'https://ai.oneapi.center/v1'
 const DEFAULT_CLAUDE_BASE_URL = 'https://ai.oneapi.center'
-const DEFAULT_CODEX_MODEL = 'gpt-5.5'
-const DEFAULT_CLAUDE_MODEL = 'claude-opus-4-7'
+const DEFAULT_CODEX_MODEL = 'gpt-5.4'
+const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-4-6'
+const MOBILE_BRIDGE_LOOP_INTERVAL_MS = 5000
+const MOBILE_BRIDGE_HEARTBEAT_INTERVAL_MS = 30000
 const WINDOW_CHROME_HEIGHT = 25
 const DESKTOP_PARTITION = 'persist:oneapi-desktop'
 const isDev = !!process.env.VITE_DEV_SERVER_URL
@@ -116,10 +121,11 @@ let activeTitleDrag:
   | null = null
 const activeApiRequests = new Map<string, AbortController>()
 const activeCliProcesses = new Map<string, ChildProcess>()
+const mobileBridgeProgressMirrors = new Map<string, (payload: CliProgressPayload) => void>()
 const activeCliRequestStates = new Map<string, {
   client: CliClient
   child: ChildProcess
-  webContents: WebContents
+  webContents: WebContents | null
   fullAccess: boolean
   autoApprove: boolean
   interactions: Map<string, CliInteractionPrompt>
@@ -137,6 +143,38 @@ let updateDownloadPromise: Promise<DesktopUpdateState> | null = null
 let windowsDesktopUpdater: NsisUpdater | null = null
 let windowsDesktopUpdaterFeedUrl = ''
 let desktopUpdateInstallStrategy: 'manual' | 'updater' | null = null
+let mobileBridgeStarted = false
+let mobileBridgeRunning = false
+let mobileBridgeDeviceId = ''
+let mobileBridgeLastHeartbeatAt = 0
+let mobileBridgeLastSnapshotSignature = ''
+
+interface MobileBridgeExtensionRef {
+  id: string
+  kind: 'command' | 'skill' | 'plugin'
+  name: string
+  description?: string
+}
+
+interface MobileBridgeJob {
+  job_id?: string
+  jobId?: string
+  device_id?: string
+  deviceId?: string
+  client?: string
+  session_id?: string
+  sessionId?: string
+  prompt?: string
+  extension_refs?: MobileBridgeExtensionRef[]
+  extensionRefs?: MobileBridgeExtensionRef[]
+}
+
+interface MobileBridgeInteractionResponse {
+  responseId: string
+  jobId: string
+  interactionId: string
+  action: CliInteractionResponseRequest['action']
+}
 
 function applyThemeMode(mode: ThemeMode) {
   nativeTheme.themeSource = mode
@@ -146,6 +184,10 @@ function applyThemeMode(mode: ThemeMode) {
 
 function getServerConfigPath() {
   return path.join(app.getPath('userData'), 'server-base-url.json')
+}
+
+function getMobileBridgeConfigPath() {
+  return path.join(app.getPath('userData'), 'mobile-bridge.json')
 }
 
 function getAssistantHistoryRoot(scope: AssistantHistoryScope) {
@@ -224,6 +266,31 @@ function resolveWorkspaceTitle(projectName?: string) {
 
 function getDesktopSession() {
   return session.fromPartition(DESKTOP_PARTITION)
+}
+
+async function getMobileBridgeDeviceId() {
+  if (mobileBridgeDeviceId) {
+    return mobileBridgeDeviceId
+  }
+  try {
+    const raw = await fs.readFile(getMobileBridgeConfigPath(), 'utf8')
+    const parsed = JSON.parse(raw) as { deviceId?: string }
+    if (parsed.deviceId?.trim()) {
+      mobileBridgeDeviceId = parsed.deviceId.trim()
+      return mobileBridgeDeviceId
+    }
+  } catch {
+    /* empty */
+  }
+
+  mobileBridgeDeviceId = randomUUID()
+  await fs.mkdir(path.dirname(getMobileBridgeConfigPath()), { recursive: true })
+  await fs.writeFile(
+    getMobileBridgeConfigPath(),
+    JSON.stringify({ deviceId: mobileBridgeDeviceId }, null, 2),
+    'utf8',
+  )
+  return mobileBridgeDeviceId
 }
 
 type ApiMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
@@ -1358,6 +1425,257 @@ function getCommandLocator() {
   return process.platform === 'win32' ? 'where' : 'which'
 }
 
+async function registerMobileBridgeDevice(status = 'online', lastError = '') {
+  const deviceId = await getMobileBridgeDeviceId()
+  await requestMobileBridgeJson({
+    method: 'POST',
+    path: '/api/mobile/desktop-devices/register',
+    body: {
+      deviceId,
+      name: os.hostname(),
+      platform: process.platform,
+      clientVersion: app.getVersion(),
+      status,
+      lastError,
+    },
+  })
+}
+
+async function heartbeatMobileBridgeDevice(status = 'online', lastError = '') {
+  const now = Date.now()
+  if (now - mobileBridgeLastHeartbeatAt < MOBILE_BRIDGE_HEARTBEAT_INTERVAL_MS) {
+    return
+  }
+  mobileBridgeLastHeartbeatAt = now
+  const deviceId = await getMobileBridgeDeviceId()
+  await requestMobileBridgeJson({
+    method: 'POST',
+    path: `/api/mobile/desktop-devices/${encodeURIComponent(deviceId)}/heartbeat`,
+    body: {
+      deviceId,
+      name: os.hostname(),
+      platform: process.platform,
+      clientVersion: app.getVersion(),
+      status,
+      lastError,
+    },
+  })
+}
+
+async function syncMobileBridgeExtensionsSnapshot() {
+  const deviceId = await getMobileBridgeDeviceId()
+  const [codexExtensions, claudeExtensions] = await Promise.all([
+    listCliExtensions('codex').catch(() => [] as CliExtensionEntry[]),
+    listCliExtensions('claude').catch(() => [] as CliExtensionEntry[]),
+  ])
+  const entries = [...codexExtensions, ...claudeExtensions].map((item) => ({
+    id: item.id,
+    kind: item.kind,
+    name: item.name,
+    description: item.description,
+  }))
+  const signature = JSON.stringify(entries)
+  if (signature === mobileBridgeLastSnapshotSignature) {
+    return
+  }
+  mobileBridgeLastSnapshotSignature = signature
+  await requestMobileBridgeJson({
+    method: 'POST',
+    path: '/api/mobile/desktop-extensions/snapshot',
+    query: {
+      device_id: deviceId,
+    },
+    body: entries,
+  })
+}
+
+async function readBridgeClientProjectPath(client: CliClient) {
+  const raw = await getRendererStorageValue(`oneapi-desktop-${client}-last-project-path`)
+  try {
+    return raw ? JSON.parse(raw) as string : ''
+  } catch {
+    return ''
+  }
+}
+
+async function postMobileBridgeJobEvent(jobId: string, event: Record<string, unknown>) {
+  await requestMobileBridgeJson({
+    method: 'POST',
+    path: `/api/mobile/desktop-jobs/${encodeURIComponent(jobId)}/events`,
+    body: event,
+  })
+}
+
+async function runMobileBridgeInteractionLoop(requestId: string, jobId: string, state: { done: boolean }) {
+  const deviceId = await getMobileBridgeDeviceId()
+  while (!state.done || activeCliRequestStates.has(requestId)) {
+    try {
+      const responses = await requestMobileBridgeJson<MobileBridgeInteractionResponse[]>({
+        method: 'GET',
+        path: '/api/mobile/desktop-interactions/pending',
+        query: {
+          device_id: deviceId,
+        },
+      })
+      for (const item of responses.filter((entry) => entry.jobId === jobId)) {
+        const accepted = writeCliInteractionResponse(requestId, item.interactionId, item.action)
+        if (accepted) {
+          await requestMobileBridgeJson({
+            method: 'POST',
+            path: `/api/mobile/desktop-interactions/${encodeURIComponent(item.responseId)}/ack`,
+          })
+        }
+      }
+    } catch {
+      /* empty */
+    }
+    await wait(1500)
+  }
+}
+
+async function executeMobileBridgeJob(rawJob: MobileBridgeJob) {
+  const job = normalizeMobileBridgeJob(rawJob)
+  if (!job.jobId || (job.client !== 'codex' && job.client !== 'claude')) {
+    return
+  }
+  const deviceId = await getMobileBridgeDeviceId()
+  await requestMobileBridgeJson({
+    method: 'POST',
+    path: `/api/mobile/desktop-jobs/${encodeURIComponent(job.jobId)}/claim`,
+    query: {
+      device_id: deviceId,
+    },
+  })
+
+  const requestedSessionId = job.sessionId || `mobile-${job.client}-${job.jobId}`
+  const requestId = `mobile-${job.jobId}`
+  const projectPath = (await readBridgeClientProjectPath(job.client)).trim() || os.homedir()
+  const promptSnapshot = buildFinalPrompt({
+    prompt: job.prompt,
+    client: job.client,
+    projectPath,
+    fullAccess: false,
+    extensions: job.extensionRefs.map((item) => ({
+      client: job.client,
+      kind: item.kind,
+      name: item.name,
+    })),
+  })
+
+  for (const event of buildExecutionCycleEvents({
+    sessionId: requestedSessionId,
+    requestId,
+    intent: job.prompt,
+    finalPrompt: promptSnapshot.finalPrompt,
+    commandTitle: '扩展与上下文准备',
+  })) {
+    await postMobileBridgeJobEvent(job.jobId, {
+      id: event.id,
+      type: event.phase === 'intent' ? 'intent' : 'log',
+      phase: event.phase,
+      level: event.severity === 'error' ? 2 : 0,
+      title: event.title,
+      body: event.detail,
+      command: event.command,
+      parentId: event.parentId,
+      indentLevel: event.indentLevel,
+      interactionStatus: event.interaction?.status,
+      createdAt: event.createdAt,
+    })
+  }
+
+  mobileBridgeProgressMirrors.set(requestId, (payload) => {
+    const mapped = mapCliPayloadToMobileBridgeEvent(job.jobId, payload)
+    if (!mapped) {
+      return
+    }
+    void postMobileBridgeJobEvent(job.jobId, mapped).catch(() => undefined)
+  })
+
+  const interactionState = { done: false }
+  const interactionLoop = runMobileBridgeInteractionLoop(requestId, job.jobId, interactionState)
+  try {
+    const runner = job.client === 'codex' ? runCodexPrompt : runClaudePrompt
+    const result = await runner(mainWindow?.webContents || null, {
+      client: job.client,
+      requestId,
+      projectPath,
+      prompt: promptSnapshot.finalPrompt,
+      sessionId: requestedSessionId,
+      fullAccess: false,
+    })
+
+    if (result.output.trim()) {
+      await postMobileBridgeJobEvent(job.jobId, {
+        id: `${requestId}-assistant-final`,
+        type: 'message',
+        role: 'assistant',
+        text: result.output.trim(),
+        createdAt: Date.now(),
+      })
+    }
+
+    if (!result.success) {
+      await postMobileBridgeJobEvent(job.jobId, {
+        id: `${requestId}-failed`,
+        type: 'error',
+        phase: 'error',
+        level: 2,
+        title: '执行失败',
+        body: result.error || 'CLI 执行未返回成功结果。',
+        createdAt: Date.now(),
+      })
+    }
+  } finally {
+    interactionState.done = true
+    mobileBridgeProgressMirrors.delete(requestId)
+    await interactionLoop.catch(() => undefined)
+  }
+}
+
+async function startMobileBridgeLoop() {
+  if (mobileBridgeStarted) {
+    return
+  }
+  mobileBridgeStarted = true
+  while (!isQuitting) {
+    if (mobileBridgeRunning) {
+      await wait(MOBILE_BRIDGE_LOOP_INTERVAL_MS)
+      continue
+    }
+    mobileBridgeRunning = true
+    try {
+      const userId = await getDesktopUserHeaderValue()
+      if (!userId) {
+        await wait(MOBILE_BRIDGE_LOOP_INTERVAL_MS)
+        continue
+      }
+
+      await registerMobileBridgeDevice()
+      await heartbeatMobileBridgeDevice()
+      await syncMobileBridgeExtensionsSnapshot()
+
+      const jobs = await requestMobileBridgeJson<MobileBridgeJob[]>({
+        method: 'GET',
+        path: '/api/mobile/desktop-jobs/pending',
+        query: {
+          device_id: await getMobileBridgeDeviceId(),
+        },
+      })
+
+      for (const job of jobs) {
+        await executeMobileBridgeJob(job)
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      await heartbeatMobileBridgeDevice('degraded', message).catch(() => undefined)
+    } finally {
+      mobileBridgeRunning = false
+    }
+    await wait(MOBILE_BRIDGE_LOOP_INTERVAL_MS)
+  }
+}
+
 function getNpmCommand() {
   return process.platform === 'win32' ? 'npm.cmd' : 'npm'
 }
@@ -1448,6 +1766,133 @@ function buildNpmInvocation(runtime: NodeRuntimeInfo, args: string[]) {
   return {
     command: runtime.npmPath,
     args,
+  }
+}
+
+async function getRendererStorageValue(key: string) {
+  if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) {
+    return ''
+  }
+  try {
+    const value = await mainWindow.webContents.executeJavaScript(
+      `window.localStorage.getItem(${JSON.stringify(key)}) ?? ''`,
+      true,
+    )
+    return typeof value === 'string' ? value : ''
+  } catch {
+    return ''
+  }
+}
+
+async function getDesktopUserHeaderValue() {
+  return (await getRendererStorageValue('uid')).trim()
+}
+
+async function requestMobileBridgeApi(input: DesktopApiRequest) {
+  const userId = await getDesktopUserHeaderValue()
+  return requestApi({
+    ...input,
+    headers: {
+      ...(input.headers || {}),
+      ...(userId ? { 'New-Api-User': userId } : {}),
+      'X-Desktop-Device': await getMobileBridgeDeviceId(),
+    },
+  })
+}
+
+async function requestMobileBridgeJson<T>(input: DesktopApiRequest) {
+  const response = await requestMobileBridgeApi(input)
+  if (!response.ok) {
+    const message =
+      typeof response.data === 'object' &&
+      response.data &&
+      'message' in response.data &&
+      typeof response.data.message === 'string'
+        ? response.data.message
+        : `请求失败（${response.status}）`
+    throw new Error(message)
+  }
+  const payload =
+    typeof response.data === 'object' &&
+    response.data &&
+    'data' in response.data
+      ? (response.data as { data: T }).data
+      : response.data as T
+  return payload
+}
+
+function normalizeMobileBridgeJob(raw: MobileBridgeJob) {
+  return {
+    jobId: raw.jobId || raw.job_id || '',
+    deviceId: raw.deviceId || raw.device_id || '',
+    client: (raw.client || '').trim().toLowerCase() as CliClient,
+    sessionId: raw.sessionId || raw.session_id || '',
+    prompt: raw.prompt || '',
+    extensionRefs: (raw.extensionRefs || raw.extension_refs || []).map((item) => ({
+      id: item.id,
+      kind: item.kind,
+      name: item.name,
+      description: item.description,
+    })),
+  }
+}
+
+function resolveMobileBridgePhase(payload: Pick<CliProgressPayload, 'logKind' | 'sourceKind' | 'kind' | 'interaction'>) {
+  if (payload.interaction?.status === 'pending') {
+    return 'interaction_required'
+  }
+  const sourceKind = (payload.sourceKind || '').trim().toLowerCase()
+  if (sourceKind.startsWith('orchestrator.')) {
+    return sourceKind.slice('orchestrator.'.length)
+  }
+  if (sourceKind.startsWith('intent.') || payload.logKind === 'intent') {
+    return 'intent'
+  }
+  if (payload.logKind === 'command' || payload.logKind === 'tool') {
+    return 'invoke'
+  }
+  if (payload.logKind === 'stdout' || sourceKind.includes('prepare') || sourceKind.includes('thread.started') || sourceKind.includes('session.connected')) {
+    return 'prepare'
+  }
+  if (payload.logKind === 'result') {
+    return 'result'
+  }
+  if (payload.kind === 'error' || payload.logKind === 'error' || payload.logKind === 'stderr') {
+    return 'error'
+  }
+  return 'prepare'
+}
+
+function mapCliPayloadToMobileBridgeEvent(
+  jobId: string,
+  payload: CliProgressPayload,
+): Record<string, unknown> | null {
+  if (payload.kind === 'partial') {
+    return null
+  }
+  const phase = resolveMobileBridgePhase(payload)
+  const type =
+    payload.interaction?.status === 'pending'
+      ? 'interaction_required'
+      : phase === 'intent'
+        ? 'intent'
+        : payload.kind === 'error'
+          ? 'error'
+          : payload.done && payload.logKind === 'status'
+            ? 'complete'
+            : 'log'
+  return {
+    id: `${jobId}-${payload.requestId}-${payload.createdAt}-${payload.kind}-${phase}`,
+    type,
+    phase,
+    level: payload.kind === 'error' ? 2 : payload.logKind === 'stderr' ? 1 : 0,
+    title: payload.message,
+    body: payload.detail || payload.assistantChunk || payload.message,
+    command: payload.command,
+    interactionId: payload.interaction?.id,
+    interactionStatus: payload.interaction?.status,
+    indentLevel: payload.indentLevel || 0,
+    createdAt: payload.createdAt,
   }
 }
 
@@ -5103,7 +5548,7 @@ function parseJsonObjectsFromText(text: string) {
 }
 
 function createCliProgressEmitter(
-  webContents: WebContents,
+  webContents: WebContents | null,
   client: CliClient,
   requestId: string
 ) {
@@ -5133,7 +5578,7 @@ function createCliProgressEmitter(
         return
       }
 
-      webContents.send('desktop:cli-progress', {
+      const payload = {
         client,
         requestId,
         sessionId: input.sessionId,
@@ -5151,7 +5596,11 @@ function createCliProgressEmitter(
         exitCode: input.exitCode,
         plan: input.plan,
         interaction: input.interaction,
-      } satisfies CliProgressPayload)
+      } satisfies CliProgressPayload
+      if (webContents && !webContents.isDestroyed()) {
+        webContents.send('desktop:cli-progress', payload)
+      }
+      mobileBridgeProgressMirrors.get(requestId)?.(payload)
     },
     status(
       message: string,
@@ -5426,6 +5875,19 @@ function summarizeCliIntentForLog(value: string, maxLength = 260) {
   return `${normalized.slice(0, maxLength - 1).trim()}…`
 }
 
+function summarizeCliIntentStep(value: string, maxLength = 120) {
+  const normalized = summarizeCliIntentForLog(value, maxLength * 2)
+  if (!normalized) {
+    return ''
+  }
+  const segments = normalized
+    .split(/(?<=[。！？；;.!?])\s*|(?<=\))\s+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+  const lastSegment = segments.at(-1) || normalized
+  return lastSegment.length <= maxLength ? lastSegment : `${lastSegment.slice(0, maxLength - 1).trim()}…`
+}
+
 function describeCliToolUse(name: string, input: unknown) {
   const command = extractCommandFromUnknown(input)
   const files = extractCliFilesFromUnknown(input)
@@ -5514,7 +5976,13 @@ function emitCliInteractionPrompt(input: {
   }
   state.interactionKeys.add(interactionKey)
 
-  if (state.fullAccess && input.interaction.autoApproveEligible) {
+  if (
+    resolveInteractionDecision({
+      fullAccess: state.fullAccess,
+      autoApproveEligible: !!input.interaction.autoApproveEligible,
+      command: input.interaction.command,
+    }) === 'auto_approve'
+  ) {
     input.progress.status('全权限模式已自动确认本次权限请求。', input.sessionId, false, undefined, {
       logKind: 'status',
       sourceKind: 'interaction.auto_approved',
@@ -5758,7 +6226,7 @@ function isClaudeStaleResumeFailure(stdout: string, stderr: string) {
 }
 
 async function runCodexPrompt(
-  webContents: WebContents,
+  webContents: WebContents | null,
   input: CliRunRequest
 ): Promise<CliRunResponse> {
   const requestStartedAtMs = Date.now()
@@ -5767,7 +6235,7 @@ async function runCodexPrompt(
   const resumeSessionId = requestedSessionId && await getLatestCodexSessionFile(requestedSessionId)
     ? requestedSessionId
     : undefined
-  let sessionId = resumeSessionId
+  let sessionId = resumeSessionId || requestedSessionId
   let partialText = ''
   let planState: CliPlanState | null = null
   let lastToolIntentText = ''
@@ -5902,16 +6370,16 @@ async function runCodexPrompt(
             continue
           }
           const assistantChunk = takeAssistantChunk(partialText, toolEntry.textBefore)
-          const intentText = summarizeCliIntentForLog(assistantChunk || partialText)
-          if (assistantChunk || (intentText && intentText !== lastToolIntentText)) {
+          const intentText = summarizeCliIntentStep(assistantChunk || partialText)
+          if (intentText && intentText !== lastToolIntentText) {
             lastToolIntentText = intentText
             progress.intent(
-              assistantChunk ? '执行目的' : `执行目的：${intentText}`,
+              '执行意图',
               sessionId,
-              assistantChunk || intentText,
+              intentText,
               undefined,
               toolEntry.name?.trim() ? `intent.before_tool.${toolEntry.name.trim()}` : 'intent.before_tool',
-              assistantChunk || undefined
+              intentText
             )
           }
           const sourceKind = toolEntry.name?.trim() ? `tool_use.${toolEntry.name.trim()}` : 'tool_use'
@@ -6000,6 +6468,13 @@ async function runCodexPrompt(
   activeCliProcesses.delete(input.requestId)
   activeCliRequestStates.delete(input.requestId)
   const aborted = stoppedCliRequests.delete(input.requestId)
+  if (!aborted) {
+    progress.status('Codex 输出已结束，正在整理会话记录。', sessionId, true, undefined, {
+      logKind: 'status',
+      sourceKind: 'request.stream.completed',
+      plan: planState,
+    })
+  }
 
   const events = parseJsonObjectsFromText(result.stdout)
   const threadEvent = events.find((item) => item.type === 'thread.started')
@@ -6090,7 +6565,7 @@ async function runCodexPrompt(
 }
 
 async function runClaudePrompt(
-  webContents: WebContents,
+  webContents: WebContents | null,
   input: CliRunRequest
 ): Promise<CliRunResponse> {
   const requestStartedAtMs = Date.now()
@@ -6099,7 +6574,7 @@ async function runClaudePrompt(
   const resumeSessionId = requestedSessionId && await getClaudeSessionFile(requestedSessionId)
     ? requestedSessionId
     : undefined
-  let sessionId = resumeSessionId
+  let sessionId = resumeSessionId || requestedSessionId
   let partialText = ''
   let finalResult: Record<string, unknown> | null = null
   let planState: CliPlanState | null = null
@@ -6157,16 +6632,16 @@ async function runClaudePrompt(
       toolUseIndentLevels.set(options.toolUseId, indentLevel)
     }
     const assistantChunk = takeAssistantChunk(options.assistantSnapshot || partialText, options.assistantChunk || '')
-    const intentText = summarizeCliIntentForLog(assistantChunk || options.assistantSnapshot || partialText)
-    if (assistantChunk || (intentText && intentText !== lastToolIntentText)) {
+    const intentText = summarizeCliIntentStep(assistantChunk || options.assistantSnapshot || partialText)
+    if (intentText && intentText !== lastToolIntentText) {
       lastToolIntentText = intentText
       progress.intent(
-        assistantChunk ? '执行目的' : `执行目的：${intentText}`,
+        '执行意图',
         sessionId,
-        assistantChunk || intentText,
+        intentText,
         undefined,
         toolName.trim() ? `intent.before_tool.${toolName.trim()}` : 'intent.before_tool',
-        assistantChunk || undefined,
+        intentText,
         indentLevel
       )
     }
@@ -6487,6 +6962,13 @@ async function runClaudePrompt(
   }
   const success = !aborted && result.exitCode === 0 && output.length > 0
   const completedWithWarnings = !aborted && !success && output.length > 0 && !!runtimeDiagnostics.policyIssue
+  if (!aborted) {
+    progress.status('Claude 输出已结束，正在整理会话记录。', sessionId, true, undefined, {
+      logKind: 'status',
+      sourceKind: 'request.stream.completed',
+      plan: planState,
+    })
+  }
 
   if (success) {
     progress.partial(output, sessionId, true)
@@ -7524,6 +8006,7 @@ app.whenReady().then(() => {
   return loadServerBaseUrl().then(() => {
     Menu.setApplicationMenu(null)
     createWindow()
+    void startMobileBridgeLoop()
 
     app.on('activate', () => {
       if (mainWindow) {

@@ -3,6 +3,9 @@ import react from '@vitejs/plugin-react'
 import electron from 'vite-plugin-electron/simple'
 
 export default defineConfig({
+  build: {
+    emptyOutDir: false,
+  },
   plugins: [
     react(),
     electron({

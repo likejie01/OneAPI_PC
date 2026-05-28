@@ -30,7 +30,7 @@ export function classifyCliStderrLine(line: string) {
       level: 'status' as const,
       logKind: 'stderr' as const,
       sourceKind: 'stderr',
-      title: 'CLI 输出了诊断信息',
+      title: 'CLI 返回了空诊断输出',
     }
   }
 
@@ -48,7 +48,7 @@ export function classifyCliStderrLine(line: string) {
       level: 'status' as const,
       logKind: 'stderr' as const,
       sourceKind: 'stderr.warn',
-      title: 'CLI 输出了警告信息',
+      title: 'CLI 返回了警告信息',
     }
   }
 
@@ -65,7 +65,7 @@ export function classifyCliStderrLine(line: string) {
       level: 'status' as const,
       logKind: 'stderr' as const,
       sourceKind: 'stderr.command',
-      title: 'CLI 输出了命令诊断信息',
+      title: '命令执行返回了路径或参数诊断',
     }
   }
 
@@ -73,7 +73,7 @@ export function classifyCliStderrLine(line: string) {
     level: 'status' as const,
     logKind: 'stderr' as const,
     sourceKind: 'stderr',
-    title: 'CLI 输出了诊断信息',
+    title: 'CLI 返回了补充诊断信息',
   }
 }
 

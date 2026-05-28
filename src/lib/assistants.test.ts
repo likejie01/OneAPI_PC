@@ -5,7 +5,9 @@ import { createBuiltinAssistants, decorateAssistants, mergeAssistantsWithBuiltin
 test('createBuiltinAssistants exposes only the requested Cherry-based assistant set', () => {
   const assistants = createBuiltinAssistants(100)
 
-  assert.equal(assistants.length, 18)
+  assert.equal(assistants.length, 20)
+  assert.ok(assistants.some((item) => item.name === '默认助手'))
+  assert.ok(assistants.some((item) => item.name === '流程图专家（Mermaid）'))
   assert.ok(assistants.some((item) => item.name === '律师'))
   assert.ok(assistants.some((item) => item.name === '推文快写'))
   assert.ok(assistants.some((item) => item.name === '心理模型专家'))
@@ -47,6 +49,7 @@ test('mergeAssistantsWithBuiltins keeps builtin overrides and custom assistants'
   )
   assert.ok(merged.some((item) => item.id === 'custom-1'))
   assert.ok(merged.some((item) => item.name === '网页生成'))
+  assert.equal(merged[0]?.id, 'assistant-cherry-default')
 })
 
 test('decorateAssistants prioritizes favorites in stored order and searches prompt text', () => {

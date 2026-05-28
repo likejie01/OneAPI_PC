@@ -1,4 +1,4 @@
-import type { ChatModelOption } from '../shared/contracts'
+import type { ChatCompletionResponse, ChatModelOption } from '../shared/contracts'
 import type { CliHistoryEntry, CliInteractionPrompt, CliLogKind, CliSessionMessage } from '../shared/desktop'
 
 export type AssistantModeKey = 'chat' | 'draw' | 'codex' | 'claude'
@@ -54,6 +54,7 @@ export type CliTimelineEntry =
       createdAt: number
       requestId?: string
       modelLabel?: string
+      usage?: CliSessionMessage['usage']
       attachments?: CliSessionMessage['attachments']
       selectedExtensions?: CliSessionMessage['selectedExtensions']
       fileChanges?: CliFileChange[]
@@ -467,6 +468,7 @@ export function buildCliTimeline(input: {
         createdAt: toTimelineTimestamp(item.createdAt),
         requestId: item.requestId,
         modelLabel: item.modelLabel,
+        usage: item.usage,
         attachments: item.attachments,
         selectedExtensions: item.selectedExtensions,
         fileChanges: item.fileChanges,
@@ -483,17 +485,6 @@ export function buildCliTimeline(input: {
       )
     })
     .sort((left, right) => left.createdAt - right.createdAt)
-
-  if (input.partial?.trim()) {
-    entries.push({
-      id: `partial-${input.partialCreatedAt || 0}`,
-      kind: 'partial',
-      role: 'assistant',
-      content: input.partial.trim(),
-      createdAt: toTimelineTimestamp(input.partialCreatedAt || Date.now()),
-      modelLabel: input.partialModelLabel || 'Assistant',
-    })
-  }
 
   const sortedLogs = [...groupedLogs].sort((left, right) => left.startedAt - right.startedAt)
   const timeline: CliTimelineEntry[] = []
@@ -530,6 +521,7 @@ export function appendCliFallbackAssistantMessage(
     requestId?: string
     modelLabel?: string
     fileChanges?: CliFileChange[]
+    usage?: ChatCompletionResponse['usage']
   }
 ) {
   const content = fallback.content.trim()
@@ -562,6 +554,7 @@ export function appendCliFallbackAssistantMessage(
       requestId: fallback.requestId,
       modelLabel: fallback.modelLabel,
       fileChanges: fallback.fileChanges,
+      usage: fallback.usage,
     },
   ].sort((left, right) => toTimelineTimestamp(left.createdAt) - toTimelineTimestamp(right.createdAt))
 }

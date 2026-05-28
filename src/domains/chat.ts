@@ -12,6 +12,7 @@ import type {
   ChatGroupOption,
   ImageGenerationResponse,
 } from '../shared/contracts'
+import type { DesktopChatStreamPayload } from '../shared/desktop'
 import { mergePricingAndUserModels, type PricingModelLike } from '../lib/model-options'
 
 export async function getUserModels() {
@@ -130,7 +131,7 @@ export async function streamChatCompletion(
       finish(() => reject(new DOMException('请求已取消', 'AbortError')))
     }
 
-    const unsubscribe = bridge.onChatStream((event) => {
+    const unsubscribe = bridge.onChatStream((event: DesktopChatStreamPayload) => {
       if (event.requestId !== requestId) {
         return
       }
@@ -174,7 +175,7 @@ export async function streamChatCompletion(
         promptCacheKey,
         reasoningEffort,
       })
-      .catch((error) => {
+      .catch((error: unknown) => {
         finish(() => reject(error instanceof Error ? error : new Error('聊天请求失败')))
       })
   })

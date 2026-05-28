@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ChangeEvent, ClipboardEvent, Dispatch, DragEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent, PointerEvent as ReactPointerEvent, ReactNode, SetStateAction } from 'react'
 import {
   Activity,
@@ -159,7 +159,6 @@ import {
 } from './lib/chat-session'
 import {
   applyCliMessageOverlays,
-  buildCliExtensionAugmentedPrompt,
   buildCliExtensionDedupeKey,
   buildCliExtensionDisplayName,
   buildCliExtensionInsertText,
@@ -203,7 +202,6 @@ import {
   resolveDesktopUpdateStatusSummary,
   shouldAutoCheckDesktopUpdate,
 } from './lib/app-update'
-import { buildCliExecutionPrompt } from './lib/cli-prompt'
 import {
   buildPendingDrawRetryRequest,
   resolvePendingDrawRequestGroup,
@@ -211,6 +209,10 @@ import {
 } from './lib/draw-request'
 import { isRecoverableNetworkError } from './lib/network-retry'
 import { estimateCliSessionContextUsage, isDirectCliCommandPrompt } from './lib/cli-runtime'
+import { buildFinalPrompt } from './process/prompt-assembler/build-final-prompt'
+import { buildImageEditRequest } from './process/image-editing/build-edit-request'
+import { mapImageEditError } from './process/image-editing/map-edit-error'
+import { buildExecutionCycleEvents } from './process/execution-orchestrator/run-request.ts'
 import {
   commitPromptHistoryEntry,
   createPromptHistoryState,
@@ -261,6 +263,7 @@ import type {
   CliSessionDetails,
   CliSessionMessage,
   CliStatus,
+  DesktopAppMeta,
   DesktopUpdateState,
   DeployProgressPayload,
 } from './shared/desktop'
@@ -474,15 +477,6 @@ function buildChatAttachmentContent(
   }
 
   return parts.length === 1 ? text : parts
-}
-
-function buildCliAttachmentReferenceText(attachments: ComposerAttachment[]) {
-  if (!attachments.length) {
-    return ''
-  }
-
-  const lines = attachments.map((item, index) => `${index + 1}. ${item.name} -> ${item.filePath}`)
-  return `\n\n附件引用：\n${lines.join('\n')}\n请结合这些附件路径处理本次任务。`
 }
 
 function toMessageAttachments(attachments: ComposerAttachment[]) {
@@ -1239,10 +1233,10 @@ const CLAUDE_REASONING_OPTIONS = [
   { label: '极限', value: 'max' },
 ] as const
 
-const DEFAULT_CHAT_MODEL = 'gpt-5.5'
+const DEFAULT_CHAT_MODEL = 'mimo-v2.5-pro'
 const DEFAULT_DRAW_MODEL = 'gpt-image-2'
-const DEFAULT_CODEX_MODEL = 'gpt-5.5'
-const DEFAULT_CLAUDE_MODEL = 'claude-opus-4-7'
+const DEFAULT_CODEX_MODEL = 'gpt-5.4'
+const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-4-6'
 const DEFAULT_SERVER_BASE_URL = 'https://ai.oneapi.center'
 const DEFAULT_CODEX_BASE_URL = 'https://ai.oneapi.center/v1'
 const DEFAULT_CLAUDE_BASE_URL = 'https://ai.oneapi.center'
@@ -1367,6 +1361,11 @@ function resolvePreferredModel(
   preferred: string,
   fallback = ''
 ) {
+  const smartDefault = resolveSmartDefaultChatModel(options)
+  if (smartDefault) {
+    return smartDefault
+  }
+
   if (options.some((item) => item.value === preferred)) {
     return preferred
   }
@@ -1376,6 +1375,47 @@ function resolvePreferredModel(
   }
 
   return options[0]?.value || preferred || fallback || ''
+}
+
+function extractModelRank(value: string) {
+  const normalized = value.trim().toLowerCase()
+  const matched = normalized.match(/(\d+(?:\.\d+)+|\d+)/g)
+  if (!matched?.length) {
+    return [0]
+  }
+  return matched.flatMap((item) => item.split('.').map((part) => Number(part || 0)))
+}
+
+function compareModelRank(left: string, right: string) {
+  const leftRank = extractModelRank(left)
+  const rightRank = extractModelRank(right)
+  const length = Math.max(leftRank.length, rightRank.length)
+  for (let index = 0; index < length; index += 1) {
+    const delta = (rightRank[index] || 0) - (leftRank[index] || 0)
+    if (delta !== 0) {
+      return delta
+    }
+  }
+  return right.localeCompare(left, 'en')
+}
+
+function resolveSmartDefaultChatModel(options: ChatModelOption[]) {
+  const candidates = options
+    .filter((item) => !isImageGenerationModel(item.value))
+    .map((item) => item.value)
+  const mimo = candidates
+    .filter((item) => item.toLowerCase().includes('mimo') || item.toLowerCase().includes('xiaomi'))
+    .sort(compareModelRank)
+  if (mimo.length > 0) {
+    return mimo[0]
+  }
+  const deepseek = candidates
+    .filter((item) => item.toLowerCase().startsWith('deepseek'))
+    .sort(compareModelRank)
+  if (deepseek.length > 0) {
+    return deepseek[0]
+  }
+  return ''
 }
 
 async function translateSelectedText(options: {
@@ -1625,13 +1665,22 @@ function formatUsageSummary(usage?: ChatMessage['usage']) {
     Number(usage.input_tokens_details?.cached_tokens || 0),
     Number(usage.prompt_cache_hit_tokens || 0)
   )
+  const cacheHitRatio = total > 0
+    ? percentageOf(cacheHitTokens, total)
+    : prompt > 0
+      ? percentageOf(cacheHitTokens, prompt)
+      : 0
+  const cacheHitSummary =
+    cacheHitTokens > 0
+      ? `缓存命中 ${cacheHitRatio.toFixed(cacheHitRatio >= 10 ? 0 : 1)}%`
+      : ''
 
   if (total > 0) {
-    return `Tokens ${total}${prompt || completion ? ` · 输入 ${prompt} · 输出 ${completion}` : ''}${cacheHitTokens > 0 ? ` · 缓存命中 ${cacheHitTokens}` : ''}`
+    return `Tokens ${total}${prompt || completion ? ` · 输入 ${prompt} · 输出 ${completion}` : ''}${cacheHitSummary ? ` · ${cacheHitSummary}` : ''}`
   }
 
   if (prompt > 0 || completion > 0 || cacheHitTokens > 0) {
-    return `输入 ${prompt} · 输出 ${completion}${cacheHitTokens > 0 ? ` · 缓存命中 ${cacheHitTokens}` : ''}`
+    return `输入 ${prompt} · 输出 ${completion}${cacheHitSummary ? ` · ${cacheHitSummary}` : ''}`
   }
 
   return ''
@@ -1915,7 +1964,7 @@ function PendingMessageContent(props: {
   )
 }
 
-function LazyMarkdownContent(props: {
+const LazyMarkdownContent = memo(function LazyMarkdownContent(props: {
   content: string
   className?: string
   onSelectionContextMenu?: (event: MouseEvent<HTMLDivElement>, selectedText: string) => void
@@ -1932,9 +1981,9 @@ function LazyMarkdownContent(props: {
       />
     </Suspense>
   )
-}
+})
 
-function ReasoningMessageContent(props: {
+const ReasoningMessageContent = memo(function ReasoningMessageContent(props: {
   content: string
   pending?: boolean
   onSelectionContextMenu?: (event: MouseEvent<HTMLDivElement>, selectedText: string) => void
@@ -1955,7 +2004,7 @@ function ReasoningMessageContent(props: {
       </div>
     </details>
   )
-}
+})
 
 function formatDownloadSize(value?: number) {
   const size = Number(value || 0)
@@ -3115,10 +3164,203 @@ function CliLogBubble(props: {
   const executedToolNames = collectCliToolNames(item.events.map((eventItem) => eventItem.sourceKind))
   const logStatus = resolveCliLogGroupStatus(item.events)
   const commandCount = item.events.filter((eventItem) => eventItem.kind === 'command').length
-  const intentItems = item.events
-    .map((eventItem) => eventItem.assistantChunk?.trim() || '')
-    .filter(Boolean)
-    .filter((value, index, values) => values.indexOf(value) === index)
+  const visibleEvents = expanded ? item.events : item.events.slice(0, 1)
+  const visualBlocks = buildCliVisualLogBlocks(visibleEvents)
+  const [collapsedSectionIds, setCollapsedSectionIds] = useState<string[]>([])
+  const [collapsedTimeGroupIds, setCollapsedTimeGroupIds] = useState<string[]>([])
+  const [collapsedOutputGroupIds, setCollapsedOutputGroupIds] = useState<string[]>([])
+  const eventTotals = useMemo(() => summarizeCliEventTotals(item.events), [item.events])
+  const renderedBlocks = useMemo(() => visualBlocks.map((block) => {
+    const rows: Array<
+      | { type: 'event'; id: string; event: typeof block.items[number] }
+      | { type: 'output'; id: string; items: Array<typeof block.items[number]>; title: string; summary: string }
+    > = []
+
+    for (const sectionItem of block.items) {
+      const previous = rows.at(-1)
+      const outputFamily = resolveCliOutputFamily(sectionItem)
+      if (
+        previous?.type === 'output' &&
+        outputFamily &&
+        canGroupCliOutputEvents(sectionItem, previous.items.at(-1)!)
+      ) {
+        previous.items.push(sectionItem)
+        previous.title = resolveCliOutputGroupTitle(previous.items)
+        previous.summary = resolveCliOutputGroupSummary(previous.items)
+        continue
+      }
+
+      if (outputFamily) {
+        rows.push({
+          type: 'output',
+          id: `${block.id}-${sectionItem.id}`,
+          items: [sectionItem],
+          title: resolveCliOutputGroupTitle([sectionItem]),
+          summary: resolveCliOutputGroupSummary([sectionItem]),
+        })
+        continue
+      }
+
+      rows.push({
+        type: 'event',
+        id: sectionItem.id,
+        event: sectionItem,
+      })
+    }
+
+    return {
+      ...block,
+      rows,
+      summary: summarizeCliBlockRows(rows),
+      timeGroups: rows.reduce<Array<{
+        id: string
+        timeLabel: string
+        summary: string
+        rows: typeof rows
+      }>>((groups, row) => {
+        const createdAt = row.type === 'output' ? row.items[0]?.createdAt || item.createdAt : row.event.createdAt
+        const timeLabel = formatCliLogTime(createdAt)
+        const summary = row.type === 'output' ? row.summary : row.event.message
+        const previous = groups.at(-1)
+        if (previous && previous.timeLabel === timeLabel) {
+          previous.rows.push(row)
+          return groups
+        }
+        groups.push({
+          id: `${block.id}-${timeLabel}-${groups.length}`,
+          timeLabel,
+          summary,
+          rows: [row],
+        })
+        return groups
+      }, []),
+    }
+  }), [visualBlocks, item.createdAt])
+
+  const toggleSection = (sectionId: string) => {
+    setCollapsedSectionIds((current) =>
+      current.includes(sectionId) ? current.filter((itemId) => itemId !== sectionId) : [...current, sectionId],
+    )
+  }
+
+  const toggleTimeGroup = (groupId: string) => {
+    setCollapsedTimeGroupIds((current) =>
+      current.includes(groupId) ? current.filter((itemId) => itemId !== groupId) : [...current, groupId],
+    )
+  }
+
+  const toggleOutputGroup = (groupId: string) => {
+    setCollapsedOutputGroupIds((current) =>
+      current.includes(groupId) ? current.filter((itemId) => itemId !== groupId) : [...current, groupId],
+    )
+  }
+
+  const normalizeComparable = (value?: string) => (value || '').trim().replace(/\s+/g, ' ')
+  const isPlainStatusSourceKind = (sourceKind?: string) => isCliMetaIntentSourceKind(sourceKind)
+
+  const renderInteraction = (interaction: CliInteractionPrompt) => {
+    const interactionPending = interaction.status === 'pending'
+    const interactionBusy = respondingInteractionIds.includes(interaction.id)
+    return (
+      <div className={`cli-interaction-card ${interaction.status}`}>
+        <div className='cli-interaction-copy'>
+          <strong>{interaction.message}</strong>
+          {interaction.command?.trim() ? (
+            <pre className='cli-log-detail-window'>{interaction.command}</pre>
+          ) : null}
+        </div>
+        {interactionPending && item.requestId ? (
+          <div className='cli-interaction-actions'>
+            <button
+              className='ghost-button tiny'
+              type='button'
+              disabled={interactionBusy}
+              onClick={() => onRespondInteraction(item.requestId || '', interaction.id, 'approve')}
+            >
+              确认
+            </button>
+            <button
+              className='ghost-button tiny'
+              type='button'
+              disabled={interactionBusy}
+              onClick={() => onRespondInteraction(item.requestId || '', interaction.id, 'approve_always')}
+            >
+              一直确认
+            </button>
+            <button
+              className='ghost-button tiny danger'
+              type='button'
+              disabled={interactionBusy}
+              onClick={() => onRespondInteraction(item.requestId || '', interaction.id, 'reject')}
+            >
+              拒绝
+            </button>
+          </div>
+        ) : (
+          <span className='cli-interaction-status'>
+            {interaction.status === 'auto_approved'
+              ? '已自动确认'
+              : interaction.status === 'approved_always'
+                ? '已持续放行'
+                : interaction.status === 'approved'
+                  ? '已确认'
+                  : interaction.status === 'rejected'
+                    ? '已拒绝'
+                    : '等待确认'}
+          </span>
+        )}
+      </div>
+    )
+  }
+
+  const renderExpandedEventDetails = (
+    ownerId: string,
+    command?: string,
+    detail?: string,
+    files?: Array<{ path: string }>,
+  ) => {
+    const uniqueEventFiles = Array.from(new Map((files || []).map((file) => [file.path, file])).values())
+    return (
+      <div className='cli-log-event-details'>
+        {command?.trim() ? (
+          <div className='cli-log-detail-block'>
+            <span className='cli-log-detail-label'>执行命令</span>
+            <pre className='cli-log-detail-window'>{command}</pre>
+          </div>
+        ) : null}
+        {detail?.trim() ? (
+          <div className='cli-log-detail-block'>
+            <pre className='cli-log-detail-window'>{detail}</pre>
+          </div>
+        ) : null}
+        {uniqueEventFiles.length > 0 ? (
+          <div className='cli-log-detail-block'>
+            <span className='cli-log-detail-label'>相关文件</span>
+            <div className='cli-log-files inline-expanded'>
+              {uniqueEventFiles.map((fileItem) => (
+                <button
+                  key={fileItem.path}
+                  className='ghost-button tiny cli-log-file'
+                  type='button'
+                  onClick={() => onOpenFile(ownerId, fileItem.path)}
+                  title={fileItem.path}
+                >
+                  <FileText size={14} />
+                  <span>{fileItem.path.split(/[\\/]/).filter(Boolean).at(-1) || fileItem.path}</span>
+                </button>
+              ))}
+            </div>
+            {previewFile && previewFile.ownerId === ownerId ? (
+              <div className='inline-file-preview'>
+                <code className='inline-file-preview-path'>{previewFile.path}</code>
+                <pre className='inline-file-preview-content'>{previewFile.content}</pre>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    )
+  }
 
   return (
     <div className={`message-bubble system cli-log-bubble ${logStatus.tone === 'error' ? 'error' : ''}`}>
@@ -3141,162 +3383,210 @@ function CliLogBubble(props: {
           </div>
         </div>
       ) : null}
-      {intentItems.length > 0 ? (
-        <div className='cli-log-intent-summary'>
-          <span>AI 执行目的</span>
-          <ul>
-            {intentItems.map((intentItem) => (
-              <li key={intentItem}>{intentItem}</li>
-            ))}
-          </ul>
+      {item.events.length >= 40 ? (
+        <div className='cli-log-overview-strip'>
+          <span>{`意图 ${eventTotals.intentCount}`}</span>
+          <span>{`命令 ${eventTotals.commandCount}`}</span>
+          <span>{`工具 ${eventTotals.toolCount}`}</span>
+          <span>{`诊断 ${eventTotals.diagnosticCount}`}</span>
+          <span>{`确认 ${eventTotals.interactionCount}`}</span>
         </div>
       ) : null}
       <div className='cli-log-event-list'>
-        {(expanded ? item.events : item.events.slice(0, 1)).map((eventItem) => {
-          const eventFiles = Array.from(new Map(eventItem.files.map((file) => [file.path, file])).values())
-          const hasExpandableContent =
-            !!eventItem.command?.trim() ||
-            !!eventItem.detail?.trim() ||
-            eventFiles.length > 0
-          const eventExpanded = expandedEventIds.includes(eventItem.id)
-          const interaction = eventItem.interaction
-          const interactionPending = interaction?.status === 'pending'
-          const interactionBusy = interaction ? respondingInteractionIds.includes(interaction.id) : false
+        {renderedBlocks.map((block, blockIndex) => {
+          const blockTitle = resolveCliVisualBlockTitle(block, blockIndex)
+          const plainStatusBlock =
+            (!block.items.length && !!block.intent) ||
+            (block.intent ? isPlainStatusSourceKind(block.intent.sourceKind) : false) ||
+            (!block.intent &&
+              block.items.length > 0 &&
+              block.items.every((eventItem) => isPlainStatusSourceKind(eventItem.sourceKind)))
+          const autoCollapsed = item.events.length >= 80 && blockIndex < renderedBlocks.length - 3
+          const collapsed = collapsedSectionIds.includes(block.id) || autoCollapsed
+          const showBlockHead = !!blockTitle && !plainStatusBlock
 
           return (
-            <div
-              key={eventItem.id}
-              className={`cli-log-event-row ${eventItem.kind} ${eventItem.level}`}
-              style={
-                {
-                  '--cli-log-indent-level': `${Math.max(0, eventItem.indentLevel || 0)}`,
-                } as CSSProperties
-              }
-            >
-              <div className='cli-log-event-dot' />
-              <div className='cli-log-event-body'>
-                {eventItem.assistantChunk?.trim() ? (
-                  <div className='cli-log-event-intent-text'>{eventItem.assistantChunk.trim()}</div>
-                ) : null}
-                <div className='cli-log-event-head'>
-                  <div className='cli-log-event-copy'>
-                    <strong>{eventItem.message}</strong>
-                    <small>
-                      {[
-                        resolveCliLogKindLabel(eventItem.kind),
-                        formatCliSourceKind(eventItem.sourceKind),
-                        formatCliLogTime(eventItem.createdAt),
-                      ]
-                        .filter(Boolean)
-                        .join(' · ')}
-                    </small>
-                  </div>
-                  {hasExpandableContent ? (
-                    <button
-                      className='cli-log-inline-toggle'
-                      type='button'
-                      title={eventExpanded ? '收起详情' : '展开详情'}
-                      aria-label={eventExpanded ? '收起详情' : '展开详情'}
-                      onClick={(event) => {
-                        event.stopPropagation()
-                        onToggleEvent(eventItem.id)
-                      }}
-                    >
-                      {eventExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                    </button>
-                  ) : null}
-                </div>
-                {interaction ? (
-                  <div className={`cli-interaction-card ${interaction.status}`}>
-                    <div className='cli-interaction-copy'>
-                      <strong>{interaction.message}</strong>
-                      {interaction.command?.trim() ? (
-                        <pre className='cli-log-detail-window'>{interaction.command}</pre>
-                      ) : null}
+            <div key={block.id} className={`cli-log-phase-section ${plainStatusBlock ? 'plain-status' : ''}`}>
+              {showBlockHead ? (
+                <button className='cli-log-phase-head' type='button' onClick={() => toggleSection(block.id)}>
+                  <span className='cli-log-phase-headline'>
+                    <strong>{blockTitle}</strong>
+                    <span className='cli-log-inline-fold-indicator'>{collapsed ? '展开' : '收起'}</span>
+                  </span>
+                  <small>{[block.summary, `${block.rows.length || block.items.length || (block.intent ? 1 : 0)} 条`].filter(Boolean).join(' · ')}</small>
+                </button>
+              ) : null}
+              {plainStatusBlock && !block.timeGroups.length && blockTitle ? (
+                <div className='cli-log-time-group'>
+                  <div className='cli-log-time-head plain static'>
+                    <div className='cli-log-time-copy plain'>
+                      <span className='cli-log-time-dot' />
+                      <strong>{blockTitle}</strong>
+                      {block.intent?.createdAt ? <small>{formatCliLogTime(block.intent.createdAt)}</small> : null}
                     </div>
-                    {interactionPending && item.requestId ? (
-                      <div className='cli-interaction-actions'>
-                        <button
-                          className='ghost-button tiny'
-                          type='button'
-                          disabled={interactionBusy}
-                          onClick={() => onRespondInteraction(item.requestId || '', interaction.id, 'approve')}
-                        >
-                          确认
-                        </button>
-                        <button
-                          className='ghost-button tiny'
-                          type='button'
-                          disabled={interactionBusy}
-                          onClick={() => onRespondInteraction(item.requestId || '', interaction.id, 'approve_always')}
-                        >
-                          一直确认
-                        </button>
-                        <button
-                          className='ghost-button tiny danger'
-                          type='button'
-                          disabled={interactionBusy}
-                          onClick={() => onRespondInteraction(item.requestId || '', interaction.id, 'reject')}
-                        >
-                          拒绝
-                        </button>
-                      </div>
-                    ) : (
-                      <span className='cli-interaction-status'>
-                        {interaction.status === 'auto_approved'
-                          ? '已自动确认'
-                          : interaction.status === 'approved_always'
-                            ? '已持续放行'
-                            : interaction.status === 'approved'
-                              ? '已确认'
-                              : interaction.status === 'rejected'
-                                ? '已拒绝'
-                                : '等待确认'}
-                      </span>
-                    )}
                   </div>
-                ) : null}
-                {eventExpanded && (
-                  <div className='cli-log-event-details'>
-                    {eventItem.command?.trim() ? (
-                      <div className='cli-log-detail-block'>
-                        <span className='cli-log-detail-label'>执行命令</span>
-                        <pre className='cli-log-detail-window'>{eventItem.command}</pre>
-                      </div>
-                    ) : null}
-                    {eventItem.detail?.trim() ? (
-                      <div className='cli-log-detail-block'>
-                        <pre className='cli-log-detail-window'>{eventItem.detail}</pre>
-                      </div>
-                    ) : null}
-                    {eventFiles.length > 0 ? (
-                      <div className='cli-log-detail-block'>
-                        <span className='cli-log-detail-label'>相关文件</span>
-                        <div className='cli-log-files inline-expanded'>
-                          {eventFiles.map((fileItem) => (
-                            <button
-                              key={fileItem.path}
-                              className='ghost-button tiny cli-log-file'
-                              type='button'
-                              onClick={() => onOpenFile(eventItem.id, fileItem.path)}
-                              title={fileItem.path}
-                            >
-                              <FileText size={14} />
-                              <span>{fileItem.path.split(/[\\/]/).filter(Boolean).at(-1) || fileItem.path}</span>
-                            </button>
-                          ))}
-                        </div>
-                        {previewFile && previewFile.ownerId === eventItem.id ? (
-                          <div className='inline-file-preview'>
-                            <code className='inline-file-preview-path'>{previewFile.path}</code>
-                            <pre className='inline-file-preview-content'>{previewFile.content}</pre>
-                          </div>
+                </div>
+              ) : null}
+              {!collapsed ? block.timeGroups.map((timeGroup) => {
+                const firstRow = timeGroup.rows[0]
+                const rawHeadline = firstRow?.type === 'output' ? firstRow.summary : firstRow?.event.message || ''
+                const normalizedHeadline = normalizeComparable(rawHeadline)
+                const effectiveHeadline = normalizedHeadline === normalizeComparable(blockTitle) ? '' : rawHeadline
+                const timeCollapsed = collapsedTimeGroupIds.includes(timeGroup.id)
+
+                return (
+                  <div key={timeGroup.id} className='cli-log-time-group'>
+                    <button
+                      className={`cli-log-time-head ${effectiveHeadline ? '' : 'plain'}`.trim()}
+                      type='button'
+                      onClick={() => toggleTimeGroup(timeGroup.id)}
+                    >
+                      <div className={`cli-log-time-copy ${effectiveHeadline ? '' : 'plain'}`.trim()}>
+                        <span className='cli-log-time-dot' />
+                        {effectiveHeadline ? (
+                          <>
+                            <strong>{effectiveHeadline}</strong>
+                            <span className='cli-log-inline-fold-indicator'>{timeCollapsed ? '展开' : '收起'}</span>
+                          </>
                         ) : null}
+                        <small>{timeGroup.timeLabel}</small>
+                      </div>
+                    </button>
+                    {!timeCollapsed ? (
+                      <div className='cli-log-time-lines'>
+                        {timeGroup.rows.map((row, rowIndex) => {
+                          if (row.type === 'output') {
+                            const outputGroups = summarizeCliOutputDetailGroups(
+                              row.items.map((eventItem) => ({
+                                id: eventItem.id,
+                                sourceKind: eventItem.sourceKind,
+                                detail: eventItem.detail,
+                                command: eventItem.command,
+                                message: eventItem.message,
+                              })),
+                            )
+                            const headline =
+                              resolveCliOutputGroupHeadline(row.items) || row.summary || '执行细节'
+
+                            return (
+                              <div key={row.id} className='cli-log-output-stack'>
+                                {headline && normalizeComparable(headline) !== normalizeComparable(effectiveHeadline) ? (
+                                  <div className='cli-log-output-stack-title'>
+                                    <span className='cli-log-child-dot' />
+                                    <strong>{headline}</strong>
+                                  </div>
+                                ) : null}
+                                {outputGroups.map((group) => {
+                                  const collapsedOutput = collapsedOutputGroupIds.includes(group.id)
+                                  const detailSummary =
+                                    group.count > 1 ? `${group.count} 条相似日志` : `${group.details.length} 条详细日志`
+                                  return (
+                                    <div key={group.id} className='cli-log-output-card'>
+                                      <button
+                                        className='cli-log-output-card-head'
+                                        type='button'
+                                        onClick={() => toggleOutputGroup(group.id)}
+                                      >
+                                        <span className='cli-log-child-dot' />
+                                        <strong>{group.headline}</strong>
+                                        <span className='cli-log-inline-fold-indicator'>{collapsedOutput ? '展开' : '收起'}</span>
+                                        <small>{detailSummary}</small>
+                                      </button>
+                                      {!collapsedOutput ? (
+                                        <div className='cli-log-output-card-body'>
+                                          {group.details.map((detailText, detailIndex) => (
+                                            <pre key={`${group.id}-${detailIndex}`} className='cli-log-detail-window compact'>
+                                              {detailText}
+                                            </pre>
+                                          ))}
+                                        </div>
+                                      ) : null}
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            )
+                          }
+
+                          const eventItem = row.event
+                          const eventExpanded = expandedEventIds.includes(eventItem.id)
+                          const hasExpandableContent =
+                            !!eventItem.command?.trim() ||
+                            !!eventItem.detail?.trim() ||
+                            eventItem.files.length > 0
+                          const duplicatedPrimary =
+                            rowIndex === 0 &&
+                            normalizeComparable(eventItem.message) === normalizeComparable(effectiveHeadline || eventItem.message)
+
+                          return (
+                            <div
+                              key={eventItem.id}
+                              className={`cli-log-event-row ${eventItem.kind} ${eventItem.level}`}
+                              style={
+                                {
+                                  '--cli-log-indent-level': `${Math.max(0, eventItem.indentLevel || 0)}`,
+                                } as CSSProperties
+                              }
+                            >
+                              <div className='cli-log-event-dot' />
+                              <div className='cli-log-event-body'>
+                                {!duplicatedPrimary ? (
+                                  <div className='cli-log-event-head'>
+                                    <div className='cli-log-event-copy'>
+                                      {hasExpandableContent ? (
+                                        <button
+                                          className='cli-log-event-toggle'
+                                          type='button'
+                                          title={eventExpanded ? '收起详情' : '展开详情'}
+                                          aria-label={eventExpanded ? '收起详情' : '展开详情'}
+                                          onClick={(event) => {
+                                            event.stopPropagation()
+                                            onToggleEvent(eventItem.id)
+                                          }}
+                                        >
+                                          {eventExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                                          <strong>{eventItem.message}</strong>
+                                        </button>
+                                      ) : (
+                                        <strong>{eventItem.message}</strong>
+                                      )}
+                                    </div>
+                                  </div>
+                                ) : hasExpandableContent ? (
+                                  <div className='cli-log-event-head compact'>
+                                    <button
+                                      className='cli-log-event-toggle'
+                                      type='button'
+                                      title={eventExpanded ? '收起详情' : '展开详情'}
+                                      aria-label={eventExpanded ? '收起详情' : '展开详情'}
+                                      onClick={(event) => {
+                                        event.stopPropagation()
+                                        onToggleEvent(eventItem.id)
+                                      }}
+                                    >
+                                      {eventExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                                      <span>查看详情</span>
+                                    </button>
+                                  </div>
+                                ) : null}
+                                {eventItem.interaction ? renderInteraction(eventItem.interaction) : null}
+                                {eventExpanded
+                                  ? renderExpandedEventDetails(
+                                      eventItem.id,
+                                      eventItem.command,
+                                      eventItem.detail,
+                                      eventItem.files,
+                                    )
+                                  : null}
+                              </div>
+                            </div>
+                          )
+                        })}
                       </div>
                     ) : null}
                   </div>
-                )}
-              </div>
+                )
+              }) : null}
             </div>
           )
         })}
@@ -3308,12 +3598,10 @@ function CliLogBubble(props: {
             commandCount > 0 ? `命令 ${commandCount}` : '',
             `步骤 ${item.events.length}`,
             `最后更新 ${formatCliLogTime(item.createdAt)}`,
-          ]
-            .filter(Boolean)
-            .join(' · ')}
+          ].filter(Boolean).join(' · ')}
         </small>
       </div>
-      {uniqueFiles.length > 0 && !expanded && (
+      {uniqueFiles.length > 0 && !expanded ? (
         <div className='cli-log-files'>
           {uniqueFiles.slice(0, 4).map((fileItem) => (
             <button
@@ -3328,7 +3616,7 @@ function CliLogBubble(props: {
             </button>
           ))}
         </div>
-      )}
+      ) : null}
       <BubbleMeta
         side='left'
         createdAt={item.createdAt}
@@ -3479,6 +3767,41 @@ function formatCliLogTime(timestamp: number) {
   return dayjs(normalizeTimestampMs(timestamp)).format('HH:mm:ss')
 }
 
+function summarizeCliIntentStep(value: string, maxLength = 120) {
+  const normalized = value
+    .split(/\r?\n/)
+    .map((line) => line.trim().replace(/^[-*•]\s*/, ''))
+    .filter(Boolean)
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (!normalized) {
+    return ''
+  }
+  const segments = normalized
+    .split(/(?<=[。！？；;.!?])\s*|(?<=\))\s+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+  const lastSegment = segments.at(-1) || normalized
+  return lastSegment.length <= maxLength ? lastSegment : `${lastSegment.slice(0, maxLength - 1).trim()}…`
+}
+
+function extractCliIntentDelta(previous: string, next: string) {
+  const normalizedPrevious = previous.trim()
+  const normalizedNext = next.trim()
+  if (!normalizedNext || normalizedNext === normalizedPrevious) {
+    return ''
+  }
+  if (normalizedPrevious && normalizedNext.startsWith(normalizedPrevious)) {
+    return normalizedNext.slice(normalizedPrevious.length).trim()
+  }
+  const previousIndex = normalizedPrevious ? normalizedNext.indexOf(normalizedPrevious) : -1
+  if (previousIndex >= 0) {
+    return normalizedNext.slice(previousIndex + normalizedPrevious.length).trim()
+  }
+  return normalizedNext
+}
+
 function resolveCliLogKindLabel(kind?: CliLogKind) {
   switch (kind) {
     case 'intent':
@@ -3501,12 +3824,362 @@ function resolveCliLogKindLabel(kind?: CliLogKind) {
   }
 }
 
-function formatCliSourceKind(value?: string) {
-  const normalized = value?.trim()
-  if (!normalized) {
-    return ''
+function isCliIntentEvent(item: {
+  kind?: CliLogKind
+  sourceKind?: string
+  interaction?: CliInteractionPrompt
+  assistantChunk?: string
+}) {
+  const sourceKind = (item.sourceKind || '').trim().toLowerCase()
+  return sourceKind.startsWith('orchestrator.intent') || sourceKind.startsWith('intent.') || item.kind === 'intent'
+}
+
+function buildCliVisualLogBlocks<T extends {
+  id: string
+  message: string
+  kind?: CliLogKind
+  sourceKind?: string
+  interaction?: CliInteractionPrompt
+  assistantChunk?: string
+  detail?: string
+  createdAt: number
+}>(events: T[]) {
+  const blocks: Array<{
+    id: string
+    label: string
+    intent?: T
+    items: T[]
+  }> = []
+
+  let currentBlock: {
+    id: string
+    label: string
+    intent?: T
+    items: T[]
+  } | null = null
+
+  for (const eventItem of events) {
+    if (isCliIntentEvent(eventItem)) {
+      currentBlock = {
+        id: `intent-block-${eventItem.id}`,
+        label: '意图',
+        intent: eventItem,
+        items: [],
+      }
+      blocks.push(currentBlock)
+      continue
+    }
+
+    if (!currentBlock) {
+      currentBlock = {
+        id: `execution-block-${eventItem.id}`,
+        label: '执行',
+        items: [],
+      }
+      blocks.push(currentBlock)
+    }
+
+    currentBlock.items.push(eventItem)
   }
-  return normalized.replace(/[_\s]+/g, '.')
+
+  return blocks.filter((block) => block.intent || block.items.length > 0)
+}
+
+function isCliMetaIntentSourceKind(sourceKind?: string) {
+  const normalized = (sourceKind || '').trim().toLowerCase()
+  return (
+    normalized === 'request.started' ||
+    normalized === 'thread.started' ||
+    normalized === 'turn.started' ||
+    normalized === 'session.connected' ||
+    normalized === 'system.init' ||
+    normalized === 'request.stream.completed' ||
+    normalized === 'request.aborted' ||
+    normalized === 'request.failed' ||
+    normalized === 'turn.completed' ||
+    normalized === 'turn.completed.with_warnings' ||
+    normalized === 'result' ||
+    normalized === 'result.with_warnings'
+  )
+}
+
+function resolveCliVisualBlockTitle<T extends {
+  intent?: {
+    assistantChunk?: string
+    detail?: string
+    message: string
+    sourceKind?: string
+  }
+  label: string
+}>(block: T, index: number) {
+  const assistantChunk = block.intent?.assistantChunk?.trim()
+  if (assistantChunk) {
+    return assistantChunk
+  }
+  const detail = block.intent?.detail?.trim()
+  if (detail && detail !== (block.intent?.sourceKind || '').trim()) {
+    return detail
+  }
+  if (block.intent && !isCliMetaIntentSourceKind(block.intent.sourceKind)) {
+    return block.intent.message.trim() || `${block.label} ${index + 1}`
+  }
+  return ''
+}
+
+function isCliDiagnosticEvent(item: {
+  kind?: CliLogKind
+  sourceKind?: string
+}) {
+  const sourceKind = (item.sourceKind || '').trim().toLowerCase()
+  return item.kind === 'stderr' || sourceKind.startsWith('stderr')
+}
+
+function resolveCliDiagnosticDetail(item: {
+  detail?: string
+  command?: string
+  message: string
+}) {
+  return item.detail?.trim() || item.command?.trim() || item.message.trim()
+}
+
+function resolveCliOutputFamily(item: {
+  kind?: CliLogKind
+  sourceKind?: string
+}) {
+  const sourceKind = (item.sourceKind || '').trim().toLowerCase()
+  if (item.kind === 'stdout' || sourceKind.startsWith('stdout')) {
+    return 'stdout' as const
+  }
+  if (item.kind === 'stderr' || sourceKind.startsWith('stderr')) {
+    return 'stderr' as const
+  }
+  return null
+}
+
+function canGroupCliOutputEvents(
+  left: {
+    kind?: CliLogKind
+    sourceKind?: string
+    createdAt: number
+  },
+  right: {
+    kind?: CliLogKind
+    sourceKind?: string
+    createdAt: number
+  }
+) {
+  return (
+    resolveCliOutputFamily(left) === resolveCliOutputFamily(right) &&
+    (left.sourceKind || '').trim().toLowerCase() === (right.sourceKind || '').trim().toLowerCase() &&
+    Math.abs(left.createdAt - right.createdAt) <= 3000
+  )
+}
+
+function resolveCliOutputGroupTitle(items: Array<{
+  kind?: CliLogKind
+  sourceKind?: string
+  detail?: string
+}>) {
+  const family = resolveCliOutputFamily(items[0] || {})
+  if (family === 'stderr') {
+    return `同类 stderr ${items.length} 条`
+  }
+  if (family === 'stdout') {
+    return `同类 stdout ${items.length} 条`
+  }
+  return `同类输出 ${items.length} 条`
+}
+
+function resolveCliOutputGroupSummary(items: Array<{
+  kind?: CliLogKind
+  sourceKind?: string
+  detail?: string
+}>) {
+  const family = resolveCliOutputFamily(items[0] || {})
+  if (family === 'stderr') {
+    return resolveCliDiagnosticSummary(items)
+  }
+  return '执行输出'
+}
+
+function resolveCliDiagnosticSummary(items: Array<{
+  sourceKind?: string
+  detail?: string
+}>) {
+  const sourceKinds = items.map((item) => (item.sourceKind || '').trim().toLowerCase())
+  if (sourceKinds.every((item) => item.startsWith('stderr.command'))) {
+    return '执行细节：命令返回了路径、参数或文件状态'
+  }
+  if (sourceKinds.every((item) => item.startsWith('stderr.stdin.idle'))) {
+    return '执行细节：CLI 正在等待交互输入或权限确认'
+  }
+  if (sourceKinds.every((item) => item.startsWith('stderr.warn'))) {
+    return '执行细节：CLI 返回了警告信息'
+  }
+  const matchedDetail = items
+    .map((item) => item.detail?.trim() || '')
+    .find((item) => /error|failed|not found|invalid|拒绝|blocked/i.test(item))
+  if (matchedDetail) {
+    return '执行异常细节'
+  }
+  return '执行细节'
+}
+
+function resolveCliOutputGroupHeadline(items: Array<{
+  sourceKind?: string
+  detail?: string
+  command?: string
+  message: string
+}>) {
+  const detailLines = items
+    .map((item) => resolveCliDiagnosticDetail(item))
+    .flatMap((item) => item.split(/\r?\n/).map((line) => line.trim()).filter(Boolean))
+  const firstErrorLine = detailLines.find((line) =>
+    /error|failed|eperm|enoent|invalid config|proxy|ts\d+|exit code/i.test(line),
+  )
+  if (firstErrorLine) {
+    return firstErrorLine
+  }
+  return detailLines[0] || resolveCliDiagnosticSummary(items)
+}
+
+function summarizeCliOutputDetailGroups(items: Array<{
+  id: string
+  sourceKind?: string
+  detail?: string
+  command?: string
+  message: string
+}>) {
+  const groups = new Map<string, {
+    id: string
+    headline: string
+    details: string[]
+    count: number
+  }>()
+
+  for (const item of items) {
+    const rawText = resolveCliDiagnosticDetail(item)
+    const lines = rawText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+    if (!lines.length) {
+      continue
+    }
+    const headline =
+      lines.find((line) => /error|failed|eperm|enoent|invalid config|proxy|ts\d+|exit code/i.test(line)) ||
+      lines[0]
+    const detailBody = lines.join('\n')
+    const key =
+      /npm warn invalid config/i.test(headline)
+        ? `npm-invalid-config:${headline.replace(/".*?"/g, '""')}`
+        : /error ts5033/i.test(headline)
+          ? 'ts5033-eperm'
+          : headline
+    const existing = groups.get(key)
+    if (existing) {
+      existing.count += 1
+      if (!existing.details.includes(detailBody)) {
+        existing.details.push(detailBody)
+      }
+      continue
+    }
+    groups.set(key, {
+      id: item.id,
+      headline,
+      details: [detailBody],
+      count: 1,
+    })
+  }
+
+  return [...groups.values()]
+}
+
+function summarizeCliBlockRows(rows: Array<
+  | { type: 'event'; id: string; event: { kind?: CliLogKind; interaction?: CliInteractionPrompt } }
+  | { type: 'output'; id: string; items: Array<{ kind?: CliLogKind; interaction?: CliInteractionPrompt; sourceKind?: string }> }
+>) {
+  let commandCount = 0
+  let toolCount = 0
+  let interactionCount = 0
+  let stderrGroupCount = 0
+  let stderrItemCount = 0
+  let stdoutGroupCount = 0
+  let stdoutItemCount = 0
+
+  for (const row of rows) {
+    if (row.type === 'output') {
+      const family = resolveCliOutputFamily(row.items[0] || {})
+      if (family === 'stderr') {
+        stderrGroupCount += 1
+        stderrItemCount += row.items.length
+      } else if (family === 'stdout') {
+        stdoutGroupCount += 1
+        stdoutItemCount += row.items.length
+      }
+      continue
+    }
+    if (row.event.interaction) {
+      interactionCount += 1
+    }
+    if (row.event.kind === 'command') {
+      commandCount += 1
+    } else if (row.event.kind === 'tool') {
+      toolCount += 1
+    }
+  }
+
+  return [
+    commandCount > 0 ? `命令 ${commandCount}` : '',
+    toolCount > 0 ? `工具 ${toolCount}` : '',
+    stdoutGroupCount > 0 ? `stdout ${stdoutGroupCount} 组/${stdoutItemCount} 条` : '',
+    stderrGroupCount > 0 ? `stderr ${stderrGroupCount} 组/${stderrItemCount} 条` : '',
+    interactionCount > 0 ? `确认 ${interactionCount}` : '',
+  ].filter(Boolean).join(' · ')
+}
+
+function summarizeCliEventTotals(events: Array<{ kind?: CliLogKind; interaction?: CliInteractionPrompt }>) {
+  let intentCount = 0
+  let commandCount = 0
+  let toolCount = 0
+  let diagnosticCount = 0
+  let interactionCount = 0
+
+  for (const eventItem of events) {
+    if (isCliIntentEvent(eventItem)) {
+      intentCount += 1
+      continue
+    }
+    if (isCliDiagnosticEvent(eventItem)) {
+      diagnosticCount += 1
+      continue
+    }
+    if (eventItem.interaction) {
+      interactionCount += 1
+    }
+    if (eventItem.kind === 'command') {
+      commandCount += 1
+    } else if (eventItem.kind === 'tool') {
+      toolCount += 1
+    }
+  }
+
+  return {
+    intentCount,
+    commandCount,
+    toolCount,
+    diagnosticCount,
+    interactionCount,
+  }
+}
+
+function shouldClearCliPlanOnDone(sourceKind?: string) {
+  return (
+    sourceKind === 'turn.completed' ||
+    sourceKind === 'turn.completed.with_warnings' ||
+    sourceKind === 'result' ||
+    sourceKind === 'result.with_warnings' ||
+    sourceKind === 'request.aborted' ||
+    sourceKind === 'request.failed' ||
+    sourceKind === 'request.stream.completed'
+  )
 }
 
 function serializeCliLogEvent(item: {
@@ -4677,7 +5350,7 @@ function AssistantsChatWorkspace(props: {
   }
 
   function openChatSessionFolder(sessionId: string) {
-    void openAssistantHistoryFolder('chat', sessionId).catch((error) => {
+    void openAssistantHistoryFolder('chat', sessionId).catch((error: unknown) => {
       toast(error instanceof Error ? error.message : '打开会话目录失败')
     })
   }
@@ -4851,7 +5524,6 @@ function AssistantsChatWorkspace(props: {
             onChange: (value) => {
               setDraft(value)
               chatPromptHistory.syncInputValue(value)
-              resizeDraft()
             },
             onKeyDown: (event) => {
               if ((event.ctrlKey || event.metaKey) && event.key === 'Enter' && !sending) {
@@ -5598,7 +6270,7 @@ function DrawWorkspace(props: {
   }
 
   function openDrawSessionFolder(sessionId: string) {
-    void openAssistantHistoryFolder('draw', sessionId).catch((error) => {
+    void openAssistantHistoryFolder('draw', sessionId).catch((error: unknown) => {
       toast(error instanceof Error ? error.message : '打开会话目录失败')
     })
   }
@@ -6002,16 +6674,23 @@ function DrawWorkspace(props: {
         preferredNames: ['桌面端专用 Key', 'CODEX 桌面安装 Key', 'CLAUDE 桌面安装 Key'],
       })
 
-      return sendImageEdit({
-        apiKey: serviceKey.key,
-        model: request.model,
-        prompt: request.prompt,
-        imageName: request.imageName,
-        mimeType: request.mimeType,
-        dataBase64: request.dataBase64,
-        size: request.size,
-        quality: request.quality,
-      })
+      try {
+        return sendImageEdit(
+          buildImageEditRequest({
+            apiKey: serviceKey.key,
+            model: request.model,
+            fallbackModel: DEFAULT_DRAW_MODEL,
+            prompt: request.prompt,
+            imageName: request.imageName,
+            mimeType: request.mimeType,
+            dataBase64: request.dataBase64,
+            size: request.size,
+            quality: request.quality,
+          })
+        )
+      } catch (error) {
+        throw new Error(mapImageEditError(error))
+      }
     }
 
     const serviceKey = await ensureDesktopServiceKey({
@@ -6336,7 +7015,6 @@ function DrawWorkspace(props: {
             onChange: (value) => {
               setDraft(value)
               drawPromptHistory.syncInputValue(value)
-              window.setTimeout(() => resizeDraft(), 0)
             },
             onKeyDown: (event) => {
               if ((event.ctrlKey || event.metaKey) && event.key === 'Enter' && !sending) {
@@ -8665,6 +9343,19 @@ function CliWorkspace(props: {
         }))
       }
 
+      if (payload.done && shouldClearCliPlanOnDone(payload.sourceKind)) {
+        const doneSessionIds = Array.from(
+          new Set([payload.sessionId, tracked?.sessionId, currentSession, targetSessionId].filter(Boolean)),
+        ) as string[]
+        setSessionPlansMap((current) => {
+          const next = { ...current }
+          doneSessionIds.forEach((sessionId) => {
+            next[sessionId] = null
+          })
+          return next
+        })
+      }
+
       if (payload.done && activeRequestIdRef.current === payload.requestId) {
         activeRequestIdRef.current = ''
         stoppingRunRef.current = false
@@ -8672,10 +9363,49 @@ function CliWorkspace(props: {
       }
 
       if (payload.kind === 'partial') {
-        setSessionPartialMap((current) => ({
-          ...current,
-          [targetSessionId]: payload.message,
-        }))
+        let previousPartial = ''
+        setSessionPartialMap((current) => {
+          previousPartial = current[targetSessionId] || ''
+          return {
+            ...current,
+            [targetSessionId]: payload.message,
+          }
+        })
+        setSessionLogsMap((current) => {
+          const deltaText = extractCliIntentDelta(previousPartial, payload.message)
+          const intentStep = summarizeCliIntentStep(deltaText || payload.message)
+          if (!intentStep) {
+            return current
+          }
+          const previous = current[targetSessionId] || []
+          const lastIntentLog = [...previous].reverse().find((entry) =>
+            entry.requestId === payload.requestId && entry.sourceKind === 'intent.live'
+          )
+          const nextEntry = {
+            id: lastIntentLog?.id || `${payload.requestId}-partial-intent-${payload.createdAt}`,
+            requestId: payload.requestId,
+            sessionId: targetSessionId,
+            level: 'status' as const,
+            logKind: 'intent' as const,
+            sourceKind: 'intent.live',
+            content: '执行意图',
+            assistantChunk: intentStep,
+            indentLevel: 0,
+            createdAt: payload.createdAt,
+            files: [],
+            detail: intentStep,
+          } satisfies CliLogEntry
+          if (lastIntentLog) {
+            return {
+              ...current,
+              [targetSessionId]: previous.map((entry) => (entry.id === lastIntentLog.id ? nextEntry : entry)),
+            }
+          }
+          return {
+            ...current,
+            [targetSessionId]: [...previous, nextEntry],
+          }
+        })
         if (payload.done) {
           window.setTimeout(() => {
             setSessionPartialMap((current) => ({
@@ -8688,8 +9418,9 @@ function CliWorkspace(props: {
       }
 
       setSessionLogsMap((current) => {
+        const previous = current[targetSessionId] || []
         const nextEntry = {
-          id: `${payload.requestId}-${payload.kind}-${payload.createdAt}-${currentSession}`,
+          id: `${payload.requestId}-${payload.kind}-${payload.createdAt}-${targetSessionId}-${previous.length}-${payload.sourceKind || 'status'}`,
           requestId: payload.requestId,
           sessionId: targetSessionId,
           level: payload.kind === 'error' ? 'error' : 'status',
@@ -8705,7 +9436,6 @@ function CliWorkspace(props: {
           exitCode: payload.exitCode,
           interaction: payload.interaction,
         } satisfies CliLogEntry
-        const previous = current[targetSessionId] || []
         const lastEntry = previous.at(-1)
         if (
           lastEntry?.level === nextEntry.level &&
@@ -9257,7 +9987,7 @@ function CliWorkspace(props: {
           key: 'open-folder',
           label: '打开文件夹',
           onSelect: () =>
-            openCliSessionFolder(client, item.id).catch((error) => {
+            openCliSessionFolder(client, item.id).catch((error: unknown) => {
               toast(error instanceof Error ? error.message : '打开会话目录失败')
             }),
         },
@@ -9265,7 +9995,7 @@ function CliWorkspace(props: {
           key: 'export',
           label: '导出会话',
           onSelect: () =>
-            exportCliSession(item).catch((error) => {
+            exportCliSession(item).catch((error: unknown) => {
               toast(error instanceof Error ? error.message : '导出会话失败')
             }),
         },
@@ -9582,18 +10312,26 @@ function CliWorkspace(props: {
         break
       }
     }
-    const promptWithAttachments = directCommand
-      ? cleanedPrompt
-      : buildCliExecutionPrompt(
-          buildCliExtensionAugmentedPrompt(
-            `${cleanedPrompt}${buildCliAttachmentReferenceText(targetAttachments)}`,
-            requestExtensions
-          ),
-          {
-            fullAccess,
-            projectPath: requestProjectPath,
-          }
-        )
+    const promptWithAttachments = buildFinalPrompt({
+      prompt: cleanedPrompt,
+      client,
+      projectPath: requestProjectPath,
+      fullAccess,
+      directCommand,
+      attachments: targetAttachments.map((item) => ({
+        id: item.id,
+        name: item.name,
+        filePath: item.filePath,
+        kind: item.kind,
+      })),
+      extensions: directCommand
+        ? []
+        : requestExtensions.map((item) => ({
+            client: item.client,
+            kind: item.kind,
+            name: item.name,
+          })),
+    }).finalPrompt
     const userMessage = {
       id: `user-${Date.now()}`,
       role: 'user' as const,
@@ -9626,6 +10364,34 @@ function CliWorkspace(props: {
       ...current,
       [currentSessionKey]: CLI_PENDING_MESSAGE_LABEL,
     }))
+    setSessionLogsMap((current) => {
+      const previous = current[currentSessionKey] || []
+      const orchestrationLogs = buildExecutionCycleEvents({
+        sessionId: currentSessionKey,
+        requestId,
+        intent: cleanedPrompt,
+        finalPrompt: promptWithAttachments,
+        commandTitle: directCommand ? '直接命令准备' : '扩展与上下文准备',
+        command: directCommand ? cleanedPrompt : '',
+      }).map((event) => ({
+        id: event.id,
+        requestId,
+        sessionId: currentSessionKey,
+        level: event.severity === 'error' ? 'error' : 'status',
+        logKind: 'status',
+        sourceKind: `orchestrator.${event.phase}`,
+        content: event.title,
+        indentLevel: event.indentLevel,
+        createdAt: event.createdAt,
+        detail: event.detail,
+        command: event.command,
+        interaction: event.interaction,
+      }) satisfies CliLogEntry)
+      return {
+        ...current,
+        [currentSessionKey]: [...previous, ...orchestrationLogs],
+      }
+    })
     cliPromptHistory.commitInputValue(cleanedPrompt)
     setPrompt('')
     setSelectedExtensions([])
@@ -9653,7 +10419,7 @@ function CliWorkspace(props: {
         setSessionMessagesMap((current) => {
           const previous = current[currentSessionKey] || []
           const incoming = current[nextSessionId] || []
-          const next = {
+          const next: Record<string, CliSessionMessage[]> = {
             ...current,
             [nextSessionId]: mergeCliMessages(previous, incoming),
           }
@@ -9663,7 +10429,7 @@ function CliWorkspace(props: {
         setSessionLogsMap((current) => {
           const previous = current[currentSessionKey] || []
           const incoming = current[nextSessionId] || []
-          const next = {
+          const next: Record<string, CliLogEntry[]> = {
             ...current,
             [nextSessionId]: mergeCliLogs(previous, incoming),
           }
@@ -9696,6 +10462,10 @@ function CliWorkspace(props: {
             requestId,
             modelLabel: selectedModelLabel,
             fileChanges: responseFileChanges,
+            usage:
+              response.metadata && typeof response.metadata === 'object' && 'usage' in response.metadata
+                ? response.metadata.usage as CliSessionMessage['usage']
+                : undefined,
           })
           if (nextMessages === previous) {
             return current
@@ -10053,6 +10823,7 @@ function CliWorkspace(props: {
                     <BubbleMeta
                       side={item.role === 'user' ? 'right' : 'left'}
                       createdAt={item.createdAt}
+                      extra={item.kind === 'message' && item.role === 'assistant' ? <span className='message-usage'>{formatUsageSummary(item.usage)}</span> : null}
                       actions={[
                         {
                           key: 'copy',
@@ -10100,7 +10871,6 @@ function CliWorkspace(props: {
               onChange: (value) => {
                 setPrompt(value)
                 cliPromptHistory.syncInputValue(value)
-                resizePrompt()
               },
               onKeyDown: (event) => {
                 if ((event.ctrlKey || event.metaKey) && event.key === 'Enter' && !running) {
@@ -11376,7 +12146,7 @@ export function App() {
 
     getDesktopBridge()
       .getAppMeta()
-      .then((meta) => {
+      .then((meta: DesktopAppMeta) => {
         setPlatformLabel(meta.platform === 'darwin' ? 'macOS' : 'Windows')
         setProductName(meta.productName)
         setAppVersion(meta.version)
@@ -11387,7 +12157,7 @@ export function App() {
       .catch(() => undefined)
 
     getUpdateState()
-      .then((state) => {
+      .then((state: DesktopUpdateState) => {
         setUpdateState(state)
       })
       .catch(() => undefined)
@@ -11395,7 +12165,7 @@ export function App() {
     window.setTimeout(() => {
       getDesktopBridge()
         .getCliStatus()
-        .then((status) => {
+        .then((status: { codex: CliStatus; claude: CliStatus }) => {
           setCliStatus(status)
         })
         .catch(() => undefined)
@@ -11651,7 +12421,7 @@ export function App() {
     }
   }, [])
 
-  useEffect(() => onUpdateState((payload) => {
+  useEffect(() => onUpdateState((payload: DesktopUpdateState) => {
     setUpdateState(payload)
   }), [])
 

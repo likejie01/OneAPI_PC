@@ -18,7 +18,7 @@ test('classifyCliStderrLine demotes powershell command noise to diagnostic statu
       level: 'status',
       logKind: 'stderr',
       sourceKind: 'stderr.command',
-      title: 'CLI 输出了命令诊断信息',
+      title: '命令执行返回了路径或参数诊断',
     }
   )
 })

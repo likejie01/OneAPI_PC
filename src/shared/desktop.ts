@@ -131,6 +131,7 @@ export interface CliSessionMessage {
   createdAt: number
   requestId?: string
   modelLabel?: string
+  usage?: ChatCompletionResponse['usage']
   sourceFilePath?: string
   sourceLineNumber?: number
   sourceTimestamp?: string | number

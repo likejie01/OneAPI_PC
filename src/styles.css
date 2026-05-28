@@ -1542,8 +1542,8 @@ select {
 
 .composer-asset-card {
   position: relative;
-  width: 32px;
-  height: 32px;
+  width: 64px;
+  height: 64px;
   border-radius: 12px;
   overflow: hidden;
   background: rgba(23, 49, 74, 0.06);
@@ -2373,6 +2373,288 @@ select {
   gap: 10px;
 }
 
+.cli-log-phase-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(29, 52, 73, 0.08);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.cli-log-phase-section.plain-status {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.cli-log-phase-head {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.cli-log-phase-head span {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: 0.04em;
+}
+
+.cli-log-phase-headline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.cli-log-phase-headline strong {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.cli-log-phase-head small {
+  font-size: 11px;
+  color: var(--muted);
+  margin-left: 0;
+}
+
+.cli-log-block-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin-top: -2px;
+}
+
+.cli-log-overview-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.cli-log-overview-strip span {
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: rgba(23, 49, 74, 0.06);
+  border: 1px solid rgba(23, 49, 74, 0.08);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.cli-log-time-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cli-log-time-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.cli-log-time-copy {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.cli-log-time-head.plain {
+  justify-content: flex-start;
+}
+
+.cli-log-time-head.static {
+  cursor: default;
+}
+
+.cli-log-time-copy.plain {
+  gap: 8px;
+}
+
+.cli-log-time-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(210, 142, 56, 0.9);
+  flex: 0 0 auto;
+}
+
+.cli-log-time-copy strong {
+  font-size: 13px;
+}
+
+.cli-log-time-copy small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.cli-log-inline-fold-indicator {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.cli-log-time-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-left: 22px;
+}
+
+.cli-log-time-line {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-left: calc(var(--cli-log-indent-level, 0) * 18px);
+}
+
+.cli-log-time-line-marker {
+  display: none;
+}
+
+.cli-log-time-line-copy {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: var(--text);
+  line-height: 1.6;
+}
+
+.cli-log-child-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: rgba(29, 107, 120, 0.45);
+  flex: 0 0 auto;
+  margin-top: 7px;
+}
+
+.cli-log-output-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cli-log-output-stack-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding-left: 4px;
+}
+
+.cli-log-output-stack-title strong {
+  line-height: 1.55;
+}
+
+.cli-log-output-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-left: 14px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(29, 52, 73, 0.08);
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.cli-log-output-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.cli-log-output-card-head strong {
+  line-height: 1.55;
+}
+
+.cli-log-output-card-head small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.cli-log-output-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cli-log-diagnostic-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(201, 110, 75, 0.14);
+  background: rgba(250, 247, 244, 0.88);
+}
+
+.cli-log-diagnostic-group.stdout-group {
+  border-color: rgba(58, 126, 184, 0.14);
+  background: rgba(244, 249, 253, 0.9);
+}
+
+.cli-log-diagnostic-head {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.cli-log-diagnostic-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cli-log-diagnostic-copy small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.cli-log-diagnostic-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .cli-interaction-card {
   margin-top: 10px;
   padding: 10px 12px;
@@ -2552,8 +2834,12 @@ select {
 .cli-log-event-head {
   display: flex;
   align-items: flex-start;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 12px;
+}
+
+.cli-log-event-head.compact {
+  justify-content: flex-start;
 }
 
 .cli-log-event-copy {
@@ -2566,6 +2852,23 @@ select {
 .cli-log-event-copy strong {
   color: var(--text);
   line-height: 1.5;
+}
+
+.cli-log-event-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.cli-log-event-toggle:hover,
+.cli-log-event-toggle:focus-visible {
+  color: var(--text);
 }
 
 .cli-log-event-copy small {
@@ -2602,6 +2905,11 @@ select {
   font-size: 12px;
   line-height: 1.5;
   max-height: calc(1.5em * 10 + 20px);
+}
+
+.cli-log-detail-window.compact {
+  max-height: none;
+  padding: 8px 10px;
 }
 
 .cli-log-files {
@@ -3110,6 +3418,15 @@ select {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.cli-log-event-diagnostic-text {
+  margin-top: 6px;
+  color: rgba(66, 56, 48, 0.88);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .attachment-preview-title-block span {
@@ -4169,8 +4486,8 @@ textarea:focus {
 }
 
 .composer-asset-card {
-  width: 36px;
-  height: 36px;
+  width: 72px;
+  height: 72px;
   border-radius: 13px;
   background: rgba(245, 240, 233, 0.9);
 }
