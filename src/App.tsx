@@ -181,7 +181,12 @@ import {
   type ImageStylePreset,
 } from './lib/image-style-presets'
 import { groupDrawSessionsByAssistant } from './lib/draw-history'
-import { isCliStatusReadyForWorkspace, resolveCliSetupPeerState } from './lib/desktop-service'
+import {
+  describeCliWorkspaceStatus,
+  isCliStatusInstalled,
+  isCliStatusReadyForWorkspace,
+  resolveCliSetupPeerState,
+} from './lib/desktop-service'
 import {
   clipText,
   formatDateTime,
@@ -7886,7 +7891,14 @@ function CliWorkspace(props: {
   const activeRequestIdRef = useRef('')
   const stoppingRunRef = useRef(false)
   const autoHydratingSessionIdsRef = useRef<Set<string>>(new Set())
-  const autoCompactSessionStateRef = useRef<Record<string, number>>({})
+  const autoCompactSessionStateRef = useRef<Record<string, {
+    messageCount: number
+    estimatedTokens: number
+    triggeredAt: number
+    baselineMessageCount: number
+    baselineEstimatedTokens: number
+    baselineUpdatedAt: number
+  }>>({})
 
   const currentExtensionPreferenceKey = useMemo(
     () => resolveCliExtensionPreferenceProjectKey(projectPath),
@@ -9755,17 +9767,57 @@ function CliWorkspace(props: {
     }
 
     const usage = estimateCliSessionContextUsage(client, activeMessages, activePlan)
-    if (usage.ratio < 0.5) {
+    const compactState = autoCompactSessionStateRef.current[activeSessionId]
+    const latestUserCommand = latestUserMessage
+      ? matchCliBuiltinCommand(client, latestUserMessage.content)?.id
+      : null
+    if (latestUserCommand === 'compact') {
+      autoCompactSessionStateRef.current[activeSessionId] = {
+        messageCount: compactState?.messageCount ?? activeMessages.length,
+        estimatedTokens: compactState?.estimatedTokens ?? usage.estimatedTokens,
+        triggeredAt: compactState?.triggeredAt ?? 0,
+        baselineMessageCount: activeMessages.length,
+        baselineEstimatedTokens: usage.estimatedTokens,
+        baselineUpdatedAt: Date.now(),
+      }
       return
     }
 
-    const lastTriggeredCount = autoCompactSessionStateRef.current[activeSessionId] || 0
-    if (activeMessages.length <= lastTriggeredCount) {
+    const baselineEstimatedTokens = compactState?.baselineEstimatedTokens ?? 0
+    const effectiveEstimatedTokens = Math.max(0, usage.estimatedTokens - baselineEstimatedTokens)
+    const effectiveRatio = usage.softLimitTokens > 0
+      ? Math.min(1, effectiveEstimatedTokens / usage.softLimitTokens)
+      : 0
+    if (effectiveRatio < 0.82) {
       return
     }
 
-    autoCompactSessionStateRef.current[activeSessionId] = activeMessages.length
-    toast(`检测到上下文估算已使用 ${Math.round(usage.ratio * 100)}%，已自动执行 /compact。`)
+    if (compactState) {
+      const withinCooldown = Date.now() - compactState.triggeredAt < 10 * 60 * 1000
+      const growthByMessageCount = activeMessages.length - compactState.messageCount
+      const growthByTokens = effectiveEstimatedTokens - compactState.estimatedTokens
+      if (
+        withinCooldown ||
+        growthByMessageCount < 6 ||
+        growthByTokens < 4_000
+      ) {
+        return
+      }
+    }
+
+    if (latestUserMessage && latestUserMessage.content.trim() === prompt.trim()) {
+      return
+    }
+
+    autoCompactSessionStateRef.current[activeSessionId] = {
+      messageCount: activeMessages.length,
+      estimatedTokens: effectiveEstimatedTokens,
+      triggeredAt: Date.now(),
+      baselineMessageCount: compactState?.baselineMessageCount ?? 0,
+      baselineEstimatedTokens,
+      baselineUpdatedAt: compactState?.baselineUpdatedAt ?? 0,
+    }
+    toast(`检测到压缩后增量上下文估算已使用 ${Math.round(effectiveRatio * 100)}%，已自动执行 /compact。`)
     void submitCliPrompt('/compact', {
       silentValidation: true,
       nextAttachments: [],
@@ -9924,7 +9976,7 @@ function CliWorkspace(props: {
         <article className='panel cli-main-panel cli-panel-surface'>
           {!cliStatusReady && (
             <div className='inline-notice warn'>
-              <span>当前环境还未完成安装或配置，请先前往设置完成一键部署。</span>
+              <span>{describeCliWorkspaceStatus(status, serverBaseUrl || DEFAULT_SERVER_BASE_URL).detail}</span>
               <button className='secondary-button tiny' type='button' onClick={openSettings}>
                 前往设置
               </button>
@@ -10451,6 +10503,7 @@ function CliSetupCard(props: {
   const [preset, setPreset] = useState<CliDeployPreset | null>(null)
   const timelineRef = useRef<HTMLDivElement | null>(null)
   const peerState = resolveCliSetupPeerState(client, activeDeployClient)
+  const workspaceStatusSummary = describeCliWorkspaceStatus(status, DEFAULT_SERVER_BASE_URL)
 
   useEffect(() => {
     let disposed = false
@@ -10611,6 +10664,10 @@ function CliSetupCard(props: {
         <button className='ghost-button tiny status-button' type='button' onClick={() => void openFolder(status.dataPath)}>
           <strong>数据目录</strong>
         </button>
+      </div>
+
+      <div className={`inline-notice ${workspaceStatusSummary.level === 'ready' ? 'success' : 'warn'}`}>
+        <span>{workspaceStatusSummary.detail}</span>
       </div>
 
       {!peerState.isPeerDeploying && (
@@ -11296,10 +11353,10 @@ export function App() {
   const [cliStatus, setCliStatus] = useState<{ codex: CliStatus; claude: CliStatus } | null>(null)
   const enabledAssistantModes = useMemo(() => {
     const next: AssistantMode[] = ['chat', 'draw']
-    if (cliStatus?.codex && isCliStatusReadyForWorkspace(cliStatus.codex, serverBaseUrl || DEFAULT_SERVER_BASE_URL)) {
+    if (cliStatus?.codex && isCliStatusInstalled(cliStatus.codex)) {
       next.push('codex')
     }
-    if (cliStatus?.claude && isCliStatusReadyForWorkspace(cliStatus.claude, serverBaseUrl || DEFAULT_SERVER_BASE_URL)) {
+    if (cliStatus?.claude && isCliStatusInstalled(cliStatus.claude)) {
       next.push('claude')
     }
     return next

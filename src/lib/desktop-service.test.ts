@@ -1,6 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  describeCliWorkspaceStatus,
+  isCliStatusInstalled,
   MIN_DESKTOP_CLI_NODE_MAJOR,
   buildCodexSandboxArgs,
   buildWindowsCommandShimArgs,
@@ -87,6 +89,8 @@ test('sanitizeCliNpmEnvironment forces online npm fetches for CLI tasks', () => 
       registry: 'https://registry.npmmirror.com',
       prefix: 'D:\\prefix',
       cache: 'D:\\cache',
+      userConfig: 'D:\\npm\\user.npmrc',
+      globalConfig: 'D:\\npm\\global.npmrc',
     }
   )
 
@@ -109,6 +113,10 @@ test('sanitizeCliNpmEnvironment forces online npm fetches for CLI tasks', () => 
   assert.equal(env.npm_config_registry, 'https://registry.npmmirror.com')
   assert.equal(env.npm_config_prefix, 'D:\\prefix')
   assert.equal(env.npm_config_cache, 'D:\\cache')
+  assert.equal(env.npm_config_userconfig, 'D:\\npm\\user.npmrc')
+  assert.equal(env.NPM_CONFIG_USERCONFIG, 'D:\\npm\\user.npmrc')
+  assert.equal(env.npm_config_globalconfig, 'D:\\npm\\global.npmrc')
+  assert.equal(env.NPM_CONFIG_GLOBALCONFIG, 'D:\\npm\\global.npmrc')
 })
 
 test('selectReusableDesktopApiKey prefers active matching-group keys', () => {
@@ -134,4 +142,47 @@ test('resolveCliSetupPeerState hides peer placeholder during opposite deployment
     disableDeployButton: true,
     showDeployPlaceholder: false,
   })
+})
+
+test('isCliStatusInstalled accepts configured legacy cli footprints', () => {
+  assert.equal(
+    isCliStatusInstalled({
+      client: 'codex',
+      installed: false,
+      version: '',
+      executablePath: '',
+      configPath: 'C:\\Users\\demo\\.codex\\config.toml',
+      dataPath: 'C:\\Users\\demo\\.codex',
+      hasConfig: true,
+      hasDataDirectory: true,
+      hasApiKey: true,
+      baseUrl: 'https://legacy.example/v1',
+      managedByDesktop: false,
+      brokenInstallation: false,
+    }),
+    true
+  )
+})
+
+test('describeCliWorkspaceStatus explains mismatched server instead of treating it as undeployed', () => {
+  const status = describeCliWorkspaceStatus(
+    {
+      client: 'claude',
+      installed: true,
+      version: '1.0.0',
+      executablePath: 'C:\\tools\\claude.cmd',
+      configPath: 'C:\\Users\\demo\\.claude.json',
+      dataPath: 'C:\\Users\\demo\\.claude',
+      hasConfig: true,
+      hasDataDirectory: true,
+      hasApiKey: true,
+      baseUrl: 'https://legacy.example',
+      managedByDesktop: false,
+      brokenInstallation: false,
+    },
+    'https://ai.oneapi.center'
+  )
+
+  assert.equal(status.level, 'config')
+  assert.equal(status.title, '已安装，但服务器配置不一致')
 })

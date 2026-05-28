@@ -34,6 +34,15 @@ export function classifyCliStderrLine(line: string) {
     }
   }
 
+  if (/no stdin data received in 3s/i.test(normalized)) {
+    return {
+      level: 'status' as const,
+      logKind: 'stderr' as const,
+      sourceKind: 'stderr.stdin.idle',
+      title: 'CLI 正在等待可选交互输入',
+    }
+  }
+
   if (lower.includes('warn')) {
     return {
       level: 'status' as const,
@@ -70,51 +79,52 @@ export function classifyCliStderrLine(line: string) {
 
 export function summarizeCliFailure(rawText: string, stderrText: string): CliRuntimeDiagnostics {
   const combined = `${rawText}\n${stderrText}`.trim()
+  const normalizedCombined = combined.replace(/warning:\s*no stdin data received in 3s[\s\S]*?(?=\n|$)/ig, '').trim()
   const networkIssue =
-    /stream disconnected before completion/i.test(combined) ||
-    /error sending request for url/i.test(combined) ||
-    /reconnecting\.\.\./i.test(combined) ||
-    /timed out/i.test(combined) ||
-    /tls/i.test(combined) ||
-    /certificate/i.test(combined) ||
-    /dns/i.test(combined) ||
-    /econnrefused/i.test(combined) ||
-    /econnreset/i.test(combined)
+    /stream disconnected before completion/i.test(normalizedCombined) ||
+    /error sending request for url/i.test(normalizedCombined) ||
+    /reconnecting\.\.\./i.test(normalizedCombined) ||
+    /timed out/i.test(normalizedCombined) ||
+    /tls/i.test(normalizedCombined) ||
+    /certificate/i.test(normalizedCombined) ||
+    /dns/i.test(normalizedCombined) ||
+    /econnrefused/i.test(normalizedCombined) ||
+    /econnreset/i.test(normalizedCombined)
   const upstreamIssue =
-    /bad_response_status_code/i.test(combined) ||
-    /openai_error/i.test(combined) ||
-    /upstream/i.test(combined) ||
-    /502/i.test(combined) ||
-    /503/i.test(combined) ||
-    /504/i.test(combined)
+    /bad_response_status_code/i.test(normalizedCombined) ||
+    /openai_error/i.test(normalizedCombined) ||
+    /upstream/i.test(normalizedCombined) ||
+    /502/i.test(normalizedCombined) ||
+    /503/i.test(normalizedCombined) ||
+    /504/i.test(normalizedCombined)
   const sessionIssue =
-    /failed to record rollout items/i.test(combined) ||
-    /state db returned stale rollout path/i.test(combined) ||
-    /no rollout found for thread id/i.test(combined) ||
-    /thread\/resume failed/i.test(combined) ||
-    /thread .* not found/i.test(combined) ||
-    /session .* not found/i.test(combined)
+    /failed to record rollout items/i.test(normalizedCombined) ||
+    /state db returned stale rollout path/i.test(normalizedCombined) ||
+    /no rollout found for thread id/i.test(normalizedCombined) ||
+    /thread\/resume failed/i.test(normalizedCombined) ||
+    /thread .* not found/i.test(normalizedCombined) ||
+    /session .* not found/i.test(normalizedCombined)
   const authIssue =
-    /authentication failed/i.test(combined) ||
-    /request not allowed/i.test(combined) ||
-    /forbidden/i.test(combined) ||
-    /unauthorized/i.test(combined) ||
-    /401/i.test(combined) ||
-    /403/i.test(combined)
+    /authentication failed/i.test(normalizedCombined) ||
+    /request not allowed/i.test(normalizedCombined) ||
+    /forbidden/i.test(normalizedCombined) ||
+    /unauthorized/i.test(normalizedCombined) ||
+    /401/i.test(normalizedCombined) ||
+    /403/i.test(normalizedCombined)
   const configIssue =
-    /expected value at line/i.test(combined) ||
-    /failed to parse/i.test(combined) ||
-    /invalid toml/i.test(combined) ||
-    (/json/i.test(combined) && /parse/i.test(combined))
+    /expected value at line/i.test(normalizedCombined) ||
+    /failed to parse/i.test(normalizedCombined) ||
+    /invalid toml/i.test(normalizedCombined) ||
+    (/json/i.test(normalizedCombined) && /parse/i.test(normalizedCombined))
   const policyIssue =
-    /blocked by policy/i.test(combined) ||
-    /rejected: blocked/i.test(combined) ||
-    /PropertySetterNotSupportedInConstrainedLanguage/i.test(combined) ||
-    /此语言模式仅支持核心类型的属性设置/i.test(combined)
+    /blocked by policy/i.test(normalizedCombined) ||
+    /rejected: blocked/i.test(normalizedCombined) ||
+    /PropertySetterNotSupportedInConstrainedLanguage/i.test(normalizedCombined) ||
+    /此语言模式仅支持核心类型的属性设置/i.test(normalizedCombined)
   const dependencyIssue =
-    /ENOTCACHED/i.test(combined) ||
-    /only-if-cached/i.test(combined) ||
-    /npm error/i.test(combined)
+    /ENOTCACHED/i.test(normalizedCombined) ||
+    /only-if-cached/i.test(normalizedCombined) ||
+    /npm error/i.test(normalizedCombined)
 
   let probableCause = ''
   if (networkIssue) {

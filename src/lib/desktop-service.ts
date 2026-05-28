@@ -104,6 +104,8 @@ export function sanitizeCliNpmEnvironment(
     registry?: string
     prefix?: string
     cache?: string
+    userConfig?: string
+    globalConfig?: string
   } = {}
 ) {
   const next: Record<string, string | undefined> = {}
@@ -138,6 +140,14 @@ export function sanitizeCliNpmEnvironment(
   }
   if (options.cache) {
     next.npm_config_cache = options.cache
+  }
+  if (options.userConfig) {
+    next.npm_config_userconfig = options.userConfig
+    next.NPM_CONFIG_USERCONFIG = options.userConfig
+  }
+  if (options.globalConfig) {
+    next.npm_config_globalconfig = options.globalConfig
+    next.NPM_CONFIG_GLOBALCONFIG = options.globalConfig
   }
 
   return next
@@ -176,6 +186,76 @@ export function isCliStatusReadyForWorkspace(status: CliStatus, serverBaseUrl?: 
   const expectedBaseUrl = normalizeWorkspaceCliBaseUrl(status.client, normalizeDesktopServerBaseUrl(serverBaseUrl))
   const currentBaseUrl = normalizeWorkspaceCliBaseUrl(status.client, status.baseUrl)
   return !!expectedBaseUrl && currentBaseUrl === expectedBaseUrl
+}
+
+export function isCliStatusInstalled(status: CliStatus) {
+  return !!(
+    status.installed ||
+    status.brokenInstallation ||
+    status.executablePath.trim() ||
+    status.hasConfig ||
+    status.hasDataDirectory
+  )
+}
+
+export function describeCliWorkspaceStatus(status: CliStatus, serverBaseUrl?: string) {
+  if (!isCliStatusInstalled(status)) {
+    return {
+      level: 'missing' as const,
+      title: '当前环境未安装',
+      detail: '还没有检测到 CLI 可执行文件，请执行一键部署。',
+    }
+  }
+
+  if (status.brokenInstallation) {
+    return {
+      level: 'broken' as const,
+      title: '当前环境安装已损坏',
+      detail: '检测到可执行文件存在，但版本探测失败，建议重新部署修复。',
+    }
+  }
+
+  if (!status.hasConfig) {
+    return {
+      level: 'config' as const,
+      title: '已安装，但缺少配置',
+      detail: 'CLI 已存在，但还没有可用配置文件，需要由桌面端接管配置。',
+    }
+  }
+
+  if (status.managedByDesktop && status.installed) {
+    return {
+      level: 'ready' as const,
+      title: '已安装并由桌面端托管',
+      detail: '当前环境可直接使用。',
+    }
+  }
+
+  if (!status.hasApiKey) {
+    return {
+      level: 'config' as const,
+      title: '已安装，但缺少 API Key',
+      detail: 'CLI 配置文件存在，但没有有效鉴权信息，需要重新接管配置。',
+    }
+  }
+
+  const expectedBaseUrl = normalizeWorkspaceCliBaseUrl(status.client, normalizeDesktopServerBaseUrl(serverBaseUrl))
+  const currentBaseUrl = normalizeWorkspaceCliBaseUrl(status.client, status.baseUrl)
+  if (expectedBaseUrl && currentBaseUrl && expectedBaseUrl !== currentBaseUrl) {
+    return {
+      level: 'config' as const,
+      title: '已安装，但服务器配置不一致',
+      detail: `当前 CLI 指向 ${currentBaseUrl}，桌面端当前服务器是 ${expectedBaseUrl}。重新部署只会改写配置，不会重复安装可执行文件。`,
+    }
+  }
+
+  return {
+    level: status.installed ? 'ready' as const : 'config' as const,
+    title: status.installed ? '已安装，等待桌面端接管' : '环境状态待修复',
+    detail: status.installed
+      ? 'CLI 已存在，但还没有被当前桌面端完整接管。'
+      : '检测到残留目录或旧配置，建议重新部署修复。',
+  }
 }
 
 export function selectReusableDesktopApiKey(

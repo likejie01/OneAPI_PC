@@ -16,7 +16,7 @@ import {
 import { NsisUpdater, type ProgressInfo, type UpdateDownloadedEvent } from 'electron-updater'
 import { randomUUID } from 'node:crypto'
 import { spawn, type ChildProcess } from 'node:child_process'
-import { createReadStream, createWriteStream, promises as fs } from 'node:fs'
+import { createReadStream, createWriteStream, mkdirSync, promises as fs, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import readline from 'node:readline'
@@ -1742,7 +1742,7 @@ async function inspectCli(client: CliClient): Promise<CliStatus> {
   const versionResult = executablePath
     ? await runCommand(executablePath, ['--version'], {
         timeoutMs: 15000,
-        env: managedRuntime ? buildRuntimeEnv(managedRuntime) : undefined,
+        env: buildCliExecutionEnv(managedRuntime),
       })
     : null
 
@@ -2503,7 +2503,7 @@ function buildClaudeCliEnv(
   runtime: NodeRuntimeInfo | null,
   settings?: ClaudeSettingsDocument | null
 ) {
-  const baseEnv: NodeJS.ProcessEnv = runtime ? buildRuntimeEnv(runtime) : { ...process.env }
+  const baseEnv: NodeJS.ProcessEnv = buildCliExecutionEnv(runtime)
   const nextEnv = { ...baseEnv }
   const configEnv = settings?.env || {}
 
@@ -5699,7 +5699,7 @@ async function detectCodexAskForApprovalSupport(
 
   const helpResult = await runCommand(executablePath, ['exec', '--help'], {
     timeoutMs: 15000,
-    env: managedRuntime ? buildRuntimeEnv(managedRuntime) : undefined,
+    env: buildCliExecutionEnv(managedRuntime),
   })
   const supported = helpResult.exitCode === 0 && supportsCodexAskForApprovalFlag(
     `${helpResult.stdout}\n${helpResult.stderr}`
@@ -5810,8 +5810,9 @@ async function runCodexPrompt(
   const runCodexOnce = () => spawnCommandWithHandlers(spawnCommand, args, {
     cwd: input.projectPath,
     timeoutMs: 15 * 60 * 1000,
-    env: managedRuntime ? buildRuntimeEnv(managedRuntime) : undefined,
+    env: buildCliExecutionEnv(managedRuntime),
     keepStdinOpen: true,
+    stdinData: '\n',
     onSpawn: (child) => {
       activeCliProcesses.set(input.requestId, child)
       activeCliRequestStates.set(input.requestId, {
@@ -6200,6 +6201,7 @@ async function runClaudePrompt(
     timeoutMs: 15 * 60 * 1000,
     env: buildClaudeCliEnv(managedRuntime, claudeSettings),
     keepStdinOpen: true,
+    stdinData: '\n',
     onSpawn: (child) => {
       activeCliProcesses.set(input.requestId, child)
       activeCliRequestStates.set(input.requestId, {
@@ -7268,14 +7270,57 @@ function buildRuntimeEnv(runtime: NodeRuntimeInfo) {
   const nodeDir = path.dirname(runtime.nodePath)
   const prefixBin = getManagedPrefixBin(runtime.prefixPath)
   const pathSegments = [prefixBin, nodeDir, process.env.PATH || ''].filter(Boolean)
+  const npmConfigPaths = ensureDesktopCliNpmConfigFiles()
 
   return {
     ...sanitizeCliNpmEnvironment(process.env, {
       registry: 'https://registry.npmmirror.com',
       prefix: runtime.prefixPath,
       cache: path.join(getToolchainRoot(), 'npm-cache'),
+      userConfig: npmConfigPaths.userConfigPath,
+      globalConfig: npmConfigPaths.globalConfigPath,
     }),
     PATH: pathSegments.join(process.platform === 'win32' ? ';' : ':'),
+  }
+}
+
+function buildCliExecutionEnv(runtime?: NodeRuntimeInfo | null) {
+  const npmConfigPaths = ensureDesktopCliNpmConfigFiles()
+  if (runtime) {
+    return buildRuntimeEnv(runtime)
+  }
+
+  return {
+    ...sanitizeCliNpmEnvironment(process.env, {
+      registry: 'https://registry.npmmirror.com',
+      cache: path.join(getToolchainRoot(), 'npm-cache'),
+      userConfig: npmConfigPaths.userConfigPath,
+      globalConfig: npmConfigPaths.globalConfigPath,
+    }),
+  }
+}
+
+function ensureDesktopCliNpmConfigFiles() {
+  const configDir = path.join(getToolchainRoot(), 'npm-config')
+  const userConfigPath = path.join(configDir, 'user.npmrc')
+  const globalConfigPath = path.join(configDir, 'global.npmrc')
+  const content = [
+    'registry=https://registry.npmmirror.com',
+    'proxy=',
+    'https-proxy=',
+    'noproxy=*',
+    'offline=false',
+    'prefer-offline=false',
+    'prefer-online=true',
+  ].join('\n')
+
+  mkdirSync(configDir, { recursive: true })
+  writeFileSync(userConfigPath, content, 'utf8')
+  writeFileSync(globalConfigPath, content, 'utf8')
+
+  return {
+    userConfigPath,
+    globalConfigPath,
   }
 }
 
