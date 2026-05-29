@@ -6,9 +6,11 @@ export type AssistantViewItem = AssistantRecord & {
   favorite: boolean
 }
 
+export const DEFAULT_ASSISTANT_ID = 'assistant-cherry-default'
+
 const BUILTIN_ASSISTANT_SEEDS: AssistantSeed[] = [
   {
-    id: 'assistant-cherry-default',
+    id: DEFAULT_ASSISTANT_ID,
     name: '默认助手',
     description: '通用默认助手，适合日常问答、分析、写作与执行类任务。',
     prompt:
@@ -231,6 +233,9 @@ export function decorateAssistants(
       favorite: favoriteIndex.has(item.id),
     }))
     .sort((left, right) => {
+      if (left.id === DEFAULT_ASSISTANT_ID || right.id === DEFAULT_ASSISTANT_ID) {
+        return left.id === DEFAULT_ASSISTANT_ID ? -1 : 1
+      }
       const leftRank = favoriteIndex.has(left.id) ? 1 : 0
       const rightRank = favoriteIndex.has(right.id) ? 1 : 0
       if (leftRank !== rightRank) {

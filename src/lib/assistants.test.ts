@@ -75,3 +75,14 @@ test('decorateAssistants prioritizes favorites in stored order and searches prom
     ]
   )
 })
+
+test('decorateAssistants keeps default assistant first even when favorites exist', () => {
+  const builtins = createBuiltinAssistants(300)
+  const resolved = decorateAssistants(
+    builtins,
+    ['assistant-cherry-marketing', 'assistant-cherry-web-generator'],
+    ''
+  )
+
+  assert.equal(resolved[0]?.id, 'assistant-cherry-default')
+})

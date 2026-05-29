@@ -20,6 +20,7 @@ test('image edit request falls back to supported model', () => {
   })
 
   assert.equal(request.model, 'gpt-image-2')
+  assert.equal(request.response_format, 'b64_json')
 })
 
 test('image edit error maps timeout to readable cause', () => {

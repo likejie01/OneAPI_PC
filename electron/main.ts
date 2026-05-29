@@ -48,6 +48,10 @@ import {
   resolveDesktopUpdateFeedUrl,
   resolveDesktopUpdateUrl,
 } from '../src/lib/app-update.ts'
+import {
+  formatDesktopRequestTimeoutMessage,
+  resolveDesktopRequestTimeoutMs,
+} from '../src/lib/request-timeouts.ts'
 import { parseDesktopChatStreamDataLine } from '../src/lib/chat-reasoning.ts'
 import {
   buildClaudePlanStateFromRecords,
@@ -55,6 +59,7 @@ import {
   parseClaudePlanMutationFromRecord,
   parseCodexPlanStateFromRecord,
 } from '../src/lib/cli-plan.ts'
+import { isClaudeAssistantTerminalMessage } from '../src/lib/cli-history-filter.ts'
 import { buildExecutionCycleEvents } from '../src/process/execution-orchestrator/run-request.ts'
 import { buildFinalPrompt } from '../src/process/prompt-assembler/build-final-prompt.ts'
 import { buildCliExtensionDedupeKey, parseMarkdownFrontmatterMeta } from '../src/lib/cli-extensions.ts'
@@ -303,6 +308,7 @@ interface DesktopApiRequest {
   method: ApiMethod
   path: string
   requestId?: string
+  timeoutMs?: number
   query?: Record<string, string | number | boolean | null | undefined>
   body?: unknown
   headers?: Record<string, string>
@@ -464,6 +470,7 @@ interface DesktopImageEditRequest {
   dataBase64: string
   size?: string
   quality?: string
+  response_format?: 'url' | 'b64_json'
 }
 
 interface AssistantHistorySnapshotEntry {
@@ -1374,7 +1381,12 @@ async function requestChatStream(sender: WebContents, input: DesktopChatStreamRe
 async function requestApi(input: DesktopApiRequest): Promise<DesktopApiResponse> {
   const headers = new Headers(input.headers ?? {})
   let body: string | undefined
-  const controller = input.requestId ? new AbortController() : null
+  const timeoutMs =
+    typeof input.timeoutMs === 'number' && input.timeoutMs > 0
+      ? input.timeoutMs
+      : resolveDesktopRequestTimeoutMs(input.path)
+  const controller = input.requestId || timeoutMs > 0 ? new AbortController() : null
+  const timer = timeoutMs > 0 && controller ? setTimeout(() => controller.abort(), timeoutMs) : null
 
   if (input.body !== undefined) {
     if (!headers.has('Content-Type')) {
@@ -1405,16 +1417,19 @@ async function requestApi(input: DesktopApiRequest): Promise<DesktopApiResponse>
     if (controller?.signal.aborted) {
       return {
         ok: false,
-        status: 499,
+        status: timeoutMs > 0 ? 408 : 499,
         headers: {},
         data: {
           success: false,
-          message: '请求已取消',
+          message: timeoutMs > 0 ? formatDesktopRequestTimeoutMessage(timeoutMs) : '请求已取消',
         },
       }
     }
     throw error
   } finally {
+    if (timer) {
+      clearTimeout(timer)
+    }
     if (input.requestId) {
       activeApiRequests.delete(input.requestId)
     }
@@ -2120,6 +2135,19 @@ async function stopChildProcess(child?: ChildProcess | null) {
   }
 }
 
+function writeChildStdinSafely(child: ChildProcess | null | undefined, value: string) {
+  const stdin = child?.stdin
+  if (!stdin || stdin.destroyed || stdin.closed || stdin.writableEnded || !stdin.writable) {
+    return false
+  }
+
+  try {
+    return stdin.write(value)
+  } catch {
+    return false
+  }
+}
+
 function runCommand(
   command: string,
   args: string[],
@@ -2330,6 +2358,9 @@ async function requestImageEdit(input: DesktopImageEditRequest) {
   if (input.quality?.trim()) {
     formData.append('quality', input.quality.trim())
   }
+  if (input.response_format?.trim()) {
+    formData.append('response_format', input.response_format.trim())
+  }
   formData.append(
     'image',
     new Blob([Buffer.from(input.dataBase64, 'base64')], {
@@ -2338,11 +2369,28 @@ async function requestImageEdit(input: DesktopImageEditRequest) {
     input.imageName || 'image.png'
   )
 
-  const response = await getDesktopSession().fetch(buildUrl('/v1/images/edits'), {
-    method: 'POST',
-    headers,
-    body: formData,
-  })
+  const timeoutMs = resolveDesktopRequestTimeoutMs('/v1/images/edits')
+  const controller = timeoutMs > 0 ? new AbortController() : null
+  const timer = timeoutMs > 0 && controller ? setTimeout(() => controller.abort(), timeoutMs) : null
+
+  let response: Response
+  try {
+    response = await getDesktopSession().fetch(buildUrl('/v1/images/edits'), {
+      method: 'POST',
+      headers,
+      body: formData,
+      signal: controller?.signal,
+    })
+  } catch (error) {
+    if (controller?.signal.aborted) {
+      throw new Error(formatDesktopRequestTimeoutMessage(timeoutMs))
+    }
+    throw error
+  } finally {
+    if (timer) {
+      clearTimeout(timer)
+    }
+  }
 
   const data = await parseResponse(response)
   if (!response.ok) {
@@ -5382,10 +5430,12 @@ function parseClaudeSession(lines: string[]): {
         type?: string
         timestamp?: string
         cwd?: string
+        isApiErrorMessage?: boolean
         message?: {
           role?: string
           model?: string
           content?: unknown
+          stop_reason?: unknown
         }
         toolUseResult?: {
           filePath?: string
@@ -5433,6 +5483,16 @@ function parseClaudeSession(lines: string[]): {
       const rawContent = contentPartsToText(parsed.message?.content)
       const content = role === 'user' ? sanitizeCliUserPrompt(rawContent) : rawContent
       if (shouldIgnoreClaudeMessage(content)) {
+        continue
+      }
+      if (
+        role === 'assistant' &&
+        !isClaudeAssistantTerminalMessage({
+          role,
+          stopReason: parsed.message?.stop_reason,
+          isApiErrorMessage: !!parsed.isApiErrorMessage,
+        })
+      ) {
         continue
       }
 
@@ -5960,16 +6020,15 @@ function writeCliInteractionResponse(
     return false
   }
 
-  try {
-    state.child.stdin.write(buildCliInteractionResponse(action))
-    if (action === 'approve_always') {
-      state.autoApprove = true
-    }
-    state.interactions.delete(interactionId)
-    return true
-  } catch {
+  if (!writeChildStdinSafely(state.child, buildCliInteractionResponse(action))) {
     return false
   }
+
+  if (action === 'approve_always') {
+    state.autoApprove = true
+  }
+  state.interactions.delete(interactionId)
+  return true
 }
 
 function emitCliInteractionPrompt(input: {
@@ -6010,11 +6069,7 @@ function emitCliInteractionPrompt(input: {
         }),
       },
     })
-    try {
-      state.child.stdin?.write(buildCliInteractionResponse('approve'))
-    } catch {
-      /* empty */
-    }
+    writeChildStdinSafely(state.child, buildCliInteractionResponse('approve'))
     return
   }
 
@@ -6032,11 +6087,7 @@ function emitCliInteractionPrompt(input: {
         }),
       },
     })
-    try {
-      state.child.stdin?.write(buildCliInteractionResponse('approve'))
-    } catch {
-      /* empty */
-    }
+    writeChildStdinSafely(state.child, buildCliInteractionResponse('approve'))
     return
   }
 
@@ -6144,9 +6195,33 @@ function extractClaudeTextFromMessage(content: unknown) {
 function buildCodexExecArgs(
   input: CliRunRequest,
   resumeSessionId?: string,
-  supportsAskForApproval = false
+  supportsAskForApproval = false,
+  runtimeConfig?: {
+    apiKey?: string
+    baseUrl?: string
+  }
 ) {
   const args = ['exec']
+
+  if (runtimeConfig?.apiKey?.trim() && runtimeConfig.baseUrl?.trim()) {
+    const apiKey = runtimeConfig.apiKey.trim()
+    const baseUrl = normalizeCodexBaseUrl(runtimeConfig.baseUrl)
+    args.push(
+      '--ignore-user-config',
+      '--config',
+      'model_provider="oneapi_desktop"',
+      '--config',
+      'model_providers.oneapi_desktop.name="oneapi_desktop"',
+      '--config',
+      `model_providers.oneapi_desktop.base_url=${JSON.stringify(baseUrl)}`,
+      '--config',
+      `model_providers.oneapi_desktop.api_key=${JSON.stringify(apiKey)}`,
+      '--config',
+      `model_providers.oneapi_desktop.experimental_bearer_token=${JSON.stringify(apiKey)}`,
+      '--config',
+      'model_providers.oneapi_desktop.wire_api="responses"'
+    )
+  }
 
   args.push(...buildCodexSandboxArgs(!!input.fullAccess, supportsAskForApproval))
 
@@ -6254,12 +6329,17 @@ async function runCodexPrompt(
   let planState: CliPlanState | null = null
   let lastToolIntentText = ''
   let consumedAssistantChars = 0
+  let sawCodexCompletion = false
+  let stoppedAfterCodexCompletion = false
+  let activeCodexChild: ChildProcess | null = null
+  let codexCompletionStopTimer: NodeJS.Timeout | null = null
   const runtimeDiagnostics: CliRuntimeDiagnostics = {}
   const executablePath = await locateExecutable('codex')
   const managedRuntime = await readManagedNodeRuntime()
   const spawnCommand = resolveCliSpawnCommand('codex', executablePath)
   const supportsAskForApproval = await detectCodexAskForApprovalSupport(executablePath, managedRuntime)
-  let args = buildCodexExecArgs(input, resumeSessionId, supportsAskForApproval)
+  const currentConfig = await readCurrentCodexConfig().catch(() => null)
+  let args = buildCodexExecArgs(input, resumeSessionId, supportsAskForApproval, currentConfig ?? undefined)
   const takeAssistantChunk = (snapshot: string, explicitChunk = '') => {
     const normalizedExplicitChunk = explicitChunk.trim()
     if (snapshot.length < consumedAssistantChars) {
@@ -6277,6 +6357,24 @@ async function runCodexPrompt(
     consumedAssistantChars = snapshot.length
     return nextChunk
   }
+  const clearCodexCompletionStopTimer = () => {
+    if (codexCompletionStopTimer) {
+      clearTimeout(codexCompletionStopTimer)
+      codexCompletionStopTimer = null
+    }
+  }
+  const stopCodexAfterCompletion = () => {
+    if (codexCompletionStopTimer || !activeCodexChild?.pid) {
+      return
+    }
+    codexCompletionStopTimer = setTimeout(() => {
+      if (!activeCodexChild?.pid || activeCodexChild.exitCode !== null || activeCodexChild.killed) {
+        return
+      }
+      stoppedAfterCodexCompletion = true
+      void stopChildProcess(activeCodexChild)
+    }, 1200)
+  }
 
   progress.intent('Codex 已开始处理当前任务。', sessionId, undefined, undefined, 'request.started')
   if (requestedSessionId && !resumeSessionId) {
@@ -6293,9 +6391,10 @@ async function runCodexPrompt(
     cwd: input.projectPath,
     timeoutMs: 15 * 60 * 1000,
     env: buildCliExecutionEnv(managedRuntime),
-    keepStdinOpen: true,
+    keepStdinOpen: false,
     stdinData: '\n',
     onSpawn: (child) => {
+      activeCodexChild = child
       activeCliProcesses.set(input.requestId, child)
       activeCliRequestStates.set(input.requestId, {
         client: 'codex',
@@ -6332,6 +6431,11 @@ async function runCodexPrompt(
       if (parsed.type === 'turn.started') {
         progress.intent('Codex 正在分析项目并准备执行。', sessionId, 'turn.started', undefined, 'turn.started')
         return
+      }
+
+      if (parsed.type === 'turn.completed') {
+        sawCodexCompletion = true
+        stopCodexAfterCompletion()
       }
 
       const payload =
@@ -6435,6 +6539,7 @@ async function runCodexPrompt(
     },
   })
   let result = await runCodexOnce()
+  clearCodexCompletionStopTimer()
   let attempt = 0
   if (
     resumeSessionId &&
@@ -6454,9 +6559,14 @@ async function runCodexPrompt(
     planState = null
     lastToolIntentText = ''
     consumedAssistantChars = 0
-    args = buildCodexExecArgs(input, undefined, supportsAskForApproval)
+    sawCodexCompletion = false
+    stoppedAfterCodexCompletion = false
+    activeCodexChild = null
+    clearCodexCompletionStopTimer()
+    args = buildCodexExecArgs(input, undefined, supportsAskForApproval, currentConfig ?? undefined)
     attempt += 1
     result = await runCodexOnce()
+    clearCodexCompletionStopTimer()
   }
   let retryDiagnostics = summarizeCliFailure(result.stdout, result.stderr)
   if (
@@ -6476,7 +6586,12 @@ async function runCodexPrompt(
     partialText = ''
     lastToolIntentText = ''
     consumedAssistantChars = 0
+    sawCodexCompletion = false
+    stoppedAfterCodexCompletion = false
+    activeCodexChild = null
+    clearCodexCompletionStopTimer()
     result = await runCodexOnce()
+    clearCodexCompletionStopTimer()
     retryDiagnostics = summarizeCliFailure(result.stdout, result.stderr)
   }
   activeCliProcesses.delete(input.requestId)
@@ -6517,12 +6632,15 @@ async function runCodexPrompt(
     runtimeDiagnostics.probableCause =
       runtimeDiagnostics.probableCause || 'CLI 已返回内容，但本地会话文件未能在等待窗口内落盘'
   }
-  const success = !aborted && result.exitCode === 0 && output.length > 0
+  const completionReached = sawCodexCompletion || !!usageEvent
+  const success =
+    !aborted &&
+    output.length > 0 &&
+    (result.exitCode === 0 || (completionReached && stoppedAfterCodexCompletion))
   const completedWithWarnings = !aborted && !success && output.length > 0 && !!runtimeDiagnostics.policyIssue
 
   if (success) {
     progress.partial(output, sessionId, true)
-    progress.result('Codex 已完成本次回复。', sessionId, result.exitCode, output, fileChanges, 'turn.completed')
     progress.status('Codex 已完成本次回复。', sessionId, true, fileChanges, { logKind: 'status', sourceKind: 'turn.completed', plan: planState })
     if (!session) {
       progress.status(
@@ -6597,6 +6715,10 @@ async function runClaudePrompt(
   const toolUseIndentLevels = new Map<string, number>()
   let lastToolIntentText = ''
   let consumedAssistantChars = 0
+  let sawClaudeResult = false
+  let stoppedAfterClaudeResult = false
+  let activeClaudeChild: ChildProcess | null = null
+  let claudeResultStopTimer: NodeJS.Timeout | null = null
   const runtimeDiagnostics: CliRuntimeDiagnostics = {}
   const executablePath = await locateExecutable('claude')
   const managedRuntime = await readManagedNodeRuntime()
@@ -6619,6 +6741,24 @@ async function runClaudePrompt(
     const nextChunk = snapshot.slice(consumedAssistantChars).trim()
     consumedAssistantChars = snapshot.length
     return nextChunk
+  }
+  const clearClaudeResultStopTimer = () => {
+    if (claudeResultStopTimer) {
+      clearTimeout(claudeResultStopTimer)
+      claudeResultStopTimer = null
+    }
+  }
+  const stopClaudeAfterResult = () => {
+    if (claudeResultStopTimer || !activeClaudeChild?.pid) {
+      return
+    }
+    claudeResultStopTimer = setTimeout(() => {
+      if (!activeClaudeChild?.pid || activeClaudeChild.exitCode !== null || activeClaudeChild.killed) {
+        return
+      }
+      stoppedAfterClaudeResult = true
+      void stopChildProcess(activeClaudeChild)
+    }, 1200)
   }
 
   const emitClaudeToolUse = (
@@ -6689,9 +6829,10 @@ async function runClaudePrompt(
     cwd: input.projectPath,
     timeoutMs: 15 * 60 * 1000,
     env: buildClaudeCliEnv(managedRuntime, claudeSettings),
-    keepStdinOpen: true,
+    keepStdinOpen: false,
     stdinData: '\n',
     onSpawn: (child) => {
+      activeClaudeChild = child
       activeCliProcesses.set(input.requestId, child)
       activeCliRequestStates.set(input.requestId, {
         client: 'claude',
@@ -6859,6 +7000,8 @@ async function runClaudePrompt(
 
       if (parsed.type === 'result') {
         finalResult = parsed
+        sawClaudeResult = true
+        stopClaudeAfterResult()
       }
     },
     onStderrLine: (line) => {
@@ -6881,6 +7024,7 @@ async function runClaudePrompt(
     },
   })
   let result = await runClaudeOnce()
+  clearClaudeResultStopTimer()
   let attempt = 0
   if (
     resumeSessionId &&
@@ -6904,9 +7048,14 @@ async function runClaudePrompt(
     toolUseIndentLevels.clear()
     lastToolIntentText = ''
     consumedAssistantChars = 0
+    sawClaudeResult = false
+    stoppedAfterClaudeResult = false
+    activeClaudeChild = null
+    clearClaudeResultStopTimer()
     args = buildClaudePromptArgs(input)
     attempt += 1
     result = await runClaudeOnce()
+    clearClaudeResultStopTimer()
   }
   let retryDiagnostics = summarizeCliFailure(result.stdout, result.stderr)
   if (
@@ -6931,7 +7080,12 @@ async function runClaudePrompt(
     toolUseIndentLevels.clear()
     lastToolIntentText = ''
     consumedAssistantChars = 0
+    sawClaudeResult = false
+    stoppedAfterClaudeResult = false
+    activeClaudeChild = null
+    clearClaudeResultStopTimer()
     result = await runClaudeOnce()
+    clearClaudeResultStopTimer()
     retryDiagnostics = summarizeCliFailure(result.stdout, result.stderr)
   }
   activeCliProcesses.delete(input.requestId)
@@ -6943,6 +7097,9 @@ async function runClaudePrompt(
       [...parseJsonObjectsFromText(result.stdout)]
         .reverse()
         .find((item) => item.type === 'result') ?? null
+  }
+  if (finalResult) {
+    sawClaudeResult = true
   }
 
   const fileChanges = mergeFileChanges([], extractClaudeFileChanges(result.stdout.split(/\r?\n/)))
@@ -6974,7 +7131,10 @@ async function runClaudePrompt(
     runtimeDiagnostics.probableCause =
       runtimeDiagnostics.probableCause || 'CLI 已返回内容，但本地会话文件未能在等待窗口内落盘'
   }
-  const success = !aborted && result.exitCode === 0 && output.length > 0
+  const success =
+    !aborted &&
+    output.length > 0 &&
+    (result.exitCode === 0 || (sawClaudeResult && stoppedAfterClaudeResult))
   const completedWithWarnings = !aborted && !success && output.length > 0 && !!runtimeDiagnostics.policyIssue
   if (!aborted) {
     progress.status('Claude 输出已结束，正在整理会话记录。', sessionId, true, undefined, {
@@ -6986,7 +7146,6 @@ async function runClaudePrompt(
 
   if (success) {
     progress.partial(output, sessionId, true)
-    progress.result('Claude 已完成本次回复。', sessionId, result.exitCode, output, fileChanges, 'result')
     progress.status('Claude 已完成本次回复。', sessionId, true, fileChanges, { logKind: 'status', sourceKind: 'result', plan: planState })
     if (!session) {
       progress.status(

@@ -8,4 +8,5 @@ export interface DesktopImageEditRequest {
   dataBase64: string
   size?: string
   quality?: string
+  response_format?: 'url' | 'b64_json'
 }

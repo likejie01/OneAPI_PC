@@ -1379,6 +1379,19 @@ select {
   box-shadow: 0 0 0 2px rgba(29, 107, 120, 0.28);
 }
 
+.conversation-search-mark {
+  color: inherit;
+  background: rgba(210, 142, 56, 0.24);
+  border-radius: 6px;
+  padding: 0 1px;
+}
+
+.conversation-search-mark-active {
+  color: #0f3d43;
+  background: rgba(29, 107, 120, 0.3);
+  box-shadow: 0 0 0 1px rgba(29, 107, 120, 0.18);
+}
+
 .message-bubble {
   width: auto;
   display: inline-flex;

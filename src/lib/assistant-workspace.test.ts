@@ -26,11 +26,11 @@ test('filterAssistantModels keeps only compatible CLI models', () => {
 
   assert.deepEqual(
     filterAssistantModels('codex', models).map((item) => item.value),
-    ['gpt-5.4', 'gpt-5.3-codex', 'deepseek-v4-flash', 'mimo-v2.5', 'mimo-v2.5-pro']
+    ['gpt-5.4', 'gpt-5.3-codex']
   )
   assert.deepEqual(
     filterAssistantModels('claude', models).map((item) => item.value),
-    ['claude-sonnet-4-6', 'deepseek-v4-flash', 'mimo-v2.5-pro']
+    ['claude-sonnet-4-6']
   )
   assert.deepEqual(
     filterAssistantModels('chat', models).map((item) => item.value),
@@ -65,7 +65,7 @@ test('filterModelsByVendor exposes Gemini models under the Gemini filter', () =>
   )
 })
 
-test('filterAssistantModels prefers supported endpoint metadata for codex and claude visibility', () => {
+test('filterAssistantModels does not treat compatible endpoints as the Claude or Codex brand', () => {
   const models = [
     {
       label: 'deepseek-chat-only',
@@ -101,15 +101,15 @@ test('filterAssistantModels prefers supported endpoint metadata for codex and cl
 
   assert.deepEqual(
     filterAssistantModels('codex', models).map((item) => item.value),
-    ['deepseek-v4-pro', 'mimo-v2.5']
+    []
   )
   assert.deepEqual(
     filterAssistantModels('claude', models).map((item) => item.value),
-    ['mimo-v2.5-pro']
+    []
   )
 })
 
-test('filterAssistantModels keeps OpenAI text and codex models visible for codex when metadata reports openai endpoint', () => {
+test('filterAssistantModels keeps OpenAI text and codex models visible for codex when metadata reports openai endpoints', () => {
   const models = [
     {
       label: 'gpt-5.4',
@@ -119,7 +119,7 @@ test('filterAssistantModels keeps OpenAI text and codex models visible for codex
     {
       label: 'gpt-5-codex',
       value: 'gpt-5-codex',
-      supportedEndpointTypes: ['openai'],
+      supportedEndpointTypes: ['openai-response'],
     },
     {
       label: 'deepseek-chat-only',
@@ -134,7 +134,37 @@ test('filterAssistantModels keeps OpenAI text and codex models visible for codex
   )
 })
 
-test('filterAssistantModels uses the official DeepSeek and MIMO support matrix by model name when metadata is absent', () => {
+test('filterAssistantModels keeps chat mode on all non-image models when metadata is present', () => {
+  const models = [
+    {
+      label: 'gpt-5.4',
+      value: 'gpt-5.4',
+      supportedEndpointTypes: ['openai-response'],
+    },
+    {
+      label: 'claude-sonnet-4-6',
+      value: 'claude-sonnet-4-6',
+      supportedEndpointTypes: ['anthropic'],
+    },
+    {
+      label: 'deepseek-chat',
+      value: 'deepseek-chat',
+      supportedEndpointTypes: ['openai'],
+    },
+    {
+      label: 'gpt-image-2',
+      value: 'gpt-image-2',
+      supportedEndpointTypes: ['openai'],
+    },
+  ]
+
+  assert.deepEqual(
+    filterAssistantModels('chat', models).map((item) => item.value),
+    ['gpt-5.4', 'claude-sonnet-4-6', 'deepseek-chat']
+  )
+})
+
+test('filterAssistantModels does not infer Claude or Codex brand from DeepSeek and MIMO model names', () => {
   const models = [
     { label: 'deepseek-v4-pro', value: 'deepseek-v4-pro' },
     { label: 'deepseek-chat', value: 'deepseek-chat' },
@@ -145,11 +175,11 @@ test('filterAssistantModels uses the official DeepSeek and MIMO support matrix b
 
   assert.deepEqual(
     filterAssistantModels('codex', models).map((item) => item.value),
-    ['deepseek-v4-pro', 'mimo-v2.5-pro', 'mimo-v2.5']
+    []
   )
   assert.deepEqual(
     filterAssistantModels('claude', models).map((item) => item.value),
-    ['deepseek-v4-pro', 'mimo-v2.5-pro']
+    []
   )
 })
 
@@ -162,6 +192,18 @@ test('resolveCompatibleModel falls back to preferred compatible model', () => {
   assert.equal(
     resolveCompatibleModel('claude', models, 'gpt-5.4', 'claude-sonnet-4-6'),
     'claude-sonnet-4-6'
+  )
+})
+
+test('resolveCompatibleModel returns empty when no compatible model exists', () => {
+  const models = [
+    { label: 'deepseek-v4-pro', value: 'deepseek-v4-pro' },
+    { label: 'mimo-v2.5-pro', value: 'mimo-v2.5-pro' },
+  ]
+
+  assert.equal(
+    resolveCompatibleModel('claude', models, 'claude-sonnet-4-6', 'claude-sonnet-4-6'),
+    ''
   )
 })
 

@@ -28,6 +28,7 @@ export interface DesktopApiRequest {
   method: ApiMethod
   path: string
   requestId?: string
+  timeoutMs?: number
   query?: Record<string, string | number | boolean | null | undefined>
   body?: unknown
   headers?: Record<string, string>
@@ -329,6 +330,7 @@ export interface DesktopImageEditRequest {
   dataBase64: string
   size?: string
   quality?: string
+  response_format?: 'url' | 'b64_json'
 }
 
 export interface DesktopSaveImageRequest {

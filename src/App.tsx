@@ -48,7 +48,6 @@ import {
 } from 'lucide-react'
 import {
   createAssistant,
-  loadActiveAssistantId,
   loadAssistants,
   saveActiveAssistantId,
   saveAssistants,
@@ -140,11 +139,16 @@ import {
 } from './lib/assistant-workspace'
 import { resolveCliDeploySettings } from './lib/cli-deploy'
 import {
+  applyConversationSearchHighlights,
+  clearConversationSearchHighlights,
+} from './lib/conversation-search'
+import {
   normalizeCliProjectKey,
   resolveCliHistorySessionForProject,
   resolvePreferredCliSessionId,
 } from './lib/cli-project-state'
 import {
+  DEFAULT_ASSISTANT_ID,
   decorateAssistants,
 } from './lib/assistants'
 import {
@@ -180,6 +184,7 @@ import {
   type ImageStylePreset,
 } from './lib/image-style-presets'
 import { groupDrawSessionsByAssistant } from './lib/draw-history'
+import { resolveImageGenerationResult } from './lib/image-generation'
 import {
   describeCliWorkspaceStatus,
   isCliStatusInstalled,
@@ -727,12 +732,10 @@ function useComposerAttachments(toast: (message: string) => void) {
 
 function loadInitialAssistantsState() {
   const nextAssistants = loadAssistants()
-  const storedActiveAssistantId = loadActiveAssistantId()
+  const defaultAssistant = nextAssistants.find((item) => item.id === DEFAULT_ASSISTANT_ID)
   return {
     assistants: nextAssistants,
-    activeAssistantId: nextAssistants.some((item) => item.id === storedActiveAssistantId)
-      ? storedActiveAssistantId
-      : nextAssistants[0]?.id || '',
+    activeAssistantId: defaultAssistant?.id || nextAssistants[0]?.id || '',
   }
 }
 
@@ -1304,22 +1307,6 @@ function resolveUsageTimestamp(item: UsageData['items'][number]) {
     return 0
   }
   return raw > 10_000_000_000 ? raw : raw * 1000
-}
-
-function resolveImageMessageSource(item?: { url?: string; b64_json?: string }) {
-  if (!item) {
-    return ''
-  }
-
-  if (item.url?.trim()) {
-    return item.url.trim()
-  }
-
-  if (item.b64_json?.trim()) {
-    return `data:image/png;base64,${item.b64_json.trim()}`
-  }
-
-  return ''
 }
 
 type BubbleActionConfig = {
@@ -3168,7 +3155,6 @@ function CliLogBubble(props: {
   const visualBlocks = buildCliVisualLogBlocks(visibleEvents)
   const [collapsedSectionIds, setCollapsedSectionIds] = useState<string[]>([])
   const [collapsedTimeGroupIds, setCollapsedTimeGroupIds] = useState<string[]>([])
-  const [collapsedOutputGroupIds, setCollapsedOutputGroupIds] = useState<string[]>([])
   const eventTotals = useMemo(() => summarizeCliEventTotals(item.events), [item.events])
   const renderedBlocks = useMemo(() => visualBlocks.map((block) => {
     const rows: Array<
@@ -3245,12 +3231,6 @@ function CliLogBubble(props: {
 
   const toggleTimeGroup = (groupId: string) => {
     setCollapsedTimeGroupIds((current) =>
-      current.includes(groupId) ? current.filter((itemId) => itemId !== groupId) : [...current, groupId],
-    )
-  }
-
-  const toggleOutputGroup = (groupId: string) => {
-    setCollapsedOutputGroupIds((current) =>
       current.includes(groupId) ? current.filter((itemId) => itemId !== groupId) : [...current, groupId],
     )
   }
@@ -3452,17 +3432,28 @@ function CliLogBubble(props: {
                       <div className='cli-log-time-lines'>
                         {timeGroup.rows.map((row, rowIndex) => {
                           if (row.type === 'output') {
-                            const outputGroups = summarizeCliOutputDetailGroups(
-                              row.items.map((eventItem) => ({
-                                id: eventItem.id,
-                                sourceKind: eventItem.sourceKind,
-                                detail: eventItem.detail,
-                                command: eventItem.command,
-                                message: eventItem.message,
-                              })),
-                            )
                             const headline =
                               resolveCliOutputGroupHeadline(row.items) || row.summary || '执行细节'
+                            const outputEntries = row.items.map((eventItem) => {
+                              const detailLines = resolveCliDiagnosticDetail(eventItem)
+                                .split(/\r?\n/)
+                                .map((line) => line.trim())
+                                .filter(Boolean)
+                              const entryHeadline =
+                                resolveCliOutputGroupHeadline([eventItem]) ||
+                                detailLines[0] ||
+                                eventItem.message
+                              const detailBody = detailLines.join('\n')
+
+                              return {
+                                id: eventItem.id,
+                                headline: entryHeadline,
+                                detail:
+                                  normalizeComparable(detailBody) === normalizeComparable(entryHeadline)
+                                    ? ''
+                                    : detailBody,
+                              }
+                            })
 
                             return (
                               <div key={row.id} className='cli-log-output-stack'>
@@ -3472,45 +3463,18 @@ function CliLogBubble(props: {
                                     <strong>{headline}</strong>
                                   </div>
                                 ) : null}
-                                {outputGroups.map((group) => {
-                                  const collapsedOutput = collapsedOutputGroupIds.includes(group.id)
-                                  const detailSummary =
-                                    group.count > 1 ? `${group.count} 条相似日志` : `${group.details.length} 条详细日志`
-                                  const singleDetail = group.count <= 1 && group.details.length <= 1
-                                  if (singleDetail) {
-                                    return (
-                                      <div key={group.id} className='cli-log-output-inline'>
-                                        <span className='cli-log-child-dot' />
-                                        <div className='cli-log-output-inline-copy'>
-                                          <strong>{group.headline}</strong>
-                                          <pre className='cli-log-detail-window compact'>{group.details[0] || group.headline}</pre>
-                                        </div>
-                                      </div>
-                                    )
-                                  }
+                                {outputEntries.map((entry, outputIndex) => {
+                                  const duplicatedPrimary =
+                                    outputIndex === 0 &&
+                                    normalizeComparable(entry.headline) === normalizeComparable(effectiveHeadline || entry.headline)
+
                                   return (
-                                    <div key={group.id} className='cli-log-output-card'>
-                                      <button
-                                        className='cli-log-output-card-head'
-                                        type='button'
-                                        onClick={() => toggleOutputGroup(group.id)}
-                                      >
-                                        <span className='cli-log-child-dot' />
-                                        <strong>{group.headline}</strong>
-                                        <small>{detailSummary}</small>
-                                        <span className='cli-log-output-card-toggle'>
-                                          {collapsedOutput ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
-                                        </span>
-                                      </button>
-                                      {!collapsedOutput ? (
-                                        <div className='cli-log-output-card-body'>
-                                          {group.details.map((detailText, detailIndex) => (
-                                            <pre key={`${group.id}-${detailIndex}`} className='cli-log-detail-window compact'>
-                                              {detailText}
-                                            </pre>
-                                          ))}
-                                        </div>
-                                      ) : null}
+                                    <div key={entry.id} className='cli-log-output-inline'>
+                                      <span className='cli-log-child-dot' />
+                                      <div className='cli-log-output-inline-copy'>
+                                        {!duplicatedPrimary ? <strong>{entry.headline}</strong> : null}
+                                        {entry.detail ? <pre className='cli-log-detail-window compact'>{entry.detail}</pre> : null}
+                                      </div>
                                     </div>
                                   )
                                 })}
@@ -3665,12 +3629,17 @@ function ConversationFindBar(props: {
   const inputRef = useRef<HTMLInputElement | null>(null)
 
   const clearHighlights = useCallback(() => {
+    clearConversationSearchHighlights(containerRef.current)
+  }, [containerRef])
+
+  const clearActiveTarget = useCallback(() => {
     const container = containerRef.current
     if (!container) {
       return
     }
-    container.querySelectorAll<HTMLElement>('.conversation-search-hit, .conversation-search-hit-active').forEach((node) => {
-      node.classList.remove('conversation-search-hit', 'conversation-search-hit-active')
+
+    container.querySelectorAll<HTMLElement>('.conversation-search-hit-active, .conversation-search-mark-active').forEach((node) => {
+      node.classList.remove('conversation-search-hit-active', 'conversation-search-mark-active')
     })
   }, [containerRef])
 
@@ -3714,33 +3683,21 @@ function ConversationFindBar(props: {
       setMatches([])
       return
     }
-    const keyword = query.trim().toLowerCase()
-    const nextMatches: HTMLElement[] = []
-    Array.from(container.querySelectorAll<HTMLElement>(itemSelector)).forEach((node) => {
-      const text = (node.textContent || '').toLowerCase()
-      if (!text.includes(keyword)) {
-        return
-      }
-      const occurrences = text.split(keyword).length - 1
-      for (let index = 0; index < Math.max(1, occurrences); index += 1) {
-        nextMatches.push(node)
-      }
-      node.classList.add('conversation-search-hit')
-    })
+    const nextMatches = applyConversationSearchHighlights(container, itemSelector, query)
     setMatches(nextMatches)
     setActiveIndex(nextMatches.length ? 0 : 0)
   }, [clearHighlights, containerRef, itemSelector, open, query])
 
   useEffect(() => {
-    clearHighlights()
-    matches.forEach((node) => node.classList.add('conversation-search-hit'))
+    clearActiveTarget()
     const activeNode = matches[activeIndex]
     if (!activeNode) {
       return
     }
-    activeNode.classList.add('conversation-search-hit-active')
+    activeNode.classList.add('conversation-search-mark-active')
+    activeNode.closest<HTMLElement>(itemSelector)?.classList.add('conversation-search-hit-active')
     activeNode.scrollIntoView({ behavior: 'smooth', block: 'center' })
-  }, [activeIndex, clearHighlights, matches])
+  }, [activeIndex, clearActiveTarget, itemSelector, matches])
 
   const jump = useCallback((direction: 1 | -1) => {
     setActiveIndex((current) => {
@@ -3914,39 +3871,17 @@ function formatCliLogTime(timestamp: number) {
   return dayjs(normalizeTimestampMs(timestamp)).format('HH:mm:ss')
 }
 
-function summarizeCliIntentStep(value: string, maxLength = 120) {
-  const normalized = value
-    .split(/\r?\n/)
-    .map((line) => line.trim().replace(/^[-*•]\s*/, ''))
-    .filter(Boolean)
-    .join(' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-  if (!normalized) {
-    return ''
-  }
-  const segments = normalized
-    .split(/(?<=[。！？；;.!?])\s*|(?<=\))\s+/)
-    .map((item) => item.trim())
-    .filter(Boolean)
-  const lastSegment = segments.at(-1) || normalized
-  return lastSegment.length <= maxLength ? lastSegment : `${lastSegment.slice(0, maxLength - 1).trim()}…`
-}
-
-function extractCliIntentDelta(previous: string, next: string) {
-  const normalizedPrevious = previous.trim()
-  const normalizedNext = next.trim()
-  if (!normalizedNext || normalizedNext === normalizedPrevious) {
-    return ''
-  }
-  if (normalizedPrevious && normalizedNext.startsWith(normalizedPrevious)) {
-    return normalizedNext.slice(normalizedPrevious.length).trim()
-  }
-  const previousIndex = normalizedPrevious ? normalizedNext.indexOf(normalizedPrevious) : -1
-  if (previousIndex >= 0) {
-    return normalizedNext.slice(previousIndex + normalizedPrevious.length).trim()
-  }
-  return normalizedNext
+function shouldReplaceStreamingCliIntentEntry(previous: CliLogEntry | undefined, next: CliLogEntry) {
+  return (
+    !!previous &&
+    previous.requestId === next.requestId &&
+    previous.logKind === 'intent' &&
+    next.logKind === 'intent' &&
+    previous.sourceKind === next.sourceKind &&
+    previous.content === next.content &&
+    previous.indentLevel === next.indentLevel &&
+    next.sourceKind === 'agent_progress.prompt'
+  )
 }
 
 function resolveCliLogKindLabel(kind?: CliLogKind) {
@@ -4188,55 +4123,6 @@ function resolveCliOutputGroupHeadline(items: Array<{
     return firstErrorLine
   }
   return detailLines[0] || resolveCliDiagnosticSummary(items)
-}
-
-function summarizeCliOutputDetailGroups(items: Array<{
-  id: string
-  sourceKind?: string
-  detail?: string
-  command?: string
-  message: string
-}>) {
-  const groups = new Map<string, {
-    id: string
-    headline: string
-    details: string[]
-    count: number
-  }>()
-
-  for (const item of items) {
-    const rawText = resolveCliDiagnosticDetail(item)
-    const lines = rawText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
-    if (!lines.length) {
-      continue
-    }
-    const headline =
-      lines.find((line) => /error|failed|eperm|enoent|invalid config|proxy|ts\d+|exit code/i.test(line)) ||
-      lines[0]
-    const detailBody = lines.join('\n')
-    const key =
-      /npm warn invalid config/i.test(headline)
-        ? `npm-invalid-config:${headline.replace(/".*?"/g, '""')}`
-        : /error ts5033/i.test(headline)
-          ? 'ts5033-eperm'
-          : headline
-    const existing = groups.get(key)
-    if (existing) {
-      existing.count += 1
-      if (!existing.details.includes(detailBody)) {
-        existing.details.push(detailBody)
-      }
-      continue
-    }
-    groups.set(key, {
-      id: item.id,
-      headline,
-      details: [detailBody],
-      count: 1,
-    })
-  }
-
-  return [...groups.values()]
 }
 
 function summarizeCliBlockRows(rows: Array<
@@ -4555,9 +4441,23 @@ function AssistantsChatWorkspace(props: {
     [favoriteModels, models]
   )
   const chatModeModels = compatibleChatModels
+  const chatModelVendorFilterOptions = useMemo(
+    () =>
+      MODEL_VENDOR_FILTER_OPTIONS.filter((item) => {
+        if (item.value === 'all') {
+          return chatModeModels.length > 0
+        }
+        return filterModelsByVendor(chatModeModels, item.value).length > 0
+      }),
+    [chatModeModels]
+  )
+  const effectiveModelVendorFilter = useMemo(
+    () => (chatModelVendorFilterOptions.some((item) => item.value === modelVendorFilter) ? modelVendorFilter : 'all'),
+    [chatModelVendorFilterOptions, modelVendorFilter]
+  )
   const visibleChatModeModels = useMemo(
-    () => filterModelsByVendor(chatModeModels, modelVendorFilter),
-    [chatModeModels, modelVendorFilter]
+    () => filterModelsByVendor(chatModeModels, effectiveModelVendorFilter),
+    [chatModeModels, effectiveModelVendorFilter]
   )
   const selectedReasoningLabel =
     CLI_REASONING_OPTIONS.find((item) => item.value === reasoningEffort)?.label || reasoningEffort
@@ -5146,9 +5046,8 @@ function AssistantsChatWorkspace(props: {
           },
           { requestId }
         )
-        const imageItem = response.data?.[0]
-        const imageUrl = resolveImageMessageSource(imageItem)
-        if (!imageUrl) {
+        const resolvedImage = resolveImageGenerationResult(response, normalizedDraft)
+        if (!resolvedImage) {
           throw new Error('图片生成失败')
         }
 
@@ -5163,9 +5062,9 @@ function AssistantsChatWorkspace(props: {
               ? {
                   id: `assistant-${Date.now()}`,
                   role: 'assistant',
-                  content: imageItem?.revised_prompt || normalizedDraft,
+                  content: resolvedImage.prompt,
                   createdAt: Date.now(),
-                  imageUrl,
+                  imageUrl: resolvedImage.imageUrl,
                   modelLabel: resolvedModelLabel,
                 }
               : item
@@ -5602,7 +5501,9 @@ function AssistantsChatWorkspace(props: {
                       <img src={item.imageUrl} alt={item.content || '生成图片'} />
                     </div>
                   ) : (
-                    item.pending && (!item.content.trim() || item.content === CHAT_PENDING_MESSAGE_LABEL)
+                    item.pending &&
+                    !item.reasoningContent?.trim() &&
+                    (!item.content.trim() || item.content === CHAT_PENDING_MESSAGE_LABEL)
                       ? <PendingMessageContent label={CHAT_PENDING_MESSAGE_LABEL.replace(/\.+$/, '')} />
                       : <LazyMarkdownContent
                           content={item.content}
@@ -5844,18 +5745,20 @@ function AssistantsChatWorkspace(props: {
                           <strong>AI 选择</strong>
                           <span>切换当前对话所用模型</span>
                         </div>
-                        <div className='picker-filter-row'>
-                          {MODEL_VENDOR_FILTER_OPTIONS.map((item) => (
-                            <button
-                              key={item.value}
-                              className={`picker-filter-chip ${modelVendorFilter === item.value ? 'active' : ''}`}
-                              type='button'
-                              onClick={() => setModelVendorFilter(item.value)}
-                            >
-                              <span>{item.label}</span>
-                            </button>
-                          ))}
-                        </div>
+                        {chatModelVendorFilterOptions.length > 1 ? (
+                          <div className='picker-filter-row'>
+                            {chatModelVendorFilterOptions.map((item) => (
+                              <button
+                                key={item.value}
+                                className={`picker-filter-chip ${effectiveModelVendorFilter === item.value ? 'active' : ''}`}
+                                type='button'
+                                onClick={() => setModelVendorFilter(item.value)}
+                              >
+                                <span>{item.label}</span>
+                              </button>
+                            ))}
+                          </div>
+                        ) : null}
                         <div className='picker-menu-list'>
                           {visibleChatModeModels.length ? (
                             visibleChatModeModels.map((item) => (
@@ -6825,7 +6728,7 @@ function DrawWorkspace(props: {
       })
 
       try {
-        return sendImageEdit(
+        return await sendImageEdit(
           buildImageEditRequest({
             apiKey: serviceKey.key,
             model: request.model,
@@ -6861,9 +6764,8 @@ function DrawWorkspace(props: {
   }
 
   function buildResolvedDrawAssistantMessage(response: ImageGenerationResponse, fallbackPrompt: string) {
-    const firstImage = response.data?.[0]
-    const imageSource = resolveImageMessageSource(firstImage)
-    if (!imageSource) {
+    const resolvedImage = resolveImageGenerationResult(response, fallbackPrompt)
+    if (!resolvedImage) {
       throw new Error('模型没有返回可展示的图片。')
     }
 
@@ -6871,10 +6773,10 @@ function DrawWorkspace(props: {
     return {
       id: `draw-assistant-${resolvedAt}`,
       role: 'assistant' as const,
-      content: firstImage?.revised_prompt?.trim() || fallbackPrompt,
+      content: resolvedImage.prompt,
       createdAt: resolvedAt,
-      imageUrl: imageSource,
-      imagePrompt: firstImage?.revised_prompt?.trim() || fallbackPrompt,
+      imageUrl: resolvedImage.imageUrl,
+      imagePrompt: resolvedImage.prompt,
       modelLabel: DEFAULT_DRAW_MODEL,
       usage: response.usage,
     }
@@ -8765,21 +8667,12 @@ function CliWorkspace(props: {
   const autoInvokeExtensions = activeExtensionPreferenceBucket.autoInvokeEnabled !== false
   const reasoningOptions = client === 'claude' ? CLAUDE_REASONING_OPTIONS : CLI_REASONING_OPTIONS
   const preferredCliModel = client === 'codex' ? DEFAULT_CODEX_MODEL : DEFAULT_CLAUDE_MODEL
-  const fallbackCliModels = useMemo(
-    () => [
-      {
-        label: preferredCliModel,
-        value: preferredCliModel,
-      },
-    ],
-    [preferredCliModel]
-  )
   const compatibleCliModels = useMemo(
     () =>
       prioritizeFavoriteModels(
-        filterAssistantModels(client, withFavoriteFlag(cliModels, favoriteModels), fallbackCliModels)
+        filterAssistantModels(client, withFavoriteFlag(cliModels, favoriteModels))
       ),
-    [client, cliModels, favoriteModels, fallbackCliModels]
+    [client, cliModels, favoriteModels]
   )
   const cliModelVendorFilterOptions = useMemo(
     () =>
@@ -9393,14 +9286,12 @@ function CliWorkspace(props: {
         if (!disposed) {
           setCliModels(models)
           setSelectedModel((current) =>
-            resolveCompatibleModel(client, [...models, ...fallbackCliModels], current, preferredCliModel)
+            resolveCompatibleModel(client, models, current, preferredCliModel)
           )
         }
       } catch {
         if (!disposed) {
-          setSelectedModel((current) =>
-            resolveCompatibleModel(client, fallbackCliModels, current, preferredCliModel)
-          )
+          setSelectedModel('')
         }
       }
     })()
@@ -9408,7 +9299,7 @@ function CliWorkspace(props: {
     return () => {
       disposed = true
     }
-  }, [client, fallbackCliModels, preferredCliModel])
+  }, [client, preferredCliModel])
 
   useEffect(() => {
     window.setTimeout(() => {
@@ -9516,53 +9407,10 @@ function CliWorkspace(props: {
       }
 
       if (payload.kind === 'partial') {
-        let previousPartial = ''
         setSessionPartialMap((current) => {
-          previousPartial = current[targetSessionId] || ''
           return {
             ...current,
             [targetSessionId]: payload.message,
-          }
-        })
-        setSessionLogsMap((current) => {
-          const deltaText = extractCliIntentDelta(previousPartial, payload.message)
-          const intentStep = summarizeCliIntentStep(deltaText || payload.message)
-          if (!intentStep) {
-            return current
-          }
-          const previous = current[targetSessionId] || []
-          const lastIntentLog = [...previous].reverse().find((entry) =>
-            entry.requestId === payload.requestId && entry.sourceKind === 'intent.live'
-          )
-          const shouldAppendNewIntent =
-            !!lastIntentLog &&
-            (lastIntentLog.detail || lastIntentLog.assistantChunk || '').trim().replace(/\s+/g, ' ') !==
-              intentStep.trim().replace(/\s+/g, ' ')
-          const nextEntry = {
-            id: shouldAppendNewIntent || !lastIntentLog
-              ? `${payload.requestId}-partial-intent-${payload.createdAt}`
-              : lastIntentLog.id,
-            requestId: payload.requestId,
-            sessionId: targetSessionId,
-            level: 'status' as const,
-            logKind: 'intent' as const,
-            sourceKind: 'intent.live',
-            content: '执行意图',
-            assistantChunk: intentStep,
-            indentLevel: 0,
-            createdAt: payload.createdAt,
-            files: [],
-            detail: intentStep,
-          } satisfies CliLogEntry
-          if (lastIntentLog && !shouldAppendNewIntent) {
-            return {
-              ...current,
-              [targetSessionId]: previous.map((entry) => (entry.id === lastIntentLog.id ? nextEntry : entry)),
-            }
-          }
-          return {
-            ...current,
-            [targetSessionId]: [...previous, nextEntry],
           }
         })
         if (payload.done) {
@@ -9610,6 +9458,16 @@ function CliWorkspace(props: {
           JSON.stringify(lastEntry.files || []) === JSON.stringify(nextEntry.files || [])
         ) {
           return current
+        }
+        if (shouldReplaceStreamingCliIntentEntry(lastEntry, nextEntry)) {
+          const replaceId = lastEntry?.id
+          if (!replaceId) {
+            return current
+          }
+          return {
+            ...current,
+            [targetSessionId]: previous.map((entry) => (entry.id === replaceId ? nextEntry : entry)),
+          }
         }
         return {
           ...current,
@@ -10491,6 +10349,20 @@ function CliWorkspace(props: {
             name: item.name,
           })),
     }).finalPrompt
+    const resolvedCliModel = resolveCompatibleModel(
+      client,
+      compatibleCliModels,
+      selectedModel,
+      preferredCliModel,
+    )
+    if (!resolvedCliModel) {
+      toast(
+        client === 'claude'
+          ? '当前服务器没有可用的 Claude 模型，请先修复服务器 Claude 渠道。'
+          : '当前服务器没有可用的 Codex 模型，请先修复服务器 Codex 渠道。'
+      )
+      return
+    }
     const userMessage = {
       id: `user-${Date.now()}`,
       role: 'user' as const,
@@ -10567,7 +10439,7 @@ function CliWorkspace(props: {
         projectPath: requestProjectPath,
         prompt: promptWithAttachments,
         sessionId: getCliResumeSessionId(activeSessionId),
-        model: resolveCompatibleModel(client, compatibleCliModels, selectedModel, preferredCliModel) || undefined,
+        model: resolvedCliModel,
         reasoningEffort,
         fullAccess,
       })
@@ -11142,18 +11014,20 @@ function CliWorkspace(props: {
                           <strong>AI 版本</strong>
                           <span>切换当前 CLI 会话模型</span>
                         </div>
-                        <div className='picker-filter-row'>
-                          {cliModelVendorFilterOptions.map((item) => (
-                            <button
-                              key={item.value}
-                              className={`picker-filter-chip ${effectiveCliModelVendorFilter === item.value ? 'active' : ''}`}
-                              type='button'
-                              onClick={() => setCliModelVendorFilter(item.value)}
-                            >
-                              <span>{item.label}</span>
-                            </button>
-                          ))}
-                        </div>
+                        {cliModelVendorFilterOptions.length > 1 ? (
+                          <div className='picker-filter-row'>
+                            {cliModelVendorFilterOptions.map((item) => (
+                              <button
+                                key={item.value}
+                                className={`picker-filter-chip ${effectiveCliModelVendorFilter === item.value ? 'active' : ''}`}
+                                type='button'
+                                onClick={() => setCliModelVendorFilter(item.value)}
+                              >
+                                <span>{item.label}</span>
+                              </button>
+                            ))}
+                          </div>
+                        ) : null}
                         <div className='picker-menu-list'>
                           {visibleCliModels.length ? (
                             visibleCliModels.map((item: ChatModelOption) => (
@@ -12309,7 +12183,9 @@ export function App() {
     const persistedUser = useAuthStore.getState().user
     if (persistedUser?.id) {
       saveStoredDesktopUserId(persistedUser.id)
-      setUser(persistedUser)
+    } else {
+      clearStoredDesktopUserId()
+      setUser(null)
     }
 
     getDesktopBridge()
@@ -12340,13 +12216,10 @@ export function App() {
     }, 0)
 
     if (!persistedUser?.id) {
-      clearStoredDesktopUserId()
-      setUser(null)
       setBootstrapping(false)
       return
     }
 
-    setBootstrapping(false)
     void requireSuccess(getSelfProfile())
       .then((profile) => {
         const nextUser = profile as UserProfile
@@ -12356,6 +12229,9 @@ export function App() {
       .catch(() => {
         clearStoredDesktopUserId()
         setUser(null)
+      })
+      .finally(() => {
+        setBootstrapping(false)
       })
   }, [setBootstrapping, setUser])
 

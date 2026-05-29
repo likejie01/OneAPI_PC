@@ -32,5 +32,6 @@ export function buildImageEditRequest(input: BuildEditRequestInput): DesktopImag
     dataBase64: input.dataBase64,
     size: input.size,
     quality: input.quality,
+    response_format: 'b64_json',
   }
 }

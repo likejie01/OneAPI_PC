@@ -14,6 +14,7 @@ import type {
 } from '../shared/contracts'
 import type { DesktopChatStreamPayload } from '../shared/desktop'
 import { mergePricingAndUserModels, type PricingModelLike } from '../lib/model-options'
+import { resolveDesktopRequestTimeoutMs } from '../lib/request-timeouts'
 
 export async function getUserModels() {
   let pricingModels: PricingModelLike[] = []
@@ -28,6 +29,10 @@ export async function getUserModels() {
     }
   } catch {
     // Fallback for older servers that do not expose pricing metadata consistently.
+  }
+
+  if (pricingModels.length) {
+    return mergePricingAndUserModels(pricingModels, [])
   }
 
   const response = await desktopEnvelope<string[]>({
@@ -201,6 +206,7 @@ export async function sendImageGeneration(payload: {
     method: 'POST',
     path: '/pg/images/generations',
     requestId: options.requestId,
+    timeoutMs: resolveDesktopRequestTimeoutMs('/pg/images/generations'),
     body: {
       ...payload,
       stream: false,
@@ -225,6 +231,7 @@ export async function sendDirectImageGeneration(payload: {
     method: 'POST',
     path: '/v1/images/generations',
     requestId: options.requestId,
+    timeoutMs: resolveDesktopRequestTimeoutMs('/v1/images/generations'),
     headers: {
       Authorization: `Bearer ${payload.apiKey}`,
     },

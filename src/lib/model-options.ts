@@ -11,6 +11,7 @@ export function mergePricingAndUserModels(
 ): ChatModelOption[] {
   const merged: ChatModelOption[] = []
   const seen = new Set<string>()
+  const hasPricingModels = pricingModels.length > 0
 
   for (const item of pricingModels) {
     const modelName = item.model_name?.trim()
@@ -25,6 +26,10 @@ export function mergePricingAndUserModels(
         ? item.supported_endpoint_types
         : undefined,
     })
+  }
+
+  if (hasPricingModels) {
+    return merged
   }
 
   for (const model of userModels) {
