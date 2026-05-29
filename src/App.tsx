@@ -3220,7 +3220,7 @@ function CliLogBubble(props: {
       }>>((groups, row) => {
         const createdAt = row.type === 'output' ? row.items[0]?.createdAt || item.createdAt : row.event.createdAt
         const timeLabel = formatCliLogTime(createdAt)
-        const summary = row.type === 'output' ? row.summary : row.event.message
+        const summary = row.type === 'output' ? resolveCliOutputGroupHeadline(row.items) || row.summary : row.event.message
         const previous = groups.at(-1)
         if (previous && previous.timeLabel === timeLabel) {
           previous.rows.push(row)
@@ -3411,9 +3411,9 @@ function CliLogBubble(props: {
                 <button className='cli-log-phase-head' type='button' onClick={() => toggleSection(block.id)}>
                   <span className='cli-log-phase-headline'>
                     <strong>{blockTitle}</strong>
-                    <span className='cli-log-inline-fold-indicator'>{collapsed ? '展开' : '收起'}</span>
                   </span>
                   <small>{[block.summary, `${block.rows.length || block.items.length || (block.intent ? 1 : 0)} 条`].filter(Boolean).join(' · ')}</small>
+                  <span className='cli-log-head-toggle-icon'>{collapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}</span>
                 </button>
               ) : null}
               {plainStatusBlock && !block.timeGroups.length && blockTitle ? (
@@ -3443,14 +3443,10 @@ function CliLogBubble(props: {
                     >
                       <div className={`cli-log-time-copy ${effectiveHeadline ? '' : 'plain'}`.trim()}>
                         <span className='cli-log-time-dot' />
-                        {effectiveHeadline ? (
-                          <>
-                            <strong>{effectiveHeadline}</strong>
-                            <span className='cli-log-inline-fold-indicator'>{timeCollapsed ? '展开' : '收起'}</span>
-                          </>
-                        ) : null}
+                        {effectiveHeadline ? <strong>{effectiveHeadline}</strong> : null}
                         <small>{timeGroup.timeLabel}</small>
                       </div>
+                      <span className='cli-log-head-toggle-icon'>{timeCollapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}</span>
                     </button>
                     {!timeCollapsed ? (
                       <div className='cli-log-time-lines'>
@@ -3480,6 +3476,18 @@ function CliLogBubble(props: {
                                   const collapsedOutput = collapsedOutputGroupIds.includes(group.id)
                                   const detailSummary =
                                     group.count > 1 ? `${group.count} 条相似日志` : `${group.details.length} 条详细日志`
+                                  const singleDetail = group.count <= 1 && group.details.length <= 1
+                                  if (singleDetail) {
+                                    return (
+                                      <div key={group.id} className='cli-log-output-inline'>
+                                        <span className='cli-log-child-dot' />
+                                        <div className='cli-log-output-inline-copy'>
+                                          <strong>{group.headline}</strong>
+                                          <pre className='cli-log-detail-window compact'>{group.details[0] || group.headline}</pre>
+                                        </div>
+                                      </div>
+                                    )
+                                  }
                                   return (
                                     <div key={group.id} className='cli-log-output-card'>
                                       <button
@@ -3489,8 +3497,10 @@ function CliLogBubble(props: {
                                       >
                                         <span className='cli-log-child-dot' />
                                         <strong>{group.headline}</strong>
-                                        <span className='cli-log-inline-fold-indicator'>{collapsedOutput ? '展开' : '收起'}</span>
                                         <small>{detailSummary}</small>
+                                        <span className='cli-log-output-card-toggle'>
+                                          {collapsedOutput ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+                                        </span>
                                       </button>
                                       {!collapsedOutput ? (
                                         <div className='cli-log-output-card-body'>
@@ -3592,7 +3602,10 @@ function CliLogBubble(props: {
         })}
       </div>
       <div className='cli-log-status-bar'>
-        <span className={`cli-log-status-pill ${logStatus.tone}`}>{logStatus.label}</span>
+        <span className={`cli-log-status-pill ${logStatus.tone}`}>
+          {logStatus.tone === 'running' ? <LoaderCircle className='spin' size={13} /> : null}
+          {logStatus.label}
+        </span>
         <small>
           {[
             commandCount > 0 ? `命令 ${commandCount}` : '',
@@ -3635,6 +3648,140 @@ function CliLogBubble(props: {
           },
         ]}
       />
+    </div>
+  )
+}
+
+function ConversationFindBar(props: {
+  active: boolean
+  containerRef: React.RefObject<HTMLDivElement | null>
+  itemSelector?: string
+}) {
+  const { active, containerRef, itemSelector = '.message-bubble' } = props
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const [matches, setMatches] = useState<HTMLElement[]>([])
+  const [activeIndex, setActiveIndex] = useState(0)
+  const inputRef = useRef<HTMLInputElement | null>(null)
+
+  const clearHighlights = useCallback(() => {
+    const container = containerRef.current
+    if (!container) {
+      return
+    }
+    container.querySelectorAll<HTMLElement>('.conversation-search-hit, .conversation-search-hit-active').forEach((node) => {
+      node.classList.remove('conversation-search-hit', 'conversation-search-hit-active')
+    })
+  }, [containerRef])
+
+  useEffect(() => {
+    if (!active) {
+      setOpen(false)
+      setQuery('')
+      setMatches([])
+      setActiveIndex(0)
+      clearHighlights()
+    }
+  }, [active, clearHighlights])
+
+  useEffect(() => {
+    if (!active) {
+      return
+    }
+    function handleKeyDown(event: KeyboardEvent) {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') {
+        event.preventDefault()
+        setOpen(true)
+        window.setTimeout(() => inputRef.current?.focus(), 0)
+      }
+      if (event.key === 'Escape' && open) {
+        setOpen(false)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [active, open])
+
+  useEffect(() => {
+    clearHighlights()
+    if (!open || !query.trim()) {
+      setMatches([])
+      setActiveIndex(0)
+      return
+    }
+    const container = containerRef.current
+    if (!container) {
+      setMatches([])
+      return
+    }
+    const keyword = query.trim().toLowerCase()
+    const nextMatches: HTMLElement[] = []
+    Array.from(container.querySelectorAll<HTMLElement>(itemSelector)).forEach((node) => {
+      const text = (node.textContent || '').toLowerCase()
+      if (!text.includes(keyword)) {
+        return
+      }
+      const occurrences = text.split(keyword).length - 1
+      for (let index = 0; index < Math.max(1, occurrences); index += 1) {
+        nextMatches.push(node)
+      }
+      node.classList.add('conversation-search-hit')
+    })
+    setMatches(nextMatches)
+    setActiveIndex(nextMatches.length ? 0 : 0)
+  }, [clearHighlights, containerRef, itemSelector, open, query])
+
+  useEffect(() => {
+    clearHighlights()
+    matches.forEach((node) => node.classList.add('conversation-search-hit'))
+    const activeNode = matches[activeIndex]
+    if (!activeNode) {
+      return
+    }
+    activeNode.classList.add('conversation-search-hit-active')
+    activeNode.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }, [activeIndex, clearHighlights, matches])
+
+  const jump = useCallback((direction: 1 | -1) => {
+    setActiveIndex((current) => {
+      if (!matches.length) {
+        return 0
+      }
+      return (current + direction + matches.length) % matches.length
+    })
+  }, [matches.length])
+
+  if (!open) {
+    return null
+  }
+
+  return (
+    <div className='conversation-find-bar' aria-label='会话搜索'>
+      <Search size={15} />
+      <input
+        ref={inputRef}
+        value={query}
+        placeholder='搜索当前会话'
+        onChange={(event) => setQuery(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault()
+            jump(event.shiftKey ? -1 : 1)
+          }
+        }}
+      />
+      <span className='conversation-find-stats'>
+        {matches.length ? `${activeIndex + 1}/${matches.length}` : '0/0'}
+      </span>
+      <button className='conversation-find-button' type='button' aria-label='上一条' onClick={() => jump(-1)}>
+        <ChevronUp size={14} />
+      </button>
+      <button className='conversation-find-button' type='button' aria-label='下一条' onClick={() => jump(1)}>
+        <ChevronDown size={14} />
+      </button>
+      <button className='conversation-find-button' type='button' aria-label='关闭搜索' onClick={() => setOpen(false)}>
+        <X size={14} />
+      </button>
     </div>
   )
 }
@@ -5416,6 +5563,9 @@ function AssistantsChatWorkspace(props: {
       <div className={`chat-layout ${historyOpen ? 'history-open' : ''}`}>
         <article className='panel conversation-panel chat-panel-surface'>
           <div className='conversation-scroll-region'>
+            <div className='workspace-corner-tools'>
+              <ConversationFindBar active containerRef={messageStreamRef} itemSelector='.message-bubble' />
+            </div>
             <div ref={messageStreamRef} className='message-stream'>
               {messages.length === 0 ? (
                 <EmptyState
@@ -6894,6 +7044,9 @@ function DrawWorkspace(props: {
       <div className={`chat-layout ${historyOpen ? 'history-open' : ''}`}>
         <article className='panel chat-main-panel chat-panel-surface'>
           <div className='conversation-scroll-region'>
+            <div className='workspace-corner-tools'>
+              <ConversationFindBar active containerRef={messageStreamRef} itemSelector='.message-bubble' />
+            </div>
             <div ref={messageStreamRef} className='message-stream'>
               {messages.length === 0 ? (
                 <EmptyState title='开始绘图' description='输入提示词后，使用 gpt-image-2 直接生图；拖拽或粘贴图片后，会自动走修图接口。' icon={Sparkles} />
@@ -9381,8 +9534,14 @@ function CliWorkspace(props: {
           const lastIntentLog = [...previous].reverse().find((entry) =>
             entry.requestId === payload.requestId && entry.sourceKind === 'intent.live'
           )
+          const shouldAppendNewIntent =
+            !!lastIntentLog &&
+            (lastIntentLog.detail || lastIntentLog.assistantChunk || '').trim().replace(/\s+/g, ' ') !==
+              intentStep.trim().replace(/\s+/g, ' ')
           const nextEntry = {
-            id: lastIntentLog?.id || `${payload.requestId}-partial-intent-${payload.createdAt}`,
+            id: shouldAppendNewIntent || !lastIntentLog
+              ? `${payload.requestId}-partial-intent-${payload.createdAt}`
+              : lastIntentLog.id,
             requestId: payload.requestId,
             sessionId: targetSessionId,
             level: 'status' as const,
@@ -9395,7 +9554,7 @@ function CliWorkspace(props: {
             files: [],
             detail: intentStep,
           } satisfies CliLogEntry
-          if (lastIntentLog) {
+          if (lastIntentLog && !shouldAppendNewIntent) {
             return {
               ...current,
               [targetSessionId]: previous.map((entry) => (entry.id === lastIntentLog.id ? nextEntry : entry)),
@@ -10387,10 +10546,12 @@ function CliWorkspace(props: {
         command: event.command,
         interaction: event.interaction,
       }) satisfies CliLogEntry)
-      return {
-        ...current,
-        [currentSessionKey]: [...previous, ...orchestrationLogs],
-      }
+      return orchestrationLogs.length
+        ? {
+            ...current,
+            [currentSessionKey]: [...previous, ...orchestrationLogs],
+          }
+        : current
     })
     cliPromptHistory.commitInputValue(cleanedPrompt)
     setPrompt('')
@@ -10754,6 +10915,13 @@ function CliWorkspace(props: {
           )}
 
           <div className={`conversation-scroll-region ${visibleActivePlan ? 'has-cli-plan' : ''}`}>
+            <div className='workspace-corner-tools'>
+              <ConversationFindBar
+                active={active}
+                containerRef={threadRef}
+                itemSelector='.message-bubble, .cli-log-bubble'
+              />
+            </div>
             <CliPlanFloatingPanel plan={visibleActivePlan} />
             <div ref={threadRef} className='cli-thread'>
               {activeTimeline.length === 0 ? (

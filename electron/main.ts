@@ -5142,7 +5142,14 @@ function parseCodexSession(lines: string[]): {
   return {
     messages: uniqueMessages(messages),
     fileChanges: mergeFileChanges([], fileChanges),
-    plan: buildCodexPlanStateFromRecords(planRecords),
+    plan: (() => {
+      const plan = buildCodexPlanStateFromRecords(planRecords)
+      const lastAssistantMessage = [...messages].reverse().find((item) => item.role === 'assistant')
+      if (plan && lastAssistantMessage && lastAssistantMessage.createdAt >= plan.updatedAt) {
+        return null
+      }
+      return plan
+    })(),
   }
 }
 
@@ -5446,7 +5453,14 @@ function parseClaudeSession(lines: string[]): {
   return {
     messages: uniqueMessages(messages),
     fileChanges: mergeFileChanges([], fileChanges),
-    plan: buildClaudePlanStateFromRecords(planRecords),
+    plan: (() => {
+      const plan = buildClaudePlanStateFromRecords(planRecords)
+      const lastAssistantMessage = [...messages].reverse().find((item) => item.role === 'assistant')
+      if (plan && lastAssistantMessage && lastAssistantMessage.createdAt >= plan.updatedAt) {
+        return null
+      }
+      return plan
+    })(),
   }
 }
 

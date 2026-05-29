@@ -1321,6 +1321,62 @@ select {
   top: 6px;
   right: 8px;
   z-index: 6;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.conversation-find-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 14px;
+  border: 1px solid rgba(29, 52, 73, 0.1);
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 8px 24px rgba(36, 56, 76, 0.08);
+}
+
+.conversation-find-bar input {
+  width: 180px;
+  border: 0;
+  background: transparent;
+  outline: none;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.conversation-find-stats {
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.conversation-find-button {
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.conversation-find-button:hover,
+.conversation-find-button:focus-visible {
+  background: rgba(23, 49, 74, 0.08);
+  color: var(--text);
+}
+
+.conversation-search-hit {
+  box-shadow: 0 0 0 2px rgba(210, 142, 56, 0.18);
+}
+
+.conversation-search-hit-active {
+  box-shadow: 0 0 0 2px rgba(29, 107, 120, 0.28);
 }
 
 .message-bubble {
@@ -1328,7 +1384,7 @@ select {
   display: inline-flex;
   flex-direction: column;
   max-width: var(--conversation-bubble-max-width);
-  padding: 10px 12px 9px;
+  padding: 15px 18px 14px;
   border-radius: 18px;
   border: 1px solid var(--line);
   box-shadow: 0 8px 20px rgba(36, 56, 76, 0.05);
@@ -2429,6 +2485,16 @@ select {
   margin-left: 0;
 }
 
+.cli-log-head-toggle-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  color: var(--muted);
+  margin-left: auto;
+}
+
 .cli-log-block-label {
   font-size: 11px;
   font-weight: 700;
@@ -2602,10 +2668,32 @@ select {
   font-size: 11px;
 }
 
+.cli-log-output-card-toggle {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+}
+
 .cli-log-output-card-body {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.cli-log-output-inline {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-left: 14px;
+}
+
+.cli-log-output-inline-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
 }
 
 .cli-log-diagnostic-group {
@@ -2714,6 +2802,7 @@ select {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 6px;
   min-width: 58px;
   height: 24px;
   padding: 0 10px;
