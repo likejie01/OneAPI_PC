@@ -355,6 +355,11 @@ export interface DesktopFilePreview {
   content: string
 }
 
+export interface DesktopPathInfo {
+  path: string
+  kind: 'file' | 'directory' | 'missing'
+}
+
 export interface CliDeployPreset {
   client: CliClient
   apiKey: string

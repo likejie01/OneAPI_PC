@@ -458,6 +458,27 @@ export function buildCliTimeline(input: {
     logIndex += 1
   }
 
+  const partialContent = input.partial || ''
+  const hasVisiblePartial = partialContent === 'Coding...' || partialContent.trim().length > 0
+  const partialDuplicate = hasVisiblePartial && entries.some((entry) => {
+    if (entry.kind !== 'message' || entry.role !== 'assistant') {
+      return false
+    }
+    return normalizeMessageContent(entry.content) === normalizeMessageContent(partialContent)
+  })
+
+  if (hasVisiblePartial && !partialDuplicate) {
+    timeline.push({
+      id: 'partial-response',
+      kind: 'partial',
+      role: 'assistant',
+      content: partialContent,
+      createdAt: toTimelineTimestamp(input.partialCreatedAt || Date.now()),
+      modelLabel: input.partialModelLabel || 'Assistant',
+    })
+    timeline.sort((left, right) => left.createdAt - right.createdAt)
+  }
+
   return timeline
 }
 

@@ -1,5 +1,5 @@
 import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { CSSProperties, ChangeEvent, ClipboardEvent, Dispatch, DragEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent, PointerEvent as ReactPointerEvent, ReactNode, SetStateAction } from 'react'
+import type { CSSProperties, ChangeEvent, ClipboardEvent, Dispatch, DragEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent, PointerEvent as ReactPointerEvent, ReactNode, SetStateAction, WheelEvent as ReactWheelEvent } from 'react'
 import {
   Activity,
   Blocks,
@@ -83,6 +83,7 @@ import {
   deleteCliSessions,
   deployCli,
   exportTextFile,
+  getDesktopPathInfo,
   getCliSession,
   getCliDeployPreset,
   getCliStatus,
@@ -269,6 +270,7 @@ import type {
   CliSessionMessage,
   CliStatus,
   DesktopAppMeta,
+  DesktopPathInfo,
   DesktopUpdateState,
   DeployProgressPayload,
 } from './shared/desktop'
@@ -578,6 +580,88 @@ function isMarkdownPreviewableFile(targetPath: string) {
 
 function isEmbeddedPreviewableFile(targetPath: string) {
   return /\.(pdf)$/i.test(targetPath.trim().toLowerCase())
+}
+
+function isPreviewableDesktopFile(targetPath: string) {
+  return (
+    isImagePreviewableFile(targetPath) ||
+    isEmbeddedPreviewableFile(targetPath) ||
+    isInlinePreviewableFile(targetPath)
+  )
+}
+
+function getPathDisplayName(targetPath: string) {
+  return targetPath.split(/[\\/]/).filter(Boolean).at(-1) || targetPath
+}
+
+function scheduleScrollToBottom(containerRef: React.RefObject<HTMLDivElement | null>) {
+  const scroll = () => {
+    const node = containerRef.current
+    if (!node) {
+      return
+    }
+    node.scrollTop = node.scrollHeight
+  }
+
+  window.requestAnimationFrame(() => {
+    scroll()
+    window.requestAnimationFrame(scroll)
+  })
+}
+
+function useDesktopPathKind(targetPath: string) {
+  const [kind, setKind] = useState<'file' | 'directory' | 'missing'>('file')
+
+  useEffect(() => {
+    let cancelled = false
+    const normalizedPath = targetPath.trim()
+    if (!normalizedPath) {
+      setKind('missing')
+      return
+    }
+
+    void getDesktopPathInfo(normalizedPath)
+      .then((info: DesktopPathInfo) => {
+        if (!cancelled) {
+          setKind(info.kind)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setKind('missing')
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [targetPath])
+
+  return kind
+}
+
+function CliPathChip(props: {
+  ownerId: string
+  path: string
+  onOpenFile: (ownerId: string, path: string) => void
+  onPathContextMenu?: (event: MouseEvent<HTMLButtonElement>, ownerId: string, path: string) => void
+}) {
+  const { ownerId, path, onOpenFile, onPathContextMenu } = props
+  const kind = useDesktopPathKind(path)
+  const Icon = kind === 'directory' ? FolderOpen : FileText
+
+  return (
+    <button
+      type='button'
+      className={`ghost-button tiny cli-log-file ${kind === 'directory' ? 'directory' : ''}`.trim()}
+      onClick={() => onOpenFile(ownerId, path)}
+      onContextMenu={onPathContextMenu ? (event) => onPathContextMenu(event, ownerId, path) : undefined}
+      title={path}
+    >
+      <Icon size={14} />
+      <span>{getPathDisplayName(path)}</span>
+    </button>
+  )
 }
 
 function useComposerAttachments(toast: (message: string) => void) {
@@ -1229,6 +1313,11 @@ const CLI_REASONING_OPTIONS = [
   { label: '低', value: 'low' },
   { label: '中', value: 'medium' },
   { label: '高', value: 'high' },
+] as const
+
+const CHAT_REASONING_OPTIONS = [
+  { label: '关', value: 'off' },
+  ...CLI_REASONING_OPTIONS,
 ] as const
 
 const CLAUDE_REASONING_OPTIONS = [
@@ -2215,19 +2304,120 @@ function AttachmentPreviewModal(props: {
   onImageContextMenu?: (event: MouseEvent<HTMLImageElement | HTMLDivElement>, preview: Extract<AttachmentPreviewState, { mode: 'image' }>) => void
 }) {
   const { preview, onClose, onImageContextMenu } = props
+  const stageRef = useRef<HTMLDivElement | null>(null)
+  const dragStateRef = useRef<{
+    pointerId: number
+    startX: number
+    startY: number
+    originX: number
+    originY: number
+  } | null>(null)
+  const [imageScale, setImageScale] = useState(1)
+  const [imageOffset, setImageOffset] = useState({ x: 0, y: 0 })
+  const [draggingImage, setDraggingImage] = useState(false)
+
+  useEffect(() => {
+    setImageScale(1)
+    setImageOffset({ x: 0, y: 0 })
+    setDraggingImage(false)
+    dragStateRef.current = null
+  }, [preview?.mode, preview?.name, preview && 'src' in preview ? preview.src : ''])
+
   if (!preview) {
     return null
+  }
+
+  const clampImageScale = (value: number) => Math.min(6, Math.max(0.5, value))
+  const adjustImageScale = (multiplier: number) => {
+    setImageScale((current) => clampImageScale(current * multiplier))
+  }
+
+  const handleImageWheel = (event: ReactWheelEvent<HTMLDivElement>) => {
+    if (preview.mode !== 'image') {
+      return
+    }
+    event.preventDefault()
+    const stageRect = stageRef.current?.getBoundingClientRect()
+    const zoomFactor = event.deltaY < 0 ? 1.12 : 1 / 1.12
+    setImageScale((current) => {
+      const nextScale = clampImageScale(current * zoomFactor)
+      if (!stageRect || nextScale === current) {
+        return nextScale
+      }
+      const scaleRatio = nextScale / current
+      const relativeX = event.clientX - stageRect.left - stageRect.width / 2
+      const relativeY = event.clientY - stageRect.top - stageRect.height / 2
+      setImageOffset((offset) => ({
+        x: offset.x - relativeX * (scaleRatio - 1),
+        y: offset.y - relativeY * (scaleRatio - 1),
+      }))
+      return nextScale
+    })
+  }
+
+  const handleImagePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (preview.mode !== 'image' || event.button !== 0) {
+      return
+    }
+    dragStateRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: imageOffset.x,
+      originY: imageOffset.y,
+    }
+    setDraggingImage(true)
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+
+  const handleImagePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const dragState = dragStateRef.current
+    if (!dragState || dragState.pointerId !== event.pointerId) {
+      return
+    }
+    setImageOffset({
+      x: dragState.originX + (event.clientX - dragState.startX),
+      y: dragState.originY + (event.clientY - dragState.startY),
+    })
+  }
+
+  const stopImageDragging = (event?: ReactPointerEvent<HTMLDivElement>) => {
+    const dragState = dragStateRef.current
+    if (event && dragState && event.currentTarget.hasPointerCapture(dragState.pointerId)) {
+      event.currentTarget.releasePointerCapture(dragState.pointerId)
+    }
+    dragStateRef.current = null
+    setDraggingImage(false)
   }
 
   let previewContent: ReactNode
   if (preview.mode === 'image') {
     previewContent = (
-      <img
-        src={preview.src}
-        alt={preview.name}
-        className='image-preview-full'
-        onContextMenu={(event) => onImageContextMenu?.(event, preview)}
-      />
+      <div
+        ref={stageRef}
+        className={`image-preview-pan-shell ${draggingImage ? 'dragging' : ''}`}
+        onWheel={handleImageWheel}
+        onPointerDown={handleImagePointerDown}
+        onPointerMove={handleImagePointerMove}
+        onPointerUp={stopImageDragging}
+        onPointerCancel={stopImageDragging}
+        onPointerLeave={() => {
+          if (!dragStateRef.current) {
+            setDraggingImage(false)
+          }
+        }}
+      >
+        <img
+          src={preview.src}
+          alt={preview.name}
+          className='image-preview-full'
+          draggable={false}
+          style={{
+            transform: `translate3d(${imageOffset.x}px, ${imageOffset.y}px, 0) scale(${imageScale})`,
+          }}
+          onContextMenu={(event) => onImageContextMenu?.(event, preview)}
+        />
+      </div>
     )
   } else if (preview.mode === 'iframe') {
     previewContent = <iframe src={preview.src} title={preview.name} className='attachment-preview-frame' />
@@ -2252,6 +2442,26 @@ function AttachmentPreviewModal(props: {
             <strong>{preview.name}</strong>
             <span title={preview.path}>{preview.path}</span>
           </div>
+          {preview.mode === 'image' ? (
+            <div className='image-preview-toolbar'>
+              <button className='ghost-button tiny' type='button' onClick={() => adjustImageScale(1 / 1.15)}>
+                <span>缩小</span>
+              </button>
+              <button
+                className='ghost-button tiny'
+                type='button'
+                onClick={() => {
+                  setImageScale(1)
+                  setImageOffset({ x: 0, y: 0 })
+                }}
+              >
+                <span>重置</span>
+              </button>
+              <button className='ghost-button tiny' type='button' onClick={() => adjustImageScale(1.15)}>
+                <span>放大</span>
+              </button>
+            </div>
+          ) : null}
           <button className='ghost-button tiny' type='button' onClick={onClose}>
             <X size={14} />
             <span>关闭</span>
@@ -3083,8 +3293,9 @@ function MessageFileChangeLinks(props: {
     content: string
   } | null
   onOpenFile: (ownerId: string, path: string) => void
+  onPathContextMenu?: (event: MouseEvent<HTMLButtonElement>, ownerId: string, path: string) => void
 }) {
-  const { ownerId, files = [], previewFile, onOpenFile } = props
+  const { ownerId, files = [], previewFile, onOpenFile, onPathContextMenu } = props
   const uniqueFiles = Array.from(new Map(files.map((item) => [item.path, item])).values())
   if (!uniqueFiles.length) {
     return null
@@ -3093,16 +3304,13 @@ function MessageFileChangeLinks(props: {
   return (
     <div className='message-file-links'>
       {uniqueFiles.map((item) => (
-        <button
+        <CliPathChip
           key={item.path}
-          type='button'
-          className='ghost-button tiny cli-log-file'
-          onClick={() => onOpenFile(ownerId, item.path)}
-          title={item.path}
-        >
-          <FileText size={14} />
-          <span>{item.path.split(/[\\/]/).filter(Boolean).at(-1) || item.path}</span>
-        </button>
+          ownerId={ownerId}
+          path={item.path}
+          onOpenFile={onOpenFile}
+          onPathContextMenu={onPathContextMenu}
+        />
       ))}
       {previewFile && previewFile.ownerId === ownerId && (
         <div className='inline-file-preview'>
@@ -3121,6 +3329,7 @@ function CliLogBubble(props: {
   expandedEventIds: string[]
   onToggleEvent: (eventId: string) => void
   onOpenFile: (ownerId: string, path: string) => void
+  onPathContextMenu?: (event: MouseEvent<HTMLButtonElement>, ownerId: string, path: string) => void
   onCopy: () => void
   onDelete: () => void
   onRespondInteraction: (requestId: string, interactionId: string, action: CliInteractionAction) => void
@@ -3140,6 +3349,7 @@ function CliLogBubble(props: {
     expandedEventIds,
     onToggleEvent,
     onOpenFile,
+    onPathContextMenu,
     onCopy,
     onDelete,
     onRespondInteraction,
@@ -3318,16 +3528,13 @@ function CliLogBubble(props: {
             <span className='cli-log-detail-label'>相关文件</span>
             <div className='cli-log-files inline-expanded'>
               {uniqueEventFiles.map((fileItem) => (
-                <button
+                <CliPathChip
                   key={fileItem.path}
-                  className='ghost-button tiny cli-log-file'
-                  type='button'
-                  onClick={() => onOpenFile(ownerId, fileItem.path)}
-                  title={fileItem.path}
-                >
-                  <FileText size={14} />
-                  <span>{fileItem.path.split(/[\\/]/).filter(Boolean).at(-1) || fileItem.path}</span>
-                </button>
+                  ownerId={ownerId}
+                  path={fileItem.path}
+                  onOpenFile={onOpenFile}
+                  onPathContextMenu={onPathContextMenu}
+                />
               ))}
             </div>
             {previewFile && previewFile.ownerId === ownerId ? (
@@ -3390,6 +3597,9 @@ function CliLogBubble(props: {
               {showBlockHead ? (
                 <button className='cli-log-phase-head' type='button' onClick={() => toggleSection(block.id)}>
                   <span className='cli-log-phase-headline'>
+                    {isCliRunningIndicatorSourceKind(block.intent?.sourceKind) ? (
+                      <LoaderCircle className='spin cli-log-inline-spinner' size={13} />
+                    ) : null}
                     <strong>{blockTitle}</strong>
                   </span>
                   <small>{[block.summary, `${block.rows.length || block.items.length || (block.intent ? 1 : 0)} 条`].filter(Boolean).join(' · ')}</small>
@@ -3400,7 +3610,11 @@ function CliLogBubble(props: {
                 <div className='cli-log-time-group'>
                   <div className='cli-log-time-head plain static'>
                     <div className='cli-log-time-copy plain'>
-                      <span className='cli-log-time-dot' />
+                      {isCliRunningIndicatorSourceKind(block.intent?.sourceKind) ? (
+                        <LoaderCircle className='spin cli-log-inline-spinner' size={13} />
+                      ) : (
+                        <span className='cli-log-time-dot' />
+                      )}
                       <strong>{blockTitle}</strong>
                       {block.intent?.createdAt ? <small>{formatCliLogTime(block.intent.createdAt)}</small> : null}
                     </div>
@@ -3413,6 +3627,8 @@ function CliLogBubble(props: {
                 const normalizedHeadline = normalizeComparable(rawHeadline)
                 const effectiveHeadline = normalizedHeadline === normalizeComparable(blockTitle) ? '' : rawHeadline
                 const timeCollapsed = collapsedTimeGroupIds.includes(timeGroup.id)
+                const timeGroupShowsRunning =
+                  firstRow?.type === 'event' && isCliRunningIndicatorSourceKind(firstRow.event.sourceKind)
 
                 return (
                   <div key={timeGroup.id} className='cli-log-time-group'>
@@ -3422,7 +3638,11 @@ function CliLogBubble(props: {
                       onClick={() => toggleTimeGroup(timeGroup.id)}
                     >
                       <div className={`cli-log-time-copy ${effectiveHeadline ? '' : 'plain'}`.trim()}>
-                        <span className='cli-log-time-dot' />
+                        {timeGroupShowsRunning ? (
+                          <LoaderCircle className='spin cli-log-inline-spinner' size={13} />
+                        ) : (
+                          <span className='cli-log-time-dot' />
+                        )}
                         {effectiveHeadline ? <strong>{effectiveHeadline}</strong> : null}
                         <small>{timeGroup.timeLabel}</small>
                       </div>
@@ -3434,25 +3654,24 @@ function CliLogBubble(props: {
                           if (row.type === 'output') {
                             const headline =
                               resolveCliOutputGroupHeadline(row.items) || row.summary || '执行细节'
-                            const outputEntries = row.items.map((eventItem) => {
+                            const outputEntries = row.items.flatMap((eventItem) => {
                               const detailLines = resolveCliDiagnosticDetail(eventItem)
                                 .split(/\r?\n/)
                                 .map((line) => line.trim())
                                 .filter(Boolean)
-                              const entryHeadline =
-                                resolveCliOutputGroupHeadline([eventItem]) ||
-                                detailLines[0] ||
-                                eventItem.message
-                              const detailBody = detailLines.join('\n')
-
-                              return {
-                                id: eventItem.id,
-                                headline: entryHeadline,
-                                detail:
-                                  normalizeComparable(detailBody) === normalizeComparable(entryHeadline)
-                                    ? ''
-                                    : detailBody,
+                              if (!detailLines.length) {
+                                return [{
+                                  id: eventItem.id,
+                                  headline: eventItem.message,
+                                  detail: '',
+                                }]
                               }
+
+                              return detailLines.map((line, detailIndex) => ({
+                                id: `${eventItem.id}-${detailIndex}`,
+                                headline: line,
+                                detail: '',
+                              }))
                             })
 
                             return (
@@ -3491,6 +3710,7 @@ function CliLogBubble(props: {
                           const duplicatedPrimary =
                             rowIndex === 0 &&
                             normalizeComparable(eventItem.message) === normalizeComparable(effectiveHeadline || eventItem.message)
+                          const showRunningIndicator = isCliRunningIndicatorSourceKind(eventItem.sourceKind)
 
                           return (
                             <div
@@ -3502,7 +3722,11 @@ function CliLogBubble(props: {
                                 } as CSSProperties
                               }
                             >
-                              <div className='cli-log-event-dot' />
+                              {showRunningIndicator ? (
+                                <LoaderCircle className='spin cli-log-inline-spinner' size={13} />
+                              ) : (
+                                <div className='cli-log-event-dot' />
+                              )}
                               <div className='cli-log-event-body'>
                                 {!duplicatedPrimary ? (
                                   <div className='cli-log-event-head'>
@@ -3581,16 +3805,13 @@ function CliLogBubble(props: {
       {uniqueFiles.length > 0 && !expanded ? (
         <div className='cli-log-files'>
           {uniqueFiles.slice(0, 4).map((fileItem) => (
-            <button
+            <CliPathChip
               key={fileItem.path}
-              className='ghost-button tiny cli-log-file'
-              type='button'
-              onClick={() => onOpenFile(item.id, fileItem.path)}
-              title={fileItem.path}
-            >
-              <FileText size={14} />
-              <span>{fileItem.path.split(/[\\/]/).filter(Boolean).at(-1) || fileItem.path}</span>
-            </button>
+              ownerId={item.id}
+              path={fileItem.path}
+              onOpenFile={onOpenFile}
+              onPathContextMenu={onPathContextMenu}
+            />
           ))}
         </div>
       ) : null}
@@ -3879,8 +4100,7 @@ function shouldReplaceStreamingCliIntentEntry(previous: CliLogEntry | undefined,
     next.logKind === 'intent' &&
     previous.sourceKind === next.sourceKind &&
     previous.content === next.content &&
-    previous.indentLevel === next.indentLevel &&
-    next.sourceKind === 'agent_progress.prompt'
+    previous.indentLevel === next.indentLevel
   )
 }
 
@@ -3941,6 +4161,16 @@ function buildCliVisualLogBlocks<T extends {
   } | null = null
 
   for (const eventItem of events) {
+    if (
+      eventItem.sourceKind === 'request.stream.completed' ||
+      eventItem.sourceKind === 'result' ||
+      eventItem.sourceKind === 'result.with_warnings' ||
+      eventItem.sourceKind === 'turn.completed' ||
+      eventItem.sourceKind === 'turn.completed.with_warnings'
+    ) {
+      continue
+    }
+
     if (isCliIntentEvent(eventItem)) {
       currentBlock = {
         id: `intent-block-${eventItem.id}`,
@@ -4102,9 +4332,22 @@ function resolveCliDiagnosticSummary(items: Array<{
     .map((item) => item.detail?.trim() || '')
     .find((item) => /error|failed|not found|invalid|拒绝|blocked/i.test(item))
   if (matchedDetail) {
-    return '执行异常细节'
+    return '执行细节'
   }
   return '执行细节'
+}
+
+function isCliRunningIndicatorSourceKind(sourceKind?: string) {
+  const normalized = (sourceKind || '').trim().toLowerCase()
+  return (
+    normalized === 'request.started' ||
+    normalized === 'turn.started' ||
+    normalized === 'thread.started' ||
+    normalized === 'session.connected' ||
+    normalized === 'system.init' ||
+    normalized.startsWith('orchestrator.intent') ||
+    normalized.startsWith('orchestrator.prepare')
+  )
 }
 
 function resolveCliOutputGroupHeadline(items: Array<{
@@ -4460,7 +4703,7 @@ function AssistantsChatWorkspace(props: {
     [chatModeModels, effectiveModelVendorFilter]
   )
   const selectedReasoningLabel =
-    CLI_REASONING_OPTIONS.find((item) => item.value === reasoningEffort)?.label || reasoningEffort
+    CHAT_REASONING_OPTIONS.find((item) => item.value === reasoningEffort)?.label || reasoningEffort
   const selectedContextWindowLabel =
     CHAT_CONTEXT_WINDOW_OPTIONS.find((item) => item.value === contextWindow)?.label || `${contextWindow}`
 
@@ -4993,6 +5236,7 @@ function AssistantsChatWorkspace(props: {
       title: clipText(userMessage.content.replace(/\s+/g, ' '), 24) || session.title,
       messages: renderedHistory,
     }))
+    scheduleScrollToBottom(messageStreamRef)
     pendingRequestIdRef.current = requestId
     stoppingRef.current = false
     chatPromptHistory.commitInputValue(userMessageContent)
@@ -5079,7 +5323,7 @@ function AssistantsChatWorkspace(props: {
             ? resolvedActiveSessionId
             : undefined,
           temperature: activeAssistant?.temperature ?? 0.7,
-          reasoningEffort,
+          reasoningEffort: reasoningEffort === 'off' ? undefined : reasoningEffort,
           messages: [
             ...(systemMessage ? [systemMessage] : []),
             ...requestHistory.map((item) => ({
@@ -5502,9 +5746,10 @@ function AssistantsChatWorkspace(props: {
                     </div>
                   ) : (
                     item.pending &&
-                    !item.reasoningContent?.trim() &&
                     (!item.content.trim() || item.content === CHAT_PENDING_MESSAGE_LABEL)
-                      ? <PendingMessageContent label={CHAT_PENDING_MESSAGE_LABEL.replace(/\.+$/, '')} />
+                      ? item.reasoningContent?.trim()
+                        ? null
+                        : <PendingMessageContent label={CHAT_PENDING_MESSAGE_LABEL.replace(/\.+$/, '')} />
                       : <LazyMarkdownContent
                           content={item.content}
                           onSelectionContextMenu={handleMessageSelectionContextMenu}
@@ -5821,7 +6066,7 @@ function AssistantsChatWorkspace(props: {
                           <strong>思考长度</strong>
                         </div>
                         <div className='picker-menu-list'>
-                          {CLI_REASONING_OPTIONS.map((item) => (
+                          {CHAT_REASONING_OPTIONS.map((item) => (
                             <button
                               key={item.value}
                               type='button'
@@ -6877,6 +7122,7 @@ function DrawWorkspace(props: {
       updatedAt: now + 1,
       messages: [...session.messages, userMessage, pendingMessage],
     }))
+    scheduleScrollToBottom(messageStreamRef)
 
     drawPromptHistory.commitInputValue(nextPrompt)
     setDraft('')
@@ -10243,18 +10489,31 @@ function CliWorkspace(props: {
   }
 
   async function handlePreviewFile(ownerId: string, targetPath: string) {
-    if (!isInlinePreviewableFile(targetPath)) {
-      await openDesktopTarget(targetPath)
-      return
-    }
-
-    if (previewFile?.ownerId === ownerId && previewFile.path === targetPath) {
-      setPreviewFile(null)
-      return
-    }
-
     try {
-      const details = await readDesktopFilePreview(targetPath)
+      const pathInfo = await getDesktopPathInfo(targetPath)
+      const resolvedPath = pathInfo.path || targetPath
+
+      if (pathInfo.kind === 'directory') {
+        await openDesktopFolder(resolvedPath)
+        return
+      }
+
+      if (isImagePreviewableFile(resolvedPath) || isEmbeddedPreviewableFile(resolvedPath)) {
+        await openAttachmentPreview(resolvedPath)
+        return
+      }
+
+      if (!isInlinePreviewableFile(resolvedPath)) {
+        await openDesktopTarget(resolvedPath)
+        return
+      }
+
+      if (previewFile?.ownerId === ownerId && previewFile.path === resolvedPath) {
+        setPreviewFile(null)
+        return
+      }
+
+      const details = await readDesktopFilePreview(resolvedPath)
       setPreviewFile({
         ownerId,
         ...details,
@@ -10262,6 +10521,51 @@ function CliWorkspace(props: {
     } catch (error) {
       toast(error instanceof Error ? error.message : '文件预览失败')
     }
+  }
+
+  function handleCliLogPathContextMenu(event: MouseEvent<HTMLButtonElement>, ownerId: string, targetPath: string) {
+    event.preventDefault()
+    const x = event.clientX
+    const y = event.clientY
+
+    void getDesktopPathInfo(targetPath)
+      .then((pathInfo: DesktopPathInfo) => {
+        const resolvedPath = pathInfo.path || targetPath
+        const items: SessionContextMenuState['items'] = []
+
+        if (pathInfo.kind !== 'directory' && isPreviewableDesktopFile(resolvedPath)) {
+          items.push({
+            key: 'preview',
+            label: '预览',
+            onSelect: () => handlePreviewFile(ownerId, resolvedPath),
+          })
+        }
+
+        if (pathInfo.kind !== 'directory') {
+          items.push({
+            key: 'open-file',
+            label: '打开文件',
+            onSelect: () => openDesktopTarget(resolvedPath),
+          })
+        }
+
+        items.push({
+          key: 'open-folder',
+          label: '打开文件夹',
+          onSelect: () => openDesktopFolder(resolvedPath, pathInfo.kind !== 'directory'),
+        })
+
+        setSessionContextMenu({
+          x,
+          y,
+          title: getPathDisplayName(resolvedPath),
+          scope: 'general',
+          items,
+        })
+      })
+      .catch((error: unknown) => {
+        toast(error instanceof Error ? error.message : '读取路径信息失败')
+      })
   }
 
   function loadPromptForEdit(
@@ -10390,6 +10694,7 @@ function CliWorkspace(props: {
       ...current,
       [currentSessionKey]: [...(current[currentSessionKey] || []), userMessage],
     }))
+    scheduleScrollToBottom(threadRef)
     persistCliMessageOverlay(currentSessionKey, userMessage)
     setSessionPartialMap((current) => ({
       ...current,
@@ -10404,6 +10709,12 @@ function CliWorkspace(props: {
         finalPrompt: promptWithAttachments,
         commandTitle: directCommand ? '直接命令准备' : '扩展与上下文准备',
         command: directCommand ? cleanedPrompt : '',
+        extensions: directCommand
+          ? []
+          : requestExtensions.map((item) => ({
+              kind: item.kind,
+              name: item.name,
+            })),
       }).map((event) => ({
         id: event.id,
         requestId,
@@ -10814,6 +11125,7 @@ function CliWorkspace(props: {
                       expandedEventIds={expandedLogEventMap[item.id] || []}
                       onToggleEvent={(eventId) => toggleLogEvent(item.id, eventId)}
                       onOpenFile={(ownerId, path) => void handlePreviewFile(ownerId, path)}
+                      onPathContextMenu={handleCliLogPathContextMenu}
                       onCopy={() => void copyText(item.events.map((eventItem) => serializeCliLogEvent(eventItem)).join('\n\n'))}
                       onDelete={() => handleDeleteCliLogGroup(item)}
                       onRespondInteraction={handleRespondCliInteraction}
@@ -10858,6 +11170,7 @@ function CliWorkspace(props: {
                         files={item.fileChanges}
                         previewFile={previewFile}
                         onOpenFile={(ownerId, path) => void handlePreviewFile(ownerId, path)}
+                        onPathContextMenu={handleCliLogPathContextMenu}
                       />
                     ) : null}
                     <BubbleMeta

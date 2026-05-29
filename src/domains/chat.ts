@@ -73,6 +73,8 @@ export async function sendChatCompletion(payload: {
   requestId?: string
 } = {}) {
   const { reasoningEffort, promptCacheKey, ...rest } = payload
+  const normalizedReasoningEffort =
+    reasoningEffort && reasoningEffort !== 'off' ? reasoningEffort : undefined
   return desktopRequest<ChatCompletionResponse>({
     method: 'POST',
     path: '/pg/chat/completions',
@@ -80,7 +82,7 @@ export async function sendChatCompletion(payload: {
     body: {
       ...rest,
       prompt_cache_key: promptCacheKey,
-      reasoning_effort: reasoningEffort,
+      ...(normalizedReasoningEffort ? { reasoning_effort: normalizedReasoningEffort } : {}),
       stream: false,
     },
   })
@@ -107,6 +109,8 @@ export async function streamChatCompletion(
   }
 ) {
   const { reasoningEffort, promptCacheKey, ...rest } = payload
+  const normalizedReasoningEffort =
+    reasoningEffort && reasoningEffort !== 'off' ? reasoningEffort : undefined
   const bridge = desktopBridge()
   const requestId =
     handlers.requestId ||
@@ -178,7 +182,7 @@ export async function streamChatCompletion(
         userId,
         ...rest,
         promptCacheKey,
-        reasoningEffort,
+        reasoningEffort: normalizedReasoningEffort,
       })
       .catch((error: unknown) => {
         finish(() => reject(error instanceof Error ? error : new Error('聊天请求失败')))

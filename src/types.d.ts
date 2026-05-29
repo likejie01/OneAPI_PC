@@ -15,6 +15,7 @@ import type {
   DesktopAttachmentSaveResult,
   DesktopCopyImageRequest,
   DesktopFilePreview,
+  DesktopPathInfo,
   DesktopImageEditRequest,
   DesktopSaveImageRequest,
   DesktopSaveImageResult,
@@ -96,6 +97,7 @@ declare global {
       copyImageToClipboard: (input: DesktopCopyImageRequest) => Promise<void>
       exportTextFile: (input: DesktopExportTextFileRequest) => Promise<DesktopExportTextFileResult>
       readFilePreview: (targetPath: string) => Promise<DesktopFilePreview>
+      statPath: (targetPath: string) => Promise<DesktopPathInfo>
       getCliDeployPreset: (client: CliClient) => Promise<CliDeployPreset>
       listCliExtensions: (client: CliClient) => Promise<CliExtensionEntry[]>
       installCliExtension: (input: {

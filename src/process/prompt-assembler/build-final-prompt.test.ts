@@ -34,3 +34,16 @@ test('direct command stays as one prompt without execution policy', () => {
   })
   assert.equal(result.finalPrompt, '/resume')
 })
+
+test('buildFinalPrompt clarifies Claude identity and workspace write scope', () => {
+  const result = buildFinalPrompt({
+    prompt: '修复日志问题',
+    client: 'claude',
+    projectPath: 'D:\\WorkSpace\\NewAPI\\OneAPI_PC_Rebuild',
+    fullAccess: false,
+  })
+
+  assert.match(result.finalPrompt, /Claude 编码助手/)
+  assert.match(result.finalPrompt, /不要自称 Kiro、Codex、ChatGPT/)
+  assert.match(result.permissionBlock, /允许读取、创建、修改、删除文件与目录/)
+})

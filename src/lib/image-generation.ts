@@ -22,6 +22,21 @@ function asRecord(value: unknown): ImagePayloadRecord | null {
   return value && typeof value === 'object' ? value as ImagePayloadRecord : null
 }
 
+function collectNestedImageArrays(record: ImagePayloadRecord, prompt: string) {
+  return [
+    ...['image_urls'].flatMap((key) =>
+      Array.isArray(record[key])
+        ? (record[key] as unknown[]).flatMap((item) => toDisplayableItems({ url: item, prompt }))
+        : []
+    ),
+    ...['image_base64', 'binary_data_base64'].flatMap((key) =>
+      Array.isArray(record[key])
+        ? (record[key] as unknown[]).flatMap((item) => toDisplayableItems({ b64_json: item, prompt }))
+        : []
+    ),
+  ]
+}
+
 function toDisplayableItems(value: unknown): Array<{
   prompt: string
   source: string
@@ -49,6 +64,11 @@ function toDisplayableItems(value: unknown): Array<{
     return [{ prompt, source }]
   }
 
+  const nestedArrayItems = collectNestedImageArrays(record, prompt)
+  if (nestedArrayItems.length > 0) {
+    return nestedArrayItems
+  }
+
   const nestedData = record.data
   if (Array.isArray(nestedData)) {
     return nestedData.flatMap((item) => toDisplayableItems(item))
@@ -60,16 +80,7 @@ function toDisplayableItems(value: unknown): Array<{
   }
 
   return [
-    ...['image_urls'].flatMap((key) =>
-      Array.isArray(nestedRecord[key])
-        ? (nestedRecord[key] as unknown[]).flatMap((item) => toDisplayableItems({ url: item, prompt }))
-        : []
-    ),
-    ...['image_base64', 'binary_data_base64'].flatMap((key) =>
-      Array.isArray(nestedRecord[key])
-        ? (nestedRecord[key] as unknown[]).flatMap((item) => toDisplayableItems({ b64_json: item, prompt }))
-        : []
-    ),
+    ...collectNestedImageArrays(nestedRecord, prompt),
     ...toDisplayableItems({
       ...nestedRecord,
       revised_prompt: nestedRecord.revised_prompt ?? prompt,

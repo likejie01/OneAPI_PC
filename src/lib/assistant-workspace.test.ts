@@ -408,6 +408,45 @@ test('buildCliTimeline strips assistant intent chunks already attached to logs',
   )
 })
 
+test('buildCliTimeline appends a live partial assistant entry while CLI output is streaming', () => {
+  const timeline = buildCliTimeline({
+    messages: [
+      { id: 'user-1', role: 'user', content: 'hello', createdAt: 1 },
+    ],
+    logs: [
+      { id: 'log-1', requestId: 'req-1', level: 'status', content: '分析需求', createdAt: 2 },
+    ],
+    partial: '正在实时输出',
+    partialCreatedAt: 3,
+    partialModelLabel: 'Codex',
+  })
+
+  assert.deepEqual(
+    timeline.map((item) => item.id),
+    ['user-1', 'log-1', 'partial-response']
+  )
+  const partialEntry = timeline.at(-1)
+  assert.equal(partialEntry?.kind, 'partial')
+  assert.equal(partialEntry?.content, '正在实时输出')
+})
+
+test('buildCliTimeline does not duplicate the final assistant message with an identical partial entry', () => {
+  const timeline = buildCliTimeline({
+    messages: [
+      { id: 'assistant-1', role: 'assistant', content: 'done', createdAt: 4, modelLabel: 'Claude' },
+    ],
+    logs: [],
+    partial: 'done',
+    partialCreatedAt: 3,
+    partialModelLabel: 'Claude',
+  })
+
+  assert.deepEqual(
+    timeline.map((item) => item.id),
+    ['assistant-1']
+  )
+})
+
 test('buildCliRecentSessions prefers live session snapshots', () => {
   const items = buildCliRecentSessions({
     history: [

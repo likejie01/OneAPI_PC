@@ -1376,7 +1376,12 @@ select {
 }
 
 .conversation-search-hit-active {
-  box-shadow: 0 0 0 2px rgba(29, 107, 120, 0.28);
+  position: relative;
+  box-shadow:
+    0 0 0 2px rgba(29, 107, 120, 0.34),
+    0 12px 28px rgba(29, 107, 120, 0.12);
+  background: rgba(29, 107, 120, 0.06);
+  scroll-margin-block: 120px;
 }
 
 .conversation-search-mark {
@@ -1388,8 +1393,10 @@ select {
 
 .conversation-search-mark-active {
   color: #0f3d43;
-  background: rgba(29, 107, 120, 0.3);
-  box-shadow: 0 0 0 1px rgba(29, 107, 120, 0.18);
+  background: rgba(29, 107, 120, 0.42);
+  box-shadow:
+    0 0 0 1px rgba(29, 107, 120, 0.24),
+    0 0 0 4px rgba(29, 107, 120, 0.08);
 }
 
 .message-bubble {
@@ -2585,6 +2592,12 @@ select {
   font-size: 13px;
 }
 
+.cli-log-inline-spinner {
+  flex: 0 0 auto;
+  color: var(--accent);
+  opacity: 0.9;
+}
+
 .cli-log-time-copy small {
   color: var(--muted);
   font-size: 11px;
@@ -3074,6 +3087,11 @@ select {
   max-width: 100%;
 }
 
+.cli-log-file.directory {
+  color: #24546a;
+  background: rgba(36, 84, 106, 0.08);
+}
+
 .history-group-head-actions {
   display: inline-flex;
   align-items: center;
@@ -3180,7 +3198,14 @@ select {
 
 .image-preview-actions {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.image-preview-toolbar {
+  display: inline-flex;
+  align-items: center;
   gap: 10px;
 }
 
@@ -3193,11 +3218,30 @@ select {
   overflow: hidden;
 }
 
+.image-preview-pan-shell {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  overflow: hidden;
+  touch-action: none;
+}
+
+.image-preview-pan-shell.dragging {
+  cursor: grabbing;
+}
+
 .image-preview-full {
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
   border-radius: 20px;
+  transform-origin: center center;
+  transition: transform 0.12s ease;
+  user-select: none;
+  pointer-events: none;
 }
 
 @keyframes shimmer {
@@ -5251,14 +5295,14 @@ textarea:focus {
   color-scheme: dark;
   --bg: #12181d;
   --bg-rgb: 18 24 29;
-  --panel: rgba(22, 29, 35, 0.62);
-  --panel-rgb: 22 29 35;
-  --panel-strong: rgba(27, 35, 41, 0.78);
-  --panel-strong-rgb: 27 35 41;
-  --surface: rgba(27, 35, 41, 0.48);
-  --surface-rgb: 27 35 41;
-  --surface-strong: rgba(30, 39, 46, 0.62);
-  --surface-strong-rgb: 30 39 46;
+  --panel: rgba(24, 28, 32, 0.64);
+  --panel-rgb: 24 28 32;
+  --panel-strong: rgba(28, 33, 37, 0.8);
+  --panel-strong-rgb: 28 33 37;
+  --surface: rgba(29, 34, 38, 0.5);
+  --surface-rgb: 29 34 38;
+  --surface-strong: rgba(33, 38, 43, 0.64);
+  --surface-strong-rgb: 33 38 43;
   --sidebar-top-rgb: 21 28 34;
   --sidebar-bottom-rgb: 18 24 30;
   --line: rgba(213, 224, 230, 0.1);
@@ -5282,10 +5326,10 @@ textarea:focus {
   --bubble-log: rgba(35, 46, 53, 0.56);
   --aurora-base: linear-gradient(180deg, rgba(14, 20, 25, 0.36), rgba(17, 24, 30, 0.44));
   --aurora-veil: linear-gradient(180deg, rgba(8, 12, 16, 0.05), rgba(10, 14, 18, 0.02));
-  --aurora-a: rgba(95, 124, 145, 0.34);
-  --aurora-b: rgba(96, 130, 112, 0.28);
-  --aurora-c: rgba(118, 108, 148, 0.26);
-  --aurora-d: rgba(82, 126, 139, 0.22);
+  --aurora-a: rgba(103, 120, 132, 0.28);
+  --aurora-b: rgba(103, 122, 113, 0.22);
+  --aurora-c: rgba(118, 114, 132, 0.2);
+  --aurora-d: rgba(92, 119, 126, 0.18);
 }
 
 body,
@@ -6546,7 +6590,7 @@ body,
 }
 
 :root[data-theme='dark'] .workspace-aurora {
-  filter: saturate(80%) brightness(0.62);
+  filter: saturate(64%) brightness(0.62);
 }
 
 .workspace-page,
@@ -7303,4 +7347,29 @@ body,
 .image-preview-modal-mask {
   backdrop-filter: blur(15px) saturate(112%) !important;
   -webkit-backdrop-filter: blur(15px) saturate(112%) !important;
+}
+
+:root[data-theme='dark'] .picker-menu,
+:root[data-theme='dark'] .session-context-menu,
+:root[data-theme='dark'] .chat-history-panel,
+:root[data-theme='dark'] .cli-history-panel,
+:root[data-theme='dark'] .cli-plan-floating-panel,
+:root[data-theme='dark'] .modal-card,
+:root[data-theme='dark'] .image-preview-modal,
+:root[data-theme='dark'] .attachment-preview-modal,
+:root[data-theme='dark'] .desktop-update-popover,
+:root[data-theme='dark'] .announcement-modal-card,
+:root[data-theme='dark'] .cli-extension-menu,
+:root[data-theme='dark'] .assistant-menu,
+:root[data-theme='dark'] .image-style-menu,
+:root[data-theme='dark'] .cli-extension-floating-tooltip,
+:root[data-theme='dark'] .markdown-code-action-menu {
+  backdrop-filter: blur(15px) saturate(96%) !important;
+  -webkit-backdrop-filter: blur(15px) saturate(96%) !important;
+}
+
+:root[data-theme='dark'] .modal-mask,
+:root[data-theme='dark'] .image-preview-modal-mask {
+  backdrop-filter: blur(15px) saturate(90%) !important;
+  -webkit-backdrop-filter: blur(15px) saturate(90%) !important;
 }

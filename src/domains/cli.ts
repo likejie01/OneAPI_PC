@@ -96,6 +96,10 @@ export function readDesktopFilePreview(targetPath: string) {
   return desktopBridge().readFilePreview(targetPath)
 }
 
+export function getDesktopPathInfo(targetPath: string) {
+  return desktopBridge().statPath(targetPath)
+}
+
 export function exportTextFile(
   suggestedName: string,
   content: string,

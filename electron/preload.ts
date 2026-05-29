@@ -15,6 +15,7 @@ import type {
   DesktopAttachmentSaveResult,
   DesktopCopyImageRequest,
   DesktopFilePreview,
+  DesktopPathInfo,
   DesktopImageEditRequest,
   DesktopSaveImageRequest,
   DesktopSaveImageResult,
@@ -151,6 +152,8 @@ contextBridge.exposeInMainWorld('desktopBridge', {
     ipcRenderer.invoke('desktop:export-text-file', input) as Promise<DesktopExportTextFileResult>,
   readFilePreview: (targetPath: string) =>
     ipcRenderer.invoke('desktop:file-preview', targetPath) as Promise<DesktopFilePreview>,
+  statPath: (targetPath: string) =>
+    ipcRenderer.invoke('desktop:stat-path', targetPath) as Promise<DesktopPathInfo>,
   getCliDeployPreset: (client: CliClient) =>
     ipcRenderer.invoke('desktop:cli-deploy-preset', client) as Promise<CliDeployPreset>,
   listCliExtensions: (client: CliClient) =>

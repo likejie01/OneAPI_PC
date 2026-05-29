@@ -2340,6 +2340,22 @@ async function readFilePreview(targetPath: string) {
   }
 }
 
+async function statDesktopPath(targetPath: string) {
+  const resolved = path.resolve(targetPath)
+  try {
+    const stat = await fs.stat(resolved)
+    return {
+      path: resolved,
+      kind: stat.isDirectory() ? 'directory' : 'file',
+    } as const
+  } catch {
+    return {
+      path: resolved,
+      kind: 'missing',
+    } as const
+  }
+}
+
 async function requestImageEdit(input: DesktopImageEditRequest) {
   const headers = new Headers()
   if (input.apiKey?.trim()) {
@@ -5932,6 +5948,20 @@ function normalizeCliToolDetail(detail: string) {
   return normalized
 }
 
+function buildCliFailureDetail(stderrText: string, probableCause?: string) {
+  const normalizedProbableCause = probableCause?.trim() || ''
+  if (normalizedProbableCause) {
+    return `推断原因：${normalizedProbableCause}`
+  }
+
+  const firstUsefulLine = stderrText
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => line && !/warning:\s*no stdin data received in 3s/i.test(line))
+
+  return firstUsefulLine || stderrText.trim()
+}
+
 function summarizeCliIntentForLog(value: string, maxLength = 260) {
   const normalized = value
     .split(/\r?\n/)
@@ -6670,7 +6700,7 @@ async function runCodexPrompt(
     progress.error('Codex 执行失败', sessionId, true, fileChanges, {
       logKind: 'error',
       sourceKind: 'request.failed',
-      detail: [result.stderr.trim(), runtimeDiagnostics.probableCause ? `推断原因：${runtimeDiagnostics.probableCause}` : ''].filter(Boolean).join('\n'),
+      detail: buildCliFailureDetail(result.stderr.trim(), runtimeDiagnostics.probableCause),
       exitCode: result.exitCode,
       plan: planState,
     })
@@ -7175,7 +7205,7 @@ async function runClaudePrompt(
     progress.error('Claude 执行失败', sessionId, true, fileChanges, {
       logKind: 'error',
       sourceKind: 'request.failed',
-      detail: [result.stderr.trim(), runtimeDiagnostics.probableCause ? `推断原因：${runtimeDiagnostics.probableCause}` : ''].filter(Boolean).join('\n'),
+      detail: buildCliFailureDetail(result.stderr.trim(), runtimeDiagnostics.probableCause),
       exitCode: result.exitCode,
       plan: planState,
     })
@@ -8384,6 +8414,9 @@ ipcMain.handle('desktop:pick-project', async () => {
 })
 ipcMain.handle('desktop:file-preview', async (_event, targetPath: string) => {
   return readFilePreview(targetPath)
+})
+ipcMain.handle('desktop:stat-path', async (_event, targetPath: string) => {
+  return statDesktopPath(targetPath)
 })
 ipcMain.handle('desktop:cli-status', async () => {
   const [codex, claude] = await Promise.all([inspectCli('codex'), inspectCli('claude')])

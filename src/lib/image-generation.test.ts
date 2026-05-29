@@ -60,3 +60,36 @@ test('resolveImageGenerationResult preserves revised prompts when available', ()
     }
   )
 })
+
+test('resolveImageGenerationResult supports image_urls arrays inside top-level data items', () => {
+  assert.deepEqual(
+    resolveImageGenerationResult({
+      data: [
+        {
+          image_urls: ['https://example.com/from-array.png'],
+          revised_prompt: 'array prompt',
+        },
+      ],
+    }, 'fallback'),
+    {
+      imageUrl: 'https://example.com/from-array.png',
+      prompt: 'array prompt',
+    }
+  )
+})
+
+test('resolveImageGenerationResult supports binary_data_base64 arrays inside top-level data items', () => {
+  assert.deepEqual(
+    resolveImageGenerationResult({
+      data: [
+        {
+          binary_data_base64: ['YWJj'],
+        },
+      ],
+    }, 'fallback'),
+    {
+      imageUrl: 'data:image/png;base64,YWJj',
+      prompt: 'fallback',
+    }
+  )
+})

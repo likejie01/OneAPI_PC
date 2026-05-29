@@ -49,6 +49,18 @@ export interface PromptAssemblySnapshot {
   permissionBlock: string
 }
 
+function buildIdentityBlock(client: CliClient) {
+  if (client !== 'claude') {
+    return ''
+  }
+
+  return [
+    '身份说明：',
+    '你当前以 Claude 编码助手身份在 OneAPI 桌面客户端中工作。',
+    '当用户询问“你是谁”时，应明确回答自己是 Claude，不要自称 Kiro、Codex、ChatGPT 或其他产品。',
+  ].join('\n')
+}
+
 function buildAttachmentReferenceText(attachments: PromptAssemblerAttachment[]) {
   if (!attachments.length) {
     return ''
@@ -111,8 +123,8 @@ function buildPermissionBlock(input: Pick<BuildFinalPromptInput, 'fullAccess' | 
   return [
     '权限上下文：',
     input.fullAccess
-      ? '当前为全权限模式，可在用户任务需要时执行项目外读写。'
-      : '当前为受限模式，仅假定当前项目目录可读写；不要申请提升权限。',
+      ? '当前为全权限模式：当前项目目录内允许读取、创建、修改、删除文件与目录；如用户任务需要，也允许项目目录外读写。'
+      : '当前为受限模式：当前项目目录内允许读取、创建、修改、删除文件与目录；项目目录外不要读写，也不要申请提升权限。',
     input.projectPath?.trim() ? `当前项目目录：${input.projectPath.trim()}` : '',
   ].filter(Boolean).join('\n')
 }
@@ -124,6 +136,7 @@ export function buildFinalPrompt(input: BuildFinalPromptInput): PromptAssemblySn
   const extensionBlock = input.directCommand ? '' : buildExtensionPromptBlock(extensions)
   const visiblePrompt = buildVisiblePrompt(cleanedPrompt, attachments, extensionBlock)
   const permissionBlock = buildPermissionBlock(input)
+  const identityBlock = buildIdentityBlock(input.client)
 
   if (input.directCommand) {
     return {
@@ -137,16 +150,29 @@ export function buildFinalPrompt(input: BuildFinalPromptInput): PromptAssemblySn
 
   return {
     visiblePrompt,
-    finalPrompt: [
-      visiblePrompt,
-      '',
-      EXECUTION_CONSTRAINT_MARKER,
-      '上方内容是用户真实需求；请直接完成上方需求，不要把本段约束当成用户问题回复。',
-      '',
-      permissionBlock,
-      '',
-      CLI_EXECUTION_POLICY,
-    ].join('\n'),
+    finalPrompt: identityBlock
+      ? [
+          visiblePrompt,
+          '',
+          EXECUTION_CONSTRAINT_MARKER,
+          '上方内容是用户真实需求；请直接完成上方需求，不要把本段约束当成用户问题回复。',
+          '',
+          identityBlock,
+          '',
+          permissionBlock,
+          '',
+          CLI_EXECUTION_POLICY,
+        ].join('\n')
+      : [
+          visiblePrompt,
+          '',
+          EXECUTION_CONSTRAINT_MARKER,
+          '上方内容是用户真实需求；请直接完成上方需求，不要把本段约束当成用户问题回复。',
+          '',
+          permissionBlock,
+          '',
+          CLI_EXECUTION_POLICY,
+        ].join('\n'),
     extensionBlock,
     attachmentBlock: buildAttachmentReferenceText(attachments),
     permissionBlock,
