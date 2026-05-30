@@ -125,6 +125,24 @@ function isOpenAITextCompatibleModel(value: string) {
   )
 }
 
+function isDeepSeekCodexCompatibleModel(value: string) {
+  const normalized = normalizeModelValue(value)
+  return normalized === 'deepseek-v4-flash' || normalized === 'deepseek-v4-pro'
+}
+
+function isDeepSeekClaudeCompatibleModel(value: string) {
+  return isDeepSeekCodexCompatibleModel(value)
+}
+
+function isMimoCodexCompatibleModel(value: string) {
+  const normalized = normalizeModelValue(value)
+  return normalized === 'mimo-v2.5' || normalized === 'mimo-v2.5-pro'
+}
+
+function isMimoClaudeCompatibleModel(value: string) {
+  return normalizeModelValue(value) === 'mimo-v2.5-pro'
+}
+
 function isClaudeTextCompatibleModel(value: string) {
   const normalized = normalizeModelValue(value)
   return normalized.includes('claude')
@@ -188,6 +206,25 @@ function stripConsumedAssistantChunks(
 
 export function isCodexModel(model: ChatModelOption | string) {
   const normalized = normalizeModelValue(typeof model === 'string' ? model : model.value)
+  if (normalized.startsWith('deepseek')) {
+    if (!isDeepSeekCodexCompatibleModel(normalized)) {
+      return false
+    }
+    if (typeof model !== 'string' && hasEndpointMetadata(model)) {
+      return supportsEndpoint(model, 'openai-response') || supportsEndpoint(model, 'openai-response-compact')
+    }
+    return true
+  }
+  if (normalized.startsWith('mimo-') || normalized.includes('xiaomi') || normalized.includes('mimo')) {
+    if (!isMimoCodexCompatibleModel(normalized)) {
+      return false
+    }
+    if (typeof model !== 'string' && hasEndpointMetadata(model)) {
+      return supportsEndpoint(model, 'openai-response') || supportsEndpoint(model, 'openai-response-compact')
+    }
+    return true
+  }
+
   if (typeof model !== 'string') {
     if (
       (supportsEndpoint(model, 'openai-response') || supportsEndpoint(model, 'openai-response-compact')) &&
@@ -210,6 +247,25 @@ export function isCodexModel(model: ChatModelOption | string) {
 
 export function isClaudeModel(model: ChatModelOption | string) {
   const normalized = normalizeModelValue(typeof model === 'string' ? model : model.value)
+  if (normalized.startsWith('deepseek')) {
+    if (!isDeepSeekClaudeCompatibleModel(normalized)) {
+      return false
+    }
+    if (typeof model !== 'string' && hasEndpointMetadata(model)) {
+      return supportsEndpoint(model, 'anthropic')
+    }
+    return true
+  }
+  if (normalized.startsWith('mimo-') || normalized.includes('xiaomi') || normalized.includes('mimo')) {
+    if (!isMimoClaudeCompatibleModel(normalized)) {
+      return false
+    }
+    if (typeof model !== 'string' && hasEndpointMetadata(model)) {
+      return supportsEndpoint(model, 'anthropic')
+    }
+    return true
+  }
+
   if (typeof model !== 'string') {
     if (supportsEndpoint(model, 'anthropic') && isClaudeTextCompatibleModel(model.value)) {
       return !isImageGenerationModel(model.value)
