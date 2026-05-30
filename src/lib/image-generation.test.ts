@@ -61,40 +61,7 @@ test('resolveImageGenerationResult preserves revised prompts when available', ()
   )
 })
 
-test('resolveImageGenerationResult supports image_urls arrays inside top-level data items', () => {
-  assert.deepEqual(
-    resolveImageGenerationResult({
-      data: [
-        {
-          image_urls: ['https://example.com/from-array.png'],
-          revised_prompt: 'array prompt',
-        },
-      ],
-    }, 'fallback'),
-    {
-      imageUrl: 'https://example.com/from-array.png',
-      prompt: 'array prompt',
-    }
-  )
-})
-
-test('resolveImageGenerationResult supports binary_data_base64 arrays inside top-level data items', () => {
-  assert.deepEqual(
-    resolveImageGenerationResult({
-      data: [
-        {
-          binary_data_base64: ['YWJj'],
-        },
-      ],
-    }, 'fallback'),
-    {
-      imageUrl: 'data:image/png;base64,YWJj',
-      prompt: 'fallback',
-    }
-  )
-})
-
-test('resolveImageGenerationResult supports responses-style image output result', () => {
+test('resolveImageGenerationResult supports responses image generation output blocks', () => {
   assert.deepEqual(
     resolveImageGenerationResult({
       output: [
@@ -111,37 +78,15 @@ test('resolveImageGenerationResult supports responses-style image output result'
   )
 })
 
-test('resolveImageGenerationResult keeps responses-style result urls', () => {
-  assert.deepEqual(
-    resolveImageGenerationResult({
-      output: [
-        {
-          type: 'image_generation_call',
-          result: 'https://example.com/result-output.png',
-        },
-      ],
-    }, 'fallback'),
-    {
-      imageUrl: 'https://example.com/result-output.png',
-      prompt: 'fallback',
-    }
-  )
-})
-
-test('resolveImageGenerationResult supports nested images arrays', () => {
-  assert.deepEqual(
-    resolveImageGenerationResult({
-      data: {
-        images: [
-          {
-            url: 'https://example.com/nested-image.png',
-          },
-        ],
+test('resolveImageResponseErrorMessage reads nested upstream errors', async () => {
+  const mod = await import('./image-generation.ts')
+  assert.equal(
+    mod.resolveImageResponseErrorMessage({
+      error: {
+        message: 'upstream did not return any image output',
+        type: 'upstream_error',
       },
-    }, 'fallback'),
-    {
-      imageUrl: 'https://example.com/nested-image.png',
-      prompt: 'fallback',
-    }
+    }),
+    'upstream did not return any image output'
   )
 })

@@ -79,14 +79,19 @@ import {
   MIN_DESKTOP_CLI_NODE_MAJOR,
   buildClaudePermissionArgs,
   buildCodexSandboxArgs,
+  buildNodeBackedCliScriptPath,
+  buildWindowsNodeExecutableCandidates,
+  buildWindowsNpmGlobalCliCandidates,
   buildWindowsCommandShimArgs,
   isDesktopCliNodeVersionSupported,
+  resolveWindowsCommandShimCommand,
   resolveCliProbeResult,
   sanitizeCliNpmEnvironment,
   shouldUseWindowsCommandShimForPath,
   supportsCodexAskForApprovalFlag,
 } from '../src/lib/desktop-service.ts'
 import {
+  buildCliRetryOutputSnapshot,
   buildCliInteractionResponse,
   classifyCliStderrLine,
   detectCliInteractionFromText,
@@ -95,6 +100,11 @@ import {
   shouldAutoRetryCliRequest,
   type CliRuntimeDiagnostics as SharedCliRuntimeDiagnostics,
 } from '../src/lib/cli-runtime.ts'
+import {
+  extractCodexCommandExecutionToolUseEntries,
+  extractCodexFunctionCallToolUseEntries,
+  normalizeCliToolInputForDetail,
+} from '../src/lib/cli-tool-events.ts'
 import { resolveInteractionDecision } from '../src/process/execution-orchestrator/interaction-policy.ts'
 
 const DEFAULT_SERVER_BASE_URL = 'https://ai.oneapi.center'
@@ -2027,7 +2037,8 @@ function spawnCommandWithHandlers(
 ) {
   const timeoutMs = options.timeoutMs ?? 30000
   const useWindowsCommandShim = shouldUseWindowsCommandShim(command)
-  const spawnCommand = useWindowsCommandShim ? 'cmd.exe' : command
+  const spawnEnv = { ...process.env, ...options.env }
+  const spawnCommand = useWindowsCommandShim ? resolveWindowsCommandShimCommand(spawnEnv) : command
   const spawnArgs = useWindowsCommandShim
     ? buildWindowsCommandShimArgs(command, args)
     : args
@@ -2043,7 +2054,7 @@ function spawnCommandWithHandlers(
     try {
       child = spawn(spawnCommand, spawnArgs, {
         cwd: options.cwd,
-        env: { ...process.env, ...options.env },
+        env: spawnEnv,
         shell: false,
         windowsVerbatimArguments: useWindowsCommandShim,
         windowsHide: true,
@@ -2199,6 +2210,10 @@ async function locateExecutable(command: string) {
     if (managedNode) {
       return managedNode
     }
+    const commonNode = await firstExistingPath(buildWindowsNodeExecutableCandidates(process.env))
+    if (commonNode) {
+      return commonNode
+    }
   }
 
   if (command === 'npm' || command === 'npm.cmd') {
@@ -2213,6 +2228,10 @@ async function locateExecutable(command: string) {
     if (managedCli) {
       return managedCli
     }
+    const userNpmCli = await firstExistingPath(buildWindowsNpmGlobalCliCandidates(command, process.env))
+    if (userNpmCli) {
+      return userNpmCli
+    }
   }
 
   return locateSystemExecutable(command)
@@ -2224,6 +2243,49 @@ function resolveCliSpawnCommand(command: string, executablePath: string) {
     return command
   }
   return normalized
+}
+
+async function resolveNodeBackedCliInvocation(
+  client: CliClient,
+  executablePath: string,
+  runtime: NodeRuntimeInfo | null,
+  args: string[]
+) {
+  if (process.platform !== 'win32' || !executablePath.trim()) {
+    return {
+      command: resolveCliSpawnCommand(client, executablePath),
+      args,
+    }
+  }
+
+  const scriptPath = buildNodeBackedCliScriptPath(client, executablePath)
+  if (!scriptPath || !(await pathExists(scriptPath))) {
+    return {
+      command: resolveCliSpawnCommand(client, executablePath),
+      args,
+    }
+  }
+
+  const localNodePath = path.join(path.dirname(executablePath), 'node.exe')
+  let nodePath = await firstExistingPath([
+    localNodePath,
+    runtime?.nodePath || '',
+  ])
+  if (!nodePath) {
+    nodePath = await locateExecutable('node')
+  }
+
+  if (!nodePath) {
+    return {
+      command: resolveCliSpawnCommand(client, executablePath),
+      args,
+    }
+  }
+
+  return {
+    command: nodePath,
+    args: [scriptPath, ...args],
+  }
 }
 
 async function inspectCli(client: CliClient): Promise<CliStatus> {
@@ -6013,7 +6075,11 @@ function describeCliToolUse(name: string, input: unknown) {
   const command = extractCommandFromUnknown(input)
   const files = extractCliFilesFromUnknown(input)
   const purpose = extractPurposeFromUnknown(input) || summarizeCommandForCliLog(command)
-  const detail = normalizeCliToolDetail(input && typeof input === 'object' ? safeStringify(input) : '')
+  const detail = normalizeCliToolDetail(
+    input && typeof input === 'object'
+      ? safeStringify(normalizeCliToolInputForDetail(input))
+      : ''
+  )
   return {
     message: `${name ? `正在执行 ${name}` : '正在执行工具调用'}${purpose ? `：${purpose}` : ''}`,
     command,
@@ -6331,10 +6397,6 @@ function buildClaudePromptArgs(input: CliRunRequest, resumeSessionId?: string) {
     ...buildClaudePermissionArgs(!!input.fullAccess),
   ]
 
-  if (input.projectPath?.trim()) {
-    args.push('--add-dir', input.projectPath.trim())
-  }
-
   if (input.model?.trim()) {
     args.push('--model', input.model.trim())
   }
@@ -6377,6 +6439,8 @@ async function runCodexPrompt(
   let consumedAssistantChars = 0
   let sawCodexCompletion = false
   let stoppedAfterCodexCompletion = false
+  let sawCodexVisibleProgress = false
+  const seenToolUseEvents = new Set<string>()
   let activeCodexChild: ChildProcess | null = null
   let codexCompletionStopTimer: NodeJS.Timeout | null = null
   const runtimeDiagnostics: CliRuntimeDiagnostics = {}
@@ -6420,6 +6484,57 @@ async function runCodexPrompt(
       stoppedAfterCodexCompletion = true
       void stopChildProcess(activeCodexChild)
     }, 1200)
+  }
+  const emitCodexToolUse = (
+    toolName: string,
+    toolInput: unknown,
+    sourceKind: string,
+    options: {
+      assistantSnapshot?: string
+      assistantChunk?: string
+    } = {}
+  ) => {
+    const interaction = detectCliInteractionFromToolUse(toolName, toolInput)
+    if (interaction) {
+      emitCliInteractionPrompt({
+        client: 'codex',
+        requestId: input.requestId,
+        sessionId,
+        progress,
+        interaction,
+      })
+    }
+
+    const described = describeCliToolUse(toolName, toolInput)
+    if (!described.meaningful) {
+      return
+    }
+    const eventKey = buildCliToolUseEventKey(toolName, described)
+    if (seenToolUseEvents.has(eventKey)) {
+      return
+    }
+    seenToolUseEvents.add(eventKey)
+    sawCodexVisibleProgress = true
+
+    const assistantSnapshot = options.assistantSnapshot || partialText
+    const assistantChunk = takeAssistantChunk(assistantSnapshot, options.assistantChunk || '')
+    const intentText = summarizeCliIntentStep(assistantChunk || assistantSnapshot)
+    if (intentText && intentText !== lastToolIntentText) {
+      lastToolIntentText = intentText
+      progress.intent(
+        '执行意图',
+        sessionId,
+        intentText,
+        undefined,
+        toolName.trim() ? `intent.before_tool.${toolName.trim()}` : 'intent.before_tool',
+        intentText
+      )
+    }
+    if (described.command) {
+      progress.command(described.message, described.command, sessionId, described.detail, described.files, sourceKind)
+      return
+    }
+    progress.tool(described.message, sessionId, described.detail, described.files, sourceKind)
   }
 
   progress.intent('Codex 已开始处理当前任务。', sessionId, undefined, undefined, 'request.started')
@@ -6498,6 +6613,7 @@ async function runCodexPrompt(
       const streamedAssistantText = extractCodexAssistantTextFromEvent(parsed)
       if (streamedAssistantText) {
         partialText = streamedAssistantText
+        sawCodexVisibleProgress = true
         progress.partial(partialText, sessionId, false, planState)
       }
 
@@ -6505,6 +6621,7 @@ async function runCodexPrompt(
         const assistantText = contentPartsToText(payload.content)
         if (assistantText.trim() && !shouldIgnoreCodexMessage(assistantText)) {
           partialText = assistantText
+          sawCodexVisibleProgress = true
           progress.partial(partialText, sessionId, false, planState)
         }
       }
@@ -6519,40 +6636,30 @@ async function runCodexPrompt(
       for (const candidate of contentCandidates) {
         const toolEntries = extractToolUseEntries(candidate)
         for (const toolEntry of toolEntries) {
-          const interaction = detectCliInteractionFromToolUse(toolEntry.name, toolEntry.input)
-          if (interaction) {
-            emitCliInteractionPrompt({
-              client: 'codex',
-              requestId: input.requestId,
-              sessionId,
-              progress,
-              interaction,
-            })
-          }
-          const described = describeCliToolUse(toolEntry.name, toolEntry.input)
-          if (!described.meaningful) {
-            continue
-          }
-          const assistantChunk = takeAssistantChunk(partialText, toolEntry.textBefore)
-          const intentText = summarizeCliIntentStep(assistantChunk || partialText)
-          if (intentText && intentText !== lastToolIntentText) {
-            lastToolIntentText = intentText
-            progress.intent(
-              '执行意图',
-              sessionId,
-              intentText,
-              undefined,
-              toolEntry.name?.trim() ? `intent.before_tool.${toolEntry.name.trim()}` : 'intent.before_tool',
-              intentText
-            )
-          }
-          const sourceKind = toolEntry.name?.trim() ? `tool_use.${toolEntry.name.trim()}` : 'tool_use'
-          if (described.command) {
-            progress.command(described.message, described.command, sessionId, described.detail, described.files, sourceKind)
-          } else {
-            progress.tool(described.message, sessionId, described.detail, described.files, sourceKind)
-          }
+          emitCodexToolUse(
+            toolEntry.name,
+            toolEntry.input,
+            toolEntry.name?.trim() ? `tool_use.${toolEntry.name.trim()}` : 'tool_use',
+            {
+              assistantSnapshot: partialText,
+              assistantChunk: toolEntry.textBefore,
+            }
+          )
         }
+      }
+
+      const functionCallToolEntries = extractCodexFunctionCallToolUseEntries(parsed)
+      const commandExecutionEntries = extractCodexCommandExecutionToolUseEntries(parsed)
+      for (const toolEntry of [...functionCallToolEntries, ...commandExecutionEntries]) {
+        emitCodexToolUse(
+          toolEntry.name,
+          toolEntry.input,
+          toolEntry.name?.trim() ? `codex.tool_use.${toolEntry.name.trim()}` : 'codex.tool_use',
+          {
+            assistantSnapshot: partialText,
+            assistantChunk: toolEntry.textBefore,
+          }
+        )
       }
 
       const lineFileChanges = extractCodexFileChanges([line])
@@ -6605,6 +6712,8 @@ async function runCodexPrompt(
     planState = null
     lastToolIntentText = ''
     consumedAssistantChars = 0
+    sawCodexVisibleProgress = false
+    seenToolUseEvents.clear()
     sawCodexCompletion = false
     stoppedAfterCodexCompletion = false
     activeCodexChild = null
@@ -6621,10 +6730,13 @@ async function runCodexPrompt(
       attempt,
       aborted: stoppedCliRequests.has(input.requestId),
       exitCode: result.exitCode,
-      output: '',
+      output: buildCliRetryOutputSnapshot(
+        partialText,
+        sawCodexVisibleProgress ? '已产生 Codex 执行日志' : ''
+      ),
     })
   ) {
-    progress.status('检测到上游瞬时异常，已自动重试一次。', sessionId, false, undefined, {
+    progress.status('检测到服务器瞬时异常，已自动重试一次。', sessionId, false, undefined, {
       logKind: 'status',
       sourceKind: 'request.retry.transient',
       detail: retryDiagnostics.probableCause || '',
@@ -6632,6 +6744,7 @@ async function runCodexPrompt(
     partialText = ''
     lastToolIntentText = ''
     consumedAssistantChars = 0
+    seenToolUseEvents.clear()
     sawCodexCompletion = false
     stoppedAfterCodexCompletion = false
     activeCodexChild = null
@@ -6769,7 +6882,6 @@ async function runClaudePrompt(
   const executablePath = await locateExecutable('claude')
   const managedRuntime = await readManagedNodeRuntime()
   const claudeSettings = await readResolvedClaudeSettingsDocument().catch(() => null)
-  const spawnCommand = resolveCliSpawnCommand('claude', executablePath)
   let args = buildClaudePromptArgs(input, resumeSessionId)
   const takeAssistantChunk = (snapshot: string, explicitChunk = '') => {
     const normalizedExplicitChunk = explicitChunk.trim()
@@ -6871,7 +6983,9 @@ async function runClaudePrompt(
     )
   }
 
-  const runClaudeOnce = () => spawnCommandWithHandlers(spawnCommand, args, {
+  const runClaudeOnce = async () => {
+    const invocation = await resolveNodeBackedCliInvocation('claude', executablePath, managedRuntime, args)
+    return spawnCommandWithHandlers(invocation.command, invocation.args, {
     cwd: input.projectPath,
     timeoutMs: 15 * 60 * 1000,
     env: buildClaudeCliEnv(managedRuntime, claudeSettings),
@@ -7068,7 +7182,8 @@ async function runClaudePrompt(
         detail: line,
       })
     },
-  })
+    })
+  }
   let result = await runClaudeOnce()
   clearClaudeResultStopTimer()
   let attempt = 0
@@ -7110,10 +7225,13 @@ async function runClaudePrompt(
       attempt,
       aborted: stoppedCliRequests.has(input.requestId),
       exitCode: result.exitCode,
-      output: '',
+      output: buildCliRetryOutputSnapshot(
+        partialText,
+        seenToolUseEvents.size > 0 ? '已产生 Claude 执行日志' : ''
+      ),
     })
   ) {
-    progress.status('检测到上游瞬时异常，已自动重试一次。', sessionId, false, undefined, {
+    progress.status('检测到服务器瞬时异常，已自动重试一次。', sessionId, false, undefined, {
       logKind: 'status',
       sourceKind: 'request.retry.transient',
       detail: retryDiagnostics.probableCause || '',
@@ -7180,7 +7298,11 @@ async function runClaudePrompt(
   const success =
     !aborted &&
     output.length > 0 &&
-    (result.exitCode === 0 || (sawClaudeResult && stoppedAfterClaudeResult))
+    (
+      result.exitCode === 0 ||
+      (sawClaudeResult && stoppedAfterClaudeResult) ||
+      (sawClaudeResult && finalResult?.is_error !== true)
+    )
   const completedWithWarnings = !aborted && !success && output.length > 0 && !!runtimeDiagnostics.policyIssue
   if (!aborted) {
     progress.status('Claude 输出已结束，正在整理会话记录。', sessionId, true, undefined, {
@@ -8139,6 +8261,17 @@ async function deployCli(webContents: WebContents, request: CliDeployRequest, jo
     }
 
     logger.info('install', 'success', `${client} 安装完成`)
+
+    const postInstallDetection = await inspectCli(client)
+    if (!postInstallDetection.installed) {
+      logger.info(
+        'install',
+        'error',
+        `${client} 安装后仍未检测到可用可执行文件`,
+        postInstallDetection.executablePath || '未找到可执行文件'
+      )
+      return
+    }
   }
 
   logger.info('config', 'running', `正在写入 ${client} 配置`)

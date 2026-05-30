@@ -38,6 +38,26 @@ export type CliTimelineLogEvent = {
   interaction?: CliInteractionPrompt
 }
 
+export function buildCliAbortLogEntry(input: {
+  client: 'codex' | 'claude'
+  requestId: string
+  sessionId: string
+  createdAt?: number
+}): CliLogEntryLike {
+  const createdAt = input.createdAt ?? Date.now()
+  const clientLabel = input.client === 'codex' ? 'Codex' : 'Claude'
+  return {
+    id: `${input.requestId}-aborted-${createdAt}`,
+    requestId: input.requestId,
+    sessionId: input.sessionId,
+    level: 'status',
+    logKind: 'status',
+    sourceKind: 'request.aborted',
+    content: `${clientLabel} 已停止本次回复。`,
+    createdAt,
+  }
+}
+
 export type CliFileChange = {
   path: string
   kind: 'created' | 'modified' | 'deleted' | 'renamed' | 'unknown'
@@ -105,6 +125,24 @@ function isOpenAITextCompatibleModel(value: string) {
   )
 }
 
+function isDeepSeekCodexCompatibleModel(value: string) {
+  const normalized = normalizeModelValue(value)
+  return normalized === 'deepseek-v4-flash' || normalized === 'deepseek-v4-pro'
+}
+
+function isDeepSeekClaudeCompatibleModel(value: string) {
+  return isDeepSeekCodexCompatibleModel(value)
+}
+
+function isMimoCodexCompatibleModel(value: string) {
+  const normalized = normalizeModelValue(value)
+  return normalized === 'mimo-v2.5' || normalized === 'mimo-v2.5-pro'
+}
+
+function isMimoClaudeCompatibleModel(value: string) {
+  return normalizeModelValue(value) === 'mimo-v2.5-pro'
+}
+
 function isClaudeTextCompatibleModel(value: string) {
   const normalized = normalizeModelValue(value)
   return normalized.includes('claude')
@@ -168,6 +206,25 @@ function stripConsumedAssistantChunks(
 
 export function isCodexModel(model: ChatModelOption | string) {
   const normalized = normalizeModelValue(typeof model === 'string' ? model : model.value)
+  if (normalized.startsWith('deepseek')) {
+    if (!isDeepSeekCodexCompatibleModel(normalized)) {
+      return false
+    }
+    if (typeof model !== 'string' && hasEndpointMetadata(model)) {
+      return supportsEndpoint(model, 'openai-response') || supportsEndpoint(model, 'openai-response-compact')
+    }
+    return true
+  }
+  if (normalized.startsWith('mimo-') || normalized.includes('xiaomi') || normalized.includes('mimo')) {
+    if (!isMimoCodexCompatibleModel(normalized)) {
+      return false
+    }
+    if (typeof model !== 'string' && hasEndpointMetadata(model)) {
+      return supportsEndpoint(model, 'openai-response') || supportsEndpoint(model, 'openai-response-compact')
+    }
+    return true
+  }
+
   if (typeof model !== 'string') {
     if (
       (supportsEndpoint(model, 'openai-response') || supportsEndpoint(model, 'openai-response-compact')) &&
@@ -190,6 +247,25 @@ export function isCodexModel(model: ChatModelOption | string) {
 
 export function isClaudeModel(model: ChatModelOption | string) {
   const normalized = normalizeModelValue(typeof model === 'string' ? model : model.value)
+  if (normalized.startsWith('deepseek')) {
+    if (!isDeepSeekClaudeCompatibleModel(normalized)) {
+      return false
+    }
+    if (typeof model !== 'string' && hasEndpointMetadata(model)) {
+      return supportsEndpoint(model, 'anthropic')
+    }
+    return true
+  }
+  if (normalized.startsWith('mimo-') || normalized.includes('xiaomi') || normalized.includes('mimo')) {
+    if (!isMimoClaudeCompatibleModel(normalized)) {
+      return false
+    }
+    if (typeof model !== 'string' && hasEndpointMetadata(model)) {
+      return supportsEndpoint(model, 'anthropic')
+    }
+    return true
+  }
+
   if (typeof model !== 'string') {
     if (supportsEndpoint(model, 'anthropic') && isClaudeTextCompatibleModel(model.value)) {
       return !isImageGenerationModel(model.value)
@@ -481,6 +557,53 @@ export function buildCliTimeline(input: {
   }
 
   return timeline
+}
+
+export function resolveCliLogGroupStatus(
+  events: Array<{
+    kind: CliLogKind
+    level: 'status' | 'error'
+    sourceKind?: string
+    interaction?: CliInteractionPrompt
+  }>
+) {
+  const pendingInteraction = [...events].reverse().find((item) => item.interaction?.status === 'pending')
+  if (pendingInteraction) {
+    return { tone: 'warning', label: '等待确认' as const }
+  }
+
+  const terminal = [...events].reverse().find((item) => {
+    const sourceKind = item.sourceKind || ''
+    return (
+      item.level === 'error' ||
+      sourceKind === 'request.failed' ||
+      sourceKind === 'request.aborted' ||
+      sourceKind === 'request.stream.completed' ||
+      sourceKind === 'result' ||
+      sourceKind === 'result.with_warnings' ||
+      sourceKind === 'turn.completed' ||
+      sourceKind === 'turn.completed.with_warnings'
+    )
+  })
+
+  if (terminal?.sourceKind === 'request.aborted') {
+    return { tone: 'aborted', label: '已停止' as const }
+  }
+  if (terminal?.sourceKind === 'result.with_warnings' || terminal?.sourceKind === 'turn.completed.with_warnings') {
+    return { tone: 'warning', label: '已完成' as const }
+  }
+  if (terminal && (terminal.level === 'error' || terminal.sourceKind === 'request.failed')) {
+    return { tone: 'error', label: '执行失败' as const }
+  }
+  if (
+    terminal?.sourceKind === 'result' ||
+    terminal?.sourceKind === 'turn.completed' ||
+    terminal?.sourceKind === 'request.stream.completed'
+  ) {
+    return { tone: 'success', label: '已完成' as const }
+  }
+
+  return { tone: 'running', label: '进行中' as const }
 }
 
 function normalizeMessageContent(value: string) {

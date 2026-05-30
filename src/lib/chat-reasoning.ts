@@ -112,14 +112,14 @@ export function normalizeStoredDesktopChatMessage(message: ChatMessage): ChatMes
   }
 }
 
-export type DesktopChatStreamParsedLine = {
-  deltaText: string
-  reasoningText: string
-  done: boolean
-  usage?: ChatCompletionResponse['usage']
-}
-
-export function parseDesktopChatStreamDataLine(line: string): DesktopChatStreamParsedLine | null {
+export function parseDesktopChatStreamDataLine(line: string):
+  | {
+      deltaText: string
+      reasoningText: string
+      done: boolean
+      usage?: ChatCompletionResponse['usage']
+    }
+  | null {
   const normalized = line.trim()
   if (!normalized) {
     return null
@@ -159,11 +159,14 @@ export function parseDesktopChatStreamDataLine(line: string): DesktopChatStreamP
   }
 }
 
-export function parseDesktopChatStreamEventBlock(rawEvent: string): DesktopChatStreamParsedLine[] {
-  return rawEvent
-    .split('\n')
-    .filter((line) => line.startsWith('data:'))
-    .map((line) => line.slice(5).trim())
+export type DesktopChatStreamParsedLine = NonNullable<ReturnType<typeof parseDesktopChatStreamDataLine>>
+
+export function parseDesktopChatStreamEventBlock(block: string): DesktopChatStreamParsedLine[] {
+  return block
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => line.startsWith('data:') ? line.slice(5).trim() : line)
     .map((line) => parseDesktopChatStreamDataLine(line))
-    .filter((item): item is DesktopChatStreamParsedLine => item !== null)
+    .filter((line): line is DesktopChatStreamParsedLine => !!line)
 }

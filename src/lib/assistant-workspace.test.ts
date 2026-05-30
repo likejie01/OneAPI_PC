@@ -3,11 +3,13 @@ import assert from 'node:assert/strict'
 import {
   applyCliHistoryTitleOverrides,
   appendCliFallbackAssistantMessage,
+  buildCliAbortLogEntry,
   buildCliRecentSessions,
   buildCliTimeline,
   filterAssistantModels,
   filterModelsByVendor,
   resolveCompatibleModel,
+  resolveCliLogGroupStatus,
 } from './assistant-workspace.ts'
 
 test('filterAssistantModels keeps only compatible CLI models', () => {
@@ -26,11 +28,11 @@ test('filterAssistantModels keeps only compatible CLI models', () => {
 
   assert.deepEqual(
     filterAssistantModels('codex', models).map((item) => item.value),
-    ['gpt-5.4', 'gpt-5.3-codex']
+    ['gpt-5.4', 'gpt-5.3-codex', 'deepseek-v4-flash', 'mimo-v2.5', 'mimo-v2.5-pro']
   )
   assert.deepEqual(
     filterAssistantModels('claude', models).map((item) => item.value),
-    ['claude-sonnet-4-6']
+    ['claude-sonnet-4-6', 'deepseek-v4-flash', 'mimo-v2.5-pro']
   )
   assert.deepEqual(
     filterAssistantModels('chat', models).map((item) => item.value),
@@ -65,7 +67,7 @@ test('filterModelsByVendor exposes Gemini models under the Gemini filter', () =>
   )
 })
 
-test('filterAssistantModels does not treat compatible endpoints as the Claude or Codex brand', () => {
+test('filterAssistantModels exposes only DeepSeek and MIMO models with compatible CLI endpoints', () => {
   const models = [
     {
       label: 'deepseek-chat-only',
@@ -101,11 +103,11 @@ test('filterAssistantModels does not treat compatible endpoints as the Claude or
 
   assert.deepEqual(
     filterAssistantModels('codex', models).map((item) => item.value),
-    []
+    ['deepseek-v4-pro', 'mimo-v2.5']
   )
   assert.deepEqual(
     filterAssistantModels('claude', models).map((item) => item.value),
-    []
+    ['mimo-v2.5-pro']
   )
 })
 
@@ -164,29 +166,7 @@ test('filterAssistantModels keeps chat mode on all non-image models when metadat
   )
 })
 
-test('filterAssistantModels routes all gpt-image models to draw mode only', () => {
-  const models = [
-    { label: 'gpt-image-1', value: 'gpt-image-1' },
-    { label: 'gpt-image-2', value: 'gpt-image-2' },
-    { label: 'gpt-image-2-edit', value: 'gpt-image-2-edit' },
-    { label: 'gpt-5.4', value: 'gpt-5.4' },
-  ]
-
-  assert.deepEqual(
-    filterAssistantModels('draw', models).map((item) => item.value),
-    ['gpt-image-1', 'gpt-image-2', 'gpt-image-2-edit']
-  )
-  assert.deepEqual(
-    filterAssistantModels('chat', models).map((item) => item.value),
-    ['gpt-5.4']
-  )
-  assert.deepEqual(
-    filterAssistantModels('codex', models).map((item) => item.value),
-    ['gpt-5.4']
-  )
-})
-
-test('filterAssistantModels does not infer Claude or Codex brand from DeepSeek and MIMO model names', () => {
+test('filterAssistantModels uses the DeepSeek and MIMO CLI support matrix when metadata is absent', () => {
   const models = [
     { label: 'deepseek-v4-pro', value: 'deepseek-v4-pro' },
     { label: 'deepseek-chat', value: 'deepseek-chat' },
@@ -197,11 +177,11 @@ test('filterAssistantModels does not infer Claude or Codex brand from DeepSeek a
 
   assert.deepEqual(
     filterAssistantModels('codex', models).map((item) => item.value),
-    []
+    ['deepseek-v4-pro', 'mimo-v2.5-pro', 'mimo-v2.5']
   )
   assert.deepEqual(
     filterAssistantModels('claude', models).map((item) => item.value),
-    []
+    ['deepseek-v4-pro', 'mimo-v2.5-pro']
   )
 })
 
@@ -219,8 +199,8 @@ test('resolveCompatibleModel falls back to preferred compatible model', () => {
 
 test('resolveCompatibleModel returns empty when no compatible model exists', () => {
   const models = [
-    { label: 'deepseek-v4-pro', value: 'deepseek-v4-pro' },
-    { label: 'mimo-v2.5-pro', value: 'mimo-v2.5-pro' },
+    { label: 'deepseek-chat', value: 'deepseek-chat' },
+    { label: 'mimo-v2-pro', value: 'mimo-v2-pro' },
   ]
 
   assert.equal(
@@ -430,42 +410,58 @@ test('buildCliTimeline strips assistant intent chunks already attached to logs',
   )
 })
 
-test('buildCliTimeline appends a live partial assistant entry while CLI output is streaming', () => {
-  const timeline = buildCliTimeline({
-    messages: [
-      { id: 'user-1', role: 'user', content: 'hello', createdAt: 1 },
-    ],
-    logs: [
-      { id: 'log-1', requestId: 'req-1', level: 'status', content: '分析需求', createdAt: 2 },
-    ],
-    partial: '正在实时输出',
-    partialCreatedAt: 3,
-    partialModelLabel: 'Codex',
-  })
-
+test('buildCliAbortLogEntry creates a terminal stopped log for optimistic UI state', () => {
   assert.deepEqual(
-    timeline.map((item) => item.id),
-    ['user-1', 'log-1', 'partial-response']
+    buildCliAbortLogEntry({
+      client: 'codex',
+      requestId: 'codex-1',
+      sessionId: 'session-1',
+      createdAt: 100,
+    }),
+    {
+      id: 'codex-1-aborted-100',
+      requestId: 'codex-1',
+      sessionId: 'session-1',
+      level: 'status',
+      logKind: 'status',
+      sourceKind: 'request.aborted',
+      content: 'Codex 已停止本次回复。',
+      createdAt: 100,
+    }
   )
-  const partialEntry = timeline.at(-1)
-  assert.equal(partialEntry?.kind, 'partial')
-  assert.equal(partialEntry?.content, '正在实时输出')
 })
 
-test('buildCliTimeline does not duplicate the final assistant message with an identical partial entry', () => {
-  const timeline = buildCliTimeline({
-    messages: [
-      { id: 'assistant-1', role: 'assistant', content: 'done', createdAt: 4, modelLabel: 'Claude' },
-    ],
-    logs: [],
-    partial: 'done',
-    partialCreatedAt: 3,
-    partialModelLabel: 'Claude',
-  })
+test('resolveCliLogGroupStatus treats stream completion as a terminal completed state', () => {
+  assert.deepEqual(
+    resolveCliLogGroupStatus([
+      {
+        kind: 'status',
+        level: 'status',
+        sourceKind: 'request.started',
+      },
+      {
+        kind: 'status',
+        level: 'status',
+        sourceKind: 'request.stream.completed',
+      },
+    ]),
+    { tone: 'success', label: '已完成' }
+  )
 
   assert.deepEqual(
-    timeline.map((item) => item.id),
-    ['assistant-1']
+    resolveCliLogGroupStatus([
+      {
+        kind: 'status',
+        level: 'status',
+        sourceKind: 'request.stream.completed',
+      },
+      {
+        kind: 'error',
+        level: 'error',
+        sourceKind: 'request.failed',
+      },
+    ]),
+    { tone: 'error', label: '执行失败' }
   )
 })
 

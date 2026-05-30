@@ -4,7 +4,7 @@ import { buildCliExecutionPrompt, CLI_EXECUTION_POLICY, extractCliUserTask } fro
 
 test('CLI execution policy defaults CLI replies to simplified Chinese', () => {
   assert.match(CLI_EXECUTION_POLICY, /默认使用简体中文回复/)
-  assert.match(CLI_EXECUTION_POLICY, /不要请求提升权限/)
+  assert.doesNotMatch(CLI_EXECUTION_POLICY, /不要请求提升权限/)
   assert.match(CLI_EXECUTION_POLICY, /OutputEncoding/)
   assert.match(CLI_EXECUTION_POLICY, /ENOTCACHED/)
 })

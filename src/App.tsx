@@ -1,5 +1,5 @@
 import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { CSSProperties, ChangeEvent, ClipboardEvent, Dispatch, DragEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent, PointerEvent as ReactPointerEvent, ReactNode, SetStateAction, WheelEvent as ReactWheelEvent } from 'react'
+import type { CSSProperties, ChangeEvent, ClipboardEvent, Dispatch, DragEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent, PointerEvent as ReactPointerEvent, ReactNode, SetStateAction } from 'react'
 import {
   Activity,
   Blocks,
@@ -83,7 +83,6 @@ import {
   deleteCliSessions,
   deployCli,
   exportTextFile,
-  getDesktopPathInfo,
   getCliSession,
   getCliDeployPreset,
   getCliStatus,
@@ -128,6 +127,7 @@ import {
 import {
   applyCliHistoryTitleOverrides,
   appendCliFallbackAssistantMessage,
+  buildCliAbortLogEntry,
   buildCliRecentSessions,
   buildCliTimeline,
   type CliTimelineEntry,
@@ -137,6 +137,7 @@ import {
   type ModelVendorFilter,
   prioritizeFavoriteModels,
   resolveCompatibleModel,
+  resolveCliLogGroupStatus,
 } from './lib/assistant-workspace'
 import { resolveCliDeploySettings } from './lib/cli-deploy'
 import {
@@ -156,6 +157,7 @@ import {
   getCliResumeSessionId,
   isDraftCliSessionId,
 } from './lib/cli-session'
+import { shouldRenderCliLogEventRow, shouldRenderCliLogOutputEntry } from './lib/cli-log-rendering'
 import { AUTH_EXPIRED_EVENT, clearStoredDesktopUserId, saveStoredDesktopUserId } from './lib/desktop-client'
 import { deriveDesktopChatDisplayState, normalizeStoredDesktopChatMessage } from './lib/chat-reasoning'
 import {
@@ -185,7 +187,7 @@ import {
   type ImageStylePreset,
 } from './lib/image-style-presets'
 import { groupDrawSessionsByAssistant } from './lib/draw-history'
-import { resolveImageGenerationResult } from './lib/image-generation'
+import { resolveImageGenerationResult, resolveImageResponseErrorMessage } from './lib/image-generation'
 import {
   describeCliWorkspaceStatus,
   isCliStatusInstalled,
@@ -215,6 +217,7 @@ import {
 } from './lib/draw-request'
 import { isRecoverableNetworkError } from './lib/network-retry'
 import { estimateCliSessionContextUsage, isDirectCliCommandPrompt } from './lib/cli-runtime'
+import { formatUserFacingMessage } from './lib/user-facing-message'
 import { buildFinalPrompt } from './process/prompt-assembler/build-final-prompt'
 import { buildImageEditRequest } from './process/image-editing/build-edit-request'
 import { mapImageEditError } from './process/image-editing/map-edit-error'
@@ -230,7 +233,6 @@ import {
   buildCliSessionExportMarkdown,
   buildDrawSessionExportMarkdown,
   buildSessionExportFileName,
-  hasActiveCliPlan,
   mergeCliMessages,
   type ExportCliLogGroup,
 } from './lib/session-history'
@@ -270,7 +272,6 @@ import type {
   CliSessionMessage,
   CliStatus,
   DesktopAppMeta,
-  DesktopPathInfo,
   DesktopUpdateState,
   DeployProgressPayload,
 } from './shared/desktop'
@@ -397,13 +398,17 @@ function resolveRecommendedSubscriptionPlanId(plans: PlanRecord[]) {
 }
 
 function useToastState() {
-  const [message, setMessage] = useState('')
+  const [message, setMessageState] = useState('')
+
+  const setMessage = useCallback((nextMessage: string) => {
+    setMessageState(formatUserFacingMessage(nextMessage))
+  }, [])
 
   useEffect(() => {
     if (!message) {
       return
     }
-    const timer = window.setTimeout(() => setMessage(''), 2800)
+    const timer = window.setTimeout(() => setMessageState(''), 2800)
     return () => window.clearTimeout(timer)
   }, [message])
 
@@ -580,87 +585,6 @@ function isMarkdownPreviewableFile(targetPath: string) {
 
 function isEmbeddedPreviewableFile(targetPath: string) {
   return /\.(pdf)$/i.test(targetPath.trim().toLowerCase())
-}
-
-function isPreviewableDesktopFile(targetPath: string) {
-  return (
-    isImagePreviewableFile(targetPath) ||
-    isEmbeddedPreviewableFile(targetPath) ||
-    isInlinePreviewableFile(targetPath)
-  )
-}
-
-function getPathDisplayName(targetPath: string) {
-  return targetPath.split(/[\\/]/).filter(Boolean).at(-1) || targetPath
-}
-
-function scheduleScrollToBottom(containerRef: React.RefObject<HTMLDivElement | null>) {
-  const scroll = () => {
-    const node = containerRef.current
-    if (!node) {
-      return
-    }
-    node.scrollTop = node.scrollHeight
-  }
-
-  window.requestAnimationFrame(() => {
-    scroll()
-    window.requestAnimationFrame(scroll)
-  })
-}
-
-function useDesktopPathKind(targetPath: string) {
-  const [kind, setKind] = useState<'file' | 'directory' | 'missing'>('file')
-  const normalizedPath = targetPath.trim()
-
-  useEffect(() => {
-    let cancelled = false
-    if (!normalizedPath) {
-      return
-    }
-
-    void getDesktopPathInfo(normalizedPath)
-      .then((info: DesktopPathInfo) => {
-        if (!cancelled) {
-          setKind(info.kind)
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setKind('missing')
-        }
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [normalizedPath])
-
-  return normalizedPath ? kind : 'missing'
-}
-
-function CliPathChip(props: {
-  ownerId: string
-  path: string
-  onOpenFile: (ownerId: string, path: string) => void
-  onPathContextMenu?: (event: MouseEvent<HTMLButtonElement>, ownerId: string, path: string) => void
-}) {
-  const { ownerId, path, onOpenFile, onPathContextMenu } = props
-  const kind = useDesktopPathKind(path)
-  const Icon = kind === 'directory' ? FolderOpen : FileText
-
-  return (
-    <button
-      type='button'
-      className={`ghost-button tiny cli-log-file ${kind === 'directory' ? 'directory' : ''}`.trim()}
-      onClick={() => onOpenFile(ownerId, path)}
-      onContextMenu={onPathContextMenu ? (event) => onPathContextMenu(event, ownerId, path) : undefined}
-      title={path}
-    >
-      <Icon size={14} />
-      <span>{getPathDisplayName(path)}</span>
-    </button>
-  )
 }
 
 function useComposerAttachments(toast: (message: string) => void) {
@@ -941,7 +865,6 @@ type ComposerTokenItem = {
 function renderComposer(props: {
   inputRef?: React.RefObject<HTMLInputElement | null>
   onAttachmentInputChange?: (event: ChangeEvent<HTMLInputElement>) => void | Promise<void>
-  inputAccept?: string
   textareaRef: React.RefObject<HTMLTextAreaElement | null>
   value: string
   placeholder: string
@@ -958,7 +881,6 @@ function renderComposer(props: {
   const {
     inputRef,
     onAttachmentInputChange,
-    inputAccept,
     textareaRef,
     value,
     placeholder,
@@ -980,7 +902,6 @@ function renderComposer(props: {
           ref={inputRef}
           type='file'
           multiple
-          accept={inputAccept}
           className='hidden-file-input'
           onChange={onAttachmentInputChange}
         />
@@ -1318,7 +1239,7 @@ const CLI_REASONING_OPTIONS = [
 ] as const
 
 const CHAT_REASONING_OPTIONS = [
-  { label: '关', value: 'off' },
+  { label: '关闭', value: 'off' },
   ...CLI_REASONING_OPTIONS,
 ] as const
 
@@ -2306,128 +2227,19 @@ function AttachmentPreviewModal(props: {
   onImageContextMenu?: (event: MouseEvent<HTMLImageElement | HTMLDivElement>, preview: Extract<AttachmentPreviewState, { mode: 'image' }>) => void
 }) {
   const { preview, onClose, onImageContextMenu } = props
-  const stageRef = useRef<HTMLDivElement | null>(null)
-  const dragStateRef = useRef<{
-    pointerId: number
-    startX: number
-    startY: number
-    originX: number
-    originY: number
-  } | null>(null)
-  const [imageScale, setImageScale] = useState(1)
-  const [imageOffset, setImageOffset] = useState({ x: 0, y: 0 })
-  const [draggingImage, setDraggingImage] = useState(false)
-  const previewResetKey = preview?.mode === 'image'
-    ? `${preview.mode}:${preview.name}:${preview.src}`
-    : preview
-      ? `${preview.mode}:${preview.name}`
-      : ''
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      setImageScale(1)
-      setImageOffset({ x: 0, y: 0 })
-      setDraggingImage(false)
-      dragStateRef.current = null
-    }, 0)
-    return () => window.clearTimeout(timer)
-  }, [previewResetKey])
-
   if (!preview) {
     return null
-  }
-
-  const clampImageScale = (value: number) => Math.min(6, Math.max(0.5, value))
-  const adjustImageScale = (multiplier: number) => {
-    setImageScale((current) => clampImageScale(current * multiplier))
-  }
-
-  const handleImageWheel = (event: ReactWheelEvent<HTMLDivElement>) => {
-    if (preview.mode !== 'image') {
-      return
-    }
-    event.preventDefault()
-    const stageRect = stageRef.current?.getBoundingClientRect()
-    const zoomFactor = event.deltaY < 0 ? 1.12 : 1 / 1.12
-    setImageScale((current) => {
-      const nextScale = clampImageScale(current * zoomFactor)
-      if (!stageRect || nextScale === current) {
-        return nextScale
-      }
-      const scaleRatio = nextScale / current
-      const relativeX = event.clientX - stageRect.left - stageRect.width / 2
-      const relativeY = event.clientY - stageRect.top - stageRect.height / 2
-      setImageOffset((offset) => ({
-        x: offset.x - relativeX * (scaleRatio - 1),
-        y: offset.y - relativeY * (scaleRatio - 1),
-      }))
-      return nextScale
-    })
-  }
-
-  const handleImagePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (preview.mode !== 'image' || event.button !== 0) {
-      return
-    }
-    dragStateRef.current = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      originX: imageOffset.x,
-      originY: imageOffset.y,
-    }
-    setDraggingImage(true)
-    event.currentTarget.setPointerCapture(event.pointerId)
-  }
-
-  const handleImagePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const dragState = dragStateRef.current
-    if (!dragState || dragState.pointerId !== event.pointerId) {
-      return
-    }
-    setImageOffset({
-      x: dragState.originX + (event.clientX - dragState.startX),
-      y: dragState.originY + (event.clientY - dragState.startY),
-    })
-  }
-
-  const stopImageDragging = (event?: ReactPointerEvent<HTMLDivElement>) => {
-    const dragState = dragStateRef.current
-    if (event && dragState && event.currentTarget.hasPointerCapture(dragState.pointerId)) {
-      event.currentTarget.releasePointerCapture(dragState.pointerId)
-    }
-    dragStateRef.current = null
-    setDraggingImage(false)
   }
 
   let previewContent: ReactNode
   if (preview.mode === 'image') {
     previewContent = (
-      <div
-        ref={stageRef}
-        className={`image-preview-pan-shell ${draggingImage ? 'dragging' : ''}`}
-        onWheel={handleImageWheel}
-        onPointerDown={handleImagePointerDown}
-        onPointerMove={handleImagePointerMove}
-        onPointerUp={stopImageDragging}
-        onPointerCancel={stopImageDragging}
-        onPointerLeave={() => {
-          if (!dragStateRef.current) {
-            setDraggingImage(false)
-          }
-        }}
-      >
-        <img
-          src={preview.src}
-          alt={preview.name}
-          className='image-preview-full'
-          draggable={false}
-          style={{
-            transform: `translate3d(${imageOffset.x}px, ${imageOffset.y}px, 0) scale(${imageScale})`,
-          }}
-          onContextMenu={(event) => onImageContextMenu?.(event, preview)}
-        />
-      </div>
+      <img
+        src={preview.src}
+        alt={preview.name}
+        className='image-preview-full'
+        onContextMenu={(event) => onImageContextMenu?.(event, preview)}
+      />
     )
   } else if (preview.mode === 'iframe') {
     previewContent = <iframe src={preview.src} title={preview.name} className='attachment-preview-frame' />
@@ -2452,26 +2264,6 @@ function AttachmentPreviewModal(props: {
             <strong>{preview.name}</strong>
             <span title={preview.path}>{preview.path}</span>
           </div>
-          {preview.mode === 'image' ? (
-            <div className='image-preview-toolbar'>
-              <button className='ghost-button tiny' type='button' onClick={() => adjustImageScale(1 / 1.15)}>
-                <span>缩小</span>
-              </button>
-              <button
-                className='ghost-button tiny'
-                type='button'
-                onClick={() => {
-                  setImageScale(1)
-                  setImageOffset({ x: 0, y: 0 })
-                }}
-              >
-                <span>重置</span>
-              </button>
-              <button className='ghost-button tiny' type='button' onClick={() => adjustImageScale(1.15)}>
-                <span>放大</span>
-              </button>
-            </div>
-          ) : null}
           <button className='ghost-button tiny' type='button' onClick={onClose}>
             <X size={14} />
             <span>关闭</span>
@@ -2562,41 +2354,6 @@ type CliPaletteItem =
       source: 'extension'
       extension: CliExtensionViewItem
     }
-
-function CliPlanFloatingPanel(props: {
-  plan: CliPlanState | null
-}) {
-  const resolvedPlan = props.plan
-  if (!resolvedPlan || !hasActiveCliPlan(resolvedPlan)) {
-    return null
-  }
-
-  return (
-    <aside className='cli-plan-floating-panel' aria-label='当前计划进度'>
-      <div className='cli-plan-floating-head'>
-        <strong>计划</strong>
-        <span>{resolvedPlan.items.length} 项</span>
-      </div>
-      {resolvedPlan.explanation ? <p className='cli-plan-floating-summary'>{resolvedPlan.explanation}</p> : null}
-      <div className='cli-plan-floating-list'>
-        {resolvedPlan.items.map((item) => (
-          <div key={item.id} className='cli-plan-floating-item'>
-            <span className={`cli-plan-status-icon ${item.status}`}>
-              {item.status === 'completed' ? (
-                '✔'
-              ) : item.status === 'in_progress' ? (
-                <LoaderCircle className='spin' size={13} />
-              ) : (
-                '○'
-              )}
-            </span>
-            <span className='cli-plan-status-text'>{item.step}</span>
-          </div>
-        ))}
-      </div>
-    </aside>
-  )
-}
 
 function MessageCliExtensionChips(props: {
   items?: CliExtensionEntry[]
@@ -3303,9 +3060,8 @@ function MessageFileChangeLinks(props: {
     content: string
   } | null
   onOpenFile: (ownerId: string, path: string) => void
-  onPathContextMenu?: (event: MouseEvent<HTMLButtonElement>, ownerId: string, path: string) => void
 }) {
-  const { ownerId, files = [], previewFile, onOpenFile, onPathContextMenu } = props
+  const { ownerId, files = [], previewFile, onOpenFile } = props
   const uniqueFiles = Array.from(new Map(files.map((item) => [item.path, item])).values())
   if (!uniqueFiles.length) {
     return null
@@ -3314,13 +3070,16 @@ function MessageFileChangeLinks(props: {
   return (
     <div className='message-file-links'>
       {uniqueFiles.map((item) => (
-        <CliPathChip
+        <button
           key={item.path}
-          ownerId={ownerId}
-          path={item.path}
-          onOpenFile={onOpenFile}
-          onPathContextMenu={onPathContextMenu}
-        />
+          type='button'
+          className='ghost-button tiny cli-log-file'
+          onClick={() => onOpenFile(ownerId, item.path)}
+          title={item.path}
+        >
+          <FileText size={14} />
+          <span>{item.path.split(/[\\/]/).filter(Boolean).at(-1) || item.path}</span>
+        </button>
       ))}
       {previewFile && previewFile.ownerId === ownerId && (
         <div className='inline-file-preview'>
@@ -3333,14 +3092,12 @@ function MessageFileChangeLinks(props: {
 }
 
 function CliLogBubble(props: {
-  client: 'codex' | 'claude'
   item: Extract<CliTimelineEntry, { kind: 'log' }>
   expanded: boolean
   onToggle: () => void
   expandedEventIds: string[]
   onToggleEvent: (eventId: string) => void
   onOpenFile: (ownerId: string, path: string) => void
-  onPathContextMenu?: (event: MouseEvent<HTMLButtonElement>, ownerId: string, path: string) => void
   onCopy: () => void
   onDelete: () => void
   onRespondInteraction: (requestId: string, interactionId: string, action: CliInteractionAction) => void
@@ -3354,14 +3111,12 @@ function CliLogBubble(props: {
   } | null
 }) {
   const {
-    client,
     item,
     expanded,
     onToggle,
     expandedEventIds,
     onToggleEvent,
     onOpenFile,
-    onPathContextMenu,
     onCopy,
     onDelete,
     onRespondInteraction,
@@ -3372,7 +3127,6 @@ function CliLogBubble(props: {
   const uniqueFiles = Array.from(new Map(item.files.map((file) => [file.path, file])).values())
   const executedToolNames = collectCliToolNames(item.events.map((eventItem) => eventItem.sourceKind))
   const logStatus = resolveCliLogGroupStatus(item.events)
-  const showRunningIndicators = logStatus.tone === 'running'
   const commandCount = item.events.filter((eventItem) => eventItem.kind === 'command').length
   const visibleEvents = expanded ? item.events : item.events.slice(0, 1)
   const visualBlocks = buildCliVisualLogBlocks(visibleEvents)
@@ -3541,13 +3295,16 @@ function CliLogBubble(props: {
             <span className='cli-log-detail-label'>相关文件</span>
             <div className='cli-log-files inline-expanded'>
               {uniqueEventFiles.map((fileItem) => (
-                <CliPathChip
+                <button
                   key={fileItem.path}
-                  ownerId={ownerId}
-                  path={fileItem.path}
-                  onOpenFile={onOpenFile}
-                  onPathContextMenu={onPathContextMenu}
-                />
+                  className='ghost-button tiny cli-log-file'
+                  type='button'
+                  onClick={() => onOpenFile(ownerId, fileItem.path)}
+                  title={fileItem.path}
+                >
+                  <FileText size={14} />
+                  <span>{fileItem.path.split(/[\\/]/).filter(Boolean).at(-1) || fileItem.path}</span>
+                </button>
               ))}
             </div>
             {previewFile && previewFile.ownerId === ownerId ? (
@@ -3565,8 +3322,8 @@ function CliLogBubble(props: {
   return (
     <div className={`message-bubble system cli-log-bubble ${logStatus.tone === 'error' ? 'error' : ''}`}>
       <button className='cli-log-card-head' type='button' onClick={onToggle}>
-        <span className='message-role'>{client === 'codex' ? 'Codex' : 'Claude'}</span>
-        <strong>{logStatus.tone === 'error' ? '运行异常' : `已执行 ${item.events.length} 步`}</strong>
+        <span className='message-role'>{logStatus.tone === 'error' ? '运行异常' : '运行日志'}</span>
+        <strong>{`已执行 ${item.events.length} 步`}</strong>
         <small>{expanded ? '点击收起' : '点击展开'}</small>
       </button>
       <MessageCliExtensionChips items={requestedExtensions} label='本轮指定扩展' />
@@ -3610,9 +3367,6 @@ function CliLogBubble(props: {
               {showBlockHead ? (
                 <button className='cli-log-phase-head' type='button' onClick={() => toggleSection(block.id)}>
                   <span className='cli-log-phase-headline'>
-                    {showRunningIndicators && isCliRunningIndicatorSourceKind(block.intent?.sourceKind) ? (
-                      <LoaderCircle className='spin cli-log-inline-spinner' size={13} />
-                    ) : null}
                     <strong>{blockTitle}</strong>
                   </span>
                   <small>{[block.summary, `${block.rows.length || block.items.length || (block.intent ? 1 : 0)} 条`].filter(Boolean).join(' · ')}</small>
@@ -3623,11 +3377,7 @@ function CliLogBubble(props: {
                 <div className='cli-log-time-group'>
                   <div className='cli-log-time-head plain static'>
                     <div className='cli-log-time-copy plain'>
-                      {showRunningIndicators && isCliRunningIndicatorSourceKind(block.intent?.sourceKind) ? (
-                        <LoaderCircle className='spin cli-log-inline-spinner' size={13} />
-                      ) : (
-                        <span className='cli-log-time-dot' />
-                      )}
+                      <span className='cli-log-time-dot' />
                       <strong>{blockTitle}</strong>
                       {block.intent?.createdAt ? <small>{formatCliLogTime(block.intent.createdAt)}</small> : null}
                     </div>
@@ -3640,10 +3390,6 @@ function CliLogBubble(props: {
                 const normalizedHeadline = normalizeComparable(rawHeadline)
                 const effectiveHeadline = normalizedHeadline === normalizeComparable(blockTitle) ? '' : rawHeadline
                 const timeCollapsed = collapsedTimeGroupIds.includes(timeGroup.id)
-                const timeGroupShowsRunning =
-                  showRunningIndicators &&
-                  firstRow?.type === 'event' &&
-                  isCliRunningIndicatorSourceKind(firstRow.event.sourceKind)
 
                 return (
                   <div key={timeGroup.id} className='cli-log-time-group'>
@@ -3653,11 +3399,7 @@ function CliLogBubble(props: {
                       onClick={() => toggleTimeGroup(timeGroup.id)}
                     >
                       <div className={`cli-log-time-copy ${effectiveHeadline ? '' : 'plain'}`.trim()}>
-                        {timeGroupShowsRunning ? (
-                          <LoaderCircle className='spin cli-log-inline-spinner' size={13} />
-                        ) : (
-                          <span className='cli-log-time-dot' />
-                        )}
+                        <span className='cli-log-time-dot' />
                         {effectiveHeadline ? <strong>{effectiveHeadline}</strong> : null}
                         <small>{timeGroup.timeLabel}</small>
                       </div>
@@ -3669,24 +3411,25 @@ function CliLogBubble(props: {
                           if (row.type === 'output') {
                             const headline =
                               resolveCliOutputGroupHeadline(row.items) || row.summary || '执行细节'
-                            const outputEntries = row.items.flatMap((eventItem) => {
+                            const outputEntries = row.items.map((eventItem) => {
                               const detailLines = resolveCliDiagnosticDetail(eventItem)
                                 .split(/\r?\n/)
                                 .map((line) => line.trim())
                                 .filter(Boolean)
-                              if (!detailLines.length) {
-                                return [{
-                                  id: eventItem.id,
-                                  headline: eventItem.message,
-                                  detail: '',
-                                }]
-                              }
+                              const entryHeadline =
+                                resolveCliOutputGroupHeadline([eventItem]) ||
+                                detailLines[0] ||
+                                eventItem.message
+                              const detailBody = detailLines.join('\n')
 
-                              return detailLines.map((line, detailIndex) => ({
-                                id: `${eventItem.id}-${detailIndex}`,
-                                headline: line,
-                                detail: '',
-                              }))
+                              return {
+                                id: eventItem.id,
+                                headline: entryHeadline,
+                                detail:
+                                  normalizeComparable(detailBody) === normalizeComparable(entryHeadline)
+                                    ? ''
+                                    : detailBody,
+                              }
                             })
 
                             return (
@@ -3701,6 +3444,14 @@ function CliLogBubble(props: {
                                   const duplicatedPrimary =
                                     outputIndex === 0 &&
                                     normalizeComparable(entry.headline) === normalizeComparable(effectiveHeadline || entry.headline)
+                                  if (!shouldRenderCliLogOutputEntry({
+                                    outputIndex,
+                                    entryHeadline: entry.headline,
+                                    entryDetail: entry.detail,
+                                    groupHeadline: headline,
+                                  })) {
+                                    return null
+                                  }
 
                                   return (
                                     <div key={entry.id} className='cli-log-output-inline'>
@@ -3725,8 +3476,13 @@ function CliLogBubble(props: {
                           const duplicatedPrimary =
                             rowIndex === 0 &&
                             normalizeComparable(eventItem.message) === normalizeComparable(effectiveHeadline || eventItem.message)
-                          const showRunningIndicator =
-                            showRunningIndicators && isCliRunningIndicatorSourceKind(eventItem.sourceKind)
+                          if (!shouldRenderCliLogEventRow({
+                            duplicatedPrimary,
+                            hasExpandableContent,
+                            hasInteraction: !!eventItem.interaction,
+                          })) {
+                            return null
+                          }
 
                           return (
                             <div
@@ -3738,11 +3494,7 @@ function CliLogBubble(props: {
                                 } as CSSProperties
                               }
                             >
-                              {showRunningIndicator ? (
-                                <LoaderCircle className='spin cli-log-inline-spinner' size={13} />
-                              ) : (
-                                <div className='cli-log-event-dot' />
-                              )}
+                              <div className='cli-log-event-dot' />
                               <div className='cli-log-event-body'>
                                 {!duplicatedPrimary ? (
                                   <div className='cli-log-event-head'>
@@ -3821,13 +3573,16 @@ function CliLogBubble(props: {
       {uniqueFiles.length > 0 && !expanded ? (
         <div className='cli-log-files'>
           {uniqueFiles.slice(0, 4).map((fileItem) => (
-            <CliPathChip
+            <button
               key={fileItem.path}
-              ownerId={item.id}
-              path={fileItem.path}
-              onOpenFile={onOpenFile}
-              onPathContextMenu={onPathContextMenu}
-            />
+              className='ghost-button tiny cli-log-file'
+              type='button'
+              onClick={() => onOpenFile(item.id, fileItem.path)}
+              title={fileItem.path}
+            >
+              <FileText size={14} />
+              <span>{fileItem.path.split(/[\\/]/).filter(Boolean).at(-1) || fileItem.path}</span>
+            </button>
           ))}
         </div>
       ) : null}
@@ -3882,16 +3637,14 @@ function ConversationFindBar(props: {
 
   useEffect(() => {
     if (!active) {
-      const timer = window.setTimeout(() => {
+      window.setTimeout(() => {
         setOpen(false)
         setQuery('')
         setMatches([])
         setActiveIndex(0)
         clearHighlights()
       }, 0)
-      return () => window.clearTimeout(timer)
     }
-    return undefined
   }, [active, clearHighlights])
 
   useEffect(() => {
@@ -3913,23 +3666,26 @@ function ConversationFindBar(props: {
   }, [active, open])
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      clearHighlights()
-      if (!open || !query.trim()) {
+    clearHighlights()
+    if (!open || !query.trim()) {
+      window.setTimeout(() => {
         setMatches([])
         setActiveIndex(0)
-        return
-      }
-      const container = containerRef.current
-      if (!container) {
+      }, 0)
+      return
+    }
+    const container = containerRef.current
+    if (!container) {
+      window.setTimeout(() => {
         setMatches([])
-        return
-      }
-      const nextMatches = applyConversationSearchHighlights(container, itemSelector, query)
+      }, 0)
+      return
+    }
+    const nextMatches = applyConversationSearchHighlights(container, itemSelector, query)
+    window.setTimeout(() => {
       setMatches(nextMatches)
       setActiveIndex(nextMatches.length ? 0 : 0)
     }, 0)
-    return () => window.clearTimeout(timer)
   }, [clearHighlights, containerRef, itemSelector, open, query])
 
   useEffect(() => {
@@ -4123,7 +3879,8 @@ function shouldReplaceStreamingCliIntentEntry(previous: CliLogEntry | undefined,
     next.logKind === 'intent' &&
     previous.sourceKind === next.sourceKind &&
     previous.content === next.content &&
-    previous.indentLevel === next.indentLevel
+    previous.indentLevel === next.indentLevel &&
+    next.sourceKind === 'agent_progress.prompt'
   )
 }
 
@@ -4184,16 +3941,6 @@ function buildCliVisualLogBlocks<T extends {
   } | null = null
 
   for (const eventItem of events) {
-    if (
-      eventItem.sourceKind === 'request.stream.completed' ||
-      eventItem.sourceKind === 'result' ||
-      eventItem.sourceKind === 'result.with_warnings' ||
-      eventItem.sourceKind === 'turn.completed' ||
-      eventItem.sourceKind === 'turn.completed.with_warnings'
-    ) {
-      continue
-    }
-
     if (isCliIntentEvent(eventItem)) {
       currentBlock = {
         id: `intent-block-${eventItem.id}`,
@@ -4360,19 +4107,6 @@ function resolveCliDiagnosticSummary(items: Array<{
   return '执行细节'
 }
 
-function isCliRunningIndicatorSourceKind(sourceKind?: string) {
-  const normalized = (sourceKind || '').trim().toLowerCase()
-  return (
-    normalized === 'request.started' ||
-    normalized === 'turn.started' ||
-    normalized === 'thread.started' ||
-    normalized === 'session.connected' ||
-    normalized === 'system.init' ||
-    normalized.startsWith('orchestrator.intent') ||
-    normalized.startsWith('orchestrator.prepare')
-  )
-}
-
 function resolveCliOutputGroupHeadline(items: Array<{
   sourceKind?: string
   detail?: string
@@ -4499,48 +4233,6 @@ function serializeCliLogEvent(item: {
     item.detail ? `detail:\n${item.detail}` : '',
     item.exitCode !== undefined ? `exitCode: ${item.exitCode}` : '',
   ].filter(Boolean).join('\n\n')
-}
-
-function resolveCliLogGroupStatus(
-  events: Array<{
-    kind: CliLogKind
-    level: 'status' | 'error'
-    sourceKind?: string
-    interaction?: CliInteractionPrompt
-  }>
-) {
-  const pendingInteraction = [...events].reverse().find((item) => item.interaction?.status === 'pending')
-  if (pendingInteraction) {
-    return { tone: 'warning', label: '等待确认' as const }
-  }
-
-  const terminal = [...events].reverse().find((item) => {
-    const sourceKind = item.sourceKind || ''
-    return (
-      item.level === 'error' ||
-      sourceKind === 'request.failed' ||
-      sourceKind === 'request.aborted' ||
-      sourceKind === 'result' ||
-      sourceKind === 'result.with_warnings' ||
-      sourceKind === 'turn.completed' ||
-      sourceKind === 'turn.completed.with_warnings'
-    )
-  })
-
-  if (terminal?.sourceKind === 'request.aborted') {
-    return { tone: 'aborted', label: '已停止' as const }
-  }
-  if (terminal?.sourceKind === 'result.with_warnings' || terminal?.sourceKind === 'turn.completed.with_warnings') {
-    return { tone: 'warning', label: '已完成' as const }
-  }
-  if (terminal && (terminal.level === 'error' || terminal.sourceKind === 'request.failed')) {
-    return { tone: 'error', label: '执行失败' as const }
-  }
-  if (terminal?.sourceKind === 'result' || terminal?.sourceKind === 'turn.completed') {
-    return { tone: 'success', label: '已完成' as const }
-  }
-
-  return { tone: 'running', label: '进行中' as const }
 }
 
 function PasswordField(props: {
@@ -5259,7 +4951,6 @@ function AssistantsChatWorkspace(props: {
       title: clipText(userMessage.content.replace(/\s+/g, ' '), 24) || session.title,
       messages: renderedHistory,
     }))
-    scheduleScrollToBottom(messageStreamRef)
     pendingRequestIdRef.current = requestId
     stoppingRef.current = false
     chatPromptHistory.commitInputValue(userMessageContent)
@@ -5769,10 +5460,9 @@ function AssistantsChatWorkspace(props: {
                     </div>
                   ) : (
                     item.pending &&
+                    !item.reasoningContent?.trim() &&
                     (!item.content.trim() || item.content === CHAT_PENDING_MESSAGE_LABEL)
-                      ? item.reasoningContent?.trim()
-                        ? null
-                        : <PendingMessageContent label={CHAT_PENDING_MESSAGE_LABEL.replace(/\.+$/, '')} />
+                      ? <PendingMessageContent label={CHAT_PENDING_MESSAGE_LABEL.replace(/\.+$/, '')} />
                       : <LazyMarkdownContent
                           content={item.content}
                           onSelectionContextMenu={handleMessageSelectionContextMenu}
@@ -6411,7 +6101,6 @@ function DrawWorkspace(props: {
   const drawQualityLabel =
     DRAW_QUALITY_OPTIONS.find((item) => item.value === drawQuality)?.label || drawQuality
   const drawRandomSeedLabel = drawRandomSeed ? '随机' : '固定'
-  const activeImageAttachment = [...attachments].reverse().find((item) => item.kind === 'image')
   const imageStyleMenuItems = useMemo(
     () => decorateImageStylePresets(imageStylePresets, imageStyleFavorites, imageStyleSearch),
     [imageStyleFavorites, imageStylePresets, imageStyleSearch]
@@ -7033,6 +6722,11 @@ function DrawWorkspace(props: {
   }
 
   function buildResolvedDrawAssistantMessage(response: ImageGenerationResponse, fallbackPrompt: string) {
+    const responseErrorMessage = resolveImageResponseErrorMessage(response)
+    if (responseErrorMessage) {
+      throw new Error(responseErrorMessage)
+    }
+
     const resolvedImage = resolveImageGenerationResult(response, fallbackPrompt)
     if (!resolvedImage) {
       throw new Error('模型没有返回可展示的图片。')
@@ -7083,7 +6777,10 @@ function DrawWorkspace(props: {
       replacePendingDrawMessage(snapshot.sessionId, {
         id: `draw-assistant-error-${failedAt}`,
         role: 'assistant',
-        content: error instanceof Error ? error.message : '图片生成失败',
+        content: formatUserFacingMessage(
+          error instanceof Error ? error.message : '图片生成失败',
+          '图片生成失败'
+        ),
         createdAt: failedAt,
         modelLabel: DEFAULT_DRAW_MODEL,
       })
@@ -7118,6 +6815,7 @@ function DrawWorkspace(props: {
     }
 
     const nextSessionId = ensureDrawSession()
+    const imageAttachment = attachments.find((item) => item.kind === 'image')
     const now = getCurrentTimestamp()
     const nextPrompt = buildImageStyleAugmentedPrompt(draft, selectedImageStylePreset || { prompt: '' })
     const userMessage: ChatBubbleMessage = {
@@ -7145,7 +6843,6 @@ function DrawWorkspace(props: {
       updatedAt: now + 1,
       messages: [...session.messages, userMessage, pendingMessage],
     }))
-    scheduleScrollToBottom(messageStreamRef)
 
     drawPromptHistory.commitInputValue(nextPrompt)
     setDraft('')
@@ -7165,7 +6862,7 @@ function DrawWorkspace(props: {
         size: drawSize,
         quality: drawQuality,
         seed: drawRandomSeed ? undefined : 1,
-        imageAttachment: activeImageAttachment,
+        imageAttachment,
       })
       const response = await executeDrawRequest(request)
       replacePendingDrawMessage(nextSessionId, buildResolvedDrawAssistantMessage(response, nextPrompt))
@@ -7186,7 +6883,7 @@ function DrawWorkspace(props: {
             size: drawSize,
             quality: drawQuality,
             seed: drawRandomSeed ? undefined : 1,
-            imageAttachment: activeImageAttachment,
+            imageAttachment,
           }),
         })
         toast('网络异常，连接恢复后会自动继续当前图片生成。')
@@ -7197,7 +6894,10 @@ function DrawWorkspace(props: {
       replacePendingDrawMessage(nextSessionId, {
         id: `draw-assistant-error-${failedAt}`,
         role: 'assistant',
-        content: error instanceof Error ? error.message : '图片生成失败',
+        content: formatUserFacingMessage(
+          error instanceof Error ? error.message : '图片生成失败',
+          '图片生成失败'
+        ),
         createdAt: failedAt,
         modelLabel: DEFAULT_DRAW_MODEL,
       })
@@ -7333,7 +7033,6 @@ function DrawWorkspace(props: {
           {renderComposer({
             inputRef: attachmentInputRef,
             onAttachmentInputChange: handleAttachmentInputChange,
-            inputAccept: 'image/*',
             textareaRef: draftRef,
             value: draft,
             placeholder: '输入绘图提示词；粘贴、拖拽图片后会自动进入修图模式',
@@ -7380,22 +7079,6 @@ function DrawWorkspace(props: {
                 ]
               : [],
             leftActions: [
-              {
-                key: 'draw-upload',
-                node: (
-                  <button
-                    className={`ghost-button tiny toolbar-icon-button ${activeImageAttachment ? 'selected-toggle' : ''}`}
-                    type='button'
-                    title={activeImageAttachment ? '当前为修图模式：将调用 /v1/images/edits' : '上传图片进入修图模式'}
-                    aria-label={activeImageAttachment ? '修图模式' : '上传图片'}
-                    disabled={sending}
-                    onClick={() => attachmentInputRef.current?.click()}
-                  >
-                    {activeImageAttachment ? <PencilLine size={16} /> : <Plus size={16} />}
-                    <span className='toolbar-icon-label'>{activeImageAttachment ? '修图' : '上传图'}</span>
-                  </button>
-                ),
-              },
               {
                 key: 'group',
                 node: (
@@ -7568,7 +7251,7 @@ function DrawWorkspace(props: {
             ],
             fileAssets: attachments
               .filter((item) => item.kind === 'image')
-              .slice(-1)
+              .slice(0, 1)
               .map((item) => ({
                 id: item.id,
                 name: item.name,
@@ -8946,7 +8629,6 @@ function CliWorkspace(props: {
     [activeSessionId, sessionLogsMap]
   )
   const activePlan = activeSessionId ? sessionPlansMap[activeSessionId] || null : null
-  const visibleActivePlan = hasActiveCliPlan(activePlan) ? activePlan : null
   const activePartial = activeSessionId ? sessionPartialMap[activeSessionId] || '' : ''
   const activeExtensionPreferenceBucket =
     cliExtensionPreferences[currentExtensionPreferenceKey] || createEmptyCliExtensionPreferenceBucket()
@@ -10529,31 +10211,18 @@ function CliWorkspace(props: {
   }
 
   async function handlePreviewFile(ownerId: string, targetPath: string) {
+    if (!isInlinePreviewableFile(targetPath)) {
+      await openDesktopTarget(targetPath)
+      return
+    }
+
+    if (previewFile?.ownerId === ownerId && previewFile.path === targetPath) {
+      setPreviewFile(null)
+      return
+    }
+
     try {
-      const pathInfo = await getDesktopPathInfo(targetPath)
-      const resolvedPath = pathInfo.path || targetPath
-
-      if (pathInfo.kind === 'directory') {
-        await openDesktopFolder(resolvedPath)
-        return
-      }
-
-      if (isImagePreviewableFile(resolvedPath) || isEmbeddedPreviewableFile(resolvedPath)) {
-        await openAttachmentPreview(resolvedPath)
-        return
-      }
-
-      if (!isInlinePreviewableFile(resolvedPath)) {
-        await openDesktopTarget(resolvedPath)
-        return
-      }
-
-      if (previewFile?.ownerId === ownerId && previewFile.path === resolvedPath) {
-        setPreviewFile(null)
-        return
-      }
-
-      const details = await readDesktopFilePreview(resolvedPath)
+      const details = await readDesktopFilePreview(targetPath)
       setPreviewFile({
         ownerId,
         ...details,
@@ -10561,51 +10230,6 @@ function CliWorkspace(props: {
     } catch (error) {
       toast(error instanceof Error ? error.message : '文件预览失败')
     }
-  }
-
-  function handleCliLogPathContextMenu(event: MouseEvent<HTMLButtonElement>, ownerId: string, targetPath: string) {
-    event.preventDefault()
-    const x = event.clientX
-    const y = event.clientY
-
-    void getDesktopPathInfo(targetPath)
-      .then((pathInfo: DesktopPathInfo) => {
-        const resolvedPath = pathInfo.path || targetPath
-        const items: SessionContextMenuState['items'] = []
-
-        if (pathInfo.kind !== 'directory' && isPreviewableDesktopFile(resolvedPath)) {
-          items.push({
-            key: 'preview',
-            label: '预览',
-            onSelect: () => handlePreviewFile(ownerId, resolvedPath),
-          })
-        }
-
-        if (pathInfo.kind !== 'directory') {
-          items.push({
-            key: 'open-file',
-            label: '打开文件',
-            onSelect: () => openDesktopTarget(resolvedPath),
-          })
-        }
-
-        items.push({
-          key: 'open-folder',
-          label: '打开文件夹',
-          onSelect: () => openDesktopFolder(resolvedPath, pathInfo.kind !== 'directory'),
-        })
-
-        setSessionContextMenu({
-          x,
-          y,
-          title: getPathDisplayName(resolvedPath),
-          scope: 'general',
-          items,
-        })
-      })
-      .catch((error: unknown) => {
-        toast(error instanceof Error ? error.message : '读取路径信息失败')
-      })
   }
 
   function loadPromptForEdit(
@@ -10734,7 +10358,6 @@ function CliWorkspace(props: {
       ...current,
       [currentSessionKey]: [...(current[currentSessionKey] || []), userMessage],
     }))
-    scheduleScrollToBottom(threadRef)
     persistCliMessageOverlay(currentSessionKey, userMessage)
     setSessionPartialMap((current) => ({
       ...current,
@@ -10749,18 +10372,12 @@ function CliWorkspace(props: {
         finalPrompt: promptWithAttachments,
         commandTitle: directCommand ? '直接命令准备' : '扩展与上下文准备',
         command: directCommand ? cleanedPrompt : '',
-        extensions: directCommand
-          ? []
-          : requestExtensions.map((item) => ({
-              kind: item.kind,
-              name: item.name,
-            })),
       }).map((event) => ({
         id: event.id,
         requestId,
         sessionId: currentSessionKey,
         level: event.severity === 'error' ? 'error' : 'status',
-        logKind: (event.phase === 'intent' ? 'intent' : event.phase === 'result' ? 'result' : 'status') as CliLogKind,
+        logKind: 'status',
         sourceKind: `orchestrator.${event.phase}`,
         content: event.title,
         indentLevel: event.indentLevel,
@@ -10972,14 +10589,13 @@ function CliWorkspace(props: {
       baselineUpdatedAt: compactState?.baselineUpdatedAt ?? 0,
     }
     toast(`检测到压缩后增量上下文估算已使用 ${Math.round(effectiveRatio * 100)}%，已自动执行 /compact。`)
-    const timer = window.setTimeout(() => {
+    window.setTimeout(() => {
       void submitCliPrompt('/compact', {
         silentValidation: true,
         nextAttachments: [],
         directCommand: true,
       })
     }, 0)
-    return () => window.clearTimeout(timer)
   }, [active, activeMessages, activePlan, activeSessionId, client, prompt, running, submitCliPrompt, toast])
 
   useEffect(() => {
@@ -11025,6 +10641,25 @@ function CliWorkspace(props: {
     stoppingRunRef.current = true
     activeRequestIdRef.current = ''
     setRunning(false)
+    if (activeSessionId) {
+      const abortLog = buildCliAbortLogEntry({
+        client,
+        requestId,
+        sessionId: activeSessionId,
+      })
+      setSessionLogsMap((current) => ({
+        ...current,
+        [activeSessionId]: mergeCliLogs(current[activeSessionId] || [], [abortLog]),
+      }))
+      setSessionPartialMap((current) => ({
+        ...current,
+        [activeSessionId]: '',
+      }))
+      setSessionPlansMap((current) => ({
+        ...current,
+        [activeSessionId]: null,
+      }))
+    }
     try {
       await stopCliPrompt(requestId)
       toast(`已停止 ${client === 'codex' ? 'Codex' : 'Claude'} 当前回复。`)
@@ -11140,7 +10775,7 @@ function CliWorkspace(props: {
             </div>
           )}
 
-          <div className={`conversation-scroll-region ${visibleActivePlan ? 'has-cli-plan' : ''}`}>
+          <div className='conversation-scroll-region'>
             <div className='workspace-corner-tools'>
               <ConversationFindBar
                 active={active}
@@ -11148,7 +10783,6 @@ function CliWorkspace(props: {
                 itemSelector='.message-bubble, .cli-log-bubble'
               />
             </div>
-            <CliPlanFloatingPanel plan={visibleActivePlan} />
             <div ref={threadRef} className='cli-thread'>
               {activeTimeline.length === 0 ? (
                 <EmptyState
@@ -11162,14 +10796,12 @@ function CliWorkspace(props: {
                   return (
                     <CliLogBubble
                       key={item.id}
-                      client={client}
                       item={item}
                       expanded={expanded}
                       onToggle={() => toggleLogGroup(item.id)}
                       expandedEventIds={expandedLogEventMap[item.id] || []}
                       onToggleEvent={(eventId) => toggleLogEvent(item.id, eventId)}
                       onOpenFile={(ownerId, path) => void handlePreviewFile(ownerId, path)}
-                      onPathContextMenu={handleCliLogPathContextMenu}
                       onCopy={() => void copyText(item.events.map((eventItem) => serializeCliLogEvent(eventItem)).join('\n\n'))}
                       onDelete={() => handleDeleteCliLogGroup(item)}
                       onRespondInteraction={handleRespondCliInteraction}
@@ -11214,7 +10846,6 @@ function CliWorkspace(props: {
                         files={item.fileChanges}
                         previewFile={previewFile}
                         onOpenFile={(ownerId, path) => void handlePreviewFile(ownerId, path)}
-                        onPathContextMenu={handleCliLogPathContextMenu}
                       />
                     ) : null}
                     <BubbleMeta

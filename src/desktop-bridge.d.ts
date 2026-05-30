@@ -1,41 +1,44 @@
-export {}
 import type {
   AssistantHistoryScope,
   AssistantHistorySnapshotEntry,
   CliClient,
+  CliDeployPreset,
   CliDeployRequest,
-  CliInteractionResponseRequest,
+  CliExtensionEntry,
+  CliExtensionInstallRequest,
+  CliExtensionInstallResult,
   CliHistoryEntry,
+  CliInteractionResponseRequest,
   CliProgressPayload,
-  CliSessionDetails,
   CliRunRequest,
   CliRunResponse,
+  CliSessionDetails,
   CliStatus,
-  DesktopAttachmentSaveRequest,
-  DesktopAttachmentSaveResult,
-  DesktopCopyImageRequest,
-  DesktopFilePreview,
-  DesktopPathInfo,
-  DesktopImageEditRequest,
-  DesktopSaveImageRequest,
-  DesktopSaveImageResult,
-  CliDeployPreset,
-  CliExtensionEntry,
   DeployProgressPayload,
-  DesktopAppMeta,
   DesktopApiRequest,
   DesktopApiResponse,
+  DesktopAppMeta,
+  DesktopAttachmentSaveRequest,
+  DesktopAttachmentSaveResult,
   DesktopChatStreamPayload,
   DesktopChatStreamRequest,
+  DesktopCopyImageRequest,
   DesktopDeleteCliMessageRequest,
   DesktopDeleteCliSessionsRequest,
   DesktopDeleteCliSessionsResult,
   DesktopExportTextFileRequest,
   DesktopExportTextFileResult,
+  DesktopFilePreview,
+  DesktopImageEditRequest,
+  DesktopPathInfo,
+  DesktopSaveImageRequest,
+  DesktopSaveImageResult,
   DesktopTranslateSelectionPayload,
   DesktopUpdateState,
 } from './shared/desktop'
 import type { ImageGenerationResponse } from './shared/contracts'
+
+type Unsubscribe = () => void
 
 declare global {
   interface Window {
@@ -70,10 +73,7 @@ declare global {
       openAssistantHistoryFolder: (scope: AssistantHistoryScope, sessionId: string) => Promise<void>
       syncAssistantHistory: (scope: AssistantHistoryScope, entries: AssistantHistorySnapshotEntry[]) => Promise<void>
       pickProjectDirectory: () => Promise<string>
-      getCliStatus: () => Promise<{
-        codex: CliStatus
-        claude: CliStatus
-      }>
+      getCliStatus: () => Promise<{ codex: CliStatus; claude: CliStatus }>
       listCliHistory: (client: CliClient, limit?: number) => Promise<CliHistoryEntry[]>
       getCliSession: (client: CliClient, sessionId: string) => Promise<CliSessionDetails | null>
       deleteCliMessage: (input: DesktopDeleteCliMessageRequest) => Promise<CliSessionDetails | null>
@@ -82,16 +82,12 @@ declare global {
       runCliPrompt: (input: CliRunRequest) => Promise<CliRunResponse>
       stopCliPrompt: (requestId: string) => Promise<void>
       respondCliInteraction: (input: CliInteractionResponseRequest) => Promise<void>
-      onCliProgress: (
-        listener: (payload: CliProgressPayload) => void
-      ) => () => void
+      onCliProgress: (listener: (payload: CliProgressPayload) => void) => Unsubscribe
       openFiles: (paths: string[]) => Promise<void>
       setWindowTitle: (projectName?: string) => Promise<void>
       setThemeMode: (mode: 'light' | 'dark') => Promise<void>
       deployCli: (input: CliDeployRequest) => Promise<{ jobId: string }>
-      saveAttachment: (
-        input: DesktopAttachmentSaveRequest
-      ) => Promise<DesktopAttachmentSaveResult>
+      saveAttachment: (input: DesktopAttachmentSaveRequest) => Promise<DesktopAttachmentSaveResult>
       editImage: (input: DesktopImageEditRequest) => Promise<ImageGenerationResponse>
       saveImage: (input: DesktopSaveImageRequest) => Promise<DesktopSaveImageResult>
       copyImageToClipboard: (input: DesktopCopyImageRequest) => Promise<void>
@@ -100,25 +96,13 @@ declare global {
       statPath: (targetPath: string) => Promise<DesktopPathInfo>
       getCliDeployPreset: (client: CliClient) => Promise<CliDeployPreset>
       listCliExtensions: (client: CliClient) => Promise<CliExtensionEntry[]>
-      installCliExtension: (input: {
-        client: CliClient
-        extensionId: string
-      }) => Promise<{
-        success: boolean
-        message: string
-      }>
-      onDeployProgress: (
-        listener: (payload: DeployProgressPayload) => void
-      ) => () => void
-      onChatStream: (
-        listener: (payload: DesktopChatStreamPayload) => void
-      ) => () => void
-      onTranslateSelectionRequested: (
-        listener: (payload: DesktopTranslateSelectionPayload) => void
-      ) => () => void
-      onUpdateState: (
-        listener: (payload: DesktopUpdateState) => void
-      ) => () => void
+      installCliExtension: (input: CliExtensionInstallRequest) => Promise<CliExtensionInstallResult>
+      onDeployProgress: (listener: (payload: DeployProgressPayload) => void) => Unsubscribe
+      onChatStream: (listener: (payload: DesktopChatStreamPayload) => void) => Unsubscribe
+      onTranslateSelectionRequested: (listener: (payload: DesktopTranslateSelectionPayload) => void) => Unsubscribe
+      onUpdateState: (listener: (payload: DesktopUpdateState) => void) => Unsubscribe
     }
   }
 }
+
+export {}

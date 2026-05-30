@@ -35,15 +35,36 @@ test('direct command stays as one prompt without execution policy', () => {
   assert.equal(result.finalPrompt, '/resume')
 })
 
-test('buildFinalPrompt clarifies Claude identity and workspace write scope', () => {
+test('buildFinalPrompt describes restricted project-folder permissions explicitly', () => {
   const result = buildFinalPrompt({
-    prompt: '修复日志问题',
+    prompt: '修改项目内文件',
     client: 'claude',
-    projectPath: 'D:\\WorkSpace\\NewAPI\\OneAPI_PC_Rebuild',
     fullAccess: false,
+    projectPath: 'D:\\WorkSpace\\NewAPI\\OneAPI_PC_Rebuild',
   })
+  assert.match(result.permissionBlock, /当前为受限模式/)
+  assert.match(result.permissionBlock, /客户端不再附加读写限制/)
+})
 
-  assert.match(result.finalPrompt, /Claude 编码助手/)
-  assert.match(result.finalPrompt, /不要自称 Kiro、Codex、ChatGPT/)
-  assert.match(result.permissionBlock, /允许读取、创建、修改、删除文件与目录/)
+test('buildFinalPrompt describes full-access user-requested path permissions', () => {
+  const result = buildFinalPrompt({
+    prompt: '修改 D:\\Temp\\x.txt',
+    client: 'codex',
+    fullAccess: true,
+    projectPath: 'D:\\WorkSpace\\NewAPI\\OneAPI_PC_Rebuild',
+  })
+  assert.match(result.permissionBlock, /当前为全权限模式/)
+  assert.match(result.permissionBlock, /客户端不再附加读写限制/)
+})
+
+test('buildFinalPrompt tells CLI agents to quote PowerShell paths with special characters', () => {
+  const result = buildFinalPrompt({
+    prompt: '读取 D:\\WorkSpace\\Demo\\src\\app\\(main)\\page.tsx',
+    client: 'codex',
+    fullAccess: true,
+    projectPath: 'D:\\WorkSpace\\Demo',
+  })
+  assert.match(result.finalPrompt, /-LiteralPath/)
+  assert.match(result.finalPrompt, /路径包含空格、括号/)
+  assert.match(result.finalPrompt, /不要把 \$null 作为参数传给 PowerShell 命令/)
 })

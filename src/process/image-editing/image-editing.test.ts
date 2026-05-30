@@ -24,5 +24,12 @@ test('image edit request falls back to supported model', () => {
 })
 
 test('image edit error maps timeout to readable cause', () => {
-  assert.equal(mapImageEditError(new Error('upstream timeout 524')), '图片编辑上游超时')
+  assert.equal(mapImageEditError(new Error('upstream timeout 524')), '图片编辑服务器超时')
+})
+
+test('image edit error maps empty upstream image output to actionable cause', () => {
+  assert.equal(
+    mapImageEditError(new Error('upstream did not return any image output')),
+    '图片编辑服务器未返回图片，请调整提示词或更换可编辑图片模型/渠道'
+  )
 })
