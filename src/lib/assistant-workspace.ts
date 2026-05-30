@@ -481,6 +481,53 @@ export function buildCliTimeline(input: {
   return timeline
 }
 
+export function resolveCliLogGroupStatus(
+  events: Array<{
+    kind: CliLogKind
+    level: 'status' | 'error'
+    sourceKind?: string
+    interaction?: CliInteractionPrompt
+  }>
+) {
+  const pendingInteraction = [...events].reverse().find((item) => item.interaction?.status === 'pending')
+  if (pendingInteraction) {
+    return { tone: 'warning', label: '等待确认' as const }
+  }
+
+  const terminal = [...events].reverse().find((item) => {
+    const sourceKind = item.sourceKind || ''
+    return (
+      item.level === 'error' ||
+      sourceKind === 'request.failed' ||
+      sourceKind === 'request.aborted' ||
+      sourceKind === 'request.stream.completed' ||
+      sourceKind === 'result' ||
+      sourceKind === 'result.with_warnings' ||
+      sourceKind === 'turn.completed' ||
+      sourceKind === 'turn.completed.with_warnings'
+    )
+  })
+
+  if (terminal?.sourceKind === 'request.aborted') {
+    return { tone: 'aborted', label: '已停止' as const }
+  }
+  if (terminal?.sourceKind === 'result.with_warnings' || terminal?.sourceKind === 'turn.completed.with_warnings') {
+    return { tone: 'warning', label: '已完成' as const }
+  }
+  if (terminal && (terminal.level === 'error' || terminal.sourceKind === 'request.failed')) {
+    return { tone: 'error', label: '执行失败' as const }
+  }
+  if (
+    terminal?.sourceKind === 'result' ||
+    terminal?.sourceKind === 'turn.completed' ||
+    terminal?.sourceKind === 'request.stream.completed'
+  ) {
+    return { tone: 'success', label: '已完成' as const }
+  }
+
+  return { tone: 'running', label: '进行中' as const }
+}
+
 function normalizeMessageContent(value: string) {
   return value.replace(/\s+/g, ' ').trim()
 }

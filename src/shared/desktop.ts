@@ -116,6 +116,11 @@ export interface DesktopUpdateState {
   announcements?: DesktopAnnouncement[]
 }
 
+export interface DesktopPathInfo {
+  path: string
+  kind: 'file' | 'directory' | 'missing'
+}
+
 export interface CliHistoryEntry {
   id: string
   title: string

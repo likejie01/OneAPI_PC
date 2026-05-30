@@ -9,6 +9,7 @@ import {
   filterAssistantModels,
   filterModelsByVendor,
   resolveCompatibleModel,
+  resolveCliLogGroupStatus,
 } from './assistant-workspace.ts'
 
 test('filterAssistantModels keeps only compatible CLI models', () => {
@@ -427,6 +428,40 @@ test('buildCliAbortLogEntry creates a terminal stopped log for optimistic UI sta
       content: 'Codex 已停止本次回复。',
       createdAt: 100,
     }
+  )
+})
+
+test('resolveCliLogGroupStatus treats stream completion as a terminal completed state', () => {
+  assert.deepEqual(
+    resolveCliLogGroupStatus([
+      {
+        kind: 'status',
+        level: 'status',
+        sourceKind: 'request.started',
+      },
+      {
+        kind: 'status',
+        level: 'status',
+        sourceKind: 'request.stream.completed',
+      },
+    ]),
+    { tone: 'success', label: '已完成' }
+  )
+
+  assert.deepEqual(
+    resolveCliLogGroupStatus([
+      {
+        kind: 'status',
+        level: 'status',
+        sourceKind: 'request.stream.completed',
+      },
+      {
+        kind: 'error',
+        level: 'error',
+        sourceKind: 'request.failed',
+      },
+    ]),
+    { tone: 'error', label: '执行失败' }
   )
 })
 

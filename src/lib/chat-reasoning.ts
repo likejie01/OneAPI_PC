@@ -158,3 +158,15 @@ export function parseDesktopChatStreamDataLine(line: string):
     return null
   }
 }
+
+export type DesktopChatStreamParsedLine = NonNullable<ReturnType<typeof parseDesktopChatStreamDataLine>>
+
+export function parseDesktopChatStreamEventBlock(block: string): DesktopChatStreamParsedLine[] {
+  return block
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => line.startsWith('data:') ? line.slice(5).trim() : line)
+    .map((line) => parseDesktopChatStreamDataLine(line))
+    .filter((line): line is DesktopChatStreamParsedLine => !!line)
+}

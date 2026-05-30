@@ -5,10 +5,14 @@ import {
   isCliStatusInstalled,
   MIN_DESKTOP_CLI_NODE_MAJOR,
   buildCodexSandboxArgs,
+  buildNodeBackedCliScriptPath,
+  buildWindowsNodeExecutableCandidates,
+  buildWindowsNpmGlobalCliCandidates,
   buildWindowsCommandShimArgs,
   isDesktopCliNodeVersionSupported,
   parseNodeMajorVersion,
   quoteWindowsCommandArg,
+  resolveWindowsCommandShimCommand,
   resolveCliSetupPeerState,
   sanitizeCliNpmEnvironment,
   selectReusableDesktopApiKey,
@@ -50,6 +54,77 @@ test('buildWindowsCommandShimArgs uses call for command shims with spaces', () =
       '/d',
       '/c',
       'call "C:\\Users\\Honor Elite\\AppData\\Roaming\\oneapi-pc\\toolchains\\npm-global\\claude.cmd" --version',
+    ]
+  )
+})
+
+test('resolveWindowsCommandShimCommand avoids PATH-dependent cmd lookup', () => {
+  assert.equal(
+    resolveWindowsCommandShimCommand({
+      ComSpec: 'C:\\Windows\\System32\\cmd.exe',
+      PATH: 'D:\\OneAPI\\toolchains\\npm-global;D:\\OneAPI\\toolchains\\node',
+    }),
+    'C:\\Windows\\System32\\cmd.exe'
+  )
+  assert.equal(
+    resolveWindowsCommandShimCommand({
+      SystemRoot: 'C:\\Windows',
+      PATH: 'D:\\OneAPI\\toolchains\\npm-global',
+    }),
+    'C:\\Windows\\System32\\cmd.exe'
+  )
+})
+
+test('buildNodeBackedCliScriptPath resolves npm CLI wrapper targets on Windows', () => {
+  assert.equal(
+    buildNodeBackedCliScriptPath('claude', 'C:\\Users\\demo\\AppData\\Roaming\\npm\\claude'),
+    'C:\\Users\\demo\\AppData\\Roaming\\npm\\node_modules\\@anthropic-ai\\claude-code\\cli.js'
+  )
+  assert.equal(
+    buildNodeBackedCliScriptPath('claude', 'C:\\Users\\demo\\AppData\\Roaming\\npm\\claude.cmd'),
+    'C:\\Users\\demo\\AppData\\Roaming\\npm\\node_modules\\@anthropic-ai\\claude-code\\cli.js'
+  )
+  assert.equal(
+    buildNodeBackedCliScriptPath('codex', 'C:\\Users\\demo\\AppData\\Roaming\\npm\\codex.cmd'),
+    'C:\\Users\\demo\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\bin\\codex.js'
+  )
+})
+
+test('buildWindowsNpmGlobalCliCandidates finds user npm cli shims without PATH', () => {
+  assert.deepEqual(
+    buildWindowsNpmGlobalCliCandidates('claude', {
+      APPDATA: 'C:\\Users\\demo\\AppData\\Roaming',
+      USERPROFILE: 'C:\\Users\\demo',
+    }),
+    [
+      'C:\\Users\\demo\\AppData\\Roaming\\npm\\claude.cmd',
+      'C:\\Users\\demo\\AppData\\Roaming\\npm\\claude.exe',
+      'C:\\Users\\demo\\AppData\\Roaming\\npm\\claude',
+    ]
+  )
+  assert.deepEqual(
+    buildWindowsNpmGlobalCliCandidates('claude', {
+      USERPROFILE: 'C:\\Users\\demo',
+    }),
+    [
+      'C:\\Users\\demo\\AppData\\Roaming\\npm\\claude.cmd',
+      'C:\\Users\\demo\\AppData\\Roaming\\npm\\claude.exe',
+      'C:\\Users\\demo\\AppData\\Roaming\\npm\\claude',
+    ]
+  )
+})
+
+test('buildWindowsNodeExecutableCandidates finds common Node installs without PATH', () => {
+  assert.deepEqual(
+    buildWindowsNodeExecutableCandidates({
+      ProgramFiles: 'C:\\Program Files',
+      'ProgramFiles(x86)': 'C:\\Program Files (x86)',
+      LOCALAPPDATA: 'C:\\Users\\demo\\AppData\\Local',
+    }),
+    [
+      'C:\\Program Files\\nodejs\\node.exe',
+      'C:\\Program Files (x86)\\nodejs\\node.exe',
+      'C:\\Users\\demo\\AppData\\Local\\Programs\\nodejs\\node.exe',
     ]
   )
 })

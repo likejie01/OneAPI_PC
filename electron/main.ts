@@ -52,7 +52,7 @@ import {
   formatDesktopRequestTimeoutMessage,
   resolveDesktopRequestTimeoutMs,
 } from '../src/lib/request-timeouts.ts'
-import { parseDesktopChatStreamDataLine } from '../src/lib/chat-reasoning.ts'
+import { parseDesktopChatStreamEventBlock, type DesktopChatStreamParsedLine } from '../src/lib/chat-reasoning.ts'
 import {
   buildClaudePlanStateFromRecords,
   buildCodexPlanStateFromRecords,
@@ -77,15 +77,21 @@ import { extractCliUserTask } from '../src/lib/cli-prompt.ts'
 import { isCliSessionReadyForLatestTurn } from '../src/lib/cli-session-readiness.ts'
 import {
   MIN_DESKTOP_CLI_NODE_MAJOR,
+  buildClaudePermissionArgs,
   buildCodexSandboxArgs,
+  buildNodeBackedCliScriptPath,
+  buildWindowsNodeExecutableCandidates,
+  buildWindowsNpmGlobalCliCandidates,
   buildWindowsCommandShimArgs,
   isDesktopCliNodeVersionSupported,
+  resolveWindowsCommandShimCommand,
   resolveCliProbeResult,
   sanitizeCliNpmEnvironment,
   shouldUseWindowsCommandShimForPath,
   supportsCodexAskForApprovalFlag,
 } from '../src/lib/desktop-service.ts'
 import {
+  buildCliRetryOutputSnapshot,
   buildCliInteractionResponse,
   classifyCliStderrLine,
   detectCliInteractionFromText,
@@ -99,7 +105,6 @@ import {
   extractCodexFunctionCallToolUseEntries,
   normalizeCliToolInputForDetail,
 } from '../src/lib/cli-tool-events.ts'
-import { resolveImageResponseErrorMessage } from '../src/lib/image-generation.ts'
 import { resolveInteractionDecision } from '../src/process/execution-orchestrator/interaction-policy.ts'
 
 const DEFAULT_SERVER_BASE_URL = 'https://ai.oneapi.center'
@@ -1264,6 +1269,42 @@ function emitChatStream(sender: WebContents, payload: DesktopChatStreamPayload) 
   sender.send('desktop:chat-stream', payload)
 }
 
+function emitParsedChatStreamLine(
+  sender: WebContents,
+  requestId: string,
+  parsedLine: DesktopChatStreamParsedLine,
+  usage: ChatCompletionResponse['usage'] | undefined
+) {
+  if (parsedLine.deltaText) {
+    emitChatStream(sender, {
+      requestId,
+      type: 'delta',
+      text: parsedLine.deltaText,
+    })
+  }
+  if (parsedLine.reasoningText) {
+    emitChatStream(sender, {
+      requestId,
+      type: 'reasoning',
+      text: parsedLine.reasoningText,
+    })
+  }
+
+  const nextUsage = parsedLine.usage || usage
+  if (parsedLine.done) {
+    emitChatStream(sender, {
+      requestId,
+      type: 'done',
+      usage: nextUsage,
+    })
+  }
+
+  return {
+    done: parsedLine.done,
+    usage: nextUsage,
+  }
+}
+
 async function requestChatStream(sender: WebContents, input: DesktopChatStreamRequest) {
   const controller = new AbortController()
   activeApiRequests.set(input.requestId, controller)
@@ -1323,42 +1364,22 @@ async function requestChatStream(sender: WebContents, input: DesktopChatStreamRe
       buffer = events.pop() || ''
 
       for (const rawEvent of events) {
-        const dataLines = rawEvent
-          .split('\n')
-          .filter((line) => line.startsWith('data:'))
-          .map((line) => line.slice(5).trim())
-
-        for (const line of dataLines) {
-          const parsedLine = parseDesktopChatStreamDataLine(line)
-          if (!parsedLine) {
-            continue
-          }
-
-          if (parsedLine.deltaText) {
-            emitChatStream(sender, {
-              requestId: input.requestId,
-              type: 'delta',
-              text: parsedLine.deltaText,
-            })
-          }
-          if (parsedLine.reasoningText) {
-            emitChatStream(sender, {
-              requestId: input.requestId,
-              type: 'reasoning',
-              text: parsedLine.reasoningText,
-            })
-          }
-          if (parsedLine.usage) {
-            usage = parsedLine.usage
-          }
-          if (parsedLine.done) {
-            emitChatStream(sender, {
-              requestId: input.requestId,
-              type: 'done',
-              usage,
-            })
+        for (const parsedLine of parseDesktopChatStreamEventBlock(rawEvent)) {
+          const emitted = emitParsedChatStreamLine(sender, input.requestId, parsedLine, usage)
+          usage = emitted.usage
+          if (emitted.done) {
             return
           }
+        }
+      }
+    }
+
+    if (buffer.trim()) {
+      for (const parsedLine of parseDesktopChatStreamEventBlock(buffer)) {
+        const emitted = emitParsedChatStreamLine(sender, input.requestId, parsedLine, usage)
+        usage = emitted.usage
+        if (emitted.done) {
+          return
         }
       }
     }
@@ -2016,7 +2037,8 @@ function spawnCommandWithHandlers(
 ) {
   const timeoutMs = options.timeoutMs ?? 30000
   const useWindowsCommandShim = shouldUseWindowsCommandShim(command)
-  const spawnCommand = useWindowsCommandShim ? 'cmd.exe' : command
+  const spawnEnv = { ...process.env, ...options.env }
+  const spawnCommand = useWindowsCommandShim ? resolveWindowsCommandShimCommand(spawnEnv) : command
   const spawnArgs = useWindowsCommandShim
     ? buildWindowsCommandShimArgs(command, args)
     : args
@@ -2032,7 +2054,7 @@ function spawnCommandWithHandlers(
     try {
       child = spawn(spawnCommand, spawnArgs, {
         cwd: options.cwd,
-        env: { ...process.env, ...options.env },
+        env: spawnEnv,
         shell: false,
         windowsVerbatimArguments: useWindowsCommandShim,
         windowsHide: true,
@@ -2188,6 +2210,10 @@ async function locateExecutable(command: string) {
     if (managedNode) {
       return managedNode
     }
+    const commonNode = await firstExistingPath(buildWindowsNodeExecutableCandidates(process.env))
+    if (commonNode) {
+      return commonNode
+    }
   }
 
   if (command === 'npm' || command === 'npm.cmd') {
@@ -2202,6 +2228,10 @@ async function locateExecutable(command: string) {
     if (managedCli) {
       return managedCli
     }
+    const userNpmCli = await firstExistingPath(buildWindowsNpmGlobalCliCandidates(command, process.env))
+    if (userNpmCli) {
+      return userNpmCli
+    }
   }
 
   return locateSystemExecutable(command)
@@ -2213,6 +2243,49 @@ function resolveCliSpawnCommand(command: string, executablePath: string) {
     return command
   }
   return normalized
+}
+
+async function resolveNodeBackedCliInvocation(
+  client: CliClient,
+  executablePath: string,
+  runtime: NodeRuntimeInfo | null,
+  args: string[]
+) {
+  if (process.platform !== 'win32' || !executablePath.trim()) {
+    return {
+      command: resolveCliSpawnCommand(client, executablePath),
+      args,
+    }
+  }
+
+  const scriptPath = buildNodeBackedCliScriptPath(client, executablePath)
+  if (!scriptPath || !(await pathExists(scriptPath))) {
+    return {
+      command: resolveCliSpawnCommand(client, executablePath),
+      args,
+    }
+  }
+
+  const localNodePath = path.join(path.dirname(executablePath), 'node.exe')
+  let nodePath = await firstExistingPath([
+    localNodePath,
+    runtime?.nodePath || '',
+  ])
+  if (!nodePath) {
+    nodePath = await locateExecutable('node')
+  }
+
+  if (!nodePath) {
+    return {
+      command: resolveCliSpawnCommand(client, executablePath),
+      args,
+    }
+  }
+
+  return {
+    command: nodePath,
+    args: [scriptPath, ...args],
+  }
 }
 
 async function inspectCli(client: CliClient): Promise<CliStatus> {
@@ -2346,6 +2419,22 @@ async function readFilePreview(targetPath: string) {
   }
 }
 
+async function statDesktopPath(targetPath: string) {
+  const resolved = path.resolve(targetPath)
+  try {
+    const stat = await fs.stat(resolved)
+    return {
+      path: resolved,
+      kind: stat.isDirectory() ? 'directory' : 'file',
+    } as const
+  } catch {
+    return {
+      path: resolved,
+      kind: 'missing',
+    } as const
+  }
+}
+
 async function requestImageEdit(input: DesktopImageEditRequest) {
   const headers = new Headers()
   if (input.apiKey?.trim()) {
@@ -2400,12 +2489,14 @@ async function requestImageEdit(input: DesktopImageEditRequest) {
 
   const data = await parseResponse(response)
   if (!response.ok) {
-    throw new Error(getResponseErrorMessage(data, response.status, `图片编辑失败（${response.status}）`))
-  }
-
-  const responseErrorMessage = resolveImageResponseErrorMessage(data)
-  if (responseErrorMessage) {
-    throw new Error(responseErrorMessage)
+    const message =
+      typeof data === 'object' &&
+      data &&
+      'message' in data &&
+      typeof data.message === 'string'
+        ? data.message
+        : `图片编辑失败（${response.status}）`
+    throw new Error(message)
   }
 
   return data
@@ -2704,14 +2795,10 @@ function createCodexProviderSection(apiKey: string, baseUrl: string): TomlSectio
 function createCodexWindowsSection(): TomlSectionBlock {
   return {
     header: 'windows',
-    lines: ['[windows]'],
-  }
-}
-
-function removeCodexWindowsSandboxSetting(block: TomlSectionBlock): TomlSectionBlock {
-  return {
-    header: block.header,
-    lines: block.lines.filter((line, index) => index === 0 || !/^\s*sandbox\s*=/.test(line)),
+    lines: [
+      '[windows]',
+      'sandbox = "unelevated"',
+    ],
   }
 }
 
@@ -2829,7 +2916,7 @@ function mergeCodexConfig(raw: string, apiKey: string, model: string, baseUrl: s
 
     if (section.header === 'windows') {
       if (!insertedWindows) {
-        sections.push(removeCodexWindowsSandboxSetting(section))
+        sections.push(section)
         insertedWindows = true
       }
       continue
@@ -5940,6 +6027,20 @@ function normalizeCliToolDetail(detail: string) {
   return normalized
 }
 
+function buildCliFailureDetail(stderrText: string, probableCause?: string) {
+  const normalizedProbableCause = probableCause?.trim() || ''
+  if (normalizedProbableCause) {
+    return `推断原因：${normalizedProbableCause}`
+  }
+
+  const firstUsefulLine = stderrText
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => line && !/warning:\s*no stdin data received in 3s/i.test(line))
+
+  return firstUsefulLine || stderrText.trim()
+}
+
 function summarizeCliIntentForLog(value: string, maxLength = 260) {
   const normalized = value
     .split(/\r?\n/)
@@ -6246,12 +6347,10 @@ function buildCodexExecArgs(
     `model_reasoning_effort="${parseCodexReasoningEffort(input.reasoningEffort)}"`
   )
 
-  args.push('-C', input.projectPath)
-
   if (resumeSessionId) {
     args.push('resume', '--json', '--skip-git-repo-check', resumeSessionId, input.prompt)
   } else {
-    args.push('--json', '--skip-git-repo-check', input.prompt)
+    args.push('--json', '-C', input.projectPath, '--skip-git-repo-check', input.prompt)
   }
 
   return args
@@ -6295,9 +6394,7 @@ function buildClaudePromptArgs(input: CliRunRequest, resumeSessionId?: string) {
     '--output-format',
     'stream-json',
     '--include-partial-messages',
-    '--permission-mode',
-    'bypassPermissions',
-    '--dangerously-skip-permissions',
+    ...buildClaudePermissionArgs(!!input.fullAccess),
   ]
 
   if (input.model?.trim()) {
@@ -6342,11 +6439,11 @@ async function runCodexPrompt(
   let consumedAssistantChars = 0
   let sawCodexCompletion = false
   let stoppedAfterCodexCompletion = false
+  let sawCodexVisibleProgress = false
+  const seenToolUseEvents = new Set<string>()
   let activeCodexChild: ChildProcess | null = null
   let codexCompletionStopTimer: NodeJS.Timeout | null = null
   const runtimeDiagnostics: CliRuntimeDiagnostics = {}
-  const seenToolUseEvents = new Set<string>()
-  const toolUseIndentLevels = new Map<string, number>()
   const executablePath = await locateExecutable('codex')
   const managedRuntime = await readManagedNodeRuntime()
   const spawnCommand = resolveCliSpawnCommand('codex', executablePath)
@@ -6393,8 +6490,6 @@ async function runCodexPrompt(
     toolInput: unknown,
     sourceKind: string,
     options: {
-      toolUseId?: string
-      indentLevel?: number
       assistantSnapshot?: string
       assistantChunk?: string
     } = {}
@@ -6419,12 +6514,11 @@ async function runCodexPrompt(
       return
     }
     seenToolUseEvents.add(eventKey)
-    const indentLevel = Math.max(0, options.indentLevel || 0)
-    if (options.toolUseId) {
-      toolUseIndentLevels.set(options.toolUseId, indentLevel)
-    }
-    const assistantChunk = takeAssistantChunk(options.assistantSnapshot || partialText, options.assistantChunk || '')
-    const intentText = summarizeCliIntentStep(assistantChunk || options.assistantSnapshot || partialText)
+    sawCodexVisibleProgress = true
+
+    const assistantSnapshot = options.assistantSnapshot || partialText
+    const assistantChunk = takeAssistantChunk(assistantSnapshot, options.assistantChunk || '')
+    const intentText = summarizeCliIntentStep(assistantChunk || assistantSnapshot)
     if (intentText && intentText !== lastToolIntentText) {
       lastToolIntentText = intentText
       progress.intent(
@@ -6433,23 +6527,14 @@ async function runCodexPrompt(
         intentText,
         undefined,
         toolName.trim() ? `intent.before_tool.${toolName.trim()}` : 'intent.before_tool',
-        intentText,
-        indentLevel
+        intentText
       )
     }
     if (described.command) {
-      progress.command(
-        described.message,
-        described.command,
-        sessionId,
-        described.detail,
-        described.files,
-        sourceKind,
-        indentLevel
-      )
+      progress.command(described.message, described.command, sessionId, described.detail, described.files, sourceKind)
       return
     }
-    progress.tool(described.message, sessionId, described.detail, described.files, sourceKind, indentLevel)
+    progress.tool(described.message, sessionId, described.detail, described.files, sourceKind)
   }
 
   progress.intent('Codex 已开始处理当前任务。', sessionId, undefined, undefined, 'request.started')
@@ -6528,6 +6613,7 @@ async function runCodexPrompt(
       const streamedAssistantText = extractCodexAssistantTextFromEvent(parsed)
       if (streamedAssistantText) {
         partialText = streamedAssistantText
+        sawCodexVisibleProgress = true
         progress.partial(partialText, sessionId, false, planState)
       }
 
@@ -6535,6 +6621,7 @@ async function runCodexPrompt(
         const assistantText = contentPartsToText(payload.content)
         if (assistantText.trim() && !shouldIgnoreCodexMessage(assistantText)) {
           partialText = assistantText
+          sawCodexVisibleProgress = true
           progress.partial(partialText, sessionId, false, planState)
         }
       }
@@ -6552,9 +6639,8 @@ async function runCodexPrompt(
           emitCodexToolUse(
             toolEntry.name,
             toolEntry.input,
-            toolEntry.name?.trim() ? `assistant.tool_use.${toolEntry.name.trim()}` : 'assistant.tool_use',
+            toolEntry.name?.trim() ? `tool_use.${toolEntry.name.trim()}` : 'tool_use',
             {
-              toolUseId: toolEntry.id,
               assistantSnapshot: partialText,
               assistantChunk: toolEntry.textBefore,
             }
@@ -6563,27 +6649,15 @@ async function runCodexPrompt(
       }
 
       const functionCallToolEntries = extractCodexFunctionCallToolUseEntries(parsed)
-      for (const toolEntry of functionCallToolEntries) {
-        emitCodexToolUse(
-          toolEntry.name,
-          toolEntry.input,
-          toolEntry.name?.trim() ? `assistant.tool_use.${toolEntry.name.trim()}` : 'assistant.tool_use',
-          {
-            toolUseId: toolEntry.id,
-            assistantSnapshot: partialText,
-          }
-        )
-      }
-
       const commandExecutionEntries = extractCodexCommandExecutionToolUseEntries(parsed)
-      for (const toolEntry of commandExecutionEntries) {
+      for (const toolEntry of [...functionCallToolEntries, ...commandExecutionEntries]) {
         emitCodexToolUse(
           toolEntry.name,
           toolEntry.input,
-          'codex.command_execution',
+          toolEntry.name?.trim() ? `codex.tool_use.${toolEntry.name.trim()}` : 'codex.tool_use',
           {
-            toolUseId: toolEntry.id,
             assistantSnapshot: partialText,
+            assistantChunk: toolEntry.textBefore,
           }
         )
       }
@@ -6638,8 +6712,8 @@ async function runCodexPrompt(
     planState = null
     lastToolIntentText = ''
     consumedAssistantChars = 0
+    sawCodexVisibleProgress = false
     seenToolUseEvents.clear()
-    toolUseIndentLevels.clear()
     sawCodexCompletion = false
     stoppedAfterCodexCompletion = false
     activeCodexChild = null
@@ -6656,10 +6730,13 @@ async function runCodexPrompt(
       attempt,
       aborted: stoppedCliRequests.has(input.requestId),
       exitCode: result.exitCode,
-      output: '',
+      output: buildCliRetryOutputSnapshot(
+        partialText,
+        sawCodexVisibleProgress ? '已产生 Codex 执行日志' : ''
+      ),
     })
   ) {
-    progress.status('检测到上游瞬时异常，已自动重试一次。', sessionId, false, undefined, {
+    progress.status('检测到服务器瞬时异常，已自动重试一次。', sessionId, false, undefined, {
       logKind: 'status',
       sourceKind: 'request.retry.transient',
       detail: retryDiagnostics.probableCause || '',
@@ -6668,7 +6745,6 @@ async function runCodexPrompt(
     lastToolIntentText = ''
     consumedAssistantChars = 0
     seenToolUseEvents.clear()
-    toolUseIndentLevels.clear()
     sawCodexCompletion = false
     stoppedAfterCodexCompletion = false
     activeCodexChild = null
@@ -6753,7 +6829,7 @@ async function runCodexPrompt(
     progress.error('Codex 执行失败', sessionId, true, fileChanges, {
       logKind: 'error',
       sourceKind: 'request.failed',
-      detail: [result.stderr.trim(), runtimeDiagnostics.probableCause ? `推断原因：${runtimeDiagnostics.probableCause}` : ''].filter(Boolean).join('\n'),
+      detail: buildCliFailureDetail(result.stderr.trim(), runtimeDiagnostics.probableCause),
       exitCode: result.exitCode,
       plan: planState,
     })
@@ -6806,7 +6882,6 @@ async function runClaudePrompt(
   const executablePath = await locateExecutable('claude')
   const managedRuntime = await readManagedNodeRuntime()
   const claudeSettings = await readResolvedClaudeSettingsDocument().catch(() => null)
-  const spawnCommand = resolveCliSpawnCommand('claude', executablePath)
   let args = buildClaudePromptArgs(input, resumeSessionId)
   const takeAssistantChunk = (snapshot: string, explicitChunk = '') => {
     const normalizedExplicitChunk = explicitChunk.trim()
@@ -6908,7 +6983,9 @@ async function runClaudePrompt(
     )
   }
 
-  const runClaudeOnce = () => spawnCommandWithHandlers(spawnCommand, args, {
+  const runClaudeOnce = async () => {
+    const invocation = await resolveNodeBackedCliInvocation('claude', executablePath, managedRuntime, args)
+    return spawnCommandWithHandlers(invocation.command, invocation.args, {
     cwd: input.projectPath,
     timeoutMs: 15 * 60 * 1000,
     env: buildClaudeCliEnv(managedRuntime, claudeSettings),
@@ -7105,7 +7182,8 @@ async function runClaudePrompt(
         detail: line,
       })
     },
-  })
+    })
+  }
   let result = await runClaudeOnce()
   clearClaudeResultStopTimer()
   let attempt = 0
@@ -7147,10 +7225,13 @@ async function runClaudePrompt(
       attempt,
       aborted: stoppedCliRequests.has(input.requestId),
       exitCode: result.exitCode,
-      output: '',
+      output: buildCliRetryOutputSnapshot(
+        partialText,
+        seenToolUseEvents.size > 0 ? '已产生 Claude 执行日志' : ''
+      ),
     })
   ) {
-    progress.status('检测到上游瞬时异常，已自动重试一次。', sessionId, false, undefined, {
+    progress.status('检测到服务器瞬时异常，已自动重试一次。', sessionId, false, undefined, {
       logKind: 'status',
       sourceKind: 'request.retry.transient',
       detail: retryDiagnostics.probableCause || '',
@@ -7217,7 +7298,11 @@ async function runClaudePrompt(
   const success =
     !aborted &&
     output.length > 0 &&
-    (result.exitCode === 0 || (sawClaudeResult && stoppedAfterClaudeResult))
+    (
+      result.exitCode === 0 ||
+      (sawClaudeResult && stoppedAfterClaudeResult) ||
+      (sawClaudeResult && finalResult?.is_error !== true)
+    )
   const completedWithWarnings = !aborted && !success && output.length > 0 && !!runtimeDiagnostics.policyIssue
   if (!aborted) {
     progress.status('Claude 输出已结束，正在整理会话记录。', sessionId, true, undefined, {
@@ -7258,7 +7343,7 @@ async function runClaudePrompt(
     progress.error('Claude 执行失败', sessionId, true, fileChanges, {
       logKind: 'error',
       sourceKind: 'request.failed',
-      detail: [result.stderr.trim(), runtimeDiagnostics.probableCause ? `推断原因：${runtimeDiagnostics.probableCause}` : ''].filter(Boolean).join('\n'),
+      detail: buildCliFailureDetail(result.stderr.trim(), runtimeDiagnostics.probableCause),
       exitCode: result.exitCode,
       plan: planState,
     })
@@ -7372,7 +7457,10 @@ async function writeClaudeConfig(request: CliDeployRequest) {
     ...current,
     env,
     model: resolvedModel,
-    permissions: { allow: [], deny: [] },
+    permissions:
+      typeof current.permissions === 'object' && current.permissions
+        ? current.permissions
+        : { allow: [], deny: [] },
   }
 
   await fs.writeFile(targetPath, JSON.stringify(nextConfig, null, 2), 'utf8')
@@ -8464,6 +8552,9 @@ ipcMain.handle('desktop:pick-project', async () => {
 })
 ipcMain.handle('desktop:file-preview', async (_event, targetPath: string) => {
   return readFilePreview(targetPath)
+})
+ipcMain.handle('desktop:stat-path', async (_event, targetPath: string) => {
+  return statDesktopPath(targetPath)
 })
 ipcMain.handle('desktop:cli-status', async () => {
   const [codex, claude] = await Promise.all([inspectCli('codex'), inspectCli('claude')])

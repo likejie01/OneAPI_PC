@@ -130,11 +130,11 @@ export function summarizeCliFailure(rawText: string, stderrText: string): CliRun
   if (networkIssue) {
     probableCause = '网络 / 代理 / TLS / 反向代理流式转发异常'
   } else if (upstreamIssue) {
-    probableCause = '上游模型网关返回异常状态码，常见于流式代理、模型路由或额度侧瞬时异常'
+    probableCause = '服务器模型网关返回异常状态码，常见于流式代理、模型路由或额度侧瞬时异常'
   } else if (sessionIssue) {
     probableCause = '本地会话状态目录异常，或会话落盘未完成'
   } else if (authIssue) {
-    probableCause = 'Key 或上游鉴权不通过'
+    probableCause = 'Key 或服务器鉴权不通过'
   } else if (configIssue) {
     probableCause = '本地配置文件格式无效'
   } else if (policyIssue) {
@@ -153,6 +153,12 @@ export function summarizeCliFailure(rawText: string, stderrText: string): CliRun
     dependencyIssue,
     probableCause,
   }
+}
+
+export function buildCliRetryOutputSnapshot(...values: string[]) {
+  return values
+    .map((value) => value.trim())
+    .find(Boolean) || ''
 }
 
 export function detectCliInteractionFromToolUse(name: string, input: unknown): CliRuntimeInteractionPrompt | null {

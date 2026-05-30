@@ -137,6 +137,7 @@ import {
   type ModelVendorFilter,
   prioritizeFavoriteModels,
   resolveCompatibleModel,
+  resolveCliLogGroupStatus,
 } from './lib/assistant-workspace'
 import { resolveCliDeploySettings } from './lib/cli-deploy'
 import {
@@ -156,6 +157,7 @@ import {
   getCliResumeSessionId,
   isDraftCliSessionId,
 } from './lib/cli-session'
+import { shouldRenderCliLogEventRow, shouldRenderCliLogOutputEntry } from './lib/cli-log-rendering'
 import { AUTH_EXPIRED_EVENT, clearStoredDesktopUserId, saveStoredDesktopUserId } from './lib/desktop-client'
 import { deriveDesktopChatDisplayState, normalizeStoredDesktopChatMessage } from './lib/chat-reasoning'
 import {
@@ -230,7 +232,6 @@ import {
   buildCliSessionExportMarkdown,
   buildDrawSessionExportMarkdown,
   buildSessionExportFileName,
-  hasActiveCliPlan,
   mergeCliMessages,
   type ExportCliLogGroup,
 } from './lib/session-history'
@@ -2344,41 +2345,6 @@ type CliPaletteItem =
       extension: CliExtensionViewItem
     }
 
-function CliPlanFloatingPanel(props: {
-  plan: CliPlanState | null
-}) {
-  const resolvedPlan = props.plan
-  if (!resolvedPlan || !hasActiveCliPlan(resolvedPlan)) {
-    return null
-  }
-
-  return (
-    <aside className='cli-plan-floating-panel' aria-label='当前计划进度'>
-      <div className='cli-plan-floating-head'>
-        <strong>计划</strong>
-        <span>{resolvedPlan.items.length} 项</span>
-      </div>
-      {resolvedPlan.explanation ? <p className='cli-plan-floating-summary'>{resolvedPlan.explanation}</p> : null}
-      <div className='cli-plan-floating-list'>
-        {resolvedPlan.items.map((item) => (
-          <div key={item.id} className='cli-plan-floating-item'>
-            <span className={`cli-plan-status-icon ${item.status}`}>
-              {item.status === 'completed' ? (
-                '✔'
-              ) : item.status === 'in_progress' ? (
-                <LoaderCircle className='spin' size={13} />
-              ) : (
-                '○'
-              )}
-            </span>
-            <span className='cli-plan-status-text'>{item.step}</span>
-          </div>
-        ))}
-      </div>
-    </aside>
-  )
-}
-
 function MessageCliExtensionChips(props: {
   items?: CliExtensionEntry[]
   label?: string
@@ -3468,6 +3434,14 @@ function CliLogBubble(props: {
                                   const duplicatedPrimary =
                                     outputIndex === 0 &&
                                     normalizeComparable(entry.headline) === normalizeComparable(effectiveHeadline || entry.headline)
+                                  if (!shouldRenderCliLogOutputEntry({
+                                    outputIndex,
+                                    entryHeadline: entry.headline,
+                                    entryDetail: entry.detail,
+                                    groupHeadline: headline,
+                                  })) {
+                                    return null
+                                  }
 
                                   return (
                                     <div key={entry.id} className='cli-log-output-inline'>
@@ -3492,6 +3466,13 @@ function CliLogBubble(props: {
                           const duplicatedPrimary =
                             rowIndex === 0 &&
                             normalizeComparable(eventItem.message) === normalizeComparable(effectiveHeadline || eventItem.message)
+                          if (!shouldRenderCliLogEventRow({
+                            duplicatedPrimary,
+                            hasExpandableContent,
+                            hasInteraction: !!eventItem.interaction,
+                          })) {
+                            return null
+                          }
 
                           return (
                             <div
@@ -4242,48 +4223,6 @@ function serializeCliLogEvent(item: {
     item.detail ? `detail:\n${item.detail}` : '',
     item.exitCode !== undefined ? `exitCode: ${item.exitCode}` : '',
   ].filter(Boolean).join('\n\n')
-}
-
-function resolveCliLogGroupStatus(
-  events: Array<{
-    kind: CliLogKind
-    level: 'status' | 'error'
-    sourceKind?: string
-    interaction?: CliInteractionPrompt
-  }>
-) {
-  const pendingInteraction = [...events].reverse().find((item) => item.interaction?.status === 'pending')
-  if (pendingInteraction) {
-    return { tone: 'warning', label: '等待确认' as const }
-  }
-
-  const terminal = [...events].reverse().find((item) => {
-    const sourceKind = item.sourceKind || ''
-    return (
-      item.level === 'error' ||
-      sourceKind === 'request.failed' ||
-      sourceKind === 'request.aborted' ||
-      sourceKind === 'result' ||
-      sourceKind === 'result.with_warnings' ||
-      sourceKind === 'turn.completed' ||
-      sourceKind === 'turn.completed.with_warnings'
-    )
-  })
-
-  if (terminal?.sourceKind === 'request.aborted') {
-    return { tone: 'aborted', label: '已停止' as const }
-  }
-  if (terminal?.sourceKind === 'result.with_warnings' || terminal?.sourceKind === 'turn.completed.with_warnings') {
-    return { tone: 'warning', label: '已完成' as const }
-  }
-  if (terminal && (terminal.level === 'error' || terminal.sourceKind === 'request.failed')) {
-    return { tone: 'error', label: '执行失败' as const }
-  }
-  if (terminal?.sourceKind === 'result' || terminal?.sourceKind === 'turn.completed') {
-    return { tone: 'success', label: '已完成' as const }
-  }
-
-  return { tone: 'running', label: '进行中' as const }
 }
 
 function PasswordField(props: {
@@ -8674,7 +8613,6 @@ function CliWorkspace(props: {
     [activeSessionId, sessionLogsMap]
   )
   const activePlan = activeSessionId ? sessionPlansMap[activeSessionId] || null : null
-  const visibleActivePlan = hasActiveCliPlan(activePlan) ? activePlan : null
   const activePartial = activeSessionId ? sessionPartialMap[activeSessionId] || '' : ''
   const activeExtensionPreferenceBucket =
     cliExtensionPreferences[currentExtensionPreferenceKey] || createEmptyCliExtensionPreferenceBucket()
@@ -10821,7 +10759,7 @@ function CliWorkspace(props: {
             </div>
           )}
 
-          <div className={`conversation-scroll-region ${visibleActivePlan ? 'has-cli-plan' : ''}`}>
+          <div className='conversation-scroll-region'>
             <div className='workspace-corner-tools'>
               <ConversationFindBar
                 active={active}
@@ -10829,7 +10767,6 @@ function CliWorkspace(props: {
                 itemSelector='.message-bubble, .cli-log-bubble'
               />
             </div>
-            <CliPlanFloatingPanel plan={visibleActivePlan} />
             <div ref={threadRef} className='cli-thread'>
               {activeTimeline.length === 0 ? (
                 <EmptyState

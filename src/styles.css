@@ -2262,10 +2262,6 @@ select {
   padding-top: 12px;
 }
 
-.conversation-scroll-region.has-cli-plan .cli-thread {
-  padding-top: 104px;
-}
-
 .message-stream,
 .cli-thread {
   align-items: stretch;

@@ -61,6 +61,72 @@ export function buildWindowsCommandShimArgs(command: string, args: string[]) {
   ]
 }
 
+export function resolveWindowsCommandShimCommand(env: Record<string, string | undefined>) {
+  const comSpec = env.ComSpec?.trim() || env.COMSPEC?.trim() || ''
+  if (/cmd\.exe$/i.test(comSpec)) {
+    return comSpec
+  }
+
+  const systemRoot = env.SystemRoot?.trim() || env.SYSTEMROOT?.trim() || env.windir?.trim() || env.WINDIR?.trim() || ''
+  if (systemRoot) {
+    return `${systemRoot.replace(/[\\/]+$/, '')}\\System32\\cmd.exe`
+  }
+
+  return 'cmd.exe'
+}
+
+function dirnameLike(value: string) {
+  const normalized = value.trim().replace(/[\\/]+$/, '')
+  const slashIndex = Math.max(normalized.lastIndexOf('/'), normalized.lastIndexOf('\\'))
+  return slashIndex >= 0 ? normalized.slice(0, slashIndex) : ''
+}
+
+function joinLike(root: string, parts: string[]) {
+  const separator = root.includes('\\') ? '\\' : '/'
+  return [root.replace(/[\\/]+$/, ''), ...parts].filter(Boolean).join(separator)
+}
+
+export function buildNodeBackedCliScriptPath(client: CliClient, executablePath: string) {
+  const executableDir = dirnameLike(executablePath)
+  if (!executableDir) {
+    return ''
+  }
+
+  if (client === 'claude') {
+    return joinLike(executableDir, ['node_modules', '@anthropic-ai', 'claude-code', 'cli.js'])
+  }
+
+  if (client === 'codex') {
+    return joinLike(executableDir, ['node_modules', '@openai', 'codex', 'bin', 'codex.js'])
+  }
+
+  return ''
+}
+
+export function buildWindowsNpmGlobalCliCandidates(command: string, env: Record<string, string | undefined>) {
+  const appData = env.APPDATA?.trim() || (
+    env.USERPROFILE?.trim() ? joinLike(env.USERPROFILE.trim(), ['AppData', 'Roaming']) : ''
+  )
+  if (!appData) {
+    return []
+  }
+
+  const npmRoot = joinLike(appData, ['npm'])
+  return [
+    joinLike(npmRoot, [`${command}.cmd`]),
+    joinLike(npmRoot, [`${command}.exe`]),
+    joinLike(npmRoot, [command]),
+  ]
+}
+
+export function buildWindowsNodeExecutableCandidates(env: Record<string, string | undefined>) {
+  return [
+    env.ProgramFiles?.trim() ? joinLike(env.ProgramFiles.trim(), ['nodejs', 'node.exe']) : '',
+    env['ProgramFiles(x86)']?.trim() ? joinLike(env['ProgramFiles(x86)']!.trim(), ['nodejs', 'node.exe']) : '',
+    env.LOCALAPPDATA?.trim() ? joinLike(env.LOCALAPPDATA.trim(), ['Programs', 'nodejs', 'node.exe']) : '',
+  ].filter(Boolean)
+}
+
 export function supportsCodexAskForApprovalFlag(helpText: string) {
   return /^\s*--ask-for-approval\b/m.test(helpText)
 }
@@ -72,6 +138,11 @@ export function buildCodexSandboxArgs(
   void fullAccess
   void supportsAskForApproval
   return ['--dangerously-bypass-approvals-and-sandbox']
+}
+
+export function buildClaudePermissionArgs(fullAccess: boolean) {
+  void fullAccess
+  return ['--permission-mode', 'bypassPermissions', '--dangerously-skip-permissions']
 }
 
 const NPM_CACHE_MODE_ENV_KEYS = new Set([

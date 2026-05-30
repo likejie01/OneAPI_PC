@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  buildCliRetryOutputSnapshot,
   buildCliInteractionResponse,
   classifyCliStderrLine,
   detectCliInteractionFromText,
@@ -30,7 +31,8 @@ test('summarizeCliFailure recognizes bad_response_status_code as upstream issue'
   )
 
   assert.equal(result.upstreamIssue, true)
-  assert.match(result.probableCause || '', /上游模型网关返回异常状态码/)
+  assert.match(result.probableCause || '', /服务器模型网关返回异常状态码/)
+  assert.doesNotMatch(result.probableCause || '', new RegExp('\\u4e0a\\u6e38'))
 })
 
 test('shouldAutoRetryCliRequest retries only empty-output transient failures on first attempt', () => {
@@ -55,6 +57,25 @@ test('shouldAutoRetryCliRequest retries only empty-output transient failures on 
     }),
     false
   )
+
+  assert.equal(
+    shouldAutoRetryCliRequest({
+      diagnostics: { upstreamIssue: true },
+      attempt: 0,
+      aborted: false,
+      exitCode: 1,
+      output: '已经产生局部回复或命令日志',
+    }),
+    false
+  )
+})
+
+test('buildCliRetryOutputSnapshot preserves visible progress before retry decisions', () => {
+  assert.equal(
+    buildCliRetryOutputSnapshot('', '  Codex 正在检查 TSX 错误  ', ''),
+    'Codex 正在检查 TSX 错误'
+  )
+  assert.equal(buildCliRetryOutputSnapshot('', '   ', ''), '')
 })
 
 test('isDirectCliCommandPrompt detects leading slash commands', () => {
