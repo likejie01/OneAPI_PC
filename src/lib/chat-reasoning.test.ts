@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import {
   deriveDesktopChatDisplayState,
   normalizeStoredDesktopChatMessage,
+  parseDesktopChatStreamEventBlock,
   parseDesktopChatStreamDataLine,
 } from './chat-reasoning.ts'
 
@@ -95,4 +96,20 @@ test('parseDesktopChatStreamDataLine joins array reasoning parts', () => {
 
   assert.equal(parsed?.reasoningText, 'first second')
   assert.equal(parsed?.done, false)
+})
+
+test('parseDesktopChatStreamEventBlock parses an unterminated final SSE event', () => {
+  const parsed = parseDesktopChatStreamEventBlock(`data: ${JSON.stringify({
+    choices: [
+      {
+        delta: {
+          content: 'final chunk',
+        },
+      },
+    ],
+  })}`)
+
+  assert.equal(parsed.length, 1)
+  assert.equal(parsed[0]?.deltaText, 'final chunk')
+  assert.equal(parsed[0]?.done, false)
 })

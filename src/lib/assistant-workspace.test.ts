@@ -164,6 +164,28 @@ test('filterAssistantModels keeps chat mode on all non-image models when metadat
   )
 })
 
+test('filterAssistantModels routes all gpt-image models to draw mode only', () => {
+  const models = [
+    { label: 'gpt-image-1', value: 'gpt-image-1' },
+    { label: 'gpt-image-2', value: 'gpt-image-2' },
+    { label: 'gpt-image-2-edit', value: 'gpt-image-2-edit' },
+    { label: 'gpt-5.4', value: 'gpt-5.4' },
+  ]
+
+  assert.deepEqual(
+    filterAssistantModels('draw', models).map((item) => item.value),
+    ['gpt-image-1', 'gpt-image-2', 'gpt-image-2-edit']
+  )
+  assert.deepEqual(
+    filterAssistantModels('chat', models).map((item) => item.value),
+    ['gpt-5.4']
+  )
+  assert.deepEqual(
+    filterAssistantModels('codex', models).map((item) => item.value),
+    ['gpt-5.4']
+  )
+})
+
 test('filterAssistantModels does not infer Claude or Codex brand from DeepSeek and MIMO model names', () => {
   const models = [
     { label: 'deepseek-v4-pro', value: 'deepseek-v4-pro' },

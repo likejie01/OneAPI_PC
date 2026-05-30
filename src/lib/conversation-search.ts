@@ -74,8 +74,7 @@ export function applyConversationSearchHighlights(
       pattern.lastIndex = 0
 
       const ranges: Array<{ start: number; end: number }> = []
-      let matched: RegExpExecArray | null = null
-      while ((matched = pattern.exec(text)) !== null) {
+      for (let matched = pattern.exec(text); matched !== null; matched = pattern.exec(text)) {
         ranges.push({
           start: matched.index,
           end: matched.index + matched[0].length,

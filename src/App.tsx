@@ -611,12 +611,11 @@ function scheduleScrollToBottom(containerRef: React.RefObject<HTMLDivElement | n
 
 function useDesktopPathKind(targetPath: string) {
   const [kind, setKind] = useState<'file' | 'directory' | 'missing'>('file')
+  const normalizedPath = targetPath.trim()
 
   useEffect(() => {
     let cancelled = false
-    const normalizedPath = targetPath.trim()
     if (!normalizedPath) {
-      setKind('missing')
       return
     }
 
@@ -635,9 +634,9 @@ function useDesktopPathKind(targetPath: string) {
     return () => {
       cancelled = true
     }
-  }, [targetPath])
+  }, [normalizedPath])
 
-  return kind
+  return normalizedPath ? kind : 'missing'
 }
 
 function CliPathChip(props: {
@@ -942,6 +941,7 @@ type ComposerTokenItem = {
 function renderComposer(props: {
   inputRef?: React.RefObject<HTMLInputElement | null>
   onAttachmentInputChange?: (event: ChangeEvent<HTMLInputElement>) => void | Promise<void>
+  inputAccept?: string
   textareaRef: React.RefObject<HTMLTextAreaElement | null>
   value: string
   placeholder: string
@@ -958,6 +958,7 @@ function renderComposer(props: {
   const {
     inputRef,
     onAttachmentInputChange,
+    inputAccept,
     textareaRef,
     value,
     placeholder,
@@ -979,6 +980,7 @@ function renderComposer(props: {
           ref={inputRef}
           type='file'
           multiple
+          accept={inputAccept}
           className='hidden-file-input'
           onChange={onAttachmentInputChange}
         />
@@ -2315,13 +2317,21 @@ function AttachmentPreviewModal(props: {
   const [imageScale, setImageScale] = useState(1)
   const [imageOffset, setImageOffset] = useState({ x: 0, y: 0 })
   const [draggingImage, setDraggingImage] = useState(false)
+  const previewResetKey = preview?.mode === 'image'
+    ? `${preview.mode}:${preview.name}:${preview.src}`
+    : preview
+      ? `${preview.mode}:${preview.name}`
+      : ''
 
   useEffect(() => {
-    setImageScale(1)
-    setImageOffset({ x: 0, y: 0 })
-    setDraggingImage(false)
-    dragStateRef.current = null
-  }, [preview?.mode, preview?.name, preview && 'src' in preview ? preview.src : ''])
+    const timer = window.setTimeout(() => {
+      setImageScale(1)
+      setImageOffset({ x: 0, y: 0 })
+      setDraggingImage(false)
+      dragStateRef.current = null
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [previewResetKey])
 
   if (!preview) {
     return null
@@ -3323,6 +3333,7 @@ function MessageFileChangeLinks(props: {
 }
 
 function CliLogBubble(props: {
+  client: 'codex' | 'claude'
   item: Extract<CliTimelineEntry, { kind: 'log' }>
   expanded: boolean
   onToggle: () => void
@@ -3343,6 +3354,7 @@ function CliLogBubble(props: {
   } | null
 }) {
   const {
+    client,
     item,
     expanded,
     onToggle,
@@ -3360,6 +3372,7 @@ function CliLogBubble(props: {
   const uniqueFiles = Array.from(new Map(item.files.map((file) => [file.path, file])).values())
   const executedToolNames = collectCliToolNames(item.events.map((eventItem) => eventItem.sourceKind))
   const logStatus = resolveCliLogGroupStatus(item.events)
+  const showRunningIndicators = logStatus.tone === 'running'
   const commandCount = item.events.filter((eventItem) => eventItem.kind === 'command').length
   const visibleEvents = expanded ? item.events : item.events.slice(0, 1)
   const visualBlocks = buildCliVisualLogBlocks(visibleEvents)
@@ -3552,8 +3565,8 @@ function CliLogBubble(props: {
   return (
     <div className={`message-bubble system cli-log-bubble ${logStatus.tone === 'error' ? 'error' : ''}`}>
       <button className='cli-log-card-head' type='button' onClick={onToggle}>
-        <span className='message-role'>{logStatus.tone === 'error' ? '运行异常' : '运行日志'}</span>
-        <strong>{`已执行 ${item.events.length} 步`}</strong>
+        <span className='message-role'>{client === 'codex' ? 'Codex' : 'Claude'}</span>
+        <strong>{logStatus.tone === 'error' ? '运行异常' : `已执行 ${item.events.length} 步`}</strong>
         <small>{expanded ? '点击收起' : '点击展开'}</small>
       </button>
       <MessageCliExtensionChips items={requestedExtensions} label='本轮指定扩展' />
@@ -3597,7 +3610,7 @@ function CliLogBubble(props: {
               {showBlockHead ? (
                 <button className='cli-log-phase-head' type='button' onClick={() => toggleSection(block.id)}>
                   <span className='cli-log-phase-headline'>
-                    {isCliRunningIndicatorSourceKind(block.intent?.sourceKind) ? (
+                    {showRunningIndicators && isCliRunningIndicatorSourceKind(block.intent?.sourceKind) ? (
                       <LoaderCircle className='spin cli-log-inline-spinner' size={13} />
                     ) : null}
                     <strong>{blockTitle}</strong>
@@ -3610,7 +3623,7 @@ function CliLogBubble(props: {
                 <div className='cli-log-time-group'>
                   <div className='cli-log-time-head plain static'>
                     <div className='cli-log-time-copy plain'>
-                      {isCliRunningIndicatorSourceKind(block.intent?.sourceKind) ? (
+                      {showRunningIndicators && isCliRunningIndicatorSourceKind(block.intent?.sourceKind) ? (
                         <LoaderCircle className='spin cli-log-inline-spinner' size={13} />
                       ) : (
                         <span className='cli-log-time-dot' />
@@ -3628,7 +3641,9 @@ function CliLogBubble(props: {
                 const effectiveHeadline = normalizedHeadline === normalizeComparable(blockTitle) ? '' : rawHeadline
                 const timeCollapsed = collapsedTimeGroupIds.includes(timeGroup.id)
                 const timeGroupShowsRunning =
-                  firstRow?.type === 'event' && isCliRunningIndicatorSourceKind(firstRow.event.sourceKind)
+                  showRunningIndicators &&
+                  firstRow?.type === 'event' &&
+                  isCliRunningIndicatorSourceKind(firstRow.event.sourceKind)
 
                 return (
                   <div key={timeGroup.id} className='cli-log-time-group'>
@@ -3710,7 +3725,8 @@ function CliLogBubble(props: {
                           const duplicatedPrimary =
                             rowIndex === 0 &&
                             normalizeComparable(eventItem.message) === normalizeComparable(effectiveHeadline || eventItem.message)
-                          const showRunningIndicator = isCliRunningIndicatorSourceKind(eventItem.sourceKind)
+                          const showRunningIndicator =
+                            showRunningIndicators && isCliRunningIndicatorSourceKind(eventItem.sourceKind)
 
                           return (
                             <div
@@ -3866,12 +3882,16 @@ function ConversationFindBar(props: {
 
   useEffect(() => {
     if (!active) {
-      setOpen(false)
-      setQuery('')
-      setMatches([])
-      setActiveIndex(0)
-      clearHighlights()
+      const timer = window.setTimeout(() => {
+        setOpen(false)
+        setQuery('')
+        setMatches([])
+        setActiveIndex(0)
+        clearHighlights()
+      }, 0)
+      return () => window.clearTimeout(timer)
     }
+    return undefined
   }, [active, clearHighlights])
 
   useEffect(() => {
@@ -3893,20 +3913,23 @@ function ConversationFindBar(props: {
   }, [active, open])
 
   useEffect(() => {
-    clearHighlights()
-    if (!open || !query.trim()) {
-      setMatches([])
-      setActiveIndex(0)
-      return
-    }
-    const container = containerRef.current
-    if (!container) {
-      setMatches([])
-      return
-    }
-    const nextMatches = applyConversationSearchHighlights(container, itemSelector, query)
-    setMatches(nextMatches)
-    setActiveIndex(nextMatches.length ? 0 : 0)
+    const timer = window.setTimeout(() => {
+      clearHighlights()
+      if (!open || !query.trim()) {
+        setMatches([])
+        setActiveIndex(0)
+        return
+      }
+      const container = containerRef.current
+      if (!container) {
+        setMatches([])
+        return
+      }
+      const nextMatches = applyConversationSearchHighlights(container, itemSelector, query)
+      setMatches(nextMatches)
+      setActiveIndex(nextMatches.length ? 0 : 0)
+    }, 0)
+    return () => window.clearTimeout(timer)
   }, [clearHighlights, containerRef, itemSelector, open, query])
 
   useEffect(() => {
@@ -6388,6 +6411,7 @@ function DrawWorkspace(props: {
   const drawQualityLabel =
     DRAW_QUALITY_OPTIONS.find((item) => item.value === drawQuality)?.label || drawQuality
   const drawRandomSeedLabel = drawRandomSeed ? '随机' : '固定'
+  const activeImageAttachment = [...attachments].reverse().find((item) => item.kind === 'image')
   const imageStyleMenuItems = useMemo(
     () => decorateImageStylePresets(imageStylePresets, imageStyleFavorites, imageStyleSearch),
     [imageStyleFavorites, imageStylePresets, imageStyleSearch]
@@ -6987,7 +7011,7 @@ function DrawWorkspace(props: {
           })
         )
       } catch (error) {
-        throw new Error(mapImageEditError(error))
+        throw new Error(mapImageEditError(error), { cause: error })
       }
     }
 
@@ -7094,7 +7118,6 @@ function DrawWorkspace(props: {
     }
 
     const nextSessionId = ensureDrawSession()
-    const imageAttachment = attachments.find((item) => item.kind === 'image')
     const now = getCurrentTimestamp()
     const nextPrompt = buildImageStyleAugmentedPrompt(draft, selectedImageStylePreset || { prompt: '' })
     const userMessage: ChatBubbleMessage = {
@@ -7142,7 +7165,7 @@ function DrawWorkspace(props: {
         size: drawSize,
         quality: drawQuality,
         seed: drawRandomSeed ? undefined : 1,
-        imageAttachment,
+        imageAttachment: activeImageAttachment,
       })
       const response = await executeDrawRequest(request)
       replacePendingDrawMessage(nextSessionId, buildResolvedDrawAssistantMessage(response, nextPrompt))
@@ -7163,7 +7186,7 @@ function DrawWorkspace(props: {
             size: drawSize,
             quality: drawQuality,
             seed: drawRandomSeed ? undefined : 1,
-            imageAttachment,
+            imageAttachment: activeImageAttachment,
           }),
         })
         toast('网络异常，连接恢复后会自动继续当前图片生成。')
@@ -7310,6 +7333,7 @@ function DrawWorkspace(props: {
           {renderComposer({
             inputRef: attachmentInputRef,
             onAttachmentInputChange: handleAttachmentInputChange,
+            inputAccept: 'image/*',
             textareaRef: draftRef,
             value: draft,
             placeholder: '输入绘图提示词；粘贴、拖拽图片后会自动进入修图模式',
@@ -7356,6 +7380,22 @@ function DrawWorkspace(props: {
                 ]
               : [],
             leftActions: [
+              {
+                key: 'draw-upload',
+                node: (
+                  <button
+                    className={`ghost-button tiny toolbar-icon-button ${activeImageAttachment ? 'selected-toggle' : ''}`}
+                    type='button'
+                    title={activeImageAttachment ? '当前为修图模式：将调用 /v1/images/edits' : '上传图片进入修图模式'}
+                    aria-label={activeImageAttachment ? '修图模式' : '上传图片'}
+                    disabled={sending}
+                    onClick={() => attachmentInputRef.current?.click()}
+                  >
+                    {activeImageAttachment ? <PencilLine size={16} /> : <Plus size={16} />}
+                    <span className='toolbar-icon-label'>{activeImageAttachment ? '修图' : '上传图'}</span>
+                  </button>
+                ),
+              },
               {
                 key: 'group',
                 node: (
@@ -7528,7 +7568,7 @@ function DrawWorkspace(props: {
             ],
             fileAssets: attachments
               .filter((item) => item.kind === 'image')
-              .slice(0, 1)
+              .slice(-1)
               .map((item) => ({
                 id: item.id,
                 name: item.name,
@@ -10720,7 +10760,7 @@ function CliWorkspace(props: {
         requestId,
         sessionId: currentSessionKey,
         level: event.severity === 'error' ? 'error' : 'status',
-        logKind: 'status',
+        logKind: (event.phase === 'intent' ? 'intent' : event.phase === 'result' ? 'result' : 'status') as CliLogKind,
         sourceKind: `orchestrator.${event.phase}`,
         content: event.title,
         indentLevel: event.indentLevel,
@@ -10932,11 +10972,14 @@ function CliWorkspace(props: {
       baselineUpdatedAt: compactState?.baselineUpdatedAt ?? 0,
     }
     toast(`检测到压缩后增量上下文估算已使用 ${Math.round(effectiveRatio * 100)}%，已自动执行 /compact。`)
-    void submitCliPrompt('/compact', {
-      silentValidation: true,
-      nextAttachments: [],
-      directCommand: true,
-    })
+    const timer = window.setTimeout(() => {
+      void submitCliPrompt('/compact', {
+        silentValidation: true,
+        nextAttachments: [],
+        directCommand: true,
+      })
+    }, 0)
+    return () => window.clearTimeout(timer)
   }, [active, activeMessages, activePlan, activeSessionId, client, prompt, running, submitCliPrompt, toast])
 
   useEffect(() => {
@@ -11119,6 +11162,7 @@ function CliWorkspace(props: {
                   return (
                     <CliLogBubble
                       key={item.id}
+                      client={client}
                       item={item}
                       expanded={expanded}
                       onToggle={() => toggleLogGroup(item.id)}

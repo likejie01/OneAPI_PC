@@ -80,6 +80,14 @@ export function buildCodexSandboxArgs(
   return args
 }
 
+export function buildClaudePermissionArgs(fullAccess: boolean) {
+  if (fullAccess) {
+    return ['--permission-mode', 'bypassPermissions', '--dangerously-skip-permissions']
+  }
+
+  return ['--permission-mode', 'acceptEdits']
+}
+
 const NPM_CACHE_MODE_ENV_KEYS = new Set([
   'npm_config_offline',
   'npm_config_prefer_offline',

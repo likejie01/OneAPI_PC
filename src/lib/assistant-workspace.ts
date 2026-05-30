@@ -202,7 +202,8 @@ export function isClaudeModel(model: ChatModelOption | string) {
 }
 
 export function isImageGenerationModel(value: string) {
-  return normalizeModelValue(value) === 'gpt-image-2'
+  const normalized = normalizeModelValue(value)
+  return normalized === 'gpt-image-2' || normalized === 'gpt-image-1' || normalized.startsWith('gpt-image-')
 }
 
 export function resolveModelVendorFilter(value: string): Exclude<ModelVendorFilter, 'all'> | null {

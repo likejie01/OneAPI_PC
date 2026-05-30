@@ -1,7 +1,15 @@
 type ImagePayloadRecord = Record<string, unknown>
 
-const IMAGE_URL_KEYS = ['url', 'image_url', 'imageUrl']
-const IMAGE_BASE64_KEYS = ['b64_json', 'b64Json', 'image_base64', 'binary_data_base64', 'base64']
+const IMAGE_URL_KEYS = ['url', 'image_url', 'imageUrl', 'uri', 'src']
+const IMAGE_BASE64_KEYS = [
+  'b64_json',
+  'b64Json',
+  'image_base64',
+  'binary_data_base64',
+  'base64',
+  'base64_json',
+  'result',
+]
 const IMAGE_PROMPT_KEYS = ['revised_prompt', 'revisedPrompt', 'prompt']
 
 function readString(value: unknown) {
@@ -24,12 +32,14 @@ function asRecord(value: unknown): ImagePayloadRecord | null {
 
 function collectNestedImageArrays(record: ImagePayloadRecord, prompt: string) {
   return [
-    ...['image_urls'].flatMap((key) =>
+    ...['image_urls', 'images', 'output', 'outputs', 'results'].flatMap((key) =>
       Array.isArray(record[key])
-        ? (record[key] as unknown[]).flatMap((item) => toDisplayableItems({ url: item, prompt }))
+        ? (record[key] as unknown[]).flatMap((item) => toDisplayableItems(
+            typeof item === 'string' ? { url: item, prompt } : item
+          ))
         : []
     ),
-    ...['image_base64', 'binary_data_base64'].flatMap((key) =>
+    ...['image_base64', 'binary_data_base64', 'base64_json'].flatMap((key) =>
       Array.isArray(record[key])
         ? (record[key] as unknown[]).flatMap((item) => toDisplayableItems({ b64_json: item, prompt }))
         : []
@@ -57,7 +67,7 @@ function toDisplayableItems(value: unknown): Array<{
 
   if (directUrl || directBase64) {
     const source = directUrl || (
-      directBase64.startsWith('data:image/')
+      directBase64.startsWith('data:image/') || /^https?:\/\//i.test(directBase64)
         ? directBase64
         : `data:image/png;base64,${directBase64}`
     )

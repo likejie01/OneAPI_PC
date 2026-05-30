@@ -52,7 +52,7 @@ import {
   formatDesktopRequestTimeoutMessage,
   resolveDesktopRequestTimeoutMs,
 } from '../src/lib/request-timeouts.ts'
-import { parseDesktopChatStreamDataLine } from '../src/lib/chat-reasoning.ts'
+import { parseDesktopChatStreamEventBlock, type DesktopChatStreamParsedLine } from '../src/lib/chat-reasoning.ts'
 import {
   buildClaudePlanStateFromRecords,
   buildCodexPlanStateFromRecords,
@@ -77,6 +77,7 @@ import { extractCliUserTask } from '../src/lib/cli-prompt.ts'
 import { isCliSessionReadyForLatestTurn } from '../src/lib/cli-session-readiness.ts'
 import {
   MIN_DESKTOP_CLI_NODE_MAJOR,
+  buildClaudePermissionArgs,
   buildCodexSandboxArgs,
   buildWindowsCommandShimArgs,
   isDesktopCliNodeVersionSupported,
@@ -1258,6 +1259,42 @@ function emitChatStream(sender: WebContents, payload: DesktopChatStreamPayload) 
   sender.send('desktop:chat-stream', payload)
 }
 
+function emitParsedChatStreamLine(
+  sender: WebContents,
+  requestId: string,
+  parsedLine: DesktopChatStreamParsedLine,
+  usage: ChatCompletionResponse['usage'] | undefined
+) {
+  if (parsedLine.deltaText) {
+    emitChatStream(sender, {
+      requestId,
+      type: 'delta',
+      text: parsedLine.deltaText,
+    })
+  }
+  if (parsedLine.reasoningText) {
+    emitChatStream(sender, {
+      requestId,
+      type: 'reasoning',
+      text: parsedLine.reasoningText,
+    })
+  }
+
+  const nextUsage = parsedLine.usage || usage
+  if (parsedLine.done) {
+    emitChatStream(sender, {
+      requestId,
+      type: 'done',
+      usage: nextUsage,
+    })
+  }
+
+  return {
+    done: parsedLine.done,
+    usage: nextUsage,
+  }
+}
+
 async function requestChatStream(sender: WebContents, input: DesktopChatStreamRequest) {
   const controller = new AbortController()
   activeApiRequests.set(input.requestId, controller)
@@ -1317,42 +1354,22 @@ async function requestChatStream(sender: WebContents, input: DesktopChatStreamRe
       buffer = events.pop() || ''
 
       for (const rawEvent of events) {
-        const dataLines = rawEvent
-          .split('\n')
-          .filter((line) => line.startsWith('data:'))
-          .map((line) => line.slice(5).trim())
-
-        for (const line of dataLines) {
-          const parsedLine = parseDesktopChatStreamDataLine(line)
-          if (!parsedLine) {
-            continue
-          }
-
-          if (parsedLine.deltaText) {
-            emitChatStream(sender, {
-              requestId: input.requestId,
-              type: 'delta',
-              text: parsedLine.deltaText,
-            })
-          }
-          if (parsedLine.reasoningText) {
-            emitChatStream(sender, {
-              requestId: input.requestId,
-              type: 'reasoning',
-              text: parsedLine.reasoningText,
-            })
-          }
-          if (parsedLine.usage) {
-            usage = parsedLine.usage
-          }
-          if (parsedLine.done) {
-            emitChatStream(sender, {
-              requestId: input.requestId,
-              type: 'done',
-              usage,
-            })
+        for (const parsedLine of parseDesktopChatStreamEventBlock(rawEvent)) {
+          const emitted = emitParsedChatStreamLine(sender, input.requestId, parsedLine, usage)
+          usage = emitted.usage
+          if (emitted.done) {
             return
           }
+        }
+      }
+    }
+
+    if (buffer.trim()) {
+      for (const parsedLine of parseDesktopChatStreamEventBlock(buffer)) {
+        const emitted = emitParsedChatStreamLine(sender, input.requestId, parsedLine, usage)
+        usage = emitted.usage
+        if (emitted.done) {
+          return
         }
       }
     }
@@ -2399,7 +2416,7 @@ async function requestImageEdit(input: DesktopImageEditRequest) {
     })
   } catch (error) {
     if (controller?.signal.aborted) {
-      throw new Error(formatDesktopRequestTimeoutMessage(timeoutMs))
+      throw new Error(formatDesktopRequestTimeoutMessage(timeoutMs), { cause: error })
     }
     throw error
   } finally {
@@ -6311,12 +6328,11 @@ function buildClaudePromptArgs(input: CliRunRequest, resumeSessionId?: string) {
     '--output-format',
     'stream-json',
     '--include-partial-messages',
-    '--permission-mode',
-    input.fullAccess ? 'bypassPermissions' : 'default',
+    ...buildClaudePermissionArgs(!!input.fullAccess),
   ]
 
-  if (input.fullAccess) {
-    args.push('--dangerously-skip-permissions')
+  if (input.projectPath?.trim()) {
+    args.push('--add-dir', input.projectPath.trim())
   }
 
   if (input.model?.trim()) {

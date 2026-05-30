@@ -4,6 +4,7 @@ import {
   describeCliWorkspaceStatus,
   isCliStatusInstalled,
   MIN_DESKTOP_CLI_NODE_MAJOR,
+  buildClaudePermissionArgs,
   buildCodexSandboxArgs,
   buildWindowsCommandShimArgs,
   isDesktopCliNodeVersionSupported,
@@ -66,6 +67,18 @@ test('buildCodexSandboxArgs omits unsupported approval flags on old codex versio
     '--sandbox',
     'danger-full-access',
     '--dangerously-bypass-approvals-and-sandbox',
+  ])
+})
+
+test('buildClaudePermissionArgs accepts project edits in restricted mode and bypasses only in full access', () => {
+  assert.deepEqual(buildClaudePermissionArgs(false), [
+    '--permission-mode',
+    'acceptEdits',
+  ])
+  assert.deepEqual(buildClaudePermissionArgs(true), [
+    '--permission-mode',
+    'bypassPermissions',
+    '--dangerously-skip-permissions',
   ])
 })
 

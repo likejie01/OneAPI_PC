@@ -93,3 +93,55 @@ test('resolveImageGenerationResult supports binary_data_base64 arrays inside top
     }
   )
 })
+
+test('resolveImageGenerationResult supports responses-style image output result', () => {
+  assert.deepEqual(
+    resolveImageGenerationResult({
+      output: [
+        {
+          type: 'image_generation_call',
+          result: 'YWJj',
+        },
+      ],
+    }, 'fallback'),
+    {
+      imageUrl: 'data:image/png;base64,YWJj',
+      prompt: 'fallback',
+    }
+  )
+})
+
+test('resolveImageGenerationResult keeps responses-style result urls', () => {
+  assert.deepEqual(
+    resolveImageGenerationResult({
+      output: [
+        {
+          type: 'image_generation_call',
+          result: 'https://example.com/result-output.png',
+        },
+      ],
+    }, 'fallback'),
+    {
+      imageUrl: 'https://example.com/result-output.png',
+      prompt: 'fallback',
+    }
+  )
+})
+
+test('resolveImageGenerationResult supports nested images arrays', () => {
+  assert.deepEqual(
+    resolveImageGenerationResult({
+      data: {
+        images: [
+          {
+            url: 'https://example.com/nested-image.png',
+          },
+        ],
+      },
+    }, 'fallback'),
+    {
+      imageUrl: 'https://example.com/nested-image.png',
+      prompt: 'fallback',
+    }
+  )
+})
