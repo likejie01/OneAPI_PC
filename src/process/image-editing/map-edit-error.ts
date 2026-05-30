@@ -8,6 +8,9 @@ export function mapImageEditError(error: unknown) {
   if (/multipart|boundary|form data/.test(lower)) {
     return '图片编辑请求格式无效'
   }
+  if (/did not return any image output|no image output|未返回.*图片/.test(lower)) {
+    return '图片编辑上游未返回图片，请调整提示词或更换可编辑图片模型/渠道'
+  }
   if (/401|403|unauthorized|forbidden/.test(lower)) {
     return '图片编辑鉴权失败'
   }

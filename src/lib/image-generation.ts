@@ -3,6 +3,7 @@ type ImagePayloadRecord = Record<string, unknown>
 const IMAGE_URL_KEYS = ['url', 'image_url', 'imageUrl']
 const IMAGE_BASE64_KEYS = ['b64_json', 'b64Json', 'image_base64', 'binary_data_base64', 'base64']
 const IMAGE_PROMPT_KEYS = ['revised_prompt', 'revisedPrompt', 'prompt']
+const IMAGE_OUTPUT_KEYS = ['output', 'images', 'result']
 
 function readString(value: unknown) {
   return typeof value === 'string' ? value.trim() : ''
@@ -49,6 +50,40 @@ function toDisplayableItems(value: unknown): Array<{
     return [{ prompt, source }]
   }
 
+  const outputType = readString(record.type)
+  const outputResult = firstNonEmptyString([
+    record.result,
+    record.image,
+    record.output_image,
+  ])
+  if (
+    outputResult &&
+    (
+      outputType === 'image_generation_call' ||
+      outputType === 'output_image' ||
+      outputType === 'image'
+    )
+  ) {
+    return toDisplayableItems({ b64_json: outputResult, revised_prompt: prompt })
+  }
+
+  for (const key of IMAGE_OUTPUT_KEYS) {
+    const nestedOutput = record[key]
+    if (Array.isArray(nestedOutput)) {
+      const items = nestedOutput.flatMap((item) => toDisplayableItems(item))
+      if (items.length) {
+        return items
+      }
+    }
+    const nestedOutputRecord = asRecord(nestedOutput)
+    if (nestedOutputRecord) {
+      const items = toDisplayableItems(nestedOutputRecord)
+      if (items.length) {
+        return items
+      }
+    }
+  }
+
   const nestedData = record.data
   if (Array.isArray(nestedData)) {
     return nestedData.flatMap((item) => toDisplayableItems(item))
@@ -92,4 +127,27 @@ export function resolveImageGenerationResult(response: unknown, fallbackPrompt =
     imageUrl: first.source,
     prompt: first.prompt || fallbackPrompt,
   }
+}
+
+export function resolveImageResponseErrorMessage(response: unknown) {
+  const record = asRecord(response)
+  if (!record) {
+    return ''
+  }
+
+  const directMessage = readString(record.message)
+  if (directMessage) {
+    return directMessage
+  }
+
+  const nestedError = asRecord(record.error)
+  if (nestedError) {
+    return firstNonEmptyString([
+      nestedError.message,
+      nestedError.detail,
+      nestedError.type,
+    ])
+  }
+
+  return ''
 }

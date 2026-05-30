@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import {
   applyCliHistoryTitleOverrides,
   appendCliFallbackAssistantMessage,
+  buildCliAbortLogEntry,
   buildCliRecentSessions,
   buildCliTimeline,
   filterAssistantModels,
@@ -405,6 +406,27 @@ test('buildCliTimeline strips assistant intent chunks already attached to logs',
   assert.equal(
     timeline.find((item) => item.id === 'assistant-1' && item.kind === 'message')?.content,
     '已经完成修复。'
+  )
+})
+
+test('buildCliAbortLogEntry creates a terminal stopped log for optimistic UI state', () => {
+  assert.deepEqual(
+    buildCliAbortLogEntry({
+      client: 'codex',
+      requestId: 'codex-1',
+      sessionId: 'session-1',
+      createdAt: 100,
+    }),
+    {
+      id: 'codex-1-aborted-100',
+      requestId: 'codex-1',
+      sessionId: 'session-1',
+      level: 'status',
+      logKind: 'status',
+      sourceKind: 'request.aborted',
+      content: 'Codex 已停止本次回复。',
+      createdAt: 100,
+    }
   )
 })
 

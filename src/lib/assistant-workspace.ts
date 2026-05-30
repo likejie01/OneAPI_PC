@@ -38,6 +38,26 @@ export type CliTimelineLogEvent = {
   interaction?: CliInteractionPrompt
 }
 
+export function buildCliAbortLogEntry(input: {
+  client: 'codex' | 'claude'
+  requestId: string
+  sessionId: string
+  createdAt?: number
+}): CliLogEntryLike {
+  const createdAt = input.createdAt ?? Date.now()
+  const clientLabel = input.client === 'codex' ? 'Codex' : 'Claude'
+  return {
+    id: `${input.requestId}-aborted-${createdAt}`,
+    requestId: input.requestId,
+    sessionId: input.sessionId,
+    level: 'status',
+    logKind: 'status',
+    sourceKind: 'request.aborted',
+    content: `${clientLabel} 已停止本次回复。`,
+    createdAt,
+  }
+}
+
 export type CliFileChange = {
   path: string
   kind: 'created' | 'modified' | 'deleted' | 'renamed' | 'unknown'

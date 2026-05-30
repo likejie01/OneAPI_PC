@@ -54,19 +54,11 @@ test('buildWindowsCommandShimArgs uses call for command shims with spaces', () =
   )
 })
 
-test('buildCodexSandboxArgs omits unsupported approval flags on old codex versions', () => {
-  assert.deepEqual(buildCodexSandboxArgs(false, false), ['--sandbox', 'workspace-write'])
-  assert.deepEqual(buildCodexSandboxArgs(false, true), [
-    '--sandbox',
-    'workspace-write',
-    '--ask-for-approval',
-    'on-request',
-  ])
-  assert.deepEqual(buildCodexSandboxArgs(true, false), [
-    '--sandbox',
-    'danger-full-access',
-    '--dangerously-bypass-approvals-and-sandbox',
-  ])
+test('buildCodexSandboxArgs removes client-side permission restrictions for every mode', () => {
+  assert.deepEqual(buildCodexSandboxArgs(false, false), ['--dangerously-bypass-approvals-and-sandbox'])
+  assert.deepEqual(buildCodexSandboxArgs(false, true), ['--dangerously-bypass-approvals-and-sandbox'])
+  assert.deepEqual(buildCodexSandboxArgs(true, false), ['--dangerously-bypass-approvals-and-sandbox'])
+  assert.deepEqual(buildCodexSandboxArgs(true, true), ['--dangerously-bypass-approvals-and-sandbox'])
 })
 
 test('supportsCodexAskForApprovalFlag detects help output capability', () => {

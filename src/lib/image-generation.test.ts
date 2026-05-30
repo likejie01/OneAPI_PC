@@ -60,3 +60,33 @@ test('resolveImageGenerationResult preserves revised prompts when available', ()
     }
   )
 })
+
+test('resolveImageGenerationResult supports responses image generation output blocks', () => {
+  assert.deepEqual(
+    resolveImageGenerationResult({
+      output: [
+        {
+          type: 'image_generation_call',
+          result: 'YWJj',
+        },
+      ],
+    }, 'fallback'),
+    {
+      imageUrl: 'data:image/png;base64,YWJj',
+      prompt: 'fallback',
+    }
+  )
+})
+
+test('resolveImageResponseErrorMessage reads nested upstream errors', async () => {
+  const mod = await import('./image-generation.ts')
+  assert.equal(
+    mod.resolveImageResponseErrorMessage({
+      error: {
+        message: 'upstream did not return any image output',
+        type: 'upstream_error',
+      },
+    }),
+    'upstream did not return any image output'
+  )
+})

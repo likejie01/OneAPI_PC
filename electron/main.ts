@@ -94,6 +94,12 @@ import {
   shouldAutoRetryCliRequest,
   type CliRuntimeDiagnostics as SharedCliRuntimeDiagnostics,
 } from '../src/lib/cli-runtime.ts'
+import {
+  extractCodexCommandExecutionToolUseEntries,
+  extractCodexFunctionCallToolUseEntries,
+  normalizeCliToolInputForDetail,
+} from '../src/lib/cli-tool-events.ts'
+import { resolveImageResponseErrorMessage } from '../src/lib/image-generation.ts'
 import { resolveInteractionDecision } from '../src/process/execution-orchestrator/interaction-policy.ts'
 
 const DEFAULT_SERVER_BASE_URL = 'https://ai.oneapi.center'
@@ -2383,7 +2389,7 @@ async function requestImageEdit(input: DesktopImageEditRequest) {
     })
   } catch (error) {
     if (controller?.signal.aborted) {
-      throw new Error(formatDesktopRequestTimeoutMessage(timeoutMs))
+      throw new Error(formatDesktopRequestTimeoutMessage(timeoutMs), { cause: error })
     }
     throw error
   } finally {
@@ -2394,14 +2400,12 @@ async function requestImageEdit(input: DesktopImageEditRequest) {
 
   const data = await parseResponse(response)
   if (!response.ok) {
-    const message =
-      typeof data === 'object' &&
-      data &&
-      'message' in data &&
-      typeof data.message === 'string'
-        ? data.message
-        : `图片编辑失败（${response.status}）`
-    throw new Error(message)
+    throw new Error(getResponseErrorMessage(data, response.status, `图片编辑失败（${response.status}）`))
+  }
+
+  const responseErrorMessage = resolveImageResponseErrorMessage(data)
+  if (responseErrorMessage) {
+    throw new Error(responseErrorMessage)
   }
 
   return data
@@ -2700,10 +2704,14 @@ function createCodexProviderSection(apiKey: string, baseUrl: string): TomlSectio
 function createCodexWindowsSection(): TomlSectionBlock {
   return {
     header: 'windows',
-    lines: [
-      '[windows]',
-      'sandbox = "unelevated"',
-    ],
+    lines: ['[windows]'],
+  }
+}
+
+function removeCodexWindowsSandboxSetting(block: TomlSectionBlock): TomlSectionBlock {
+  return {
+    header: block.header,
+    lines: block.lines.filter((line, index) => index === 0 || !/^\s*sandbox\s*=/.test(line)),
   }
 }
 
@@ -2821,7 +2829,7 @@ function mergeCodexConfig(raw: string, apiKey: string, model: string, baseUrl: s
 
     if (section.header === 'windows') {
       if (!insertedWindows) {
-        sections.push(section)
+        sections.push(removeCodexWindowsSandboxSetting(section))
         insertedWindows = true
       }
       continue
@@ -5966,7 +5974,11 @@ function describeCliToolUse(name: string, input: unknown) {
   const command = extractCommandFromUnknown(input)
   const files = extractCliFilesFromUnknown(input)
   const purpose = extractPurposeFromUnknown(input) || summarizeCommandForCliLog(command)
-  const detail = normalizeCliToolDetail(input && typeof input === 'object' ? safeStringify(input) : '')
+  const detail = normalizeCliToolDetail(
+    input && typeof input === 'object'
+      ? safeStringify(normalizeCliToolInputForDetail(input))
+      : ''
+  )
   return {
     message: `${name ? `正在执行 ${name}` : '正在执行工具调用'}${purpose ? `：${purpose}` : ''}`,
     command,
@@ -6234,10 +6246,12 @@ function buildCodexExecArgs(
     `model_reasoning_effort="${parseCodexReasoningEffort(input.reasoningEffort)}"`
   )
 
+  args.push('-C', input.projectPath)
+
   if (resumeSessionId) {
     args.push('resume', '--json', '--skip-git-repo-check', resumeSessionId, input.prompt)
   } else {
-    args.push('--json', '-C', input.projectPath, '--skip-git-repo-check', input.prompt)
+    args.push('--json', '--skip-git-repo-check', input.prompt)
   }
 
   return args
@@ -6282,12 +6296,9 @@ function buildClaudePromptArgs(input: CliRunRequest, resumeSessionId?: string) {
     'stream-json',
     '--include-partial-messages',
     '--permission-mode',
-    input.fullAccess ? 'bypassPermissions' : 'default',
+    'bypassPermissions',
+    '--dangerously-skip-permissions',
   ]
-
-  if (input.fullAccess) {
-    args.push('--dangerously-skip-permissions')
-  }
 
   if (input.model?.trim()) {
     args.push('--model', input.model.trim())
@@ -6334,6 +6345,8 @@ async function runCodexPrompt(
   let activeCodexChild: ChildProcess | null = null
   let codexCompletionStopTimer: NodeJS.Timeout | null = null
   const runtimeDiagnostics: CliRuntimeDiagnostics = {}
+  const seenToolUseEvents = new Set<string>()
+  const toolUseIndentLevels = new Map<string, number>()
   const executablePath = await locateExecutable('codex')
   const managedRuntime = await readManagedNodeRuntime()
   const spawnCommand = resolveCliSpawnCommand('codex', executablePath)
@@ -6374,6 +6387,69 @@ async function runCodexPrompt(
       stoppedAfterCodexCompletion = true
       void stopChildProcess(activeCodexChild)
     }, 1200)
+  }
+  const emitCodexToolUse = (
+    toolName: string,
+    toolInput: unknown,
+    sourceKind: string,
+    options: {
+      toolUseId?: string
+      indentLevel?: number
+      assistantSnapshot?: string
+      assistantChunk?: string
+    } = {}
+  ) => {
+    const interaction = detectCliInteractionFromToolUse(toolName, toolInput)
+    if (interaction) {
+      emitCliInteractionPrompt({
+        client: 'codex',
+        requestId: input.requestId,
+        sessionId,
+        progress,
+        interaction,
+      })
+    }
+
+    const described = describeCliToolUse(toolName, toolInput)
+    if (!described.meaningful) {
+      return
+    }
+    const eventKey = buildCliToolUseEventKey(toolName, described)
+    if (seenToolUseEvents.has(eventKey)) {
+      return
+    }
+    seenToolUseEvents.add(eventKey)
+    const indentLevel = Math.max(0, options.indentLevel || 0)
+    if (options.toolUseId) {
+      toolUseIndentLevels.set(options.toolUseId, indentLevel)
+    }
+    const assistantChunk = takeAssistantChunk(options.assistantSnapshot || partialText, options.assistantChunk || '')
+    const intentText = summarizeCliIntentStep(assistantChunk || options.assistantSnapshot || partialText)
+    if (intentText && intentText !== lastToolIntentText) {
+      lastToolIntentText = intentText
+      progress.intent(
+        '执行意图',
+        sessionId,
+        intentText,
+        undefined,
+        toolName.trim() ? `intent.before_tool.${toolName.trim()}` : 'intent.before_tool',
+        intentText,
+        indentLevel
+      )
+    }
+    if (described.command) {
+      progress.command(
+        described.message,
+        described.command,
+        sessionId,
+        described.detail,
+        described.files,
+        sourceKind,
+        indentLevel
+      )
+      return
+    }
+    progress.tool(described.message, sessionId, described.detail, described.files, sourceKind, indentLevel)
   }
 
   progress.intent('Codex 已开始处理当前任务。', sessionId, undefined, undefined, 'request.started')
@@ -6473,40 +6549,43 @@ async function runCodexPrompt(
       for (const candidate of contentCandidates) {
         const toolEntries = extractToolUseEntries(candidate)
         for (const toolEntry of toolEntries) {
-          const interaction = detectCliInteractionFromToolUse(toolEntry.name, toolEntry.input)
-          if (interaction) {
-            emitCliInteractionPrompt({
-              client: 'codex',
-              requestId: input.requestId,
-              sessionId,
-              progress,
-              interaction,
-            })
-          }
-          const described = describeCliToolUse(toolEntry.name, toolEntry.input)
-          if (!described.meaningful) {
-            continue
-          }
-          const assistantChunk = takeAssistantChunk(partialText, toolEntry.textBefore)
-          const intentText = summarizeCliIntentStep(assistantChunk || partialText)
-          if (intentText && intentText !== lastToolIntentText) {
-            lastToolIntentText = intentText
-            progress.intent(
-              '执行意图',
-              sessionId,
-              intentText,
-              undefined,
-              toolEntry.name?.trim() ? `intent.before_tool.${toolEntry.name.trim()}` : 'intent.before_tool',
-              intentText
-            )
-          }
-          const sourceKind = toolEntry.name?.trim() ? `tool_use.${toolEntry.name.trim()}` : 'tool_use'
-          if (described.command) {
-            progress.command(described.message, described.command, sessionId, described.detail, described.files, sourceKind)
-          } else {
-            progress.tool(described.message, sessionId, described.detail, described.files, sourceKind)
-          }
+          emitCodexToolUse(
+            toolEntry.name,
+            toolEntry.input,
+            toolEntry.name?.trim() ? `assistant.tool_use.${toolEntry.name.trim()}` : 'assistant.tool_use',
+            {
+              toolUseId: toolEntry.id,
+              assistantSnapshot: partialText,
+              assistantChunk: toolEntry.textBefore,
+            }
+          )
         }
+      }
+
+      const functionCallToolEntries = extractCodexFunctionCallToolUseEntries(parsed)
+      for (const toolEntry of functionCallToolEntries) {
+        emitCodexToolUse(
+          toolEntry.name,
+          toolEntry.input,
+          toolEntry.name?.trim() ? `assistant.tool_use.${toolEntry.name.trim()}` : 'assistant.tool_use',
+          {
+            toolUseId: toolEntry.id,
+            assistantSnapshot: partialText,
+          }
+        )
+      }
+
+      const commandExecutionEntries = extractCodexCommandExecutionToolUseEntries(parsed)
+      for (const toolEntry of commandExecutionEntries) {
+        emitCodexToolUse(
+          toolEntry.name,
+          toolEntry.input,
+          'codex.command_execution',
+          {
+            toolUseId: toolEntry.id,
+            assistantSnapshot: partialText,
+          }
+        )
       }
 
       const lineFileChanges = extractCodexFileChanges([line])
@@ -6559,6 +6638,8 @@ async function runCodexPrompt(
     planState = null
     lastToolIntentText = ''
     consumedAssistantChars = 0
+    seenToolUseEvents.clear()
+    toolUseIndentLevels.clear()
     sawCodexCompletion = false
     stoppedAfterCodexCompletion = false
     activeCodexChild = null
@@ -6586,6 +6667,8 @@ async function runCodexPrompt(
     partialText = ''
     lastToolIntentText = ''
     consumedAssistantChars = 0
+    seenToolUseEvents.clear()
+    toolUseIndentLevels.clear()
     sawCodexCompletion = false
     stoppedAfterCodexCompletion = false
     activeCodexChild = null
@@ -7289,10 +7372,7 @@ async function writeClaudeConfig(request: CliDeployRequest) {
     ...current,
     env,
     model: resolvedModel,
-    permissions:
-      typeof current.permissions === 'object' && current.permissions
-        ? current.permissions
-        : { allow: [], deny: [] },
+    permissions: { allow: [], deny: [] },
   }
 
   await fs.writeFile(targetPath, JSON.stringify(nextConfig, null, 2), 'utf8')

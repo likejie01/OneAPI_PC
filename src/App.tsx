@@ -127,6 +127,7 @@ import {
 import {
   applyCliHistoryTitleOverrides,
   appendCliFallbackAssistantMessage,
+  buildCliAbortLogEntry,
   buildCliRecentSessions,
   buildCliTimeline,
   type CliTimelineEntry,
@@ -184,7 +185,7 @@ import {
   type ImageStylePreset,
 } from './lib/image-style-presets'
 import { groupDrawSessionsByAssistant } from './lib/draw-history'
-import { resolveImageGenerationResult } from './lib/image-generation'
+import { resolveImageGenerationResult, resolveImageResponseErrorMessage } from './lib/image-generation'
 import {
   describeCliWorkspaceStatus,
   isCliStatusInstalled,
@@ -3645,11 +3646,13 @@ function ConversationFindBar(props: {
 
   useEffect(() => {
     if (!active) {
-      setOpen(false)
-      setQuery('')
-      setMatches([])
-      setActiveIndex(0)
-      clearHighlights()
+      window.setTimeout(() => {
+        setOpen(false)
+        setQuery('')
+        setMatches([])
+        setActiveIndex(0)
+        clearHighlights()
+      }, 0)
     }
   }, [active, clearHighlights])
 
@@ -3674,18 +3677,24 @@ function ConversationFindBar(props: {
   useEffect(() => {
     clearHighlights()
     if (!open || !query.trim()) {
-      setMatches([])
-      setActiveIndex(0)
+      window.setTimeout(() => {
+        setMatches([])
+        setActiveIndex(0)
+      }, 0)
       return
     }
     const container = containerRef.current
     if (!container) {
-      setMatches([])
+      window.setTimeout(() => {
+        setMatches([])
+      }, 0)
       return
     }
     const nextMatches = applyConversationSearchHighlights(container, itemSelector, query)
-    setMatches(nextMatches)
-    setActiveIndex(nextMatches.length ? 0 : 0)
+    window.setTimeout(() => {
+      setMatches(nextMatches)
+      setActiveIndex(nextMatches.length ? 0 : 0)
+    }, 0)
   }, [clearHighlights, containerRef, itemSelector, open, query])
 
   useEffect(() => {
@@ -4102,7 +4111,7 @@ function resolveCliDiagnosticSummary(items: Array<{
     .map((item) => item.detail?.trim() || '')
     .find((item) => /error|failed|not found|invalid|拒绝|blocked/i.test(item))
   if (matchedDetail) {
-    return '执行异常细节'
+    return '执行细节'
   }
   return '执行细节'
 }
@@ -6742,7 +6751,7 @@ function DrawWorkspace(props: {
           })
         )
       } catch (error) {
-        throw new Error(mapImageEditError(error))
+        throw new Error(mapImageEditError(error), { cause: error })
       }
     }
 
@@ -6764,6 +6773,11 @@ function DrawWorkspace(props: {
   }
 
   function buildResolvedDrawAssistantMessage(response: ImageGenerationResponse, fallbackPrompt: string) {
+    const responseErrorMessage = resolveImageResponseErrorMessage(response)
+    if (responseErrorMessage) {
+      throw new Error(responseErrorMessage)
+    }
+
     const resolvedImage = resolveImageGenerationResult(response, fallbackPrompt)
     if (!resolvedImage) {
       throw new Error('模型没有返回可展示的图片。')
@@ -10621,11 +10635,13 @@ function CliWorkspace(props: {
       baselineUpdatedAt: compactState?.baselineUpdatedAt ?? 0,
     }
     toast(`检测到压缩后增量上下文估算已使用 ${Math.round(effectiveRatio * 100)}%，已自动执行 /compact。`)
-    void submitCliPrompt('/compact', {
-      silentValidation: true,
-      nextAttachments: [],
-      directCommand: true,
-    })
+    window.setTimeout(() => {
+      void submitCliPrompt('/compact', {
+        silentValidation: true,
+        nextAttachments: [],
+        directCommand: true,
+      })
+    }, 0)
   }, [active, activeMessages, activePlan, activeSessionId, client, prompt, running, submitCliPrompt, toast])
 
   useEffect(() => {
@@ -10671,6 +10687,25 @@ function CliWorkspace(props: {
     stoppingRunRef.current = true
     activeRequestIdRef.current = ''
     setRunning(false)
+    if (activeSessionId) {
+      const abortLog = buildCliAbortLogEntry({
+        client,
+        requestId,
+        sessionId: activeSessionId,
+      })
+      setSessionLogsMap((current) => ({
+        ...current,
+        [activeSessionId]: mergeCliLogs(current[activeSessionId] || [], [abortLog]),
+      }))
+      setSessionPartialMap((current) => ({
+        ...current,
+        [activeSessionId]: '',
+      }))
+      setSessionPlansMap((current) => ({
+        ...current,
+        [activeSessionId]: null,
+      }))
+    }
     try {
       await stopCliPrompt(requestId)
       toast(`已停止 ${client === 'codex' ? 'Codex' : 'Claude'} 当前回复。`)
