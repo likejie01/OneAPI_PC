@@ -8261,6 +8261,17 @@ async function deployCli(webContents: WebContents, request: CliDeployRequest, jo
     }
 
     logger.info('install', 'success', `${client} 安装完成`)
+
+    const postInstallDetection = await inspectCli(client)
+    if (!postInstallDetection.installed) {
+      logger.info(
+        'install',
+        'error',
+        `${client} 安装后仍未检测到可用可执行文件`,
+        postInstallDetection.executablePath || '未找到可执行文件'
+      )
+      return
+    }
   }
 
   logger.info('config', 'running', `正在写入 ${client} 配置`)

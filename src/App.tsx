@@ -217,6 +217,7 @@ import {
 } from './lib/draw-request'
 import { isRecoverableNetworkError } from './lib/network-retry'
 import { estimateCliSessionContextUsage, isDirectCliCommandPrompt } from './lib/cli-runtime'
+import { formatUserFacingMessage } from './lib/user-facing-message'
 import { buildFinalPrompt } from './process/prompt-assembler/build-final-prompt'
 import { buildImageEditRequest } from './process/image-editing/build-edit-request'
 import { mapImageEditError } from './process/image-editing/map-edit-error'
@@ -397,13 +398,17 @@ function resolveRecommendedSubscriptionPlanId(plans: PlanRecord[]) {
 }
 
 function useToastState() {
-  const [message, setMessage] = useState('')
+  const [message, setMessageState] = useState('')
+
+  const setMessage = useCallback((nextMessage: string) => {
+    setMessageState(formatUserFacingMessage(nextMessage))
+  }, [])
 
   useEffect(() => {
     if (!message) {
       return
     }
-    const timer = window.setTimeout(() => setMessage(''), 2800)
+    const timer = window.setTimeout(() => setMessageState(''), 2800)
     return () => window.clearTimeout(timer)
   }, [message])
 
@@ -1231,6 +1236,11 @@ const CLI_REASONING_OPTIONS = [
   { label: '低', value: 'low' },
   { label: '中', value: 'medium' },
   { label: '高', value: 'high' },
+] as const
+
+const CHAT_REASONING_OPTIONS = [
+  { label: '关闭', value: 'off' },
+  ...CLI_REASONING_OPTIONS,
 ] as const
 
 const CLAUDE_REASONING_OPTIONS = [
@@ -4408,7 +4418,7 @@ function AssistantsChatWorkspace(props: {
     [chatModeModels, effectiveModelVendorFilter]
   )
   const selectedReasoningLabel =
-    CLI_REASONING_OPTIONS.find((item) => item.value === reasoningEffort)?.label || reasoningEffort
+    CHAT_REASONING_OPTIONS.find((item) => item.value === reasoningEffort)?.label || reasoningEffort
   const selectedContextWindowLabel =
     CHAT_CONTEXT_WINDOW_OPTIONS.find((item) => item.value === contextWindow)?.label || `${contextWindow}`
 
@@ -5027,7 +5037,7 @@ function AssistantsChatWorkspace(props: {
             ? resolvedActiveSessionId
             : undefined,
           temperature: activeAssistant?.temperature ?? 0.7,
-          reasoningEffort,
+          reasoningEffort: reasoningEffort === 'off' ? undefined : reasoningEffort,
           messages: [
             ...(systemMessage ? [systemMessage] : []),
             ...requestHistory.map((item) => ({
@@ -5769,7 +5779,7 @@ function AssistantsChatWorkspace(props: {
                           <strong>思考长度</strong>
                         </div>
                         <div className='picker-menu-list'>
-                          {CLI_REASONING_OPTIONS.map((item) => (
+                          {CHAT_REASONING_OPTIONS.map((item) => (
                             <button
                               key={item.value}
                               type='button'
@@ -6767,7 +6777,10 @@ function DrawWorkspace(props: {
       replacePendingDrawMessage(snapshot.sessionId, {
         id: `draw-assistant-error-${failedAt}`,
         role: 'assistant',
-        content: error instanceof Error ? error.message : '图片生成失败',
+        content: formatUserFacingMessage(
+          error instanceof Error ? error.message : '图片生成失败',
+          '图片生成失败'
+        ),
         createdAt: failedAt,
         modelLabel: DEFAULT_DRAW_MODEL,
       })
@@ -6881,7 +6894,10 @@ function DrawWorkspace(props: {
       replacePendingDrawMessage(nextSessionId, {
         id: `draw-assistant-error-${failedAt}`,
         role: 'assistant',
-        content: error instanceof Error ? error.message : '图片生成失败',
+        content: formatUserFacingMessage(
+          error instanceof Error ? error.message : '图片生成失败',
+          '图片生成失败'
+        ),
         createdAt: failedAt,
         modelLabel: DEFAULT_DRAW_MODEL,
       })
