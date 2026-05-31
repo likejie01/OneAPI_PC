@@ -23,6 +23,16 @@ export interface MobileDesktopDevice {
   boundAt?: number
 }
 
+export interface MobileDesktopAssistantSnapshot {
+  id: string
+  scope: 'chat' | 'image' | 'draw'
+  name: string
+  description?: string
+  prompt?: string
+  model?: string
+  temperature?: number
+}
+
 export async function getLocalMobileBridgeDevice(): Promise<DesktopMobileBridgeDevice> {
   return desktopBridge().getMobileBridgeDevice()
 }
@@ -67,5 +77,27 @@ export async function deleteMobileDesktopDevice(deviceId: string) {
   })
   if (!response.success) {
     throw new Error(response.message || '删除旧设备标识失败')
+  }
+}
+
+export async function syncMobileDesktopAssistantsSnapshot(
+  deviceId: string,
+  scope: 'chat' | 'image' | 'draw',
+  assistants: MobileDesktopAssistantSnapshot[]
+) {
+  if (!deviceId) {
+    return
+  }
+  const response = await desktopEnvelope({
+    method: 'POST',
+    path: '/api/mobile/desktop-assistants/snapshot',
+    query: {
+      device_id: deviceId,
+      scope,
+    },
+    body: assistants,
+  })
+  if (!response.success) {
+    throw new Error(response.message || '同步助手失败')
   }
 }

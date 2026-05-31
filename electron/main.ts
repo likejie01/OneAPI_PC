@@ -7,6 +7,7 @@ import {
   Menu,
   nativeImage,
   nativeTheme,
+  powerSaveBlocker,
   screen,
   session,
   shell,
@@ -137,6 +138,8 @@ let activeTitleDrag:
   | null = null
 const activeApiRequests = new Map<string, AbortController>()
 const activeCliProcesses = new Map<string, ChildProcess>()
+const activeCliPowerSaveBlockers = new Map<string, number>()
+let mobileBridgePowerSaveBlockerId: number | null = null
 const mobileBridgeProgressMirrors = new Map<string, (payload: CliProgressPayload) => void>()
 const activeCliRequestStates = new Map<string, {
   client: CliClient
@@ -164,6 +167,40 @@ let mobileBridgeRunning = false
 let mobileBridgeDeviceId = ''
 let mobileBridgeLastHeartbeatAt = 0
 let mobileBridgeLastSnapshotSignature = ''
+
+function startCliPowerSaveBlocker(requestId: string) {
+  if (!requestId || activeCliPowerSaveBlockers.has(requestId)) {
+    return
+  }
+  const id = powerSaveBlocker.start('prevent-display-sleep')
+  activeCliPowerSaveBlockers.set(requestId, id)
+}
+
+function stopCliPowerSaveBlocker(requestId: string) {
+  const id = activeCliPowerSaveBlockers.get(requestId)
+  if (typeof id === 'number') {
+    activeCliPowerSaveBlockers.delete(requestId)
+    if (powerSaveBlocker.isStarted(id)) {
+      powerSaveBlocker.stop(id)
+    }
+  }
+}
+
+function setMobileBridgePowerSaveBlocker(active: boolean) {
+  if (active) {
+    if (mobileBridgePowerSaveBlockerId === null) {
+      mobileBridgePowerSaveBlockerId = powerSaveBlocker.start('prevent-display-sleep')
+    }
+    return
+  }
+  if (mobileBridgePowerSaveBlockerId !== null) {
+    const id = mobileBridgePowerSaveBlockerId
+    mobileBridgePowerSaveBlockerId = null
+    if (powerSaveBlocker.isStarted(id)) {
+      powerSaveBlocker.stop(id)
+    }
+  }
+}
 
 interface MobileBridgeExtensionRef {
   id: string
@@ -1764,9 +1801,11 @@ async function startMobileBridgeLoop() {
     try {
       const userId = await getDesktopUserHeaderValue()
       if (!userId) {
+        setMobileBridgePowerSaveBlocker(false)
         await wait(MOBILE_BRIDGE_LOOP_INTERVAL_MS)
         continue
       }
+      setMobileBridgePowerSaveBlocker(true)
 
       await registerMobileBridgeDevice()
       await heartbeatMobileBridgeDevice()
@@ -6647,6 +6686,7 @@ async function runCodexPrompt(
     onSpawn: (child) => {
       activeCodexChild = child
       activeCliProcesses.set(input.requestId, child)
+      startCliPowerSaveBlocker(input.requestId)
       activeCliRequestStates.set(input.requestId, {
         client: 'codex',
         child,
@@ -6845,6 +6885,7 @@ async function runCodexPrompt(
   }
   activeCliProcesses.delete(input.requestId)
   activeCliRequestStates.delete(input.requestId)
+  stopCliPowerSaveBlocker(input.requestId)
   const aborted = stoppedCliRequests.delete(input.requestId)
   if (!aborted) {
     progress.status('Codex 输出已结束，正在整理会话记录。', sessionId, true, undefined, {
@@ -7084,6 +7125,7 @@ async function runClaudePrompt(
     onSpawn: (child) => {
       activeClaudeChild = child
       activeCliProcesses.set(input.requestId, child)
+      startCliPowerSaveBlocker(input.requestId)
       activeCliRequestStates.set(input.requestId, {
         client: 'claude',
         child,
@@ -7344,6 +7386,7 @@ async function runClaudePrompt(
   }
   activeCliProcesses.delete(input.requestId)
   activeCliRequestStates.delete(input.requestId)
+  stopCliPowerSaveBlocker(input.requestId)
   const aborted = stoppedCliRequests.delete(input.requestId)
 
   if (!finalResult) {
@@ -8464,6 +8507,10 @@ app.whenReady().then(() => {
 
 app.on('before-quit', () => {
   isQuitting = true
+  setMobileBridgePowerSaveBlocker(false)
+  for (const requestId of activeCliPowerSaveBlockers.keys()) {
+    stopCliPowerSaveBlocker(requestId)
+  }
 })
 
 app.on('window-all-closed', () => {
@@ -8713,6 +8760,7 @@ ipcMain.handle('desktop:run-cli', async (event, request: CliRunRequest) => {
 ipcMain.handle('desktop:stop-cli', async (_event, requestId: string) => {
   stoppedCliRequests.add(requestId)
   await stopChildProcess(activeCliProcesses.get(requestId))
+  stopCliPowerSaveBlocker(requestId)
 })
 ipcMain.handle('desktop:respond-cli-interaction', async (_event, input: CliInteractionResponseRequest) => {
   const state = activeCliRequestStates.get(input.requestId)

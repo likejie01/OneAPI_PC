@@ -115,6 +115,7 @@ import {
   getLocalMobileBridgeDevice,
   getMobileDesktopDevices,
   resetLocalMobileBridgeDevice,
+  syncMobileDesktopAssistantsSnapshot,
   type MobileDesktopDevice,
 } from './domains/mobile-bridge'
 import { generateAccessToken, getSelfProfile, requireSuccess, verifyCurrentPassword } from './domains/profile'
@@ -4393,6 +4394,36 @@ function AssistantsChatWorkspace(props: {
     () => decorateAssistants(assistants, assistantFavorites, assistantSearch),
     [assistantFavorites, assistantSearch, assistants]
   )
+
+  useEffect(() => {
+    let disposed = false
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const device = await getLocalMobileBridgeDevice()
+          if (disposed || !device.deviceId) {
+            return
+          }
+          await syncMobileDesktopAssistantsSnapshot(device.deviceId, 'chat', assistants.map((item) => ({
+            id: item.id,
+            scope: 'chat',
+            name: item.name,
+            description: item.description,
+            prompt: item.prompt,
+            model: item.model,
+            temperature: item.temperature,
+          })))
+        } catch {
+          // Assistant snapshots are best-effort; the Android app keeps built-in fallbacks.
+        }
+      })()
+    }, 800)
+    return () => {
+      disposed = true
+      window.clearTimeout(timer)
+    }
+  }, [assistants])
+
   const resolvedActiveSessionId =
     activeSessionId && chatSessions.some((item) => item.id === activeSessionId)
       ? activeSessionId
@@ -6083,6 +6114,7 @@ function DrawWorkspace(props: {
     inputRef: attachmentInputRef,
     clearAttachments,
     removeAttachment,
+    replaceAttachments,
     handleInputChange: handleAttachmentInputChange,
     handlePaste: handleAttachmentPaste,
     handleDrop: handleAttachmentDrop,
@@ -6117,6 +6149,36 @@ function DrawWorkspace(props: {
     () => Object.fromEntries(imageStylePresets.map((item) => [item.id, item.title])),
     [imageStylePresets]
   )
+
+  useEffect(() => {
+    let disposed = false
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const device = await getLocalMobileBridgeDevice()
+          if (disposed || !device.deviceId) {
+            return
+          }
+          await syncMobileDesktopAssistantsSnapshot(device.deviceId, 'image', imageStylePresets.map((item) => ({
+            id: item.id,
+            scope: 'image',
+            name: item.title,
+            description: item.description,
+            prompt: item.prompt,
+            model: '',
+            temperature: 0,
+          })))
+        } catch {
+          // Image assistant snapshots are best-effort; Android falls back to built-ins.
+        }
+      })()
+    }, 800)
+    return () => {
+      disposed = true
+      window.clearTimeout(timer)
+    }
+  }, [imageStylePresets])
+
   const drawSessionsByAssistant = useMemo(
     () => groupDrawSessionsByAssistant(drawSessions, imageStyleTitleById),
     [drawSessions, imageStyleTitleById]
@@ -6590,6 +6652,45 @@ function DrawWorkspace(props: {
     }
   }
 
+  async function referenceGeneratedImageForEdit(message: ChatBubbleMessage) {
+    if (!message.imageUrl || message.imageUrl === DRAW_PENDING_IMAGE_URL) {
+      return
+    }
+    try {
+      const name = `${clipText(message.imagePrompt || 'oneapi-image', 24).replace(/[^\w\u4e00-\u9fa5-]+/g, '_') || 'oneapi-image'}.png`
+      const response = await fetch(message.imageUrl)
+      if (!response.ok) {
+        throw new Error('图片读取失败')
+      }
+      const blob = await response.blob()
+      const file = new File([blob], name, { type: blob.type || 'image/png' })
+      const dataBase64 = await fileToBase64(file)
+      const saved = await getDesktopBridge().saveAttachment({
+        name,
+        mimeType: file.type || 'image/png',
+        dataBase64,
+      })
+      replaceAttachments([{
+        id: globalThis.crypto.randomUUID(),
+        name,
+        filePath: saved.path,
+        size: file.size,
+        kind: 'image',
+        mimeType: file.type || 'image/png',
+        dataBase64,
+        previewUrl: URL.createObjectURL(file),
+      }])
+      if (!draft.trim() && message.imagePrompt?.trim()) {
+        setDraft(message.imagePrompt)
+        drawPromptHistory.syncInputValue(message.imagePrompt)
+        window.setTimeout(() => resizeDraft(), 0)
+      }
+      window.setTimeout(() => draftRef.current?.focus(), 0)
+    } catch (error) {
+      toast(error instanceof Error ? error.message : '引用图片失败')
+    }
+  }
+
   async function handleCopyImage(source: string) {
     try {
       await copyImageToClipboard({
@@ -7009,6 +7110,16 @@ function DrawWorkspace(props: {
                                   label: '复制',
                                   icon: Copy,
                                   onClick: () => void copyText(visibleMessageContent),
+                                },
+                              ]
+                            : []),
+                          ...(message.imageUrl && message.imageUrl !== DRAW_PENDING_IMAGE_URL
+                            ? [
+                                {
+                                  key: 'edit-image',
+                                  label: '编辑',
+                                  icon: PencilLine,
+                                  onClick: () => void referenceGeneratedImageForEdit(message),
                                 },
                               ]
                             : []),
