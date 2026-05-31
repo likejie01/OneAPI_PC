@@ -109,6 +109,14 @@ import {
   onUpdateState,
 } from './domains/update'
 import { createDesktopCliKey, ensureDesktopServiceKey, fetchApiKeySecret, getApiKeys } from './domains/keys'
+import {
+  deleteMobileDesktopBinding,
+  deleteMobileDesktopDevice,
+  getLocalMobileBridgeDevice,
+  getMobileDesktopDevices,
+  resetLocalMobileBridgeDevice,
+  type MobileDesktopDevice,
+} from './domains/mobile-bridge'
 import { generateAccessToken, getSelfProfile, requireSuccess, verifyCurrentPassword } from './domains/profile'
 import {
   getPublicPlans,
@@ -8154,6 +8162,19 @@ function ServiceStatusWorkspace(props: {
   )
 }
 
+function resolveNextClientKeyName(keys: Array<{ name?: string }>) {
+  const used = new Set(
+    keys
+      .map((item) => item.name?.trim())
+      .filter((name): name is string => Boolean(name))
+  )
+  let index = 1
+  while (used.has(`ClientKey_${index}`)) {
+    index += 1
+  }
+  return `ClientKey_${index}`
+}
+
 function MeWorkspace(props: {
   user: UserProfile
   toast: (message: string) => void
@@ -8177,14 +8198,41 @@ function MeWorkspace(props: {
   const [passwordInput, setPasswordInput] = useState('')
   const [pendingKeyId, setPendingKeyId] = useState<number | null>(null)
   const [revealedKey, setRevealedKey] = useState('')
-  const [newKeyName, setNewKeyName] = useState('桌面端专用 Key')
   const [accessToken, setAccessToken] = useState('')
   const [accessTokenVisible, setAccessTokenVisible] = useState(false)
   const [activeDeployClient, setActiveDeployClient] = useState<CliClient | null>(null)
+  const [mobileBridgeDevice, setMobileBridgeDevice] = useState<MobileDesktopDevice | null>(null)
+  const [mobileBridgeLoading, setMobileBridgeLoading] = useState(false)
 
   const refreshMe = useCallback(async () => {
     const nextKeys = await getApiKeys()
     setApiKeys(nextKeys?.items ?? [])
+  }, [])
+
+  const refreshMobileBridge = useCallback(async () => {
+    setMobileBridgeLoading(true)
+    try {
+      const [localDevice, devices] = await Promise.all([
+        getLocalMobileBridgeDevice(),
+        getMobileDesktopDevices(),
+      ])
+      const registered = devices.find((item) => item.deviceId === localDevice.deviceId)
+      setMobileBridgeDevice({
+        deviceId: localDevice.deviceId,
+        name: registered?.name || localDevice.name,
+        platform: registered?.platform || localDevice.platform,
+        clientVersion: registered?.clientVersion || localDevice.clientVersion,
+        status: registered?.status || 'online',
+        lastSeenAt: registered?.lastSeenAt || Date.now(),
+        lastError: registered?.lastError,
+        bound: registered?.bound,
+        boundAppId: registered?.boundAppId,
+        boundAppName: registered?.boundAppName,
+        boundAt: registered?.boundAt,
+      })
+    } finally {
+      setMobileBridgeLoading(false)
+    }
   }, [])
 
   useEffect(() => {
@@ -8210,6 +8258,18 @@ function MeWorkspace(props: {
       disposed = true
     }
   }, [toast])
+
+  useEffect(() => {
+    if (!visible) {
+      return
+    }
+    const timer = window.setTimeout(() => {
+      void refreshMobileBridge().catch((error) => {
+        toast(error instanceof Error ? error.message : '加载设备绑定状态失败')
+      })
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [refreshMobileBridge, toast, visible])
 
   function openPasswordGate(purpose: 'view-key' | 'create-key', keyId?: number) {
     if (isVerificationStillValid(user.id)) {
@@ -8239,7 +8299,7 @@ function MeWorkspace(props: {
     if (purpose === 'create-key') {
       try {
         const result = await createDesktopCliKey(
-          newKeyName.trim() || '桌面端专用 Key',
+          resolveNextClientKeyName(apiKeys),
           user.group || ''
         )
         setRevealedKey(result.key)
@@ -8278,6 +8338,50 @@ function MeWorkspace(props: {
       await continueAfterVerification(passwordGatePurpose, pendingKeyId ?? undefined)
     } catch (error) {
       toast(error instanceof Error ? error.message : '密码验证失败')
+    }
+  }
+
+  async function handleUnbindMobileDevice() {
+    if (!mobileBridgeDevice) {
+      return
+    }
+    try {
+      setMobileBridgeLoading(true)
+      await deleteMobileDesktopBinding(mobileBridgeDevice.deviceId, mobileBridgeDevice.boundAppId)
+      toast('设备绑定已解除。')
+      await refreshMobileBridge()
+    } catch (error) {
+      toast(error instanceof Error ? error.message : '解除绑定失败')
+    } finally {
+      setMobileBridgeLoading(false)
+    }
+  }
+
+  async function handleSwitchMobileDeviceBinding() {
+    if (!mobileBridgeDevice) {
+      return
+    }
+    try {
+      setMobileBridgeLoading(true)
+      if (mobileBridgeDevice.bound) {
+        await deleteMobileDesktopBinding(mobileBridgeDevice.deviceId, mobileBridgeDevice.boundAppId)
+      }
+      await deleteMobileDesktopDevice(mobileBridgeDevice.deviceId).catch(() => undefined)
+      const nextDevice = await resetLocalMobileBridgeDevice()
+      setMobileBridgeDevice({
+        deviceId: nextDevice.deviceId,
+        name: nextDevice.name,
+        platform: nextDevice.platform,
+        clientVersion: nextDevice.clientVersion,
+        status: 'online',
+        lastSeenAt: Date.now(),
+      })
+      toast('本机绑定标识已更换，请在 Android 端重新绑定。')
+      await refreshMobileBridge()
+    } catch (error) {
+      toast(error instanceof Error ? error.message : '更换绑定失败')
+    } finally {
+      setMobileBridgeLoading(false)
     }
   }
 
@@ -8353,9 +8457,74 @@ function MeWorkspace(props: {
                   </div>
                 </div>
 
+                <div className='panel-block me-device-binding-card'>
+                  <div className='list-block-header'>
+                    <strong>设备绑定</strong>
+                    <div className='inline-actions'>
+                      <button
+                        className='ghost-button tiny'
+                        type='button'
+                        onClick={() => void refreshMobileBridge().catch((error) => {
+                          toast(error instanceof Error ? error.message : '刷新设备绑定失败')
+                        })}
+                        disabled={mobileBridgeLoading}
+                      >
+                        <RotateCcw size={14} />
+                        <span>刷新</span>
+                      </button>
+                    </div>
+                  </div>
+                  <div className='subrecords'>
+                    <div className='mobile-bridge-info-row'>
+                      <div className='record-row highlighted'>
+                        <div>
+                          <strong>{mobileBridgeDevice?.name || '本机客户端'}</strong>
+                          <span>
+                            {mobileBridgeDevice?.platform || 'desktop'} · {mobileBridgeDevice?.clientVersion || '当前版本'}
+                          </span>
+                        </div>
+                        <small>{mobileBridgeDevice?.status === 'degraded' ? '异常' : '在线'}</small>
+                      </div>
+                      <div className='record-row'>
+                        <div>
+                          <strong>本机标识</strong>
+                          <span>{mobileBridgeDevice?.deviceId || '正在读取本机设备标识'}</span>
+                        </div>
+                        <small>{mobileBridgeLoading ? '同步中' : '已启用'}</small>
+                      </div>
+                    </div>
+                    <div className='mobile-bridge-action-row'>
+                        <button
+                          className='ghost-button'
+                          type='button'
+                          onClick={() => void handleUnbindMobileDevice()}
+                          disabled={!mobileBridgeDevice?.bound || mobileBridgeLoading}
+                        >
+                          解除绑定
+                        </button>
+                        <button
+                          className='secondary-button'
+                          type='button'
+                          onClick={() => void handleSwitchMobileDeviceBinding()}
+                          disabled={!mobileBridgeDevice || mobileBridgeLoading}
+                        >
+                          更换绑定
+                        </button>
+                    </div>
+                  </div>
+                </div>
+
                 <div className='panel-block me-key-list-card'>
                   <div className='list-block-header'>
                     <strong>已有 Key</strong>
+                    <button
+                      className='secondary-button tiny'
+                      type='button'
+                      onClick={() => openPasswordGate('create-key')}
+                    >
+                      <Plus size={14} />
+                      <span>新建 Key</span>
+                    </button>
                   </div>
                   <div className='subrecords'>
                     {apiKeys.length === 0 ? (
@@ -8384,31 +8553,6 @@ function MeWorkspace(props: {
                         ))}
                       </div>
                     )}
-                  </div>
-                </div>
-
-                <div className='panel-block me-key-create-card'>
-                  <div className='subform me-key-create'>
-                    <div className='list-block-header'>
-                      <strong>新建 Key</strong>
-                    </div>
-                    <div className='inline-fields'>
-                      <input
-                        value={newKeyName}
-                        onChange={(event) => setNewKeyName(event.target.value)}
-                        placeholder='新 Key 名称'
-                      />
-                      <button
-                        className='secondary-button'
-                        type='button'
-                        onClick={() => openPasswordGate('create-key')}
-                      >
-                        新建 Key
-                      </button>
-                    </div>
-                    <p className='helper-copy'>
-                      查看 Key 或新建 Key 需要校验一次密码，验证后 30 分钟内无需重复输入。
-                    </p>
                     {revealedKey && (
                       <div className='key-reveal'>
                         <strong>最近查看 / 创建的 Key</strong>
@@ -10372,6 +10516,10 @@ function CliWorkspace(props: {
         finalPrompt: promptWithAttachments,
         commandTitle: directCommand ? '直接命令准备' : '扩展与上下文准备',
         command: directCommand ? cleanedPrompt : '',
+        extensions: selectedExtensions.map((item) => ({
+          kind: item.kind,
+          name: item.name,
+        })),
       }).map((event) => ({
         id: event.id,
         requestId,

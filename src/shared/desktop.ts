@@ -116,6 +116,13 @@ export interface DesktopUpdateState {
   announcements?: DesktopAnnouncement[]
 }
 
+export interface DesktopMobileBridgeDevice {
+  deviceId: string
+  name: string
+  platform: string
+  clientVersion: string
+}
+
 export interface DesktopPathInfo {
   path: string
   kind: 'file' | 'directory' | 'missing'

@@ -3952,6 +3952,28 @@ select {
   margin-top: 0;
 }
 
+.me-device-binding-card {
+  margin-top: 0;
+}
+
+.mobile-bridge-info-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+}
+
+.mobile-bridge-action-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.mobile-bridge-action-row .ghost-button,
+.mobile-bridge-action-row .secondary-button {
+  min-height: 38px;
+  justify-content: center;
+}
+
 .me-key-grid {
   display: grid;
   gap: 10px;
@@ -3975,12 +3997,14 @@ select {
 
 .me-codex-card .panel-header,
 .me-claude-card .panel-header,
+.me-device-binding-card .list-block-header,
 .me-key-list-card .list-block-header,
 .me-key-create-card .list-block-header {
   margin-top: 0;
 }
 
 .me-key-create-card .subform,
+.me-device-binding-card .subrecords,
 .me-key-list-card .subrecords,
 .me-claude-card .status-grid,
 .me-codex-card .status-grid {
@@ -5135,6 +5159,7 @@ textarea:focus {
 }
 
 .me-user-card,
+.me-device-binding-card,
 .me-key-list-card,
 .me-key-create-card,
 .me-claude-card,
@@ -6695,6 +6720,7 @@ body,
 }
 
 .me-user-card .record-row,
+.me-device-binding-card .record-row,
 .me-claude-card .inline-settings-card,
 .me-codex-card .inline-settings-card,
 .me-key-list-card .record-row,
@@ -6755,7 +6781,8 @@ body,
 }
 
 .me-key-create-card .inline-fields,
-.me-key-create-card .key-reveal {
+.me-key-create-card .key-reveal,
+.me-key-list-card .key-reveal {
   padding: 12px 13px;
   border: 1px solid color-mix(in srgb, var(--glass-border) 80%, transparent);
   border-radius: 18px;
@@ -6772,12 +6799,14 @@ body,
   padding: 0 4px;
 }
 
-.me-key-create-card .key-reveal {
+.me-key-create-card .key-reveal,
+.me-key-list-card .key-reveal {
   margin-top: 0;
 }
 
 :root[data-theme='dark'] .me-claude-card,
 :root[data-theme='dark'] .me-codex-card,
+:root[data-theme='dark'] .me-device-binding-card,
 :root[data-theme='dark'] .me-key-list-card,
 :root[data-theme='dark'] .me-key-create-card {
   background: rgb(var(--panel-strong-rgb) / calc(0.48 + 0.18 * var(--ui-solidness, 0)));

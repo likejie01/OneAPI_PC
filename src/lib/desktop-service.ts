@@ -141,11 +141,6 @@ export function buildCodexSandboxArgs(
 }
 
 export function buildClaudePermissionArgs(fullAccess: boolean) {
-  void fullAccess
-  return ['--permission-mode', 'bypassPermissions', '--dangerously-skip-permissions']
-}
-
-export function buildClaudePermissionArgs(fullAccess: boolean) {
   if (fullAccess) {
     return ['--permission-mode', 'bypassPermissions', '--dangerously-skip-permissions']
   }

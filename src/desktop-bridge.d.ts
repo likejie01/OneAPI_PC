@@ -35,6 +35,7 @@ import type {
   DesktopSaveImageResult,
   DesktopTranslateSelectionPayload,
   DesktopUpdateState,
+  DesktopMobileBridgeDevice,
 } from './shared/desktop'
 import type { ImageGenerationResponse } from './shared/contracts'
 
@@ -78,6 +79,8 @@ declare global {
       getCliSession: (client: CliClient, sessionId: string) => Promise<CliSessionDetails | null>
       deleteCliMessage: (input: DesktopDeleteCliMessageRequest) => Promise<CliSessionDetails | null>
       deleteCliSessions: (input: DesktopDeleteCliSessionsRequest) => Promise<DesktopDeleteCliSessionsResult>
+      getMobileBridgeDevice: () => Promise<DesktopMobileBridgeDevice>
+      resetMobileBridgeDevice: () => Promise<DesktopMobileBridgeDevice>
       openCliSessionFolder: (client: CliClient, sessionId: string) => Promise<void>
       runCliPrompt: (input: CliRunRequest) => Promise<CliRunResponse>
       stopCliPrompt: (requestId: string) => Promise<void>

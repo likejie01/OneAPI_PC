@@ -170,6 +170,7 @@ interface MobileBridgeExtensionRef {
   kind: 'command' | 'skill' | 'plugin'
   name: string
   description?: string
+  client?: string
 }
 
 interface MobileBridgeJob {
@@ -181,6 +182,11 @@ interface MobileBridgeJob {
   session_id?: string
   sessionId?: string
   prompt?: string
+  model?: string
+  reasoning_effort?: string
+  reasoningEffort?: string
+  permission_mode?: string
+  permissionMode?: string
   extension_refs?: MobileBridgeExtensionRef[]
   extensionRefs?: MobileBridgeExtensionRef[]
 }
@@ -307,6 +313,29 @@ async function getMobileBridgeDeviceId() {
     'utf8',
   )
   return mobileBridgeDeviceId
+}
+
+async function getMobileBridgeLocalDevice() {
+  return {
+    deviceId: await getMobileBridgeDeviceId(),
+    name: os.hostname(),
+    platform: process.platform,
+    clientVersion: app.getVersion(),
+  }
+}
+
+async function resetMobileBridgeDeviceId() {
+  mobileBridgeDeviceId = randomUUID()
+  mobileBridgeLastHeartbeatAt = 0
+  mobileBridgeLastSnapshotSignature = ''
+  await fs.mkdir(path.dirname(getMobileBridgeConfigPath()), { recursive: true })
+  await fs.writeFile(
+    getMobileBridgeConfigPath(),
+    JSON.stringify({ deviceId: mobileBridgeDeviceId }, null, 2),
+    'utf8',
+  )
+  await registerMobileBridgeDevice().catch(() => undefined)
+  return getMobileBridgeLocalDevice()
 }
 
 type ApiMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
@@ -1193,9 +1222,10 @@ async function selectBubbleContentsAtPoint(win: BrowserWindow, x: number, y: num
 }
 
 function buildUrl(requestPath: string, query?: DesktopApiRequest['query']) {
+  const baseUrl = /^https?:\/\//i.test(serverBaseUrl) ? serverBaseUrl : DEFAULT_SERVER_BASE_URL
   const target = requestPath.startsWith('http')
     ? requestPath
-    : `${serverBaseUrl}${requestPath.startsWith('/') ? requestPath : `/${requestPath}`}`
+    : `${baseUrl}${requestPath.startsWith('/') ? requestPath : `/${requestPath}`}`
   const url = new URL(target)
   if (query) {
     for (const [key, value] of Object.entries(query)) {
@@ -1515,6 +1545,7 @@ async function syncMobileBridgeExtensionsSnapshot() {
     kind: item.kind,
     name: item.name,
     description: item.description,
+    client: item.client,
   }))
   const signature = JSON.stringify(entries)
   if (signature === mobileBridgeLastSnapshotSignature) {
@@ -1528,6 +1559,37 @@ async function syncMobileBridgeExtensionsSnapshot() {
       device_id: deviceId,
     },
     body: entries,
+  })
+}
+
+async function syncMobileBridgeAssistantsSnapshot() {
+  const deviceId = await getMobileBridgeDeviceId()
+  const raw = await getRendererStorageValue('oneapi-desktop-assistants')
+  let parsed: Array<Record<string, unknown>> = []
+  try {
+    parsed = raw ? JSON.parse(raw) as Array<Record<string, unknown>> : []
+  } catch {
+    parsed = []
+  }
+  const assistants = parsed
+    .filter((item) => typeof item?.name === 'string' && String(item.name).trim())
+    .map((item) => ({
+      id: String(item.id || item.name || ''),
+      scope: 'chat',
+      name: String(item.name || ''),
+      description: String(item.description || ''),
+      prompt: String(item.prompt || ''),
+      model: String(item.model || ''),
+      temperature: typeof item.temperature === 'number' ? item.temperature : 0.35,
+    }))
+  await requestMobileBridgeJson({
+    method: 'POST',
+    path: '/api/mobile/desktop-assistants/snapshot',
+    query: {
+      device_id: deviceId,
+      scope: 'chat',
+    },
+    body: assistants,
   })
 }
 
@@ -1592,11 +1654,12 @@ async function executeMobileBridgeJob(rawJob: MobileBridgeJob) {
   const requestedSessionId = job.sessionId || `mobile-${job.client}-${job.jobId}`
   const requestId = `mobile-${job.jobId}`
   const projectPath = (await readBridgeClientProjectPath(job.client)).trim() || os.homedir()
+  const fullAccess = job.permissionMode === 'full' || job.permissionMode === 'full_access'
   const promptSnapshot = buildFinalPrompt({
     prompt: job.prompt,
     client: job.client,
     projectPath,
-    fullAccess: false,
+    fullAccess,
     extensions: job.extensionRefs.map((item) => ({
       client: job.client,
       kind: item.kind,
@@ -1644,7 +1707,9 @@ async function executeMobileBridgeJob(rawJob: MobileBridgeJob) {
       projectPath,
       prompt: promptSnapshot.finalPrompt,
       sessionId: requestedSessionId,
-      fullAccess: false,
+      model: job.model,
+      reasoningEffort: job.reasoningEffort,
+      fullAccess,
     })
 
     if (result.output.trim()) {
@@ -1665,6 +1730,16 @@ async function executeMobileBridgeJob(rawJob: MobileBridgeJob) {
         level: 2,
         title: '执行失败',
         body: result.error || 'CLI 执行未返回成功结果。',
+        createdAt: Date.now(),
+      })
+    } else {
+      await postMobileBridgeJobEvent(job.jobId, {
+        id: `${requestId}-complete`,
+        type: 'complete',
+        phase: 'complete',
+        level: 0,
+        title: `${job.client === 'codex' ? 'Codex' : 'Claude'} 输出已结束`,
+        body: '',
         createdAt: Date.now(),
       })
     }
@@ -1696,6 +1771,7 @@ async function startMobileBridgeLoop() {
       await registerMobileBridgeDevice()
       await heartbeatMobileBridgeDevice()
       await syncMobileBridgeExtensionsSnapshot()
+      await syncMobileBridgeAssistantsSnapshot()
 
       const jobs = await requestMobileBridgeJson<MobileBridgeJob[]>({
         method: 'GET',
@@ -1870,6 +1946,9 @@ function normalizeMobileBridgeJob(raw: MobileBridgeJob) {
     client: (raw.client || '').trim().toLowerCase() as CliClient,
     sessionId: raw.sessionId || raw.session_id || '',
     prompt: raw.prompt || '',
+    model: raw.model || '',
+    reasoningEffort: raw.reasoningEffort || raw.reasoning_effort || '',
+    permissionMode: raw.permissionMode || raw.permission_mode || '',
     extensionRefs: (raw.extensionRefs || raw.extension_refs || []).map((item) => ({
       id: item.id,
       kind: item.kind,
@@ -1909,8 +1988,19 @@ function mapCliPayloadToMobileBridgeEvent(
   jobId: string,
   payload: CliProgressPayload,
 ): Record<string, unknown> | null {
-  if (payload.kind === 'partial') {
+  const assistantChunk = payload.assistantChunk
+  if (payload.kind === 'partial' && !assistantChunk?.trim()) {
     return null
+  }
+  if (assistantChunk?.trim()) {
+    return {
+      id: `${jobId}-${payload.requestId}-${payload.createdAt}-${payload.kind}-assistant`,
+      type: 'message_delta',
+      phase: 'assistant',
+      role: 'assistant',
+      text: assistantChunk,
+      createdAt: payload.createdAt,
+    }
   }
   const phase = resolveMobileBridgePhase(payload)
   const type =
@@ -8596,6 +8686,14 @@ ipcMain.handle('desktop:delete-cli-message', async (_event, input: DesktopDelete
 
 ipcMain.handle('desktop:delete-cli-sessions', async (_event, input: DesktopDeleteCliSessionsRequest) => {
   return deleteCliSessions(input)
+})
+
+ipcMain.handle('desktop:get-mobile-bridge-device', async () => {
+  return getMobileBridgeLocalDevice()
+})
+
+ipcMain.handle('desktop:reset-mobile-bridge-device', async () => {
+  return resetMobileBridgeDeviceId()
 })
 
 ipcMain.handle('desktop:export-text-file', async (_event, input: DesktopExportTextFileRequest) => {

@@ -36,6 +36,7 @@ import type {
   DesktopExportTextFileResult,
   DesktopTranslateSelectionPayload,
   DesktopUpdateState,
+  DesktopMobileBridgeDevice,
 } from '../src/shared/desktop'
 import type { ImageGenerationResponse } from '../src/shared/contracts'
 
@@ -113,6 +114,10 @@ contextBridge.exposeInMainWorld('desktopBridge', {
     ipcRenderer.invoke('desktop:delete-cli-message', input) as Promise<CliSessionDetails | null>,
   deleteCliSessions: (input: DesktopDeleteCliSessionsRequest) =>
     ipcRenderer.invoke('desktop:delete-cli-sessions', input) as Promise<DesktopDeleteCliSessionsResult>,
+  getMobileBridgeDevice: () =>
+    ipcRenderer.invoke('desktop:get-mobile-bridge-device') as Promise<DesktopMobileBridgeDevice>,
+  resetMobileBridgeDevice: () =>
+    ipcRenderer.invoke('desktop:reset-mobile-bridge-device') as Promise<DesktopMobileBridgeDevice>,
   openCliSessionFolder: (client: CliClient, sessionId: string) =>
     ipcRenderer.invoke('desktop:open-cli-session-folder', {
       client,
