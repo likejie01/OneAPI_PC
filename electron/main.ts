@@ -138,6 +138,7 @@ let activeTitleDrag:
   | null = null
 const activeApiRequests = new Map<string, AbortController>()
 const activeCliProcesses = new Map<string, ChildProcess>()
+const activeApiPowerSaveBlockers = new Map<string, number>()
 const activeCliPowerSaveBlockers = new Map<string, number>()
 let mobileBridgePowerSaveBlockerId: number | null = null
 const mobileBridgeProgressMirrors = new Map<string, (payload: CliProgressPayload) => void>()
@@ -184,6 +185,32 @@ function stopCliPowerSaveBlocker(requestId: string) {
       powerSaveBlocker.stop(id)
     }
   }
+}
+
+function startApiPowerSaveBlocker(requestId: string) {
+  if (!requestId || activeApiPowerSaveBlockers.has(requestId)) {
+    return
+  }
+  const id = powerSaveBlocker.start('prevent-display-sleep')
+  activeApiPowerSaveBlockers.set(requestId, id)
+}
+
+function stopApiPowerSaveBlocker(requestId: string) {
+  const id = activeApiPowerSaveBlockers.get(requestId)
+  if (typeof id === 'number') {
+    activeApiPowerSaveBlockers.delete(requestId)
+    if (powerSaveBlocker.isStarted(id)) {
+      powerSaveBlocker.stop(id)
+    }
+  }
+}
+
+function shouldKeepAwakeForApiPath(pathname: string) {
+  const normalized = pathname.split('?', 1)[0]
+  return normalized === '/pg/chat/completions' ||
+    normalized === '/pg/images/generations' ||
+    normalized === '/v1/images/generations' ||
+    normalized === '/v1/images/edits'
 }
 
 function setMobileBridgePowerSaveBlocker(active: boolean) {
@@ -1375,6 +1402,7 @@ function emitParsedChatStreamLine(
 async function requestChatStream(sender: WebContents, input: DesktopChatStreamRequest) {
   const controller = new AbortController()
   activeApiRequests.set(input.requestId, controller)
+  startApiPowerSaveBlocker(input.requestId)
 
   try {
     const response = await getDesktopSession().fetch(buildUrl('/pg/chat/completions'), {
@@ -1469,6 +1497,7 @@ async function requestChatStream(sender: WebContents, input: DesktopChatStreamRe
     })
   } finally {
     activeApiRequests.delete(input.requestId)
+    stopApiPowerSaveBlocker(input.requestId)
   }
 }
 
@@ -1491,6 +1520,10 @@ async function requestApi(input: DesktopApiRequest): Promise<DesktopApiResponse>
 
   if (input.requestId && controller) {
     activeApiRequests.set(input.requestId, controller)
+  }
+  const powerSaveRequestId = input.requestId || (shouldKeepAwakeForApiPath(input.path) ? `api-${randomUUID()}` : '')
+  if (powerSaveRequestId) {
+    startApiPowerSaveBlocker(powerSaveRequestId)
   }
 
   try {
@@ -1526,6 +1559,9 @@ async function requestApi(input: DesktopApiRequest): Promise<DesktopApiResponse>
     }
     if (input.requestId) {
       activeApiRequests.delete(input.requestId)
+    }
+    if (powerSaveRequestId) {
+      stopApiPowerSaveBlocker(powerSaveRequestId)
     }
   }
 }
@@ -2607,6 +2643,8 @@ async function requestImageEdit(input: DesktopImageEditRequest) {
   const timeoutMs = resolveDesktopRequestTimeoutMs('/v1/images/edits')
   const controller = timeoutMs > 0 ? new AbortController() : null
   const timer = timeoutMs > 0 && controller ? setTimeout(() => controller.abort(), timeoutMs) : null
+  const powerSaveRequestId = `image-edit-${randomUUID()}`
+  startApiPowerSaveBlocker(powerSaveRequestId)
 
   let response: Response
   try {
@@ -2625,6 +2663,7 @@ async function requestImageEdit(input: DesktopImageEditRequest) {
     if (timer) {
       clearTimeout(timer)
     }
+    stopApiPowerSaveBlocker(powerSaveRequestId)
   }
 
   const data = await parseResponse(response)
@@ -8675,6 +8714,7 @@ ipcMain.handle('desktop:chat-stream', async (event, request: DesktopChatStreamRe
 ipcMain.handle('desktop:stop-api-request', async (_event, requestId: string) => {
   activeApiRequests.get(requestId)?.abort()
   activeApiRequests.delete(requestId)
+  stopApiPowerSaveBlocker(requestId)
 })
 ipcMain.handle('desktop:open-external', async (_event, url: string) => {
   await shell.openExternal(url)
