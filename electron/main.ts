@@ -1691,6 +1691,7 @@ async function executeMobileBridgeJob(rawJob: MobileBridgeJob) {
   const requestedSessionId = job.sessionId || `mobile-${job.client}-${job.jobId}`
   const requestId = `mobile-${job.jobId}`
   const projectPath = (await readBridgeClientProjectPath(job.client)).trim() || os.homedir()
+  const projectName = path.basename(projectPath) || projectPath
   const fullAccess = job.permissionMode === 'full' || job.permissionMode === 'full_access'
   const promptSnapshot = buildFinalPrompt({
     prompt: job.prompt,
@@ -1702,6 +1703,16 @@ async function executeMobileBridgeJob(rawJob: MobileBridgeJob) {
       kind: item.kind,
       name: item.name,
     })),
+  })
+
+  await postMobileBridgeJobEvent(job.jobId, {
+    id: `${requestId}-project`,
+    type: 'project',
+    phase: 'project',
+    level: 0,
+    title: projectName,
+    body: projectPath,
+    createdAt: Date.now(),
   })
 
   for (const event of buildExecutionCycleEvents({
