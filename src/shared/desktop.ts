@@ -286,6 +286,8 @@ export interface CliProgressPayload {
   client: CliClient
   requestId: string
   sessionId?: string
+  projectPath?: string
+  prompt?: string
   kind: 'status' | 'partial' | 'error'
   logKind?: CliLogKind
   sourceKind?: string

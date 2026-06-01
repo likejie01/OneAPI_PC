@@ -1,7 +1,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  extractCodexCommandExecutionOutputEntries,
   extractCodexCommandExecutionToolUseEntries,
+  extractCodexFunctionCallOutputEntries,
   extractCodexFunctionCallToolUseEntries,
   normalizeCliToolInputForDetail,
   parseCliToolInput,
@@ -61,6 +63,52 @@ test('extractCodexCommandExecutionToolUseEntries reads Codex command execution i
           command: '"C:\\\\Windows\\\\System32\\\\WindowsPowerShell\\\\v1.0\\\\powershell.exe" -Command "Get-Content -LiteralPath \'D:\\\\WorkSpace\\\\Demo\\\\src\\\\app\\\\(main)\\\\page.tsx\'"',
         },
         textBefore: '',
+      },
+    ]
+  )
+})
+
+test('extractCodexFunctionCallOutputEntries reads Codex tool output records', () => {
+  assert.deepEqual(
+    extractCodexFunctionCallOutputEntries({
+      type: 'response_item',
+      payload: {
+        type: 'function_call_output',
+        call_id: 'call_123',
+        output: 'Chunk ID: abc\nProcess exited with code 0\nOutput:\nindex.html',
+      },
+    }),
+    [
+      {
+        id: 'call_123',
+        output: 'Chunk ID: abc\nProcess exited with code 0\nOutput:\nindex.html',
+        stdout: 'Chunk ID: abc\nProcess exited with code 0\nOutput:\nindex.html',
+        stderr: '',
+        exitCode: undefined,
+      },
+    ]
+  )
+})
+
+test('extractCodexCommandExecutionOutputEntries reads completed command output', () => {
+  assert.deepEqual(
+    extractCodexCommandExecutionOutputEntries({
+      type: 'item.completed',
+      item: {
+        id: 'item_123',
+        type: 'command_execution',
+        stdout: 'created index.html',
+        stderr: 'warning: skipped cache',
+        exit_code: 0,
+      },
+    }),
+    [
+      {
+        id: 'item_123',
+        output: 'created index.html\n\nwarning: skipped cache',
+        stdout: 'created index.html',
+        stderr: 'warning: skipped cache',
+        exitCode: 0,
       },
     ]
   )

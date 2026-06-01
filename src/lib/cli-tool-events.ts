@@ -7,6 +7,14 @@ export interface CliToolUseEntry {
   textBefore: string
 }
 
+export interface CliToolOutputEntry {
+  id: string
+  output: string
+  stdout: string
+  stderr: string
+  exitCode?: number
+}
+
 function asRecord(value: unknown): CliPayloadRecord | null {
   return value && typeof value === 'object' ? value as CliPayloadRecord : null
 }
@@ -98,6 +106,89 @@ export function extractCodexCommandExecutionToolUseEntries(record: Record<string
       name: 'shell_command',
       input: { command },
       textBefore: '',
+    },
+  ]
+}
+
+function readStringField(record: CliPayloadRecord, keys: string[]) {
+  for (const key of keys) {
+    const value = record[key]
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim()
+    }
+  }
+  return ''
+}
+
+function readNumberField(record: CliPayloadRecord, keys: string[]) {
+  for (const key of keys) {
+    const value = record[key]
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value
+    }
+    if (typeof value === 'string' && value.trim() && Number.isFinite(Number(value))) {
+      return Number(value)
+    }
+  }
+  return undefined
+}
+
+export function extractCodexFunctionCallOutputEntries(record: Record<string, unknown>): CliToolOutputEntry[] {
+  const payload = asRecord(record.payload)
+  if (record.type !== 'response_item' || !payload || payload.type !== 'function_call_output') {
+    return []
+  }
+
+  const output =
+    typeof payload.output === 'string'
+      ? payload.output.trim()
+      : payload.output === undefined || payload.output === null
+        ? ''
+        : JSON.stringify(payload.output, null, 2)
+
+  if (!output) {
+    return []
+  }
+
+  return [
+    {
+      id: typeof payload.call_id === 'string'
+        ? payload.call_id.trim()
+        : typeof payload.id === 'string'
+          ? payload.id.trim()
+          : '',
+      output,
+      stdout: output,
+      stderr: '',
+      exitCode: readNumberField(payload, ['exit_code', 'exitCode']),
+    },
+  ]
+}
+
+export function extractCodexCommandExecutionOutputEntries(record: Record<string, unknown>): CliToolOutputEntry[] {
+  if (record.type !== 'item.completed') {
+    return []
+  }
+
+  const item = asRecord(record.item)
+  if (!item || item.type !== 'command_execution') {
+    return []
+  }
+
+  const stdout = readStringField(item, ['stdout', 'output'])
+  const stderr = readStringField(item, ['stderr', 'error'])
+  const output = [stdout, stderr].filter(Boolean).join('\n\n')
+  if (!output) {
+    return []
+  }
+
+  return [
+    {
+      id: typeof item.id === 'string' ? item.id.trim() : '',
+      output,
+      stdout,
+      stderr,
+      exitCode: readNumberField(item, ['exit_code', 'exitCode']),
     },
   ]
 }

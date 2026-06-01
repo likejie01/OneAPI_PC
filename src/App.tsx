@@ -1058,6 +1058,17 @@ function useAutoFollowScroll(
 ) {
   const shouldFollowRef = useRef(true)
 
+  const scrollToLatest = useCallback(() => {
+    const node = containerRef.current
+    if (!node) {
+      return
+    }
+    shouldFollowRef.current = true
+    window.requestAnimationFrame(() => {
+      node.scrollTop = node.scrollHeight
+    })
+  }, [containerRef])
+
   useEffect(() => {
     const node = containerRef.current
     if (!node) {
@@ -1099,6 +1110,8 @@ function useAutoFollowScroll(
     }
     node.scrollTop = node.scrollHeight
   }, [containerRef, ...dependencies])
+
+  return scrollToLatest
 }
 
 function findClosestConversationBubble(
@@ -1309,6 +1322,30 @@ function isImageGenerationModel(value: string) {
 function shouldAttachPromptCacheKey(model: string) {
   const normalized = model.trim().toLowerCase()
   return normalized.startsWith('deepseek') || normalized.startsWith('mimo')
+}
+
+function isVisionChatModel(model: string) {
+  const normalized = model.trim().toLowerCase()
+  return (
+    normalized.startsWith('gpt') ||
+    normalized.startsWith('gemini') ||
+    normalized.startsWith('claude')
+  )
+}
+
+function resolveChatModelForAttachments(
+  selectedModel: string,
+  fallbackModel: string,
+  models: ChatModelOption[],
+  attachments: ComposerAttachment[]
+) {
+  if (!attachments.some((item) => item.kind === 'image')) {
+    return selectedModel || fallbackModel
+  }
+  if (isVisionChatModel(selectedModel)) {
+    return selectedModel
+  }
+  return models.find((item) => isVisionChatModel(item.value))?.value || fallbackModel || 'gpt-5.4'
 }
 
 function normalizeTimestampMs(value: number) {
@@ -4479,7 +4516,7 @@ function AssistantsChatWorkspace(props: {
   )
   const historySessions = historyVisibilityTab === 'hidden' ? hiddenChatSessions : visibleChatSessions
 
-  useAutoFollowScroll(messageStreamRef, [messages, sending])
+  const scrollChatToLatest = useAutoFollowScroll(messageStreamRef, [messages, sending])
 
   const ensureChatSessionRemainder = useCallback((remaining: ChatSessionRecord[]) => {
     if (remaining.length) {
@@ -4949,7 +4986,8 @@ function AssistantsChatWorkspace(props: {
       return
     }
 
-    const resolvedModel = selectedModel || resolvePreferredModel(models, DEFAULT_CHAT_MODEL, activeAssistant?.model)
+    const preferredModel = selectedModel || resolvePreferredModel(models, DEFAULT_CHAT_MODEL, activeAssistant?.model)
+    const resolvedModel = resolveChatModelForAttachments(selectedModel, preferredModel, chatModeModels, attachments)
     if (!resolvedModel) {
       toast('当前没有可用模型。')
       return
@@ -4990,6 +5028,7 @@ function AssistantsChatWorkspace(props: {
       title: clipText(userMessage.content.replace(/\s+/g, ' '), 24) || session.title,
       messages: renderedHistory,
     }))
+    scrollChatToLatest()
     pendingRequestIdRef.current = requestId
     stoppingRef.current = false
     chatPromptHistory.commitInputValue(userMessageContent)
@@ -5069,10 +5108,11 @@ function AssistantsChatWorkspace(props: {
         }))
       } else {
         const systemMessage = toAssistantSystemMessage(activeAssistant)
+        const requestHasAttachments = attachments.some((item) => item.dataBase64)
         const chatRequestPayload = {
           model: resolvedModel,
           group: selectedGroup || undefined,
-          promptCacheKey: shouldAttachPromptCacheKey(resolvedModel)
+          promptCacheKey: shouldAttachPromptCacheKey(resolvedModel) && !requestHasAttachments
             ? resolvedActiveSessionId
             : undefined,
           temperature: activeAssistant?.temperature ?? 0.7,
@@ -9549,7 +9589,50 @@ function CliWorkspace(props: {
         return
       }
 
-      const tracked = requestSessionMapRef.current[payload.requestId]
+      let tracked = requestSessionMapRef.current[payload.requestId]
+      if (!tracked && payload.requestId.startsWith('mobile-')) {
+        const remoteSessionId = payload.sessionId || `remote-${payload.requestId}`
+        const remoteProjectPath = payload.projectPath || projectPath
+        tracked = {
+          sessionId: remoteSessionId,
+          projectPath: remoteProjectPath,
+        }
+        requestSessionMapRef.current = {
+          ...requestSessionMapRef.current,
+          [payload.requestId]: tracked,
+        }
+        setRequestSessionMap((current) => ({
+          ...current,
+          [payload.requestId]: tracked as { sessionId: string; projectPath: string },
+        }))
+        if (remoteProjectPath) {
+          bindProjectSession(remoteProjectPath, remoteSessionId)
+          applyProjectPath(remoteProjectPath)
+        }
+        if (payload.prompt?.trim()) {
+          const userMessage = {
+            id: `user-${payload.requestId}`,
+            role: 'user' as const,
+            content: payload.prompt.trim(),
+            createdAt: payload.createdAt,
+            requestId: payload.requestId,
+          }
+          setSessionMessagesMap((current) => {
+            const previous = current[remoteSessionId] || []
+            if (previous.some((item) => item.requestId === payload.requestId && item.role === 'user')) {
+              return current
+            }
+            return {
+              ...current,
+              [remoteSessionId]: [...previous, userMessage],
+            }
+          })
+          persistCliMessageOverlay(remoteSessionId, userMessage)
+        }
+        activeRequestIdRef.current = payload.requestId
+        stoppingRunRef.current = false
+        setRunning(true)
+      }
       const currentSession = payload.sessionId || tracked?.sessionId
       if (!currentSession) {
         return

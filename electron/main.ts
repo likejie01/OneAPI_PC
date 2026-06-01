@@ -102,7 +102,9 @@ import {
   type CliRuntimeDiagnostics as SharedCliRuntimeDiagnostics,
 } from '../src/lib/cli-runtime.ts'
 import {
+  extractCodexCommandExecutionOutputEntries,
   extractCodexCommandExecutionToolUseEntries,
+  extractCodexFunctionCallOutputEntries,
   extractCodexFunctionCallToolUseEntries,
   normalizeCliToolInputForDetail,
 } from '../src/lib/cli-tool-events.ts'
@@ -115,6 +117,7 @@ const DEFAULT_CODEX_MODEL = 'gpt-5.4'
 const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-4-6'
 const MOBILE_BRIDGE_LOOP_INTERVAL_MS = 5000
 const MOBILE_BRIDGE_HEARTBEAT_INTERVAL_MS = 30000
+const MOBILE_BRIDGE_SESSION_SNAPSHOT_INTERVAL_MS = 30000
 const WINDOW_CHROME_HEIGHT = 25
 const DESKTOP_PARTITION = 'persist:oneapi-desktop'
 const isDev = !!process.env.VITE_DEV_SERVER_URL
@@ -168,6 +171,8 @@ let mobileBridgeRunning = false
 let mobileBridgeDeviceId = ''
 let mobileBridgeLastHeartbeatAt = 0
 let mobileBridgeLastSnapshotSignature = ''
+let mobileBridgeLastSessionsSnapshotSignature = ''
+let mobileBridgeLastSessionsSnapshotAt = 0
 
 function startCliPowerSaveBlocker(requestId: string) {
   if (!requestId || activeCliPowerSaveBlockers.has(requestId)) {
@@ -392,6 +397,8 @@ async function resetMobileBridgeDeviceId() {
   mobileBridgeDeviceId = randomUUID()
   mobileBridgeLastHeartbeatAt = 0
   mobileBridgeLastSnapshotSignature = ''
+  mobileBridgeLastSessionsSnapshotSignature = ''
+  mobileBridgeLastSessionsSnapshotAt = 0
   await fs.mkdir(path.dirname(getMobileBridgeConfigPath()), { recursive: true })
   await fs.writeFile(
     getMobileBridgeConfigPath(),
@@ -522,6 +529,8 @@ interface CliProgressPayload {
   client: CliClient
   requestId: string
   sessionId?: string
+  projectPath?: string
+  prompt?: string
   kind: 'status' | 'partial' | 'error'
   logKind?: CliLogKind
   sourceKind?: string
@@ -1501,6 +1510,26 @@ async function requestChatStream(sender: WebContents, input: DesktopChatStreamRe
   }
 }
 
+interface MobileBridgeSessionSnapshot {
+  id: string
+  client: CliClient
+  sessionId: string
+  title: string
+  preview: string
+  projectName: string
+  projectPath: string
+  status: string
+  updatedAt: number
+  purposes: string[]
+  messages: Array<{
+    id: string
+    role: 'user' | 'assistant'
+    text: string
+    timestamp: number
+  }>
+  logs: Array<Record<string, unknown>>
+}
+
 async function requestApi(input: DesktopApiRequest): Promise<DesktopApiResponse> {
   const headers = new Headers(input.headers ?? {})
   let body: string | undefined
@@ -1666,6 +1695,101 @@ async function syncMobileBridgeAssistantsSnapshot() {
   })
 }
 
+function cliTimestampToMillis(value: number) {
+  if (!Number.isFinite(value) || value <= 0) {
+    return Date.now()
+  }
+  return value > 10_000_000_000 ? Math.floor(value) : Math.floor(value * 1000)
+}
+
+async function buildMobileBridgeSessionSnapshot(client: CliClient, entry: CliHistoryEntry): Promise<MobileBridgeSessionSnapshot | null> {
+  const details = client === 'codex'
+    ? await getCodexSession(entry.id).catch(() => null)
+    : await getClaudeSession(entry.id).catch(() => null)
+  if (!details && !entry.projectPath && !entry.preview.trim()) {
+    return null
+  }
+
+  const messages = (details?.messages || []).slice(-40).map((message) => ({
+    id: message.id,
+    role: message.role,
+    text: message.content,
+    timestamp: cliTimestampToMillis(message.createdAt),
+  }))
+  const preview = normalizeWhitespace(
+    messages.at(-1)?.text ||
+    entry.preview ||
+    details?.preview ||
+    ''
+  )
+  const projectPath = details?.projectPath || entry.projectPath || ''
+  const projectName =
+    details?.projectName ||
+    entry.projectName ||
+    (projectPath ? path.basename(projectPath) : '') ||
+    '本机项目'
+  const updatedAt = cliTimestampToMillis(details?.updatedAt || entry.updatedAt)
+
+  return {
+    id: details?.id || entry.id,
+    client,
+    sessionId: details?.id || entry.id,
+    title: entry.title || projectName,
+    preview,
+    projectName,
+    projectPath,
+    status: 'synced',
+    updatedAt,
+    purposes: [],
+    messages,
+    logs: [],
+  }
+}
+
+async function syncMobileBridgeSessionsSnapshot(force = false) {
+  const now = Date.now()
+  if (!force && now - mobileBridgeLastSessionsSnapshotAt < MOBILE_BRIDGE_SESSION_SNAPSHOT_INTERVAL_MS) {
+    return
+  }
+  mobileBridgeLastSessionsSnapshotAt = now
+
+  const deviceId = await getMobileBridgeDeviceId()
+  const [codexHistory, claudeHistory] = await Promise.all([
+    listCodexHistory(12).catch(() => [] as CliHistoryEntry[]),
+    listClaudeHistory(12).catch(() => [] as CliHistoryEntry[]),
+  ])
+  const entries = await Promise.all([
+    ...codexHistory.map((item) => buildMobileBridgeSessionSnapshot('codex', item)),
+    ...claudeHistory.map((item) => buildMobileBridgeSessionSnapshot('claude', item)),
+  ])
+  const sessions = entries
+    .filter((item): item is MobileBridgeSessionSnapshot => !!item)
+    .sort((left, right) => right.updatedAt - left.updatedAt)
+    .slice(0, 24)
+
+  const signature = JSON.stringify(sessions.map((item) => ({
+    id: item.id,
+    client: item.client,
+    updatedAt: item.updatedAt,
+    projectPath: item.projectPath,
+    preview: item.preview.slice(0, 200),
+    messageCount: item.messages.length,
+  })))
+  if (!force && signature === mobileBridgeLastSessionsSnapshotSignature) {
+    return
+  }
+  mobileBridgeLastSessionsSnapshotSignature = signature
+
+  await requestMobileBridgeJson({
+    method: 'POST',
+    path: '/api/mobile/desktop-sessions/snapshot',
+    query: {
+      device_id: deviceId,
+    },
+    body: sessions,
+  })
+}
+
 async function readBridgeClientProjectPath(client: CliClient) {
   const raw = await getRendererStorageValue(`oneapi-desktop-${client}-last-project-path`)
   try {
@@ -1773,12 +1897,12 @@ async function executeMobileBridgeJob(rawJob: MobileBridgeJob) {
     })
   }
 
+  const mapMobileBridgeEvent = createMobileBridgeEventMapper(job.jobId)
   mobileBridgeProgressMirrors.set(requestId, (payload) => {
-    const mapped = mapCliPayloadToMobileBridgeEvent(job.jobId, payload)
-    if (!mapped) {
-      return
+    const events = mapMobileBridgeEvent(payload)
+    for (const mapped of events) {
+      void postMobileBridgeJobEvent(job.jobId, mapped).catch(() => undefined)
     }
-    void postMobileBridgeJobEvent(job.jobId, mapped).catch(() => undefined)
   })
 
   const interactionState = { done: false }
@@ -1799,6 +1923,7 @@ async function executeMobileBridgeJob(rawJob: MobileBridgeJob) {
     if (result.output.trim()) {
       await postMobileBridgeJobEvent(job.jobId, {
         id: `${requestId}-assistant-final`,
+        sessionId: result.sessionId,
         type: 'message',
         role: 'assistant',
         text: result.output.trim(),
@@ -1809,6 +1934,7 @@ async function executeMobileBridgeJob(rawJob: MobileBridgeJob) {
     if (!result.success) {
       await postMobileBridgeJobEvent(job.jobId, {
         id: `${requestId}-failed`,
+        sessionId: result.sessionId,
         type: 'error',
         phase: 'error',
         level: 2,
@@ -1819,6 +1945,7 @@ async function executeMobileBridgeJob(rawJob: MobileBridgeJob) {
     } else {
       await postMobileBridgeJobEvent(job.jobId, {
         id: `${requestId}-complete`,
+        sessionId: result.sessionId,
         type: 'complete',
         phase: 'complete',
         level: 0,
@@ -1831,6 +1958,140 @@ async function executeMobileBridgeJob(rawJob: MobileBridgeJob) {
     interactionState.done = true
     mobileBridgeProgressMirrors.delete(requestId)
     await interactionLoop.catch(() => undefined)
+    await syncMobileBridgeSessionsSnapshot(true).catch(() => undefined)
+  }
+}
+
+function readMobileBridgeJobId(value: unknown) {
+  if (!value || typeof value !== 'object') {
+    return ''
+  }
+  const record = value as Record<string, unknown>
+  return (
+    (typeof record.jobId === 'string' && record.jobId.trim()) ||
+    (typeof record.job_id === 'string' && record.job_id.trim()) ||
+    ''
+  )
+}
+
+async function createLocalCliMobileBridgeMirror(request: CliRunRequest) {
+  if (request.requestId.startsWith('mobile-')) {
+    return null
+  }
+
+  const userId = await getDesktopUserHeaderValue()
+  if (!userId) {
+    return null
+  }
+
+  const deviceId = await getMobileBridgeDeviceId()
+  const visiblePrompt = extractCliUserTask(request.prompt) || request.prompt
+  const created = await requestMobileBridgeJson<Record<string, unknown>>({
+    method: 'POST',
+    path: '/api/mobile/desktop-jobs',
+    body: {
+      deviceId,
+      client: request.client,
+      sessionId: request.sessionId || `local-${request.client}-${request.requestId}`,
+      prompt: visiblePrompt,
+      model: request.model,
+      reasoningEffort: request.reasoningEffort,
+      permissionMode: 'local_mirror',
+    },
+  })
+  const jobId = readMobileBridgeJobId(created)
+  if (!jobId) {
+    return null
+  }
+
+  await requestMobileBridgeJson({
+    method: 'POST',
+    path: `/api/mobile/desktop-jobs/${encodeURIComponent(jobId)}/claim`,
+    query: {
+      device_id: deviceId,
+    },
+  })
+
+  const projectPath = request.projectPath.trim() || os.homedir()
+  const projectName = path.basename(projectPath) || projectPath
+  await postMobileBridgeJobEvent(jobId, {
+    id: `${request.requestId}-project`,
+    type: 'project',
+    phase: 'project',
+    level: 0,
+    title: projectName,
+    body: projectPath,
+    createdAt: Date.now(),
+  })
+
+  for (const event of buildExecutionCycleEvents({
+    sessionId: request.sessionId || `local-${request.client}-${request.requestId}`,
+    requestId: request.requestId,
+    intent: visiblePrompt,
+    finalPrompt: request.prompt,
+    commandTitle: 'PC 客户端任务准备',
+  })) {
+    await postMobileBridgeJobEvent(jobId, {
+      id: event.id,
+      type: event.phase === 'intent' ? 'intent' : 'log',
+      phase: event.phase,
+      level: event.severity === 'error' ? 2 : 0,
+      title: event.title,
+      body: event.detail,
+      command: event.command,
+      parentId: event.parentId,
+      indentLevel: event.indentLevel,
+      interactionStatus: event.interaction?.status,
+      createdAt: event.createdAt,
+    })
+  }
+
+  const mapMobileBridgeEvent = createMobileBridgeEventMapper(jobId)
+  mobileBridgeProgressMirrors.set(request.requestId, (payload) => {
+    const events = mapMobileBridgeEvent(payload)
+    for (const mapped of events) {
+      void postMobileBridgeJobEvent(jobId, mapped).catch(() => undefined)
+    }
+  })
+
+  return {
+    jobId,
+    async finish(result: CliRunResponse) {
+      mobileBridgeProgressMirrors.delete(request.requestId)
+      if (result.output.trim() && result.metadata?.aborted !== true) {
+        await postMobileBridgeJobEvent(jobId, {
+          id: `${request.requestId}-assistant-final`,
+          sessionId: result.sessionId,
+          type: 'message',
+          role: 'assistant',
+          text: result.output.trim(),
+          createdAt: Date.now(),
+        })
+      }
+      await postMobileBridgeJobEvent(jobId, result.success ? {
+        id: `${request.requestId}-complete`,
+        sessionId: result.sessionId,
+        type: 'complete',
+        phase: 'complete',
+        level: 0,
+        title: `${request.client === 'codex' ? 'Codex' : 'Claude'} 输出已结束`,
+        body: '',
+        createdAt: Date.now(),
+      } : {
+        id: `${request.requestId}-failed`,
+        sessionId: result.sessionId,
+        type: 'error',
+        phase: 'error',
+        level: 2,
+        title: '执行失败',
+        body: result.error || 'CLI 执行未返回成功结果。',
+        createdAt: Date.now(),
+      })
+      await syncMobileBridgeSessionsSnapshot(true).catch(() => undefined)
+    },
+    dispose() {
+      mobileBridgeProgressMirrors.delete(request.requestId)
+    },
   }
 }
 
@@ -1858,6 +2119,7 @@ async function startMobileBridgeLoop() {
       await heartbeatMobileBridgeDevice()
       await syncMobileBridgeExtensionsSnapshot()
       await syncMobileBridgeAssistantsSnapshot()
+      await syncMobileBridgeSessionsSnapshot()
 
       const jobs = await requestMobileBridgeJson<MobileBridgeJob[]>({
         method: 'GET',
@@ -2070,23 +2332,92 @@ function resolveMobileBridgePhase(payload: Pick<CliProgressPayload, 'logKind' | 
   return 'prepare'
 }
 
-function mapCliPayloadToMobileBridgeEvent(
+function createMobileBridgeEventMapper(jobId: string) {
+  const assistantTextByRequestId = new Map<string, string>()
+  let sequence = 0
+
+  const createAssistantDeltaEvent = (payload: CliProgressPayload, text: string) => ({
+    id: `${jobId}-${payload.requestId}-${payload.createdAt}-${payload.kind}-assistant-${++sequence}`,
+    sessionId: payload.sessionId,
+    type: 'message_delta',
+    phase: 'assistant',
+    role: 'assistant',
+    text,
+    createdAt: payload.createdAt,
+  })
+
+  const takePartialDelta = (payload: CliProgressPayload) => {
+    const snapshot = payload.message || ''
+    const previous = assistantTextByRequestId.get(payload.requestId) || ''
+
+    if (!snapshot) {
+      return ''
+    }
+    if (!previous) {
+      assistantTextByRequestId.set(payload.requestId, snapshot)
+      return snapshot
+    }
+    if (snapshot.startsWith(previous)) {
+      const delta = snapshot.slice(previous.length)
+      assistantTextByRequestId.set(payload.requestId, snapshot)
+      return delta
+    }
+    assistantTextByRequestId.set(payload.requestId, snapshot)
+    return snapshot
+  }
+
+  const takeAssistantChunkDelta = (payload: CliProgressPayload, chunk: string) => {
+    const previous = assistantTextByRequestId.get(payload.requestId) || ''
+    if (!chunk) {
+      return ''
+    }
+    if (previous && (previous.endsWith(chunk) || (chunk.length > 16 && previous.includes(chunk)))) {
+      return ''
+    }
+    assistantTextByRequestId.set(payload.requestId, `${previous}${chunk}`)
+    return chunk
+  }
+
+  return (payload: CliProgressPayload): Array<Record<string, unknown>> => {
+    const events: Array<Record<string, unknown>> = []
+    const assistantChunk = payload.assistantChunk?.trim() || ''
+
+    if (payload.kind === 'partial') {
+      const delta = assistantChunk || takePartialDelta(payload)
+      if (delta.trim()) {
+        events.push(createAssistantDeltaEvent(payload, delta))
+      }
+      if (payload.done) {
+        assistantTextByRequestId.delete(payload.requestId)
+      }
+      return events
+    }
+
+    if (assistantChunk) {
+      const delta = takeAssistantChunkDelta(payload, assistantChunk)
+      if (delta) {
+        events.push(createAssistantDeltaEvent(payload, delta))
+      }
+    }
+
+    const logEvent = mapCliPayloadToMobileBridgeLogEvent(jobId, payload, ++sequence)
+    if (logEvent) {
+      events.push(logEvent)
+    }
+    if (payload.done) {
+      assistantTextByRequestId.delete(payload.requestId)
+    }
+    return events
+  }
+}
+
+function mapCliPayloadToMobileBridgeLogEvent(
   jobId: string,
   payload: CliProgressPayload,
+  sequence = 0,
 ): Record<string, unknown> | null {
-  const assistantChunk = payload.assistantChunk
-  if (payload.kind === 'partial' && !assistantChunk?.trim()) {
+  if (payload.kind === 'partial') {
     return null
-  }
-  if (assistantChunk?.trim()) {
-    return {
-      id: `${jobId}-${payload.requestId}-${payload.createdAt}-${payload.kind}-assistant`,
-      type: 'message_delta',
-      phase: 'assistant',
-      role: 'assistant',
-      text: assistantChunk,
-      createdAt: payload.createdAt,
-    }
   }
   const phase = resolveMobileBridgePhase(payload)
   const type =
@@ -2100,7 +2431,8 @@ function mapCliPayloadToMobileBridgeEvent(
             ? 'complete'
             : 'log'
   return {
-    id: `${jobId}-${payload.requestId}-${payload.createdAt}-${payload.kind}-${phase}`,
+    id: `${jobId}-${payload.requestId}-${payload.createdAt}-${payload.kind}-${phase}-${sequence}`,
+    sessionId: payload.sessionId,
     type,
     phase,
     level: payload.kind === 'error' ? 2 : payload.logKind === 'stderr' ? 1 : 0,
@@ -5898,7 +6230,11 @@ function parseJsonObjectsFromText(text: string) {
 function createCliProgressEmitter(
   webContents: WebContents | null,
   client: CliClient,
-  requestId: string
+  requestId: string,
+  context: {
+    projectPath?: string
+    prompt?: string
+  } = {},
 ) {
   let lastPartial = ''
 
@@ -5930,6 +6266,8 @@ function createCliProgressEmitter(
         client,
         requestId,
         sessionId: input.sessionId,
+        projectPath: context.projectPath,
+        prompt: context.prompt,
         kind: input.kind,
         logKind: input.logKind,
         sourceKind: input.sourceKind,
@@ -6278,6 +6616,140 @@ function buildCliToolUseEventKey(name: string, described: ReturnType<typeof desc
   ].join('::')
 }
 
+const MAX_CLI_TOOL_OUTPUT_LOG_CHARS = 20_000
+
+function formatCliToolOutputForLog(value: string) {
+  const normalized = value.trim()
+  if (normalized.length <= MAX_CLI_TOOL_OUTPUT_LOG_CHARS) {
+    return normalized
+  }
+
+  const visibleHead = normalized.slice(0, MAX_CLI_TOOL_OUTPUT_LOG_CHARS).trimEnd()
+  return [
+    visibleHead,
+    '',
+    `... 输出过长，已截断 ${normalized.length - visibleHead.length} 个字符；完整内容仍保存在原始 CLI 会话记录中。`,
+  ].join('\n')
+}
+
+function stringifyClaudeToolValue(value: unknown): string {
+  if (typeof value === 'string') {
+    return value.trim()
+  }
+  if (value === undefined || value === null) {
+    return ''
+  }
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => stringifyClaudeToolValue(item))
+      .filter(Boolean)
+      .join('\n')
+      .trim()
+  }
+  if (typeof value === 'object') {
+    const record = value as Record<string, unknown>
+    if (typeof record.text === 'string') {
+      return record.text.trim()
+    }
+    if (typeof record.content === 'string') {
+      return record.content.trim()
+    }
+    if (Array.isArray(record.content)) {
+      return stringifyClaudeToolValue(record.content)
+    }
+    return safeStringify(value).trim()
+  }
+  return String(value).trim()
+}
+
+function extractClaudeToolResultTextFromContent(content: unknown): string {
+  if (!Array.isArray(content)) {
+    return ''
+  }
+
+  return content
+    .map((part) => {
+      if (!part || typeof part !== 'object') {
+        return ''
+      }
+      const typedPart = part as {
+        type?: unknown
+        content?: unknown
+      }
+      if (typedPart.type !== 'tool_result') {
+        return ''
+      }
+      return stringifyClaudeToolValue(typedPart.content)
+    })
+    .filter(Boolean)
+    .join('\n')
+    .trim()
+}
+
+function extractClaudeToolResultOutputEntries(record: Record<string, unknown>) {
+  const entries: Array<{
+    id: string
+    output: string
+    stdout: string
+    stderr: string
+  }> = []
+
+  if (record.toolUseResult && typeof record.toolUseResult === 'object') {
+    const toolUseResult = record.toolUseResult as Record<string, unknown>
+    const stdout = [
+      stringifyClaudeToolValue(toolUseResult.stdout),
+      stringifyClaudeToolValue(toolUseResult.output),
+    ].filter(Boolean).join('\n')
+    const stderr = [
+      stringifyClaudeToolValue(toolUseResult.stderr),
+      stringifyClaudeToolValue(toolUseResult.error),
+    ].filter(Boolean).join('\n')
+    const fileRecord =
+      toolUseResult.file && typeof toolUseResult.file === 'object'
+        ? toolUseResult.file as Record<string, unknown>
+        : null
+    const filePath =
+      (typeof fileRecord?.filePath === 'string' && fileRecord.filePath.trim()) ||
+      (typeof toolUseResult.filePath === 'string' && toolUseResult.filePath.trim()) ||
+      ''
+    const contentPreview = [
+      filePath ? `文件：${filePath}` : '',
+      stringifyClaudeToolValue(toolUseResult.structuredPatch),
+      stringifyClaudeToolValue(fileRecord?.content),
+      stringifyClaudeToolValue(toolUseResult.content),
+    ].filter(Boolean).join('\n')
+    const output = [stdout, stderr, contentPreview].filter(Boolean).join('\n\n')
+    if (output.trim()) {
+      entries.push({
+        id:
+          (typeof toolUseResult.toolUseID === 'string' && toolUseResult.toolUseID.trim()) ||
+          (typeof toolUseResult.toolUseId === 'string' && toolUseResult.toolUseId.trim()) ||
+          (typeof toolUseResult.id === 'string' && toolUseResult.id.trim()) ||
+          filePath,
+        output,
+        stdout: [stdout, contentPreview].filter(Boolean).join('\n\n'),
+        stderr,
+      })
+    }
+  }
+
+  const message =
+    record.message && typeof record.message === 'object'
+      ? record.message as { content?: unknown }
+      : null
+  const toolResultText = extractClaudeToolResultTextFromContent(message?.content)
+  if (toolResultText) {
+    entries.push({
+      id: typeof record.uuid === 'string' ? record.uuid.trim() : '',
+      output: toolResultText,
+      stdout: toolResultText,
+      stderr: '',
+    })
+  }
+
+  return entries
+}
+
 function buildCliInteractionKey(input: {
   kind: string
   title: string
@@ -6606,7 +7078,10 @@ async function runCodexPrompt(
   input: CliRunRequest
 ): Promise<CliRunResponse> {
   const requestStartedAtMs = Date.now()
-  const progress = createCliProgressEmitter(webContents, 'codex', input.requestId)
+  const progress = createCliProgressEmitter(webContents, 'codex', input.requestId, {
+    projectPath: input.projectPath,
+    prompt: extractCliUserTask(input.prompt) || input.prompt,
+  })
   const requestedSessionId = input.sessionId?.trim()
   const resumeSessionId = requestedSessionId && await getLatestCodexSessionFile(requestedSessionId)
     ? requestedSessionId
@@ -6620,6 +7095,7 @@ async function runCodexPrompt(
   let stoppedAfterCodexCompletion = false
   let sawCodexVisibleProgress = false
   const seenToolUseEvents = new Set<string>()
+  const seenToolOutputEvents = new Set<string>()
   let activeCodexChild: ChildProcess | null = null
   let codexCompletionStopTimer: NodeJS.Timeout | null = null
   const runtimeDiagnostics: CliRuntimeDiagnostics = {}
@@ -6714,6 +7190,56 @@ async function runCodexPrompt(
       return
     }
     progress.tool(described.message, sessionId, described.detail, described.files, sourceKind)
+  }
+  const emitCodexToolOutput = (
+    outputEntry: {
+      id: string
+      output: string
+      stdout: string
+      stderr: string
+      exitCode?: number
+    },
+    sourceKind: string
+  ) => {
+    const eventKey = [
+      sourceKind,
+      outputEntry.id.trim(),
+      outputEntry.output.trim(),
+      typeof outputEntry.exitCode === 'number' ? outputEntry.exitCode : '',
+    ].join('::')
+    if (seenToolOutputEvents.has(eventKey)) {
+      return
+    }
+    seenToolOutputEvents.add(eventKey)
+    sawCodexVisibleProgress = true
+
+    const exitDetail = typeof outputEntry.exitCode === 'number'
+      ? `退出码：${outputEntry.exitCode}`
+      : ''
+    if (outputEntry.stdout.trim()) {
+      progress.stdout(
+        exitDetail ? '命令输出（含退出码）' : '命令输出',
+        sessionId,
+        formatCliToolOutputForLog(outputEntry.stdout),
+        sourceKind,
+      )
+    }
+    if (outputEntry.stderr.trim()) {
+      progress.stderr(
+        '命令错误输出',
+        sessionId,
+        formatCliToolOutputForLog(outputEntry.stderr),
+        sourceKind,
+      )
+    }
+    if (!outputEntry.stdout.trim() && !outputEntry.stderr.trim() && outputEntry.output.trim()) {
+      progress.stdout(
+        exitDetail ? '命令输出（含退出码）' : '命令输出',
+        sessionId,
+        formatCliToolOutputForLog(outputEntry.output),
+        sourceKind,
+      )
+    }
   }
 
   progress.intent('Codex 已开始处理当前任务。', sessionId, undefined, undefined, 'request.started')
@@ -6842,6 +7368,14 @@ async function runCodexPrompt(
         )
       }
 
+      for (const outputEntry of extractCodexFunctionCallOutputEntries(parsed)) {
+        emitCodexToolOutput(outputEntry, 'codex.tool_output')
+      }
+
+      for (const outputEntry of extractCodexCommandExecutionOutputEntries(parsed)) {
+        emitCodexToolOutput(outputEntry, 'codex.command_output')
+      }
+
       const lineFileChanges = extractCodexFileChanges([line])
       if (lineFileChanges.length > 0) {
         progress.result('已记录文件变更', sessionId, undefined, typeof parsed.type === 'string' ? parsed.type : '', lineFileChanges, typeof parsed.type === 'string' ? parsed.type : 'file_change')
@@ -6894,6 +7428,7 @@ async function runCodexPrompt(
     consumedAssistantChars = 0
     sawCodexVisibleProgress = false
     seenToolUseEvents.clear()
+    seenToolOutputEvents.clear()
     sawCodexCompletion = false
     stoppedAfterCodexCompletion = false
     activeCodexChild = null
@@ -6925,6 +7460,7 @@ async function runCodexPrompt(
     lastToolIntentText = ''
     consumedAssistantChars = 0
     seenToolUseEvents.clear()
+    seenToolOutputEvents.clear()
     sawCodexCompletion = false
     stoppedAfterCodexCompletion = false
     activeCodexChild = null
@@ -7041,7 +7577,10 @@ async function runClaudePrompt(
   input: CliRunRequest
 ): Promise<CliRunResponse> {
   const requestStartedAtMs = Date.now()
-  const progress = createCliProgressEmitter(webContents, 'claude', input.requestId)
+  const progress = createCliProgressEmitter(webContents, 'claude', input.requestId, {
+    projectPath: input.projectPath,
+    prompt: extractCliUserTask(input.prompt) || input.prompt,
+  })
   const requestedSessionId = input.sessionId?.trim()
   const resumeSessionId = requestedSessionId && await getClaudeSessionFile(requestedSessionId)
     ? requestedSessionId
@@ -7052,6 +7591,7 @@ async function runClaudePrompt(
   let planState: CliPlanState | null = null
   const planRecords: Array<Record<string, unknown>> = []
   const seenToolUseEvents = new Set<string>()
+  const seenToolOutputEvents = new Set<string>()
   const toolUseIndentLevels = new Map<string, number>()
   let lastToolIntentText = ''
   let consumedAssistantChars = 0
@@ -7152,6 +7692,50 @@ async function runClaudePrompt(
     }
     progress.tool(described.message, sessionId, described.detail, described.files, sourceKind, indentLevel)
   }
+  const emitClaudeToolOutput = (
+    outputEntry: {
+      id: string
+      output: string
+      stdout: string
+      stderr: string
+    },
+    sourceKind: string
+  ) => {
+    const eventKey = [
+      sourceKind,
+      outputEntry.id.trim(),
+      outputEntry.output.trim(),
+    ].join('::')
+    if (seenToolOutputEvents.has(eventKey)) {
+      return
+    }
+    seenToolOutputEvents.add(eventKey)
+
+    if (outputEntry.stdout.trim()) {
+      progress.stdout(
+        '工具输出',
+        sessionId,
+        formatCliToolOutputForLog(outputEntry.stdout),
+        sourceKind,
+      )
+    }
+    if (outputEntry.stderr.trim()) {
+      progress.stderr(
+        '工具错误输出',
+        sessionId,
+        formatCliToolOutputForLog(outputEntry.stderr),
+        sourceKind,
+      )
+    }
+    if (!outputEntry.stdout.trim() && !outputEntry.stderr.trim() && outputEntry.output.trim()) {
+      progress.stdout(
+        '工具输出',
+        sessionId,
+        formatCliToolOutputForLog(outputEntry.output),
+        sourceKind,
+      )
+    }
+  }
 
   progress.intent('Claude 已开始处理当前任务。', sessionId, undefined, undefined, 'request.started')
   if (requestedSessionId && !resumeSessionId) {
@@ -7218,6 +7802,10 @@ async function runClaudePrompt(
         if (planState) {
           progress.plan(`计划已更新，共 ${planState.items.length} 项。`, planState, sessionId, 'plan.task_update')
         }
+      }
+
+      for (const outputEntry of extractClaudeToolResultOutputEntries(parsed)) {
+        emitClaudeToolOutput(outputEntry, 'claude.tool_output')
       }
 
       if (parsed.type === 'system') {
@@ -7388,6 +7976,7 @@ async function runClaudePrompt(
     planState = null
     planRecords.length = 0
     seenToolUseEvents.clear()
+    seenToolOutputEvents.clear()
     toolUseIndentLevels.clear()
     lastToolIntentText = ''
     consumedAssistantChars = 0
@@ -7423,6 +8012,7 @@ async function runClaudePrompt(
     planState = null
     planRecords.length = 0
     seenToolUseEvents.clear()
+    seenToolOutputEvents.clear()
     toolUseIndentLevels.clear()
     lastToolIntentText = ''
     consumedAssistantChars = 0
@@ -8804,9 +9394,17 @@ ipcMain.handle(
   }
 )
 ipcMain.handle('desktop:run-cli', async (event, request: CliRunRequest) => {
-  return request.client === 'codex'
-    ? runCodexPrompt(event.sender, request)
-    : runClaudePrompt(event.sender, request)
+  const mobileMirror = await createLocalCliMobileBridgeMirror(request).catch(() => null)
+  try {
+    const result = request.client === 'codex'
+      ? await runCodexPrompt(event.sender, request)
+      : await runClaudePrompt(event.sender, request)
+    await mobileMirror?.finish(result).catch(() => undefined)
+    return result
+  } catch (error) {
+    mobileMirror?.dispose()
+    throw error
+  }
 })
 ipcMain.handle('desktop:stop-cli', async (_event, requestId: string) => {
   stoppedCliRequests.add(requestId)
