@@ -59,6 +59,31 @@ export async function getUserGroups() {
   )
 }
 
+function normalizeDesktopReasoningEffort(value?: string) {
+  switch ((value || '').trim()) {
+    case '关闭':
+    case 'off':
+    case 'none':
+      return 'none'
+    case '低':
+    case 'low':
+      return 'low'
+    case '中':
+    case 'medium':
+      return 'medium'
+    case '高':
+    case 'high':
+      return 'high'
+    case '极高':
+    case '极限':
+    case 'xhigh':
+    case 'max':
+      return 'xhigh'
+    default:
+      return undefined
+  }
+}
+
 export async function sendChatCompletion(payload: {
   model: string
   group?: string
@@ -73,8 +98,7 @@ export async function sendChatCompletion(payload: {
   requestId?: string
 } = {}) {
   const { reasoningEffort, promptCacheKey, ...rest } = payload
-  const normalizedReasoningEffort =
-    reasoningEffort && reasoningEffort !== 'off' ? reasoningEffort : undefined
+  const normalizedReasoningEffort = normalizeDesktopReasoningEffort(reasoningEffort)
   return desktopRequest<ChatCompletionResponse>({
     method: 'POST',
     path: '/pg/chat/completions',
@@ -109,8 +133,7 @@ export async function streamChatCompletion(
   }
 ) {
   const { reasoningEffort, promptCacheKey, ...rest } = payload
-  const normalizedReasoningEffort =
-    reasoningEffort && reasoningEffort !== 'off' ? reasoningEffort : undefined
+  const normalizedReasoningEffort = normalizeDesktopReasoningEffort(reasoningEffort)
   const bridge = desktopBridge()
   const requestId =
     handlers.requestId ||

@@ -1,4 +1,5 @@
 import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { CSSProperties, ChangeEvent, ClipboardEvent, Dispatch, DragEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent, PointerEvent as ReactPointerEvent, ReactNode, SetStateAction } from 'react'
 import {
   Activity,
@@ -1184,14 +1185,88 @@ function scrollBubbleIntoView(
   container.scrollTo({ top: nextTop, behavior: 'smooth' })
 }
 
+const CONVERSATION_SCROLL_DOCK_VIEWPORT_INSET = 8
+const CONVERSATION_SCROLL_DOCK_VERTICAL_INSET = 72
+
 function ConversationScrollDock(props: {
   containerRef: React.RefObject<HTMLDivElement | null>
+  active?: boolean
   itemSelector?: string
 }) {
-  const { containerRef, itemSelector = '.message-bubble' } = props
+  const { containerRef, active = true, itemSelector = '.message-bubble' } = props
+  const [portalRoot, setPortalRoot] = useState<HTMLElement | null>(null)
+  const [dockStyle, setDockStyle] = useState<CSSProperties>({ visibility: 'hidden' })
 
-  return (
-    <div className='conversation-scroll-dock' aria-label='会话导航'>
+  useLayoutEffect(() => {
+    const root = document.body
+    setPortalRoot(root)
+
+    let animationFrame = 0
+    const updateDockPosition = () => {
+      animationFrame = 0
+      const node = containerRef.current
+      if (!active || !node) {
+        setDockStyle({ visibility: 'hidden' })
+        return
+      }
+
+      const rect = node.getBoundingClientRect()
+      if (rect.width <= 0 || rect.height <= 0) {
+        setDockStyle({ visibility: 'hidden' })
+        return
+      }
+
+      const viewportHeight = window.innerHeight || document.documentElement.clientHeight
+      const top = Math.min(
+        Math.max(rect.top + rect.height / 2, CONVERSATION_SCROLL_DOCK_VERTICAL_INSET),
+        Math.max(CONVERSATION_SCROLL_DOCK_VERTICAL_INSET, viewportHeight - CONVERSATION_SCROLL_DOCK_VERTICAL_INSET)
+      )
+      const right = CONVERSATION_SCROLL_DOCK_VIEWPORT_INSET
+
+      setDockStyle((current) => {
+        if (current.visibility === 'visible' && current.top === top && current.right === right) {
+          return current
+        }
+        return {
+          visibility: 'visible',
+          top,
+          right,
+        }
+      })
+    }
+
+    const scheduleDockPositionUpdate = () => {
+      if (animationFrame) {
+        return
+      }
+      animationFrame = window.requestAnimationFrame(updateDockPosition)
+    }
+
+    const resizeObserver =
+      typeof ResizeObserver === 'undefined'
+        ? null
+        : new ResizeObserver(scheduleDockPositionUpdate)
+    const node = containerRef.current
+    if (node) {
+      resizeObserver?.observe(node)
+    }
+    resizeObserver?.observe(document.documentElement)
+    scheduleDockPositionUpdate()
+    window.addEventListener('resize', scheduleDockPositionUpdate)
+    document.addEventListener('scroll', scheduleDockPositionUpdate, true)
+
+    return () => {
+      if (animationFrame) {
+        window.cancelAnimationFrame(animationFrame)
+      }
+      resizeObserver?.disconnect()
+      window.removeEventListener('resize', scheduleDockPositionUpdate)
+      document.removeEventListener('scroll', scheduleDockPositionUpdate, true)
+    }
+  }, [active, containerRef])
+
+  const dock = (
+    <div className='conversation-scroll-dock' style={dockStyle} aria-label='会话导航'>
       <button
         className='conversation-scroll-button'
         type='button'
@@ -1230,6 +1305,8 @@ function ConversationScrollDock(props: {
       </button>
     </div>
   )
+
+  return portalRoot && active && dockStyle.visibility !== 'hidden' ? createPortal(dock, portalRoot) : null
 }
 
 type ChatSessionRecord = {
@@ -1254,21 +1331,17 @@ type PendingDrawRetryState = {
   request: PendingDrawRetryRequest
 }
 
-const CLI_REASONING_OPTIONS = [
+const REASONING_OPTIONS = [
+  { label: '关闭', value: 'off' },
   { label: '低', value: 'low' },
   { label: '中', value: 'medium' },
   { label: '高', value: 'high' },
+  { label: '极高', value: 'xhigh' },
 ] as const
 
-const CHAT_REASONING_OPTIONS = [
-  { label: '关闭', value: 'off' },
-  ...CLI_REASONING_OPTIONS,
-] as const
-
-const CLAUDE_REASONING_OPTIONS = [
-  ...CLI_REASONING_OPTIONS,
-  { label: '极限', value: 'max' },
-] as const
+const CLI_REASONING_OPTIONS = REASONING_OPTIONS
+const CHAT_REASONING_OPTIONS = REASONING_OPTIONS
+const CLAUDE_REASONING_OPTIONS = REASONING_OPTIONS
 
 const DEFAULT_CHAT_MODEL = 'mimo-v2.5-pro'
 const DEFAULT_DRAW_MODEL = 'gpt-image-2'
@@ -3140,7 +3213,6 @@ function MessageFileChangeLinks(props: {
 function CliLogBubble(props: {
   item: Extract<CliTimelineEntry, { kind: 'log' }>
   expanded: boolean
-  onToggle: () => void
   expandedEventIds: string[]
   onToggleEvent: (eventId: string) => void
   onOpenFile: (ownerId: string, path: string) => void
@@ -3159,7 +3231,6 @@ function CliLogBubble(props: {
   const {
     item,
     expanded,
-    onToggle,
     expandedEventIds,
     onToggleEvent,
     onOpenFile,
@@ -3367,11 +3438,10 @@ function CliLogBubble(props: {
 
   return (
     <div className={`message-bubble system cli-log-bubble ${logStatus.tone === 'error' ? 'error' : ''}`}>
-      <button className='cli-log-card-head' type='button' onClick={onToggle}>
+      <div className='cli-log-card-head'>
         <span className='message-role'>{logStatus.tone === 'error' ? '运行异常' : '运行日志'}</span>
         <strong>{`已执行 ${item.events.length} 步`}</strong>
-        <small>{expanded ? '点击收起' : '点击展开'}</small>
-      </button>
+      </div>
       <MessageCliExtensionChips items={requestedExtensions} label='本轮指定扩展' />
       {executedToolNames.length > 0 ? (
         <div className='message-extension-strip compact'>
@@ -5116,7 +5186,7 @@ function AssistantsChatWorkspace(props: {
             ? resolvedActiveSessionId
             : undefined,
           temperature: activeAssistant?.temperature ?? 0.7,
-          reasoningEffort: reasoningEffort === 'off' ? undefined : reasoningEffort,
+          reasoningEffort,
           messages: [
             ...(systemMessage ? [systemMessage] : []),
             ...requestHistory.map((item) => ({
@@ -5600,7 +5670,7 @@ function AssistantsChatWorkspace(props: {
                 </div>
               ))}
             </div>
-            <ConversationScrollDock containerRef={messageStreamRef} />
+            <ConversationScrollDock active={active} containerRef={messageStreamRef} />
           </div>
 
           {renderComposer({
@@ -6098,8 +6168,9 @@ function AssistantsChatWorkspace(props: {
 
 function DrawWorkspace(props: {
   toast: (message: string) => void
+  active: boolean
 }) {
-  const { toast } = props
+  const { toast, active } = props
   const [drawSessions, setDrawSessions] = useState<DrawSessionRecord[]>(() => {
     const storedSessions = loadStoredDrawSessions()
     return storedSessions.length ? storedSessions : [createDefaultDrawSession()]
@@ -7186,7 +7257,7 @@ function DrawWorkspace(props: {
                 })
               )}
             </div>
-            <ConversationScrollDock containerRef={messageStreamRef} />
+            <ConversationScrollDock active={active} containerRef={messageStreamRef} />
           </div>
 
           {renderComposer({
@@ -8814,7 +8885,6 @@ function CliWorkspace(props: {
   )
   const [sessionPartialMap, setSessionPartialMap] = useState<Record<string, string>>({})
   const [respondingInteractionIds, setRespondingInteractionIds] = useState<string[]>([])
-  const [expandedLogGroupIds, setExpandedLogGroupIds] = useState<string[]>([])
   const [expandedLogEventMap, setExpandedLogEventMap] = useState<Record<string, string[]>>({})
   const [previewFile, setPreviewFile] = useState<{
     ownerId: string
@@ -9137,19 +9207,6 @@ function CliWorkspace(props: {
     }
     return [...grouped.values()].sort((left, right) => left.createdAt - right.createdAt)
   }, [])
-  const latestAssistantMessageId = useMemo(
-    () => [...activeMessages].reverse().find((item) => item.role === 'assistant')?.id || '',
-    [activeMessages]
-  )
-
-  useEffect(() => {
-    if (!running && latestAssistantMessageId) {
-      const timer = window.setTimeout(() => {
-        setExpandedLogGroupIds([])
-      }, 0)
-      return () => window.clearTimeout(timer)
-    }
-  }, [latestAssistantMessageId, running])
   function toggleFavoriteModel(value: string) {
     setFavoriteModels((current) => {
       const next = current.includes(value)
@@ -9794,7 +9851,6 @@ function CliWorkspace(props: {
 
   useEffect(() => {
     const resetTimer = window.setTimeout(() => {
-      setExpandedLogGroupIds([])
       setExpandedLogEventMap({})
       setPreviewFile(null)
       setExtensionsMenuOpen(false)
@@ -9998,7 +10054,6 @@ function CliWorkspace(props: {
     )
     if (activeSessionId && removeSet.has(activeSessionId)) {
       setPreviewFile(null)
-      setExpandedLogGroupIds([])
       setExpandedLogEventMap({})
     }
   }
@@ -10057,14 +10112,6 @@ function CliWorkspace(props: {
       ...current,
       [nextProjectKey]: sessionId,
     }))
-  }
-
-  function toggleLogGroup(groupId: string) {
-    setExpandedLogGroupIds((current) =>
-      current.includes(groupId)
-        ? current.filter((item) => item !== groupId)
-        : [...current, groupId]
-    )
   }
 
   function toggleLogEvent(groupId: string, eventId: string) {
@@ -10220,7 +10267,6 @@ function CliWorkspace(props: {
       ...current,
       [nextSessionId]: null,
     }))
-    setExpandedLogGroupIds([])
     setExpandedLogEventMap({})
     setPrompt('')
     cliPromptHistory.syncInputValue('')
@@ -11134,13 +11180,11 @@ function CliWorkspace(props: {
                 />
               ) : activeTimeline.map((item) => {
                 if (item.kind === 'log') {
-                  const expanded = expandedLogGroupIds.includes(item.id)
                   return (
                     <CliLogBubble
                       key={item.id}
                       item={item}
-                      expanded={expanded}
-                      onToggle={() => toggleLogGroup(item.id)}
+                      expanded={true}
                       expandedEventIds={expandedLogEventMap[item.id] || []}
                       onToggleEvent={(eventId) => toggleLogEvent(item.id, eventId)}
                       onOpenFile={(ownerId, path) => void handlePreviewFile(ownerId, path)}
@@ -11226,6 +11270,7 @@ function CliWorkspace(props: {
               })}
             </div>
             <ConversationScrollDock
+              active={active}
               containerRef={threadRef}
               itemSelector='.message-bubble, .cli-log-bubble'
             />
@@ -11815,7 +11860,7 @@ function CliSetupCard(props: {
       {!peerState.isPeerDeploying && (
         <div className='timeline-list deploy-timeline-list' ref={timelineRef}>
           {deployLog.length === 0 ? (
-          <EmptyState title='部署进度会显示在这里' description='包含检测、安装、配置、测试四段结果。' />
+          <EmptyState title='部署进度会显示在这里' description='包含检测、安装、配置、MCP 互联、测试结果。' />
         ) : (
           deployLog.map((item, index) => (
             <div key={`${item.jobId}-${item.step}-${index}`} className={`timeline-row ${item.status}`}>
@@ -11895,7 +11940,7 @@ function AssistantWorkspace(props: {
           <AssistantsChatWorkspace toast={toast} active={visible && mode === 'chat'} />
         </div>
         <div className={mode === 'draw' ? 'workspace-shell active' : 'workspace-shell'}>
-          <DrawWorkspace toast={toast} />
+          <DrawWorkspace toast={toast} active={visible && mode === 'draw'} />
         </div>
         <div className={mode === 'codex' ? 'workspace-shell active' : 'workspace-shell'}>
           <CliWorkspace

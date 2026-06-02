@@ -314,7 +314,7 @@ export interface CliDeployRequest {
 export interface DeployProgressPayload {
   jobId: string
   client: CliClient
-  step: 'detect' | 'node' | 'install' | 'config' | 'diagnose' | 'test' | 'complete'
+  step: 'detect' | 'node' | 'install' | 'config' | 'mcp' | 'diagnose' | 'test' | 'complete'
   status: DeployStatus
   message: string
   createdAt: number

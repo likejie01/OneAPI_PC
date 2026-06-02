@@ -1312,7 +1312,7 @@ select {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow: visible;
   z-index: 0;
 }
 
@@ -2169,14 +2169,13 @@ select {
 }
 
 .conversation-scroll-dock {
-  position: absolute;
-  right: 12px;
+  position: fixed;
   top: 50%;
   transform: translateY(-50%);
   display: flex;
   flex-direction: column;
   gap: 8px;
-  z-index: 6;
+  z-index: 120;
   pointer-events: none;
 }
 
@@ -2190,7 +2189,7 @@ select {
   box-shadow: none;
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
-  opacity: 0.42;
+  opacity: 0.58;
   transition: opacity 0.16s ease, background 0.16s ease, transform 0.16s ease, box-shadow 0.16s ease;
   pointer-events: auto;
 }
@@ -6247,14 +6246,6 @@ textarea {
     color-mix(in srgb, var(--accent) 26%, transparent),
     color-mix(in srgb, var(--accent-strong) 22%, transparent)
   );
-}
-
-.conversation-scroll-button {
-  background: transparent;
-  border: 0;
-  box-shadow: none;
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
 }
 
 .aurora-opacity-inline {
