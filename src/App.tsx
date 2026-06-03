@@ -226,7 +226,7 @@ import {
   type PendingDrawRetryRequest,
 } from './lib/draw-request'
 import { isRecoverableNetworkError } from './lib/network-retry'
-import { estimateCliSessionContextUsage, isDirectCliCommandPrompt } from './lib/cli-runtime'
+import { isDirectCliCommandPrompt } from './lib/cli-runtime'
 import { formatUserFacingMessage } from './lib/user-facing-message'
 import { buildFinalPrompt } from './process/prompt-assembler/build-final-prompt'
 import { buildImageEditRequest } from './process/image-editing/build-edit-request'
@@ -4319,18 +4319,6 @@ function summarizeCliEventTotals(events: Array<{ kind?: CliLogKind; interaction?
   }
 }
 
-function shouldClearCliPlanOnDone(sourceKind?: string) {
-  return (
-    sourceKind === 'turn.completed' ||
-    sourceKind === 'turn.completed.with_warnings' ||
-    sourceKind === 'result' ||
-    sourceKind === 'result.with_warnings' ||
-    sourceKind === 'request.aborted' ||
-    sourceKind === 'request.failed' ||
-    sourceKind === 'request.stream.completed'
-  )
-}
-
 function serializeCliLogEvent(item: {
   kind?: CliLogKind
   sourceKind?: string
@@ -4424,7 +4412,9 @@ function AssistantsChatWorkspace(props: {
   )
   const [draft, setDraft] = useState('')
   const chatPromptHistory = useComposerPromptHistory(CHAT_PROMPT_HISTORY_STORAGE_KEY)
-  const [selectedModel, setSelectedModel] = useState('')
+  const [selectedModel, setSelectedModel] = useState(() =>
+    readJsonStorage<string>('oneapi-desktop-chat-selected-model', '')
+  )
   const [selectedGroup, setSelectedGroup] = useState('')
   const [sending, setSending] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
@@ -8840,6 +8830,56 @@ function MeWorkspace(props: {
   )
 }
 
+function stripCliPlanCommandPrompt(prompt: string) {
+  const stripped = prompt.replace(/^\s*\/plan(?:\s+|$)/i, '').trim()
+  return stripped || '请先基于当前会话与项目状态制定执行计划。'
+}
+
+function CliPlanFloatingPanel(props: {
+  plan: CliPlanState | null
+  client: CliClient
+}) {
+  const { plan, client } = props
+  if (!plan?.items.length) {
+    return null
+  }
+
+  const completedCount = plan.items.filter((item) => item.status === 'completed').length
+  const statusLabel: Record<CliPlanState['items'][number]['status'], string> = {
+    pending: '待处理',
+    in_progress: '进行中',
+    completed: '已完成',
+  }
+
+  return (
+    <aside className='cli-plan-floating-panel' aria-label={`${client === 'codex' ? 'Codex' : 'Claude'} 计划`}>
+      <div className='cli-plan-floating-head'>
+        <strong>方案</strong>
+        <span>{completedCount}/{plan.items.length}</span>
+      </div>
+      {plan.explanation ? <p className='cli-plan-floating-summary'>{plan.explanation}</p> : null}
+      <div className='cli-plan-floating-list'>
+        {plan.items.map((item) => {
+          const Icon =
+            item.status === 'completed'
+              ? CheckCircle2
+              : item.status === 'in_progress'
+                ? LoaderCircle
+                : CircleHelp
+          return (
+            <div key={`${item.id}-${item.status}`} className='cli-plan-floating-item'>
+              <span className={`cli-plan-status-icon ${item.status}`} title={statusLabel[item.status]}>
+                <Icon size={14} />
+              </span>
+              <span className='cli-plan-status-text'>{item.step}</span>
+            </div>
+          )
+        })}
+      </div>
+    </aside>
+  )
+}
+
 function CliWorkspace(props: {
   client: CliClient
   toast: (message: string) => void
@@ -8958,14 +8998,6 @@ function CliWorkspace(props: {
   const activeRequestIdRef = useRef('')
   const stoppingRunRef = useRef(false)
   const autoHydratingSessionIdsRef = useRef<Set<string>>(new Set())
-  const autoCompactSessionStateRef = useRef<Record<string, {
-    messageCount: number
-    estimatedTokens: number
-    triggeredAt: number
-    baselineMessageCount: number
-    baselineEstimatedTokens: number
-    baselineUpdatedAt: number
-  }>>({})
 
   const currentExtensionPreferenceKey = useMemo(
     () => resolveCliExtensionPreferenceProjectKey(projectPath),
@@ -8993,8 +9025,8 @@ function CliWorkspace(props: {
     () => (activeSessionId ? sessionLogsMap[activeSessionId] || [] : []),
     [activeSessionId, sessionLogsMap]
   )
-  const activePlan = activeSessionId ? sessionPlansMap[activeSessionId] || null : null
   const activePartial = activeSessionId ? sessionPartialMap[activeSessionId] || '' : ''
+  const activePlan = activeSessionId ? sessionPlansMap[activeSessionId] || null : null
   const activeExtensionPreferenceBucket =
     cliExtensionPreferences[currentExtensionPreferenceKey] || createEmptyCliExtensionPreferenceBucket()
   const autoInvokeExtensions = activeExtensionPreferenceBucket.autoInvokeEnabled !== false
@@ -9598,6 +9630,10 @@ function CliWorkspace(props: {
   }, [client, sessionProjectPathMap])
 
   useEffect(() => {
+    writeJsonStorage(`oneapi-desktop-${client}-selected-model`, selectedModel)
+  }, [client, selectedModel])
+
+  useEffect(() => {
     let disposed = false
 
     void (async () => {
@@ -9743,24 +9779,11 @@ function CliWorkspace(props: {
 
       const targetSessionId = payload.sessionId || tracked?.sessionId || currentSession
 
-      if (Object.prototype.hasOwnProperty.call(payload, 'plan')) {
+      if (payload.plan !== undefined) {
         setSessionPlansMap((current) => ({
           ...current,
           [targetSessionId]: payload.plan || null,
         }))
-      }
-
-      if (payload.done && shouldClearCliPlanOnDone(payload.sourceKind)) {
-        const doneSessionIds = Array.from(
-          new Set([payload.sessionId, tracked?.sessionId, currentSession, targetSessionId].filter(Boolean)),
-        ) as string[]
-        setSessionPlansMap((current) => {
-          const next = { ...current }
-          doneSessionIds.forEach((sessionId) => {
-            next[sessionId] = null
-          })
-          return next
-        })
       }
 
       if (payload.done && activeRequestIdRef.current === payload.requestId) {
@@ -10661,7 +10684,10 @@ function CliWorkspace(props: {
     const requestProjectPath = targetProjectPath
     const requestProjectKey = normalizeProjectKey(requestProjectPath)
     const currentSessionKey = activeSessionId || `draft-${client}-${Date.now()}`
-    const directCommand = options.directCommand || isDirectCliCommandPrompt(cleanedPrompt)
+    const matchedBuiltinCommand = matchCliBuiltinCommand(client, cleanedPrompt)
+    const planMode = matchedBuiltinCommand?.id === 'plan'
+    const visiblePrompt = planMode ? stripCliPlanCommandPrompt(cleanedPrompt) : cleanedPrompt
+    const directCommand = options.directCommand || (isDirectCliCommandPrompt(cleanedPrompt) && !planMode)
     const manualExtensions = selectedExtensions.map((item) => ({ ...item }))
     const autoRecommendedExtensions = autoInvokeExtensions
       ? directCommand
@@ -10682,11 +10708,12 @@ function CliWorkspace(props: {
       }
     }
     const promptWithAttachments = buildFinalPrompt({
-      prompt: cleanedPrompt,
+      prompt: planMode ? visiblePrompt : cleanedPrompt,
       client,
       projectPath: requestProjectPath,
       fullAccess,
       directCommand,
+      planMode,
       attachments: targetAttachments.map((item) => ({
         id: item.id,
         name: item.name,
@@ -10718,7 +10745,7 @@ function CliWorkspace(props: {
     const userMessage = {
       id: `user-${Date.now()}`,
       role: 'user' as const,
-      content: cleanedPrompt,
+      content: visiblePrompt,
       createdAt: Date.now(),
       requestId,
       attachments: toMessageAttachments(targetAttachments),
@@ -10752,7 +10779,7 @@ function CliWorkspace(props: {
       const orchestrationLogs = buildExecutionCycleEvents({
         sessionId: currentSessionKey,
         requestId,
-        intent: cleanedPrompt,
+        intent: visiblePrompt,
         finalPrompt: promptWithAttachments,
         commandTitle: directCommand ? '直接命令准备' : '扩展与上下文准备',
         command: directCommand ? cleanedPrompt : '',
@@ -10910,81 +10937,6 @@ function CliWorkspace(props: {
   async function handleRun() {
     await submitCliPrompt(prompt)
   }
-
-  useEffect(() => {
-    if (!active || running || prompt.trim() || !activeSessionId) {
-      return
-    }
-
-    const lastMessage = activeMessages.at(-1)
-    if (!lastMessage || lastMessage.role !== 'assistant') {
-      return
-    }
-    const latestUserMessage = [...activeMessages].reverse().find((item) => item.role === 'user')
-    if (latestUserMessage && matchCliBuiltinCommand(client, latestUserMessage.content)?.id === 'compact') {
-      return
-    }
-
-    const usage = estimateCliSessionContextUsage(client, activeMessages, activePlan)
-    const compactState = autoCompactSessionStateRef.current[activeSessionId]
-    const latestUserCommand = latestUserMessage
-      ? matchCliBuiltinCommand(client, latestUserMessage.content)?.id
-      : null
-    if (latestUserCommand === 'compact') {
-      autoCompactSessionStateRef.current[activeSessionId] = {
-        messageCount: compactState?.messageCount ?? activeMessages.length,
-        estimatedTokens: compactState?.estimatedTokens ?? usage.estimatedTokens,
-        triggeredAt: compactState?.triggeredAt ?? 0,
-        baselineMessageCount: activeMessages.length,
-        baselineEstimatedTokens: usage.estimatedTokens,
-        baselineUpdatedAt: Date.now(),
-      }
-      return
-    }
-
-    const baselineEstimatedTokens = compactState?.baselineEstimatedTokens ?? 0
-    const effectiveEstimatedTokens = Math.max(0, usage.estimatedTokens - baselineEstimatedTokens)
-    const effectiveRatio = usage.softLimitTokens > 0
-      ? Math.min(1, effectiveEstimatedTokens / usage.softLimitTokens)
-      : 0
-    if (effectiveRatio < 0.82) {
-      return
-    }
-
-    if (compactState) {
-      const withinCooldown = Date.now() - compactState.triggeredAt < 10 * 60 * 1000
-      const growthByMessageCount = activeMessages.length - compactState.messageCount
-      const growthByTokens = effectiveEstimatedTokens - compactState.estimatedTokens
-      if (
-        withinCooldown ||
-        growthByMessageCount < 6 ||
-        growthByTokens < 4_000
-      ) {
-        return
-      }
-    }
-
-    if (latestUserMessage && latestUserMessage.content.trim() === prompt.trim()) {
-      return
-    }
-
-    autoCompactSessionStateRef.current[activeSessionId] = {
-      messageCount: activeMessages.length,
-      estimatedTokens: effectiveEstimatedTokens,
-      triggeredAt: Date.now(),
-      baselineMessageCount: compactState?.baselineMessageCount ?? 0,
-      baselineEstimatedTokens,
-      baselineUpdatedAt: compactState?.baselineUpdatedAt ?? 0,
-    }
-    toast(`检测到压缩后增量上下文估算已使用 ${Math.round(effectiveRatio * 100)}%，已自动执行 /compact。`)
-    window.setTimeout(() => {
-      void submitCliPrompt('/compact', {
-        silentValidation: true,
-        nextAttachments: [],
-        directCommand: true,
-      })
-    }, 0)
-  }, [active, activeMessages, activePlan, activeSessionId, client, prompt, running, submitCliPrompt, toast])
 
   useEffect(() => {
     if (!active || running || prompt.trim() || !cliStatusReady) {
@@ -11171,6 +11123,7 @@ function CliWorkspace(props: {
                 itemSelector='.message-bubble, .cli-log-bubble'
               />
             </div>
+            <CliPlanFloatingPanel plan={activePlan} client={client} />
             <div ref={threadRef} className='cli-thread'>
               {activeTimeline.length === 0 ? (
                 <EmptyState
@@ -11781,11 +11734,10 @@ function CliSetupCard(props: {
       setDeploying(true)
       setActiveDeployClient(client)
       setDeployLog([])
-      const generated = await ensureDesktopServiceKey({
-        name: 'OneAPI Desktop Internal Key',
-        group: user.group || '',
-        preferredNames: ['桌面端专用 Key', `${client.toUpperCase()} 桌面安装 Key`],
-      })
+      const generated = await createDesktopCliKey(
+        `OneAPI Desktop ${client.toUpperCase()} Key ${Date.now()}`,
+        user.group || ''
+      )
       const resolvedDeploySettings = resolveCliDeploySettings({
         preset,
         generatedApiKey: generated.key,

@@ -10,3 +10,21 @@ test('cli log bubbles render expanded by default without a collapse header actio
   assert.match(appSource, /<CliLogBubble[\s\S]*?expanded=\{true\}/)
   assert.doesNotMatch(appSource, /点击收起/)
 })
+
+test('cli UI does not proactively submit compact commands', () => {
+  assert.doesNotMatch(appSource, /autoCompactSessionStateRef/)
+  assert.doesNotMatch(appSource, /submitCliPrompt\('\/compact'/)
+  assert.doesNotMatch(appSource, /已自动执行 \/compact/)
+})
+
+test('cli plan panel remains mounted and ignores undefined plan payloads', () => {
+  assert.match(appSource, /<CliPlanFloatingPanel plan=\{activePlan\} client=\{client\} \/>/)
+  assert.match(appSource, /if \(payload\.plan !== undefined\)/)
+  assert.doesNotMatch(appSource, /shouldClearCliPlanOnDone/)
+})
+
+test('slash plan command enables plan mode instead of direct command passthrough', () => {
+  assert.match(appSource, /const planMode = matchedBuiltinCommand\?\.id === 'plan'/)
+  assert.match(appSource, /isDirectCliCommandPrompt\(cleanedPrompt\) && !planMode/)
+  assert.match(appSource, /planMode,\s*[\r\n]+/)
+})

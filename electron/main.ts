@@ -62,7 +62,7 @@ import {
 } from '../src/lib/cli-plan.ts'
 import { isClaudeAssistantTerminalMessage } from '../src/lib/cli-history-filter.ts'
 import { buildExecutionCycleEvents } from '../src/process/execution-orchestrator/run-request.ts'
-import { buildFinalPrompt } from '../src/process/prompt-assembler/build-final-prompt.ts'
+import { buildFinalPrompt, type PromptAssemblerAttachment, type PromptAssemblerExtension } from '../src/process/prompt-assembler/build-final-prompt.ts'
 import { buildCliExtensionDedupeKey, parseMarkdownFrontmatterMeta } from '../src/lib/cli-extensions.ts'
 import {
   buildBundledCodexCuratedSkillEntries,
@@ -242,6 +242,17 @@ interface MobileBridgeExtensionRef {
   client?: string
 }
 
+interface MobileBridgeAttachment {
+  id?: string
+  name?: string
+  mime?: string
+  kind?: 'image' | 'file'
+  dataUrl?: string
+  data_url?: string
+  text?: string
+  source?: string
+}
+
 interface MobileBridgeJob {
   job_id?: string
   jobId?: string
@@ -250,6 +261,12 @@ interface MobileBridgeJob {
   client?: string
   session_id?: string
   sessionId?: string
+  project_path?: string
+  projectPath?: string
+  origin?: string
+  source?: string
+  client_request_id?: string
+  clientRequestId?: string
   prompt?: string
   model?: string
   reasoning_effort?: string
@@ -258,6 +275,7 @@ interface MobileBridgeJob {
   permissionMode?: string
   extension_refs?: MobileBridgeExtensionRef[]
   extensionRefs?: MobileBridgeExtensionRef[]
+  attachments?: MobileBridgeAttachment[]
 }
 
 interface MobileBridgeInteractionResponse {
@@ -1544,6 +1562,7 @@ interface MobileBridgeSessionSnapshot {
   preview: string
   projectName: string
   projectPath: string
+  model?: string
   status: string
   updatedAt: number
   purposes: string[]
@@ -1755,6 +1774,17 @@ async function buildMobileBridgeSessionSnapshot(client: CliClient, entry: CliHis
     (projectPath ? path.basename(projectPath) : '') ||
     '本机项目'
   const updatedAt = cliTimestampToMillis(details?.updatedAt || entry.updatedAt)
+  const model = [...(details?.messages || [])]
+    .reverse()
+    .map((message) => message.modelLabel?.trim() || '')
+    .find((value) => value && value.toLowerCase() !== client)
+  const selectedModelRaw = await getRendererStorageValue(`oneapi-desktop-${client}-selected-model`)
+  let selectedModel = ''
+  try {
+    selectedModel = selectedModelRaw ? String(JSON.parse(selectedModelRaw)).trim() : ''
+  } catch {
+    selectedModel = selectedModelRaw.trim()
+  }
 
   return {
     id: details?.id || entry.id,
@@ -1764,6 +1794,7 @@ async function buildMobileBridgeSessionSnapshot(client: CliClient, entry: CliHis
     preview,
     projectName,
     projectPath,
+    model: selectedModel || model,
     status: 'synced',
     updatedAt,
     purposes: [],
@@ -1797,6 +1828,7 @@ async function syncMobileBridgeSessionsSnapshot(force = false) {
     id: item.id,
     client: item.client,
     updatedAt: item.updatedAt,
+    model: item.model || '',
     projectPath: item.projectPath,
     preview: item.preview.slice(0, 200),
     messageCount: item.messages.length,
@@ -1860,6 +1892,97 @@ async function runMobileBridgeInteractionLoop(requestId: string, jobId: string, 
   }
 }
 
+function safeMobileAttachmentName(value: string, fallback: string) {
+  const clean = (value || '').trim().replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_')
+  return clean || fallback
+}
+
+function extensionFromMime(mime: string, fallbackName: string) {
+  const ext = path.extname(fallbackName).replace(/^\./, '').trim()
+  if (ext) return ext
+  const clean = mime.toLowerCase()
+  if (clean.includes('png')) return 'png'
+  if (clean.includes('jpeg') || clean.includes('jpg')) return 'jpg'
+  if (clean.includes('webp')) return 'webp'
+  if (clean.includes('gif')) return 'gif'
+  if (clean.includes('pdf')) return 'pdf'
+  if (clean.includes('json')) return 'json'
+  if (clean.includes('markdown')) return 'md'
+  if (clean.startsWith('text/')) return 'txt'
+  return 'txt'
+}
+
+function decodeMobileAttachmentDataUrl(dataUrl: string) {
+  const match = dataUrl.match(/^data:([^;,]+)?(;base64)?,(.*)$/s)
+  if (!match) return null
+  const mime = match[1] || 'application/octet-stream'
+  const base64 = !!match[2]
+  const payload = match[3] || ''
+  return {
+    mime,
+    bytes: base64 ? Buffer.from(payload, 'base64') : Buffer.from(decodeURIComponent(payload), 'utf8'),
+  }
+}
+
+async function materializeMobileBridgeAttachments(jobId: string, attachments: MobileBridgeAttachment[]) {
+  if (!attachments.length) return [] as PromptAssemblerAttachment[]
+  const root = path.join(app.getPath('userData'), 'mobile-bridge-attachments', safeMobileAttachmentName(jobId, randomUUID()))
+  await fs.mkdir(root, { recursive: true })
+  const out: PromptAssemblerAttachment[] = []
+  for (let index = 0; index < attachments.length; index += 1) {
+    const item = attachments[index]
+    const name = safeMobileAttachmentName(item.name || `attachment-${index + 1}`, `attachment-${index + 1}`)
+    const dataUrl = (item.dataUrl || item.data_url || '').trim()
+    const text = (item.text || '').trim()
+    try {
+      let filePath = ''
+      if (dataUrl) {
+        const decoded = decodeMobileAttachmentDataUrl(dataUrl)
+        if (!decoded) continue
+        const ext = extensionFromMime(item.mime || decoded.mime, name)
+        filePath = path.join(root, path.extname(name) ? name : `${name}.${ext}`)
+        await fs.writeFile(filePath, decoded.bytes)
+      } else if (text) {
+        const ext = extensionFromMime(item.mime || 'text/plain', name)
+        filePath = path.join(root, path.extname(name) ? name : `${name}.${ext}`)
+        await fs.writeFile(filePath, text, 'utf8')
+      }
+      if (filePath) {
+        out.push({
+          id: item.id || `${jobId}-attachment-${index + 1}`,
+          name,
+          filePath,
+          kind: item.kind === 'image' ? 'image' : 'file',
+        })
+      }
+    } catch {
+      /* skip unreadable attachment */
+    }
+  }
+  return out
+}
+
+async function resolveMobileBridgeExtensionRefs(client: CliClient, refs: MobileBridgeExtensionRef[]) {
+  if (!refs.length) return [] as PromptAssemblerExtension[]
+  const installed = (await listCliExtensions(client).catch(() => [] as CliExtensionEntry[]))
+    .filter((item) => item.installed !== false)
+  const resolved: PromptAssemblerExtension[] = []
+  for (const ref of refs) {
+    const kind = ref.kind
+    const id = (ref.id || '').trim().toLowerCase()
+    const name = (ref.name || '').trim().toLowerCase()
+    const match = installed.find((item) => item.kind === kind && (
+      item.id.trim().toLowerCase() === id ||
+      item.name.trim().toLowerCase() === name ||
+      item.installKey?.trim().toLowerCase() === id
+    ))
+    if (match) {
+      resolved.push({ client, kind, name: match.name })
+    }
+  }
+  return resolved
+}
+
 async function executeMobileBridgeJob(rawJob: MobileBridgeJob) {
   const job = normalizeMobileBridgeJob(rawJob)
   if (!job.jobId || (job.client !== 'codex' && job.client !== 'claude')) {
@@ -1876,28 +1999,42 @@ async function executeMobileBridgeJob(rawJob: MobileBridgeJob) {
 
   const requestedSessionId = job.sessionId || `mobile-${job.client}-${job.jobId}`
   const requestId = `mobile-${job.jobId}`
-  const projectPath = (await readBridgeClientProjectPath(job.client)).trim() || os.homedir()
+  const projectPath = job.projectPath.trim() || (await readBridgeClientProjectPath(job.client)).trim() || os.homedir()
   const projectName = path.basename(projectPath) || projectPath
   const fullAccess = job.permissionMode === 'full' || job.permissionMode === 'full_access'
+  const attachments = await materializeMobileBridgeAttachments(job.jobId, job.attachments)
+  const extensions = await resolveMobileBridgeExtensionRefs(job.client, job.extensionRefs)
   const promptSnapshot = buildFinalPrompt({
     prompt: job.prompt,
     client: job.client,
     projectPath,
     fullAccess,
-    extensions: job.extensionRefs.map((item) => ({
-      client: job.client,
-      kind: item.kind,
-      name: item.name,
-    })),
+    attachments,
+    extensions,
   })
 
   await postMobileBridgeJobEvent(job.jobId, {
     id: `${requestId}-project`,
+    sessionId: requestedSessionId,
     type: 'project',
     phase: 'project',
     level: 0,
     title: projectName,
     body: projectPath,
+    source: 'mobile',
+    origin: 'mobile',
+    createdAt: Date.now(),
+  })
+
+  await postMobileBridgeJobEvent(job.jobId, {
+    id: `${requestId}-user`,
+    sessionId: requestedSessionId,
+    type: 'message',
+    role: 'user',
+    text: job.prompt,
+    source: 'mobile',
+    origin: 'mobile',
+    clientRequestId: job.clientRequestId,
     createdAt: Date.now(),
   })
 
@@ -1919,6 +2056,8 @@ async function executeMobileBridgeJob(rawJob: MobileBridgeJob) {
       parentId: event.parentId,
       indentLevel: event.indentLevel,
       interactionStatus: event.interaction?.status,
+      source: 'mobile',
+      origin: 'mobile',
       createdAt: event.createdAt,
     })
   }
@@ -1953,6 +2092,8 @@ async function executeMobileBridgeJob(rawJob: MobileBridgeJob) {
         type: 'message',
         role: 'assistant',
         text: result.output.trim(),
+        source: 'mobile',
+        origin: 'mobile',
         createdAt: Date.now(),
       })
     }
@@ -1977,6 +2118,8 @@ async function executeMobileBridgeJob(rawJob: MobileBridgeJob) {
         level: 0,
         title: `${job.client === 'codex' ? 'Codex' : 'Claude'} 输出已结束`,
         body: '',
+        source: 'mobile',
+        origin: 'mobile',
         createdAt: Date.now(),
       })
     }
@@ -2019,10 +2162,13 @@ async function createLocalCliMobileBridgeMirror(request: CliRunRequest) {
       deviceId,
       client: request.client,
       sessionId: request.sessionId || `local-${request.client}-${request.requestId}`,
+      projectPath: request.projectPath,
       prompt: visiblePrompt,
       model: request.model,
       reasoningEffort: request.reasoningEffort,
       permissionMode: 'local_mirror',
+      origin: 'desktop',
+      source: 'desktop',
     },
   })
   const jobId = readMobileBridgeJobId(created)
@@ -2047,6 +2193,8 @@ async function createLocalCliMobileBridgeMirror(request: CliRunRequest) {
     level: 0,
     title: projectName,
     body: projectPath,
+    source: 'desktop',
+    origin: 'desktop',
     createdAt: Date.now(),
   })
 
@@ -2068,6 +2216,8 @@ async function createLocalCliMobileBridgeMirror(request: CliRunRequest) {
       parentId: event.parentId,
       indentLevel: event.indentLevel,
       interactionStatus: event.interaction?.status,
+      source: 'desktop',
+      origin: 'desktop',
       createdAt: event.createdAt,
     })
   }
@@ -2091,6 +2241,8 @@ async function createLocalCliMobileBridgeMirror(request: CliRunRequest) {
           type: 'message',
           role: 'assistant',
           text: result.output.trim(),
+          source: 'desktop',
+          origin: 'desktop',
           createdAt: Date.now(),
         })
       }
@@ -2102,6 +2254,8 @@ async function createLocalCliMobileBridgeMirror(request: CliRunRequest) {
         level: 0,
         title: `${request.client === 'codex' ? 'Codex' : 'Claude'} 输出已结束`,
         body: '',
+        source: 'desktop',
+        origin: 'desktop',
         createdAt: Date.now(),
       } : {
         id: `${request.requestId}-failed`,
@@ -2111,6 +2265,8 @@ async function createLocalCliMobileBridgeMirror(request: CliRunRequest) {
         level: 2,
         title: '执行失败',
         body: result.error || 'CLI 执行未返回成功结果。',
+        source: 'desktop',
+        origin: 'desktop',
         createdAt: Date.now(),
       })
       await syncMobileBridgeSessionsSnapshot(true).catch(() => undefined)
@@ -2319,6 +2475,9 @@ function normalizeMobileBridgeJob(raw: MobileBridgeJob) {
     deviceId: raw.deviceId || raw.device_id || '',
     client: (raw.client || '').trim().toLowerCase() as CliClient,
     sessionId: raw.sessionId || raw.session_id || '',
+    projectPath: raw.projectPath || raw.project_path || '',
+    origin: raw.origin || raw.source || '',
+    clientRequestId: raw.clientRequestId || raw.client_request_id || '',
     prompt: raw.prompt || '',
     model: raw.model || '',
     reasoningEffort: raw.reasoningEffort || raw.reasoning_effort || '',
@@ -2328,6 +2487,15 @@ function normalizeMobileBridgeJob(raw: MobileBridgeJob) {
       kind: item.kind,
       name: item.name,
       description: item.description,
+    })),
+    attachments: (raw.attachments || []).map((item) => ({
+      id: item.id || '',
+      name: item.name || '',
+      mime: item.mime || '',
+      kind: item.kind === 'image' ? 'image' as const : 'file' as const,
+      dataUrl: item.dataUrl || item.data_url || '',
+      text: item.text || '',
+      source: item.source || '',
     })),
   }
 }
@@ -2369,6 +2537,8 @@ function createMobileBridgeEventMapper(jobId: string) {
     phase: 'assistant',
     role: 'assistant',
     text,
+    source: payload.requestId.startsWith('mobile-') ? 'mobile' : 'desktop',
+    origin: payload.requestId.startsWith('mobile-') ? 'mobile' : 'desktop',
     createdAt: payload.createdAt,
   })
 
@@ -2463,11 +2633,13 @@ function mapCliPayloadToMobileBridgeLogEvent(
     phase,
     level: payload.kind === 'error' ? 2 : payload.logKind === 'stderr' ? 1 : 0,
     title: payload.message,
-    body: payload.detail || payload.assistantChunk || payload.message,
+    body: payload.detail || payload.message,
     command: payload.command,
     interactionId: payload.interaction?.id,
     interactionStatus: payload.interaction?.status,
     indentLevel: payload.indentLevel || 0,
+    source: payload.requestId.startsWith('mobile-') ? 'mobile' : 'desktop',
+    origin: payload.requestId.startsWith('mobile-') ? 'mobile' : 'desktop',
     createdAt: payload.createdAt,
   }
 }
@@ -3722,6 +3894,98 @@ function buildCodexCliEnv(
   claudeSettings?: ClaudeSettingsDocument | null
 ) {
   return buildClaudeCliEnv(runtime, claudeSettings)
+}
+
+function applyClaudeApiEnvironmentToProcess(apiKey: string, baseUrl: string) {
+  process.env.ANTHROPIC_API_KEY = apiKey
+  process.env.ANTHROPIC_AUTH_TOKEN = apiKey
+  process.env.ANTHROPIC_BASE_URL = baseUrl
+  process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = '1'
+  process.env.API_TIMEOUT_MS = '600000'
+}
+
+function quotePosixShellValue(value: string) {
+  return `'${value.replace(/'/g, `'\\''`)}'`
+}
+
+async function upsertShellEnvSource(profilePath: string, sourcePath: string) {
+  const markerStart = '# >>> OneAPI Claude env >>>'
+  const markerEnd = '# <<< OneAPI Claude env <<<'
+  const block = [
+    markerStart,
+    `[ -f ${quotePosixShellValue(sourcePath)} ] && . ${quotePosixShellValue(sourcePath)}`,
+    markerEnd,
+  ].join('\n')
+  const current = await fs.readFile(profilePath, 'utf8').catch(() => '')
+  const next = current.includes(markerStart)
+    ? current.replace(
+        new RegExp(`${markerStart}[\\s\\S]*?${markerEnd}`),
+        block
+      )
+    : `${current.trimEnd()}${current.trim() ? '\n\n' : ''}${block}\n`
+  if (next !== current) {
+    await fs.writeFile(profilePath, next, 'utf8')
+  }
+}
+
+async function persistPosixClaudeApiEnvironment(apiKey: string, baseUrl: string) {
+  const envPath = path.join(os.homedir(), '.oneapi-claude-env')
+  const content = [
+    `export ANTHROPIC_API_KEY=${quotePosixShellValue(apiKey)}`,
+    `export ANTHROPIC_AUTH_TOKEN=${quotePosixShellValue(apiKey)}`,
+    `export ANTHROPIC_BASE_URL=${quotePosixShellValue(baseUrl)}`,
+    `export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`,
+    `export API_TIMEOUT_MS=600000`,
+    '',
+  ].join('\n')
+  await fs.writeFile(envPath, content, { encoding: 'utf8', mode: 0o600 })
+  await fs.chmod(envPath, 0o600).catch(() => undefined)
+  await upsertShellEnvSource(path.join(os.homedir(), '.zshenv'), envPath)
+  await upsertShellEnvSource(path.join(os.homedir(), '.bash_profile'), envPath)
+  await runCommand('launchctl', ['setenv', 'ANTHROPIC_API_KEY', apiKey], { timeoutMs: 10000 }).catch(() => null)
+  await runCommand('launchctl', ['setenv', 'ANTHROPIC_AUTH_TOKEN', apiKey], { timeoutMs: 10000 }).catch(() => null)
+  await runCommand('launchctl', ['setenv', 'ANTHROPIC_BASE_URL', baseUrl], { timeoutMs: 10000 }).catch(() => null)
+}
+
+async function persistWindowsClaudeApiEnvironment(apiKey: string, baseUrl: string) {
+  const script = [
+    '$values = @{',
+    '  ANTHROPIC_API_KEY = $env:ONEAPI_ANTHROPIC_API_KEY',
+    '  ANTHROPIC_AUTH_TOKEN = $env:ONEAPI_ANTHROPIC_AUTH_TOKEN',
+    '  ANTHROPIC_BASE_URL = $env:ONEAPI_ANTHROPIC_BASE_URL',
+    '  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"',
+    '  API_TIMEOUT_MS = "600000"',
+    '}',
+    'foreach ($item in $values.GetEnumerator()) {',
+    '  [Environment]::SetEnvironmentVariable($item.Key, [string]$item.Value, "User")',
+    '}',
+  ].join('; ')
+  const result = await spawnCommandWithHandlers('powershell.exe', [
+    '-NoProfile',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-Command',
+    script,
+  ], {
+    timeoutMs: 15000,
+    env: {
+      ONEAPI_ANTHROPIC_API_KEY: apiKey,
+      ONEAPI_ANTHROPIC_AUTH_TOKEN: apiKey,
+      ONEAPI_ANTHROPIC_BASE_URL: baseUrl,
+    },
+  })
+  if (result.exitCode !== 0) {
+    throw new Error(result.stderr || result.stdout || '写入 Windows 用户环境变量失败')
+  }
+}
+
+async function persistClaudeApiEnvironment(apiKey: string, baseUrl: string) {
+  applyClaudeApiEnvironmentToProcess(apiKey, baseUrl)
+  if (process.platform === 'win32') {
+    await persistWindowsClaudeApiEnvironment(apiKey, baseUrl)
+  } else if (process.platform === 'darwin') {
+    await persistPosixClaudeApiEnvironment(apiKey, baseUrl)
+  }
 }
 
 function normalizeCliExtensionId(
@@ -5894,14 +6158,7 @@ function parseCodexSession(lines: string[]): {
   return {
     messages: uniqueMessages(messages),
     fileChanges: mergeFileChanges([], fileChanges),
-    plan: (() => {
-      const plan = buildCodexPlanStateFromRecords(planRecords)
-      const lastAssistantMessage = [...messages].reverse().find((item) => item.role === 'assistant')
-      if (plan && lastAssistantMessage && lastAssistantMessage.createdAt >= plan.updatedAt) {
-        return null
-      }
-      return plan
-    })(),
+    plan: buildCodexPlanStateFromRecords(planRecords),
   }
 }
 
@@ -6217,14 +6474,7 @@ function parseClaudeSession(lines: string[]): {
   return {
     messages: uniqueMessages(messages),
     fileChanges: mergeFileChanges([], fileChanges),
-    plan: (() => {
-      const plan = buildClaudePlanStateFromRecords(planRecords)
-      const lastAssistantMessage = [...messages].reverse().find((item) => item.role === 'assistant')
-      if (plan && lastAssistantMessage && lastAssistantMessage.createdAt >= plan.updatedAt) {
-        return null
-      }
-      return plan
-    })(),
+    plan: buildClaudePlanStateFromRecords(planRecords),
   }
 }
 
@@ -6381,10 +6631,10 @@ function createCliProgressEmitter(
         plan: input.plan,
         interaction: input.interaction,
       } satisfies CliProgressPayload
+      mobileBridgeProgressMirrors.get(requestId)?.(payload)
       if (webContents && !webContents.isDestroyed()) {
         webContents.send('desktop:cli-progress', payload)
       }
-      mobileBridgeProgressMirrors.get(requestId)?.(payload)
     },
     status(
       message: string,
@@ -8374,6 +8624,7 @@ async function writeClaudeConfig(request: CliDeployRequest) {
     ),
     'utf8'
   )
+  await persistClaudeApiEnvironment(resolvedApiKey, resolvedBaseUrl)
 
   const written = await readResolvedClaudeSettingsDocument(targetPath)
   const writtenKey = resolveDesktopCliKeyRecord(pickClaudeApiKey(written.env))
@@ -8970,6 +9221,56 @@ async function diagnoseClaudeEnvironment(
   }
 }
 
+function buildClaudeMessagesApiUrl(baseUrl: string) {
+  return `${normalizeClaudeBaseUrl(baseUrl).replace(/\/+$/, '')}/v1/messages`
+}
+
+async function probeClaudeMessagesApi(request: CliDeployRequest) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 20000)
+  const resolvedKey = resolveDesktopCliKeyRecord(request.apiKey)
+  const resolvedBaseUrl = normalizeClaudeBaseUrl(request.baseUrl)
+  const resolvedModel = request.model?.trim() || DEFAULT_CLAUDE_MODEL
+  try {
+    const response = await fetch(buildClaudeMessagesApiUrl(resolvedBaseUrl), {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        'content-type': 'application/json',
+        'anthropic-version': '2023-06-01',
+        'x-api-key': resolvedKey,
+        authorization: `Bearer ${resolvedKey}`,
+      },
+      body: JSON.stringify({
+        model: resolvedModel,
+        max_tokens: 1,
+        messages: [{ role: 'user', content: 'ping' }],
+      }),
+    })
+    const text = await response.text().catch(() => '')
+    if (response.ok) {
+      return {
+        ok: true,
+        detail: `status=${response.status} endpoint=${buildClaudeMessagesApiUrl(resolvedBaseUrl)}`,
+      }
+    }
+    return {
+      ok: false,
+      detail: [
+        `status=${response.status} endpoint=${buildClaudeMessagesApiUrl(resolvedBaseUrl)}`,
+        maskSensitiveText(text).slice(0, 2000),
+      ].filter(Boolean).join('\n'),
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      detail: error instanceof Error ? error.message : String(error),
+    }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 function buildNodeDownloadUrl(version: string) {
   const normalizedVersion = version.startsWith('v') ? version : `v${version}`
 
@@ -9438,6 +9739,15 @@ async function deployCli(webContents: WebContents, request: CliDeployRequest, jo
   logger.info('test', 'running', `正在验证 ${client} 连接`)
 
   const testProjectPath = path.join(os.homedir())
+  if (client === 'claude') {
+    logger.info('test', 'running', '正在预检 Claude 兼容接口鉴权')
+    const probe = await probeClaudeMessagesApi(request)
+    if (!probe.ok) {
+      logger.info('test', 'error', 'Claude 兼容接口预检失败', probe.detail)
+      return
+    }
+    logger.info('test', 'success', 'Claude 兼容接口预检通过', probe.detail)
+  }
   const testResult =
     client === 'codex'
       ? await runCodexPrompt(webContents, {

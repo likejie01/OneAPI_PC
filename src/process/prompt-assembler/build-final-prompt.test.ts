@@ -35,6 +35,32 @@ test('direct command stays as one prompt without execution policy', () => {
   assert.equal(result.finalPrompt, '/resume')
 })
 
+test('plan mode strips slash command and asks CLI to publish plan updates', () => {
+  const result = buildFinalPrompt({
+    prompt: '/plan 修复登录问题',
+    client: 'codex',
+    planMode: true,
+  })
+
+  assert.equal(result.finalPrompt.startsWith('修复登录问题'), true)
+  assert.doesNotMatch(result.finalPrompt, /^\/plan/)
+  assert.match(result.finalPrompt, /计划模式要求/)
+  assert.match(result.finalPrompt, /update_plan/)
+  assert.equal(extractUserTaskFromFinalPrompt(result.finalPrompt), '修复登录问题')
+})
+
+test('plan mode falls back to a concrete planning request when no task follows slash command', () => {
+  const result = buildFinalPrompt({
+    prompt: '/plan',
+    client: 'claude',
+    planMode: true,
+  })
+
+  assert.match(result.finalPrompt, /^请先基于当前会话与项目状态制定执行计划。/)
+  assert.match(result.finalPrompt, /计划模式要求/)
+  assert.equal(extractUserTaskFromFinalPrompt(result.finalPrompt), '请先基于当前会话与项目状态制定执行计划。')
+})
+
 test('buildFinalPrompt describes restricted project-folder permissions explicitly', () => {
   const result = buildFinalPrompt({
     prompt: '修改项目内文件',

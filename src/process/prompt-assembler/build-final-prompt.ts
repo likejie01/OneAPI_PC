@@ -18,6 +18,7 @@ export const CLI_EXECUTION_POLICY = [
 export const EXTENSION_CONSTRAINT_MARKER = '以下内容是 OneAPI 客户端附加的扩展调用要求'
 export const EXECUTION_CONSTRAINT_MARKER = '以下内容是 OneAPI 客户端附加的执行约束'
 export const ORIGINAL_USER_PROMPT_MARKER = '以下内容是用户真实需求原文（保留格式）'
+export const PLAN_MODE_CONSTRAINT_MARKER = '以下内容是 OneAPI 客户端附加的计划模式要求'
 
 export interface PromptAssemblerExtension {
   client: CliClient
@@ -38,6 +39,7 @@ export interface BuildFinalPromptInput {
   projectPath?: string
   fullAccess?: boolean
   directCommand?: boolean
+  planMode?: boolean
   attachments?: PromptAssemblerAttachment[]
   extensions?: PromptAssemblerExtension[]
 }
@@ -118,13 +120,34 @@ function buildPermissionBlock(input: Pick<BuildFinalPromptInput, 'fullAccess' | 
   ].filter(Boolean).join('\n')
 }
 
+function stripPlanCommandPrompt(prompt: string) {
+  const stripped = prompt.replace(/^\s*\/plan(?:\s+|$)/i, '').trim()
+  return stripped || '请先基于当前会话与项目状态制定执行计划。'
+}
+
+function buildPlanModeBlock(input: Pick<BuildFinalPromptInput, 'client' | 'planMode'>) {
+  if (!input.planMode) {
+    return ''
+  }
+  const toolHint = input.client === 'codex'
+    ? '如运行环境支持 update_plan 工具，必须先调用 update_plan 创建计划，并在步骤状态变化时继续更新。'
+    : '如运行环境支持任务/计划工具，必须先创建计划，并在步骤状态变化时继续更新。'
+  return [
+    PLAN_MODE_CONSTRAINT_MARKER,
+    '本次任务进入计划模式：在执行前先给出可操作方案，执行中保持步骤状态同步。',
+    toolHint,
+    '不要只在最终回复里用自然语言列计划；需要让客户端能收到计划状态更新。',
+  ].join('\n')
+}
+
 export function buildFinalPrompt(input: BuildFinalPromptInput): PromptAssemblySnapshot {
-  const cleanedPrompt = input.prompt.trim()
+  const cleanedPrompt = input.planMode ? stripPlanCommandPrompt(input.prompt) : input.prompt.trim()
   const attachments = input.attachments || []
   const extensions = input.extensions || []
   const extensionBlock = input.directCommand ? '' : buildExtensionPromptBlock(extensions)
   const visiblePrompt = buildVisiblePrompt(cleanedPrompt, attachments, extensionBlock)
   const permissionBlock = buildPermissionBlock(input)
+  const planModeBlock = buildPlanModeBlock(input)
 
   if (input.directCommand) {
     return {
@@ -144,6 +167,7 @@ export function buildFinalPrompt(input: BuildFinalPromptInput): PromptAssemblySn
       EXECUTION_CONSTRAINT_MARKER,
       '上方内容是用户真实需求；请直接完成上方需求，不要把本段约束当成用户问题回复。',
       '',
+      ...(planModeBlock ? [planModeBlock, ''] : []),
       permissionBlock,
       '',
       CLI_EXECUTION_POLICY,
@@ -195,6 +219,7 @@ export function extractUserTaskFromFinalPrompt(raw: string) {
   const constraintIndexes = [
     next.indexOf(EXECUTION_CONSTRAINT_MARKER),
     next.indexOf(EXTENSION_CONSTRAINT_MARKER),
+    next.indexOf(PLAN_MODE_CONSTRAINT_MARKER),
   ].filter((index) => index > 0)
   if (constraintIndexes.length) {
     const taskSection = next.slice(0, Math.min(...constraintIndexes)).trim()

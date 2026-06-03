@@ -45,3 +45,13 @@ test('resolveCliDeploySettings reuses managed desktop endpoint but still rotates
     }
   )
 })
+
+test('deploy UI creates fresh generated keys outside resolveCliDeploySettings', () => {
+  const result = resolveCliDeploySettings({
+    preset: null,
+    generatedApiKey: 'sk-fresh-only',
+    defaultBaseUrl: 'https://ai.oneapi.center',
+    defaultModel: 'claude-sonnet-4-6',
+  })
+  assert.equal(result.apiKey, 'sk-fresh-only')
+})

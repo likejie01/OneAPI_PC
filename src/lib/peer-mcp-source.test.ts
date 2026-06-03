@@ -31,6 +31,16 @@ test('codex cli runtime inherits claude api environment for peer calls', () => {
   assert.match(electronMainSource, /env: codexEnv/)
 })
 
+test('claude deploy persists api environment and preflights auth', () => {
+  assert.match(electronMainSource, /function persistClaudeApiEnvironment/)
+  assert.match(electronMainSource, /SetEnvironmentVariable\(\$item\.Key, \[string\]\$item\.Value, "User"\)/)
+  assert.match(electronMainSource, /ANTHROPIC_API_KEY/)
+  assert.match(electronMainSource, /ANTHROPIC_AUTH_TOKEN/)
+  assert.match(electronMainSource, /function probeClaudeMessagesApi/)
+  assert.match(electronMainSource, /buildClaudeMessagesApiUrl/)
+  assert.match(electronMainSource, /Claude 兼容接口预检失败/)
+})
+
 test('peer mcp server speaks newline-delimited json-rpc over stdio', () => {
   assert.match(electronMainSource, /process\.stdout\.write\(JSON\.stringify\(message\) \+ '\\n'\)/)
   assert.doesNotMatch(electronMainSource, /process\.stdout\.write\('Content-Length: '/)
