@@ -69,6 +69,7 @@ export interface ChatMessage {
   id: string
   role: 'system' | 'user' | 'assistant'
   content: string
+  requestContent?: string | ChatContentPart[]
   createdAt: number
   pending?: boolean
   reasoningContent?: string

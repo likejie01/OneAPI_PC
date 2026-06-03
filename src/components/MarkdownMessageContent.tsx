@@ -1,8 +1,7 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Copy, Globe, Link2 } from 'lucide-react'
-import { MermaidDiagram } from './MermaidDiagram'
 import {
   isMermaidMarkdownCodeBlock,
   normalizeMarkdownCodeBlockContent,
@@ -11,15 +10,21 @@ import {
 import { extractMessageLinkChips } from '../lib/message-links'
 import { resolveSelectionContextMenuText } from '../lib/context-menu'
 
+const MermaidDiagramLazy = lazy(async () => {
+  const module = await import('./MermaidDiagram')
+  return { default: module.MermaidDiagram }
+})
+
 interface MarkdownMessageContentProps {
   content: string
   onOpenLocalPath: (targetPath: string) => void | Promise<void>
   onOpenExternal: (targetUrl: string) => void | Promise<void>
   onSelectionContextMenu?: (event: ReactMouseEvent<HTMLDivElement>, selectedText: string) => void
+  renderMermaid?: boolean
 }
 
 export function MarkdownMessageContent(props: MarkdownMessageContentProps) {
-  const { content, onOpenExternal, onOpenLocalPath, onSelectionContextMenu } = props
+  const { content, onOpenExternal, onOpenLocalPath, onSelectionContextMenu, renderMermaid = true } = props
   const [copiedCode, setCopiedCode] = useState<string | null>(null)
   const extractedContent = useMemo(() => extractMessageLinkChips(content), [content])
   const rootRef = useRef<HTMLDivElement | null>(null)
@@ -112,7 +117,14 @@ export function MarkdownMessageContent(props: MarkdownMessageContentProps) {
               const normalizedText = normalizeMarkdownCodeBlockContent(rawText)
 
               if (isMermaidMarkdownCodeBlock(className)) {
-                return normalizedText.trim() ? <MermaidDiagram chart={normalizedText} /> : null
+                if (!renderMermaid) {
+                  return <code className={className} {...rest}>{normalizedText}</code>
+                }
+                return normalizedText.trim() ? (
+                  <Suspense fallback={<code className={className}>{normalizedText}</code>}>
+                    <MermaidDiagramLazy chart={normalizedText} />
+                  </Suspense>
+                ) : null
               }
 
               const isBlock = shouldRenderMarkdownCodeBlock(className, rawText)

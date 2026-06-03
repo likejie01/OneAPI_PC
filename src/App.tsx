@@ -1,4 +1,4 @@
-import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createContext, lazy, memo, startTransition, Suspense, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { CSSProperties, ChangeEvent, ClipboardEvent, Dispatch, DragEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent, PointerEvent as ReactPointerEvent, ReactNode, SetStateAction } from 'react'
 import {
@@ -20,6 +20,7 @@ import {
   EyeOff,
   FileText,
   FolderOpen,
+  Gauge,
   Shuffle,
   KeyRound,
   LoaderCircle,
@@ -46,6 +47,7 @@ import {
   UserPlus,
   Wallet,
   X,
+  Zap,
 } from 'lucide-react'
 import {
   createAssistant,
@@ -274,6 +276,7 @@ import type {
   DesktopAnnouncement,
   CliDeployPreset,
   CliExtensionEntry,
+  CliFileChange,
   CliHistoryEntry,
   CliLogKind,
   CliPlanState,
@@ -296,6 +299,14 @@ type AssistantMode = 'chat' | 'draw' | 'codex' | 'claude'
 type SideTab = 'assistants' | 'subscriptions' | 'wallet' | 'service-status' | 'me'
 type HistoryVisibilityTab = 'visible' | 'hidden'
 type ThemeMode = 'light' | 'dark'
+type AppPerformanceMode = 'performance' | 'efficiency'
+
+const APP_PERFORMANCE_MODE_STORAGE_KEY = 'oneapi-desktop-performance-mode'
+const AppPerformanceModeContext = createContext<AppPerformanceMode>('performance')
+
+function useAppPerformanceMode() {
+  return useContext(AppPerformanceModeContext)
+}
 type CliPaletteTab = 'command' | 'skill' | 'plugin'
 
 const AURORA_OPACITY_STORAGE_KEY = 'oneapi-desktop-aurora-opacity'
@@ -459,6 +470,43 @@ function buildAttachmentDataUrl(attachment: ComposerAttachment) {
   return `data:${normalizeAttachmentMimeType(attachment)};base64,${attachment.dataBase64}`
 }
 
+function decodeAttachmentText(attachment: ComposerAttachment) {
+  const mimeType = normalizeAttachmentMimeType(attachment).toLowerCase()
+  const textLike =
+    mimeType.startsWith('text/') ||
+    /(?:json|xml|csv|yaml|yml|markdown|javascript|typescript|x-sh|x-python)/i.test(mimeType) ||
+    /\.(txt|md|markdown|json|csv|tsv|xml|yml|yaml|js|jsx|ts|tsx|css|html|py|java|go|rs|c|cpp|h|hpp|cs|php|rb|sh|ps1|sql|log)$/i.test(attachment.name)
+  if (!textLike || !attachment.dataBase64) {
+    return ''
+  }
+
+  try {
+    const binary = window.atob(attachment.dataBase64)
+    const bytes = new Uint8Array(binary.length)
+    for (let index = 0; index < binary.length; index += 1) {
+      bytes[index] = binary.charCodeAt(index)
+    }
+    return new TextDecoder('utf-8', { fatal: false }).decode(bytes).slice(0, 80_000)
+  } catch {
+    return ''
+  }
+}
+
+function buildFileAttachmentText(attachment: ComposerAttachment) {
+  const decodedText = decodeAttachmentText(attachment).trim()
+  const header = [
+    `[附件] ${attachment.name}`,
+    attachment.filePath ? `路径：${attachment.filePath}` : '',
+    `类型：${normalizeAttachmentMimeType(attachment)}`,
+  ].filter(Boolean).join('\n')
+
+  if (!decodedText) {
+    return `${header}\n内容：当前接口不支持直接上传普通文件，客户端已改为文本引用；如需分析文件内容，请粘贴文本或使用可读取的文本文件。`
+  }
+
+  return `${header}\n内容：\n${decodedText}`
+}
+
 function buildChatAttachmentContent(
   text: string,
   attachments: ComposerAttachment[]
@@ -490,15 +538,28 @@ function buildChatAttachmentContent(
     }
 
     parts.push({
-      type: 'file',
-      file: {
-        filename: attachment.name,
-        file_data: buildAttachmentDataUrl(attachment),
-      },
+      type: 'text',
+      text: buildFileAttachmentText(attachment),
     })
   }
 
   return parts.length === 1 ? text : parts
+}
+
+function buildPersistedChatRequestContent(
+  text: string,
+  attachments: ComposerAttachment[]
+): string | ChatContentPart[] | undefined {
+  const fileAttachments = attachments.filter((item) => item.kind === 'file')
+  if (!fileAttachments.length) {
+    return undefined
+  }
+  const content = buildChatAttachmentContent(text, fileAttachments)
+  return content === text ? undefined : content
+}
+
+function resolveChatMessageRequestContent(message: ChatMessage) {
+  return message.requestContent ?? message.content
 }
 
 function toMessageAttachments(attachments: ComposerAttachment[]) {
@@ -1053,6 +1114,15 @@ function focusTextareaToEnd(textarea: HTMLTextAreaElement | null, value: string)
   textarea.setSelectionRange(value.length, value.length)
 }
 
+function useDebouncedJsonStorage<T>(key: string, value: T, delayMs = 350) {
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      writeJsonStorage(key, value)
+    }, delayMs)
+    return () => window.clearTimeout(timer)
+  }, [delayMs, key, value])
+}
+
 function useAutoFollowScroll(
   containerRef: React.RefObject<HTMLDivElement | null>,
   dependencies: readonly unknown[]
@@ -1076,9 +1146,21 @@ function useAutoFollowScroll(
       return
     }
 
+    let followFrame = 0
     const handleScroll = () => {
       const remaining = node.scrollHeight - node.scrollTop - node.clientHeight
       shouldFollowRef.current = remaining <= 48
+    }
+    const scheduleFollowToLatest = () => {
+      if (!shouldFollowRef.current || followFrame) {
+        return
+      }
+      followFrame = window.requestAnimationFrame(() => {
+        followFrame = 0
+        if (shouldFollowRef.current) {
+          node.scrollTop = node.scrollHeight
+        }
+      })
     }
 
     handleScroll()
@@ -1086,12 +1168,7 @@ function useAutoFollowScroll(
     const resizeObserver =
       typeof ResizeObserver === 'undefined'
         ? null
-        : new ResizeObserver(() => {
-            if (!shouldFollowRef.current) {
-              return
-            }
-            node.scrollTop = node.scrollHeight
-          })
+        : new ResizeObserver(scheduleFollowToLatest)
 
     resizeObserver?.observe(node)
     if (node.firstElementChild) {
@@ -1100,6 +1177,9 @@ function useAutoFollowScroll(
 
     return () => {
       node.removeEventListener('scroll', handleScroll)
+      if (followFrame) {
+        window.cancelAnimationFrame(followFrame)
+      }
       resizeObserver?.disconnect()
     }
   }, [containerRef])
@@ -1187,6 +1267,7 @@ function scrollBubbleIntoView(
 
 const CONVERSATION_SCROLL_DOCK_VIEWPORT_INSET = 8
 const CONVERSATION_SCROLL_DOCK_VERTICAL_INSET = 72
+const CONVERSATION_SCROLL_DOCK_UPDATE_THROTTLE_MS = 80
 
 function ConversationScrollDock(props: {
   containerRef: React.RefObject<HTMLDivElement | null>
@@ -1202,8 +1283,11 @@ function ConversationScrollDock(props: {
     setPortalRoot(root)
 
     let animationFrame = 0
+    let throttleTimer = 0
+    let lastUpdateAt = 0
     const updateDockPosition = () => {
       animationFrame = 0
+      lastUpdateAt = performance.now()
       const node = containerRef.current
       if (!active || !node) {
         setDockStyle({ visibility: 'hidden' })
@@ -1235,11 +1319,25 @@ function ConversationScrollDock(props: {
       })
     }
 
-    const scheduleDockPositionUpdate = () => {
+    const requestDockPositionUpdate = () => {
       if (animationFrame) {
         return
       }
       animationFrame = window.requestAnimationFrame(updateDockPosition)
+    }
+    const scheduleDockPositionUpdate = () => {
+      const elapsed = performance.now() - lastUpdateAt
+      const wait = CONVERSATION_SCROLL_DOCK_UPDATE_THROTTLE_MS - elapsed
+      if (wait > 0) {
+        if (!throttleTimer) {
+          throttleTimer = window.setTimeout(() => {
+            throttleTimer = 0
+            requestDockPositionUpdate()
+          }, wait)
+        }
+        return
+      }
+      requestDockPositionUpdate()
     }
 
     const resizeObserver =
@@ -1253,11 +1351,14 @@ function ConversationScrollDock(props: {
     resizeObserver?.observe(document.documentElement)
     scheduleDockPositionUpdate()
     window.addEventListener('resize', scheduleDockPositionUpdate)
-    document.addEventListener('scroll', scheduleDockPositionUpdate, true)
+    document.addEventListener('scroll', scheduleDockPositionUpdate, { capture: true, passive: true })
 
     return () => {
       if (animationFrame) {
         window.cancelAnimationFrame(animationFrame)
+      }
+      if (throttleTimer) {
+        window.clearTimeout(throttleTimer)
       }
       resizeObserver?.disconnect()
       window.removeEventListener('resize', scheduleDockPositionUpdate)
@@ -2086,8 +2187,14 @@ const LazyMarkdownContent = memo(function LazyMarkdownContent(props: {
   content: string
   className?: string
   onSelectionContextMenu?: (event: MouseEvent<HTMLDivElement>, selectedText: string) => void
+  renderMermaid?: boolean
 }) {
-  const { content, className, onSelectionContextMenu } = props
+  const { content, className, onSelectionContextMenu, renderMermaid = true } = props
+  const performanceMode = useAppPerformanceMode()
+
+  if (performanceMode === 'efficiency') {
+    return <div className={`${className || 'markdown-body'} markdown-plain-mode`}>{content}</div>
+  }
 
   return (
     <Suspense fallback={<div className={className || 'markdown-body'}>{content}</div>}>
@@ -2096,6 +2203,7 @@ const LazyMarkdownContent = memo(function LazyMarkdownContent(props: {
         onOpenLocalPath={openDesktopTarget}
         onOpenExternal={(target) => window.desktopBridge?.openExternal(target)}
         onSelectionContextMenu={onSelectionContextMenu}
+        renderMermaid={renderMermaid}
       />
     </Suspense>
   )
@@ -4339,6 +4447,46 @@ function serializeCliLogEvent(item: {
   ].filter(Boolean).join('\n\n')
 }
 
+function buildCliLogFilesSignature(files?: CliFileChange[]) {
+  if (!files?.length) {
+    return ''
+  }
+  return files.map((item) => `${item.kind}:${item.path}:${item.diff || item.content || ''}`).join('|')
+}
+
+function buildCliInteractionSignature(interaction?: CliInteractionPrompt) {
+  if (!interaction) {
+    return ''
+  }
+  return [
+    interaction.id,
+    interaction.kind,
+    interaction.status,
+    interaction.title,
+    interaction.message,
+    interaction.command,
+  ].filter(Boolean).join('|')
+}
+
+function isSameCliLogEntry(left?: CliLogEntry, right?: CliLogEntry) {
+  if (!left || !right) {
+    return false
+  }
+  return (
+    left.level === right.level &&
+    left.logKind === right.logKind &&
+    left.sourceKind === right.sourceKind &&
+    left.content === right.content &&
+    left.assistantChunk === right.assistantChunk &&
+    left.indentLevel === right.indentLevel &&
+    left.detail === right.detail &&
+    left.command === right.command &&
+    left.exitCode === right.exitCode &&
+    buildCliInteractionSignature(left.interaction) === buildCliInteractionSignature(right.interaction) &&
+    buildCliLogFilesSignature(left.files) === buildCliLogFilesSignature(right.files)
+  )
+}
+
 function PasswordField(props: {
   value: string
   placeholder: string
@@ -4404,6 +4552,7 @@ function AssistantsChatWorkspace(props: {
   active: boolean
 }) {
   const { toast, active } = props
+  const performanceMode = useAppPerformanceMode()
   const [models, setModels] = useState<ChatModelOption[]>([])
   const [favoriteModels, setFavoriteModels] = useState<string[]>(() => loadFavoriteModels('oneapi-desktop-chat-favorites'))
   const [chatSessions, setChatSessions] = useState<ChatSessionRecord[]>(() => loadStoredChatSessions())
@@ -4777,10 +4926,11 @@ function AssistantsChatWorkspace(props: {
     if (persistChatSessionsTimerRef.current) {
       window.clearTimeout(persistChatSessionsTimerRef.current)
     }
+    const persistDelay = performanceMode === 'efficiency' ? (hasPending ? 900 : 450) : (hasPending ? 220 : 80)
     persistChatSessionsTimerRef.current = window.setTimeout(() => {
       writeJsonStorage(CHAT_SESSIONS_STORAGE_KEY, chatSessions)
       persistChatSessionsTimerRef.current = null
-    }, hasPending ? 220 : 0)
+    }, persistDelay)
 
     return () => {
       if (persistChatSessionsTimerRef.current) {
@@ -4788,7 +4938,7 @@ function AssistantsChatWorkspace(props: {
         persistChatSessionsTimerRef.current = null
       }
     }
-  }, [chatSessions])
+  }, [chatSessions, performanceMode])
 
   useEffect(() => {
     writeJsonStorage(CHAT_ACTIVE_SESSION_STORAGE_KEY, resolvedActiveSessionId)
@@ -4799,6 +4949,7 @@ function AssistantsChatWorkspace(props: {
     if (persistChatHistoryTimerRef.current) {
       window.clearTimeout(persistChatHistoryTimerRef.current)
     }
+    const persistDelay = performanceMode === 'efficiency' ? (hasPending ? 1200 : 700) : (hasPending ? 360 : 120)
     persistChatHistoryTimerRef.current = window.setTimeout(() => {
       void syncAssistantHistory(
         'chat',
@@ -4810,7 +4961,7 @@ function AssistantsChatWorkspace(props: {
         }))
       )
       persistChatHistoryTimerRef.current = null
-    }, hasPending ? 360 : 0)
+    }, persistDelay)
 
     return () => {
       if (persistChatHistoryTimerRef.current) {
@@ -4818,7 +4969,7 @@ function AssistantsChatWorkspace(props: {
         persistChatHistoryTimerRef.current = null
       }
     }
-  }, [chatSessions])
+  }, [chatSessions, performanceMode])
 
   useEffect(() => {
     writeJsonStorage(CHAT_REASONING_STORAGE_KEY, reasoningEffort)
@@ -5060,10 +5211,12 @@ function AssistantsChatWorkspace(props: {
     const requestId = `chat-${createdAt}`
     const pendingAssistantId = `assistant-pending-${requestId}`
     const userMessageContent = normalizedDraft
+    const persistedRequestContent = buildPersistedChatRequestContent(userMessageContent, attachments)
     const userMessage: ChatMessage = {
       id: `user-${createdAt}`,
       role: 'user',
       content: userMessageContent,
+      requestContent: persistedRequestContent,
       createdAt,
       attachments: toMessageAttachments(attachments),
     }
@@ -5184,7 +5337,7 @@ function AssistantsChatWorkspace(props: {
               content:
                 item.id === userMessage.id
                   ? buildChatAttachmentContent(item.content, attachments)
-                  : item.content,
+                  : resolveChatMessageRequestContent(item),
             })),
           ],
         }
@@ -5605,6 +5758,7 @@ function AssistantsChatWorkspace(props: {
                       : <LazyMarkdownContent
                           content={item.content}
                           onSelectionContextMenu={handleMessageSelectionContextMenu}
+                          renderMermaid={!item.pending}
                         />
                   )}
                   <BubbleMeta
@@ -6161,6 +6315,7 @@ function DrawWorkspace(props: {
   active: boolean
 }) {
   const { toast, active } = props
+  const performanceMode = useAppPerformanceMode()
   const [drawSessions, setDrawSessions] = useState<DrawSessionRecord[]>(() => {
     const storedSessions = loadStoredDrawSessions()
     return storedSessions.length ? storedSessions : [createDefaultDrawSession()]
@@ -6287,25 +6442,26 @@ function DrawWorkspace(props: {
 
   useAutoFollowScroll(messageStreamRef, [messages, sending])
 
-  useEffect(() => {
-    writeJsonStorage(DRAW_SESSIONS_STORAGE_KEY, drawSessions)
-  }, [drawSessions])
+  useDebouncedJsonStorage(DRAW_SESSIONS_STORAGE_KEY, drawSessions, performanceMode === 'efficiency' ? 900 : 220)
 
   useEffect(() => {
     writeJsonStorage(DRAW_ACTIVE_SESSION_STORAGE_KEY, resolvedActiveSessionId)
   }, [resolvedActiveSessionId])
 
   useEffect(() => {
-    void syncAssistantHistory(
-      'draw',
-      drawSessions.map((session) => ({
-        id: session.id,
-        title: session.title,
-        updatedAt: session.updatedAt,
-        data: JSON.stringify(session),
-      }))
-    )
-  }, [drawSessions])
+    const timer = window.setTimeout(() => {
+      void syncAssistantHistory(
+        'draw',
+        drawSessions.map((session) => ({
+          id: session.id,
+          title: session.title,
+          updatedAt: session.updatedAt,
+          data: JSON.stringify(session),
+        }))
+      )
+    }, performanceMode === 'efficiency' ? 1200 : 260)
+    return () => window.clearTimeout(timer)
+  }, [drawSessions, performanceMode])
 
   useEffect(() => {
     let disposed = false
@@ -8391,10 +8547,12 @@ function MeWorkspace(props: {
   user: UserProfile
   toast: (message: string) => void
   themeMode: ThemeMode
+  performanceMode: AppPerformanceMode
+  onTogglePerformanceMode: () => void
   onToggleTheme: () => void
   visible: boolean
 }) {
-  const { user, toast, themeMode, onToggleTheme, visible } = props
+  const { user, toast, themeMode, performanceMode, onTogglePerformanceMode, onToggleTheme, visible } = props
   const [apiKeys, setApiKeys] = useState<
     Array<{
       id: number
@@ -8606,6 +8764,16 @@ function MeWorkspace(props: {
               <h2>账户与部署</h2>
             </div>
             <div className='inline-actions'>
+              <button
+                className='ghost-button tiny performance-mode-button'
+                type='button'
+                onClick={onTogglePerformanceMode}
+                title={performanceMode === 'efficiency' ? '效率模式：已降低客户端渲染开销，点击切换到性能模式' : '性能模式：完整渲染体验，点击切换到效率模式'}
+                aria-label={performanceMode === 'efficiency' ? '切换到性能模式' : '切换到效率模式'}
+              >
+                {performanceMode === 'efficiency' ? <Zap size={16} /> : <Gauge size={16} />}
+                <span>{performanceMode === 'efficiency' ? '效率' : '性能'}</span>
+              </button>
               <button
                 className='ghost-button tiny theme-toggle-button'
                 type='button'
@@ -8888,6 +9056,7 @@ function CliWorkspace(props: {
   serverBaseUrl: string
 }) {
   const { client, toast, openSettings, active, serverBaseUrl } = props
+  const performanceMode = useAppPerformanceMode()
   const lastProjectPathStorageKey = `oneapi-desktop-${client}-last-project-path`
   const projectSessionMapStorageKey = `oneapi-desktop-${client}-project-session-map`
   const lastOpenedSessionIdStorageKey = `oneapi-desktop-${client}-last-opened-session-id`
@@ -8998,6 +9167,9 @@ function CliWorkspace(props: {
   const activeRequestIdRef = useRef('')
   const stoppingRunRef = useRef(false)
   const autoHydratingSessionIdsRef = useRef<Set<string>>(new Set())
+  const pendingCliLogEntriesRef = useRef<Record<string, CliLogEntry[]>>({})
+  const pendingCliLogFlushTimerRef = useRef<number | null>(null)
+  const cliLogEntrySequenceRef = useRef(0)
 
   const currentExtensionPreferenceKey = useMemo(
     () => resolveCliExtensionPreferenceProjectKey(projectPath),
@@ -9386,6 +9558,73 @@ function CliWorkspace(props: {
     }))
   }, [])
 
+  const flushPendingCliLogEntries = useCallback(() => {
+    const pending = pendingCliLogEntriesRef.current
+    pendingCliLogEntriesRef.current = {}
+    pendingCliLogFlushTimerRef.current = null
+    const sessionIds = Object.keys(pending)
+    if (!sessionIds.length) {
+      return
+    }
+
+    startTransition(() => {
+      setSessionLogsMap((current) => {
+        let changed = false
+        const next: Record<string, CliLogEntry[]> = { ...current }
+
+        for (const sessionId of sessionIds) {
+          const entries = pending[sessionId]
+          if (!entries?.length) {
+            continue
+          }
+          let sessionLogs = next[sessionId] || []
+          for (const entry of entries) {
+            const lastEntry = sessionLogs.at(-1)
+            if (isSameCliLogEntry(lastEntry, entry)) {
+              continue
+            }
+            if (shouldReplaceStreamingCliIntentEntry(lastEntry, entry)) {
+              const replaceId = lastEntry?.id
+              if (replaceId) {
+                sessionLogs = sessionLogs.map((item) => (item.id === replaceId ? entry : item))
+                changed = true
+              }
+              continue
+            }
+            sessionLogs = [...sessionLogs, entry]
+            changed = true
+          }
+          next[sessionId] = sessionLogs
+        }
+
+        return changed ? next : current
+      })
+    })
+  }, [])
+
+  const enqueueCliLogEntry = useCallback((sessionId: string, entry: CliLogEntry, urgent = false) => {
+    pendingCliLogEntriesRef.current = {
+      ...pendingCliLogEntriesRef.current,
+      [sessionId]: [...(pendingCliLogEntriesRef.current[sessionId] || []), entry],
+    }
+    if (pendingCliLogFlushTimerRef.current !== null) {
+      if (!urgent) {
+        return
+      }
+      window.clearTimeout(pendingCliLogFlushTimerRef.current)
+    }
+    const delay = urgent ? 0 : performanceMode === 'efficiency' ? 80 : 24
+    pendingCliLogFlushTimerRef.current = window.setTimeout(flushPendingCliLogEntries, delay)
+  }, [flushPendingCliLogEntries, performanceMode])
+
+  useEffect(() => {
+    return () => {
+      if (pendingCliLogFlushTimerRef.current !== null) {
+        window.clearTimeout(pendingCliLogFlushTimerRef.current)
+      }
+    }
+  }, [])
+
   const closeCliExtensionsMenu = useCallback((focusPrompt = false) => {
     setExtensionsMenuOpen(false)
     setExtensionsMenuAnchor('button')
@@ -9613,17 +9852,23 @@ function CliWorkspace(props: {
     writeJsonStorage(`oneapi-desktop-${client}-extension-preferences`, cliExtensionPreferences)
   }, [cliExtensionPreferences, client])
 
-  useEffect(() => {
-    writeJsonStorage(`oneapi-desktop-${client}-message-overlays`, cliMessageOverlays)
-  }, [cliMessageOverlays, client])
+  useDebouncedJsonStorage(
+    `oneapi-desktop-${client}-message-overlays`,
+    cliMessageOverlays,
+    performanceMode === 'efficiency' ? 900 : 260
+  )
 
-  useEffect(() => {
-    writeJsonStorage(`oneapi-desktop-${client}-session-logs`, sessionLogsMap)
-  }, [client, sessionLogsMap])
+  useDebouncedJsonStorage(
+    `oneapi-desktop-${client}-session-logs`,
+    sessionLogsMap,
+    performanceMode === 'efficiency' ? 1200 : 360
+  )
 
-  useEffect(() => {
-    writeJsonStorage(`oneapi-desktop-${client}-session-plans`, sessionPlansMap)
-  }, [client, sessionPlansMap])
+  useDebouncedJsonStorage(
+    `oneapi-desktop-${client}-session-plans`,
+    sessionPlansMap,
+    performanceMode === 'efficiency' ? 900 : 260
+  )
 
   useEffect(() => {
     writeJsonStorage(`oneapi-desktop-${client}-session-project-paths`, sessionProjectPathMap)
@@ -9810,56 +10055,26 @@ function CliWorkspace(props: {
         return
       }
 
-      setSessionLogsMap((current) => {
-        const previous = current[targetSessionId] || []
-        const nextEntry = {
-          id: `${payload.requestId}-${payload.kind}-${payload.createdAt}-${targetSessionId}-${previous.length}-${payload.sourceKind || 'status'}`,
-          requestId: payload.requestId,
-          sessionId: targetSessionId,
-          level: payload.kind === 'error' ? 'error' : 'status',
-          logKind: payload.logKind || (payload.kind === 'error' ? 'error' : 'status'),
-          sourceKind: payload.sourceKind,
-          content: payload.message,
-          assistantChunk: payload.assistantChunk,
-          indentLevel: payload.indentLevel,
-          createdAt: payload.createdAt,
-          files: payload.files,
-          detail: payload.detail,
-          command: payload.command,
-          exitCode: payload.exitCode,
-          interaction: payload.interaction,
-        } satisfies CliLogEntry
-        const lastEntry = previous.at(-1)
-        if (
-          lastEntry?.level === nextEntry.level &&
-          lastEntry.logKind === nextEntry.logKind &&
-          lastEntry.sourceKind === nextEntry.sourceKind &&
-          lastEntry.content === nextEntry.content &&
-          lastEntry.assistantChunk === nextEntry.assistantChunk &&
-          lastEntry.indentLevel === nextEntry.indentLevel &&
-          lastEntry.detail === nextEntry.detail &&
-          lastEntry.command === nextEntry.command &&
-          lastEntry.exitCode === nextEntry.exitCode &&
-          JSON.stringify(lastEntry.interaction || null) === JSON.stringify(nextEntry.interaction || null) &&
-          JSON.stringify(lastEntry.files || []) === JSON.stringify(nextEntry.files || [])
-        ) {
-          return current
-        }
-        if (shouldReplaceStreamingCliIntentEntry(lastEntry, nextEntry)) {
-          const replaceId = lastEntry?.id
-          if (!replaceId) {
-            return current
-          }
-          return {
-            ...current,
-            [targetSessionId]: previous.map((entry) => (entry.id === replaceId ? nextEntry : entry)),
-          }
-        }
-        return {
-          ...current,
-          [targetSessionId]: [...previous, nextEntry],
-        }
-      })
+      const entryIndex = cliLogEntrySequenceRef.current
+      cliLogEntrySequenceRef.current += 1
+      const nextEntry = {
+        id: `${payload.requestId}-${payload.kind}-${payload.createdAt}-${targetSessionId}-${entryIndex}-${payload.sourceKind || 'status'}`,
+        requestId: payload.requestId,
+        sessionId: targetSessionId,
+        level: payload.kind === 'error' ? 'error' : 'status',
+        logKind: payload.logKind || (payload.kind === 'error' ? 'error' : 'status'),
+        sourceKind: payload.sourceKind,
+        content: payload.message,
+        assistantChunk: payload.assistantChunk,
+        indentLevel: payload.indentLevel,
+        createdAt: payload.createdAt,
+        files: payload.files,
+        detail: payload.detail,
+        command: payload.command,
+        exitCode: payload.exitCode,
+        interaction: payload.interaction,
+      } satisfies CliLogEntry
+      enqueueCliLogEntry(targetSessionId, nextEntry, !!payload.done)
 
       if (payload.done) {
         setSessionPartialMap((current) => ({
@@ -9870,7 +10085,7 @@ function CliWorkspace(props: {
     })
 
     return unsubscribe
-  }, [client, moveCliSessionOverlay])
+  }, [client, enqueueCliLogEntry, moveCliSessionOverlay, persistCliMessageOverlay, projectPath])
 
   useEffect(() => {
     const resetTimer = window.setTimeout(() => {
@@ -12463,6 +12678,9 @@ export function App() {
   const [themeMode, setThemeMode] = useState<ThemeMode>(() =>
     readJsonStorage<ThemeMode>('oneapi-desktop-theme-mode', 'light')
   )
+  const [performanceMode, setPerformanceMode] = useState<AppPerformanceMode>(() =>
+    readJsonStorage<AppPerformanceMode>(APP_PERFORMANCE_MODE_STORAGE_KEY, 'performance')
+  )
   const [auroraOpacity] = useState<number>(() => {
     const value = readJsonStorage<number>(AURORA_OPACITY_STORAGE_KEY, DEFAULT_AURORA_OPACITY)
     return Math.max(0, Math.min(100, Number.isFinite(value) ? value : DEFAULT_AURORA_OPACITY))
@@ -12614,6 +12832,11 @@ export function App() {
     writeJsonStorage('oneapi-desktop-theme-mode', themeMode)
     void getDesktopBridge().setThemeMode(themeMode).catch(() => undefined)
   }, [themeMode])
+
+  useEffect(() => {
+    document.documentElement.dataset.performanceMode = performanceMode
+    writeJsonStorage(APP_PERFORMANCE_MODE_STORAGE_KEY, performanceMode)
+  }, [performanceMode])
 
   useEffect(() => {
     const normalized = Math.max(0, Math.min(100, auroraOpacity))
@@ -12844,12 +13067,14 @@ export function App() {
 
   if (auth.bootstrapping) {
     return (
-      <DesktopWindowFrame iconPath={iconPath} productName={productName}>
-        <div className='boot-screen'>
-          <LoaderCircle className='spin' size={22} />
-          <span>正在初始化桌面工作台...</span>
-        </div>
-      </DesktopWindowFrame>
+      <AppPerformanceModeContext.Provider value={performanceMode}>
+        <DesktopWindowFrame iconPath={iconPath} productName={productName}>
+          <div className='boot-screen'>
+            <LoaderCircle className='spin' size={22} />
+            <span>正在初始化桌面工作台...</span>
+          </div>
+        </DesktopWindowFrame>
+      </AppPerformanceModeContext.Provider>
     )
   }
 
@@ -12890,6 +13115,7 @@ export function App() {
 
   return (
     <>
+      <AppPerformanceModeContext.Provider value={performanceMode}>
       <DesktopWindowFrame iconPath={iconPath} productName={productName}>
         <div className='shell'>
           <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
@@ -13084,6 +13310,10 @@ export function App() {
                 user={auth.user}
                 toast={setMessage}
                 themeMode={themeMode}
+                performanceMode={performanceMode}
+                onTogglePerformanceMode={() =>
+                  setPerformanceMode((current) => (current === 'efficiency' ? 'performance' : 'efficiency'))
+                }
                 onToggleTheme={() => setThemeMode((current) => (current === 'dark' ? 'light' : 'dark'))}
                 visible={sideTab === 'me'}
               />
@@ -13149,6 +13379,7 @@ export function App() {
           </div>
         </div>
       )}
+      </AppPerformanceModeContext.Provider>
     </>
   )
 }

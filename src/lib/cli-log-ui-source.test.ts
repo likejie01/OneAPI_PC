@@ -17,6 +17,13 @@ test('cli UI does not proactively submit compact commands', () => {
   assert.doesNotMatch(appSource, /已自动执行 \/compact/)
 })
 
+test('cli progress logs are batched without stringify comparisons in the hot path', () => {
+  assert.match(appSource, /pendingCliLogEntriesRef/)
+  assert.match(appSource, /enqueueCliLogEntry\(targetSessionId, nextEntry, !!payload\.done\)/)
+  assert.match(appSource, /startTransition\(\(\) => \{\s*setSessionLogsMap/)
+  assert.doesNotMatch(appSource, /JSON\.stringify\(lastEntry/)
+})
+
 test('cli plan panel remains mounted and ignores undefined plan payloads', () => {
   assert.match(appSource, /<CliPlanFloatingPanel plan=\{activePlan\} client=\{client\} \/>/)
   assert.match(appSource, /if \(payload\.plan !== undefined\)/)
