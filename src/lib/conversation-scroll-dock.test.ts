@@ -29,7 +29,7 @@ test('conversation scroll dock is pinned to the client right edge', () => {
 })
 
 test('conversation scroll dock throttles global layout recalculation', () => {
-  assert.match(appSource, /CONVERSATION_SCROLL_DOCK_UPDATE_THROTTLE_MS\s*=\s*80/)
+  assert.match(appSource, /CONVERSATION_SCROLL_DOCK_UPDATE_THROTTLE_MS\s*=\s*140/)
   assert.match(appSource, /document\.addEventListener\('scroll', scheduleDockPositionUpdate, \{ capture: true, passive: true \}\)/)
   assert.match(appSource, /new ResizeObserver\(scheduleDockPositionUpdate\)/)
 })

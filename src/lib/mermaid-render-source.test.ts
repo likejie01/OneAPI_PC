@@ -20,9 +20,16 @@ test('mermaid png export renders a large white-background image', () => {
 })
 
 test('mermaid chart view supports zoom and pan in a max-width bubble', () => {
+  assert.match(mermaidSource, /const MERMAID_SVG_CACHE_LIMIT = 48/)
+  assert.match(mermaidSource, /function readCachedMermaidSvg/)
+  assert.match(mermaidSource, /function writeCachedMermaidSvg/)
+  assert.match(mermaidSource, /while \(mermaidSvgCache\.size > MERMAID_SVG_CACHE_LIMIT\)/)
+  assert.match(mermaidSource, /typeof oldestKey !== 'string'/)
   assert.match(mermaidSource, /className='mermaid-diagram-viewport'/)
   assert.match(mermaidSource, /addEventListener\('wheel', handleWheel, \{ passive: false \}\)/)
   assert.match(mermaidSource, /event\.stopPropagation\(\)/)
+  assert.match(mermaidSource, /const handleWheel = useCallback/)
+  assert.match(mermaidSource, /\}, \[handleWheel, svg\]\)/)
   assert.doesNotMatch(mermaidSource, /onWheel=\{handleWheel\}/)
   assert.match(mermaidSource, /onPointerDown=\{handlePointerDown\}/)
   assert.match(mermaidSource, /onDoubleClick=\{\(\) => setView\(\{ scale: 1, x: 0, y: 0 \}\)\}/)

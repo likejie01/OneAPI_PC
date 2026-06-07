@@ -133,19 +133,37 @@ export function supportsCodexAskForApprovalFlag(helpText: string) {
 
 export function buildCodexSandboxArgs(
   fullAccess: boolean,
-  supportsAskForApproval: boolean
+  supportsAskForApproval: boolean,
+  additionalWritableDirectories: string[] = []
 ) {
-  void fullAccess
   void supportsAskForApproval
-  return ['--dangerously-bypass-approvals-and-sandbox']
+  if (fullAccess) {
+    return ['--dangerously-bypass-approvals-and-sandbox']
+  }
+
+  const args = ['--sandbox', 'workspace-write']
+  for (const directory of additionalWritableDirectories) {
+    const normalized = directory.trim()
+    if (normalized) {
+      args.push('--add-dir', normalized)
+    }
+  }
+  return args
 }
 
-export function buildClaudePermissionArgs(fullAccess: boolean) {
+export function buildClaudePermissionArgs(fullAccess: boolean, additionalReadableDirectories: string[] = []) {
   if (fullAccess) {
     return ['--permission-mode', 'bypassPermissions', '--dangerously-skip-permissions']
   }
 
-  return ['--permission-mode', 'acceptEdits']
+  const args = ['--permission-mode', 'acceptEdits']
+  for (const directory of additionalReadableDirectories) {
+    const normalized = directory.trim()
+    if (normalized) {
+      args.push('--add-dir', normalized)
+    }
+  }
+  return args
 }
 
 const NPM_CACHE_MODE_ENV_KEYS = new Set([

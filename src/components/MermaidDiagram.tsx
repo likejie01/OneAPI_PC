@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
 import { Copy, Download } from 'lucide-react'
 import { copyImageToClipboard, saveImageToDisk } from '../domains/chat'
 import { exportTextFile } from '../domains/cli'
@@ -8,6 +8,7 @@ interface MermaidDiagramProps {
 }
 
 const mermaidSvgCache = new Map<string, string>()
+const MERMAID_SVG_CACHE_LIMIT = 48
 const MIN_EXPORT_WIDTH = 3200
 const MIN_EXPORT_HEIGHT = 1800
 const MAX_EXPORT_DIMENSION = 12000
@@ -87,9 +88,33 @@ function clampDiagramScale(value: number) {
   return Math.max(0.25, Math.min(6, value))
 }
 
+function readCachedMermaidSvg(chart: string) {
+  const cached = mermaidSvgCache.get(chart)
+  if (!cached) {
+    return ''
+  }
+  mermaidSvgCache.delete(chart)
+  mermaidSvgCache.set(chart, cached)
+  return cached
+}
+
+function writeCachedMermaidSvg(chart: string, svg: string) {
+  if (mermaidSvgCache.has(chart)) {
+    mermaidSvgCache.delete(chart)
+  }
+  mermaidSvgCache.set(chart, svg)
+  while (mermaidSvgCache.size > MERMAID_SVG_CACHE_LIMIT) {
+    const oldestKey = mermaidSvgCache.keys().next().value
+    if (typeof oldestKey !== 'string') {
+      return
+    }
+    mermaidSvgCache.delete(oldestKey)
+  }
+}
+
 export function MermaidDiagram(props: MermaidDiagramProps) {
   const { chart } = props
-  const [svg, setSvg] = useState(() => mermaidSvgCache.get(chart) || '')
+  const [svg, setSvg] = useState(() => readCachedMermaidSvg(chart))
   const [errorMessage, setErrorMessage] = useState('')
   const [copied, setCopied] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -118,7 +143,7 @@ export function MermaidDiagram(props: MermaidDiagramProps) {
   useEffect(() => {
     let active = true
     void (async () => {
-      const cachedSvg = mermaidSvgCache.get(chart)
+      const cachedSvg = readCachedMermaidSvg(chart)
       if (cachedSvg) {
         if (active) {
           setErrorMessage('')
@@ -144,7 +169,7 @@ export function MermaidDiagram(props: MermaidDiagramProps) {
         if (!active) {
           return
         }
-        mermaidSvgCache.set(chart, rendered.svg)
+        writeCachedMermaidSvg(chart, rendered.svg)
         setSvg(rendered.svg)
         setView({ scale: 1, x: 0, y: 0 })
       } catch (error) {
@@ -182,16 +207,7 @@ export function MermaidDiagram(props: MermaidDiagramProps) {
     return () => window.removeEventListener('pointerdown', handlePointerDown)
   }, [menuOpen])
 
-  useEffect(() => {
-    const node = viewportRef.current
-    if (!node || !svg) {
-      return
-    }
-    node.addEventListener('wheel', handleWheel, { passive: false })
-    return () => node.removeEventListener('wheel', handleWheel)
-  }, [svg])
-
-  function handleWheel(event: WheelEvent) {
+  const handleWheel = useCallback((event: WheelEvent) => {
     if (!svg) {
       return
     }
@@ -212,7 +228,16 @@ export function MermaidDiagram(props: MermaidDiagramProps) {
       x: event.clientX - rect.left - originX * ratio,
       y: event.clientY - rect.top - originY * ratio,
     })
-  }
+  }, [svg])
+
+  useEffect(() => {
+    const node = viewportRef.current
+    if (!node || !svg) {
+      return
+    }
+    node.addEventListener('wheel', handleWheel, { passive: false })
+    return () => node.removeEventListener('wheel', handleWheel)
+  }, [handleWheel, svg])
 
   function handlePointerDown(event: ReactPointerEvent<HTMLSpanElement>) {
     if (event.button !== 0 || !svg) {

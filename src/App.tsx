@@ -1267,7 +1267,7 @@ function scrollBubbleIntoView(
 
 const CONVERSATION_SCROLL_DOCK_VIEWPORT_INSET = 8
 const CONVERSATION_SCROLL_DOCK_VERTICAL_INSET = 72
-const CONVERSATION_SCROLL_DOCK_UPDATE_THROTTLE_MS = 80
+const CONVERSATION_SCROLL_DOCK_UPDATE_THROTTLE_MS = 140
 
 function ConversationScrollDock(props: {
   containerRef: React.RefObject<HTMLDivElement | null>
@@ -1275,13 +1275,12 @@ function ConversationScrollDock(props: {
   itemSelector?: string
 }) {
   const { containerRef, active = true, itemSelector = '.message-bubble' } = props
-  const [portalRoot, setPortalRoot] = useState<HTMLElement | null>(null)
+  const [portalRoot] = useState<HTMLElement | null>(() =>
+    typeof document === 'undefined' ? null : document.body
+  )
   const [dockStyle, setDockStyle] = useState<CSSProperties>({ visibility: 'hidden' })
 
   useLayoutEffect(() => {
-    const root = document.body
-    setPortalRoot(root)
-
     let animationFrame = 0
     let throttleTimer = 0
     let lastUpdateAt = 0
@@ -9603,9 +9602,11 @@ function CliWorkspace(props: {
   }, [])
 
   const enqueueCliLogEntry = useCallback((sessionId: string, entry: CliLogEntry, urgent = false) => {
-    pendingCliLogEntriesRef.current = {
-      ...pendingCliLogEntriesRef.current,
-      [sessionId]: [...(pendingCliLogEntriesRef.current[sessionId] || []), entry],
+    const entries = pendingCliLogEntriesRef.current[sessionId]
+    if (entries) {
+      entries.push(entry)
+    } else {
+      pendingCliLogEntriesRef.current[sessionId] = [entry]
     }
     if (pendingCliLogFlushTimerRef.current !== null) {
       if (!urgent) {
@@ -9903,17 +9904,21 @@ function CliWorkspace(props: {
   }, [client, preferredCliModel])
 
   useEffect(() => {
-    window.setTimeout(() => {
-      void refreshCliState(true)
-    }, 0)
+    const shouldPollActively = active || running
+    if (shouldPollActively) {
+      window.setTimeout(() => {
+        void refreshCliState(true)
+      }, 0)
+    }
+    const intervalMs = shouldPollActively ? 30000 : 180000
     const timer = window.setInterval(() => {
       void refreshCliState(true)
-    }, 30000)
+    }, intervalMs)
 
     return () => {
       window.clearInterval(timer)
     }
-  }, [refreshCliState])
+  }, [active, refreshCliState, running])
 
   useEffect(() => {
     window.setTimeout(() => {
@@ -12837,6 +12842,23 @@ export function App() {
     document.documentElement.dataset.performanceMode = performanceMode
     writeJsonStorage(APP_PERFORMANCE_MODE_STORAGE_KEY, performanceMode)
   }, [performanceMode])
+
+  useEffect(() => {
+    const syncWindowActivity = () => {
+      const active = !document.hidden && document.hasFocus()
+      document.documentElement.dataset.windowActive = active ? 'active' : 'inactive'
+    }
+
+    syncWindowActivity()
+    window.addEventListener('focus', syncWindowActivity)
+    window.addEventListener('blur', syncWindowActivity)
+    document.addEventListener('visibilitychange', syncWindowActivity)
+    return () => {
+      window.removeEventListener('focus', syncWindowActivity)
+      window.removeEventListener('blur', syncWindowActivity)
+      document.removeEventListener('visibilitychange', syncWindowActivity)
+    }
+  }, [])
 
   useEffect(() => {
     const normalized = Math.max(0, Math.min(100, auroraOpacity))

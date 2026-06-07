@@ -402,7 +402,7 @@ select {
   width: 7px;
   height: 7px;
   border-radius: 999px;
-  background: #ef4444;
+  background: var(--danger);
   box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.92);
   transform: translateY(-50%);
 }
@@ -418,7 +418,7 @@ select {
   align-items: center;
   justify-content: center;
   border-radius: 999px;
-  background: #ef4444;
+  background: var(--danger);
   color: #fff;
   font-size: 10px;
   font-weight: 700;
@@ -566,7 +566,11 @@ select {
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, #4f8ec8 0%, #6bb7ff 100%);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--accent) 82%, var(--surface-strong) 18%) 0%,
+    color-mix(in srgb, var(--accent-strong) 72%, var(--success) 28%) 100%
+  );
 }
 
 .desktop-update-action {
@@ -5083,15 +5087,15 @@ textarea:focus {
 }
 
 .service-status-history-dot.success {
-  background: #3d9970;
+  background: var(--success);
 }
 
 .service-status-history-dot.warn {
-  background: #d6922a;
+  background: var(--warn);
 }
 
 .service-status-history-dot.danger {
-  background: #d24e4e;
+  background: var(--danger);
 }
 
 .service-status-history-dot.muted {
@@ -7401,7 +7405,134 @@ body,
   }
 }
 
-/* Final AIChat popup glass surfaces */
+/* Final theme consolidation */
+:root {
+  --bg: #f3f5f6;
+  --bg-rgb: 243 245 246;
+  --panel: rgba(255, 255, 255, 0.78);
+  --panel-rgb: 255 255 255;
+  --panel-strong: rgba(255, 255, 255, 0.94);
+  --panel-strong-rgb: 255 255 255;
+  --surface: rgba(248, 250, 251, 0.76);
+  --surface-rgb: 248 250 251;
+  --surface-strong: rgba(246, 248, 249, 0.9);
+  --surface-strong-rgb: 246 248 249;
+  --sidebar-top-rgb: 250 251 252;
+  --sidebar-bottom-rgb: 244 246 247;
+  --line: rgba(34, 52, 70, 0.1);
+  --line-strong: rgba(34, 52, 70, 0.16);
+  --text: #172633;
+  --muted: #657684;
+  --accent: #68727a;
+  --accent-soft: rgba(104, 114, 122, 0.13);
+  --accent-strong: #4f5a62;
+  --accent-2: #7a8388;
+  --success: #66736c;
+  --warn: #746f67;
+  --danger: #766c69;
+  --bubble-user: rgba(246, 248, 249, 0.86);
+  --bubble-ai: rgba(255, 255, 255, 0.9);
+  --bubble-log: rgba(248, 250, 251, 0.82);
+  --aurora-base: linear-gradient(180deg, rgba(247, 250, 251, 0.36), rgba(234, 239, 242, 0.4));
+  --aurora-a: rgba(120, 146, 160, 0.3);
+  --aurora-b: rgba(133, 160, 148, 0.24);
+  --aurora-c: rgba(150, 149, 165, 0.2);
+  --aurora-d: rgba(124, 158, 166, 0.18);
+}
+
+:root[data-theme='dark'] {
+  --bg: #11171b;
+  --bg-rgb: 17 23 27;
+  --panel: rgba(25, 30, 34, 0.82);
+  --panel-rgb: 25 30 34;
+  --panel-strong: rgba(29, 35, 39, 0.94);
+  --panel-strong-rgb: 29 35 39;
+  --surface: rgba(31, 37, 42, 0.76);
+  --surface-rgb: 31 37 42;
+  --surface-strong: rgba(35, 42, 47, 0.9);
+  --surface-strong-rgb: 35 42 47;
+  --sidebar-top-rgb: 20 26 30;
+  --sidebar-bottom-rgb: 17 23 27;
+  --line: rgba(218, 229, 235, 0.1);
+  --line-strong: rgba(218, 229, 235, 0.16);
+  --text: #e7eef2;
+  --muted: #9cadb8;
+  --accent: #9faab0;
+  --accent-soft: rgba(159, 170, 176, 0.16);
+  --accent-strong: #c4ccd0;
+  --accent-2: #a8b0b5;
+  --success: #a7b1aa;
+  --warn: #b0aaa1;
+  --danger: #b2a6a2;
+  --bubble-user: rgba(35, 42, 47, 0.84);
+  --bubble-ai: rgba(29, 35, 39, 0.88);
+  --bubble-log: rgba(31, 37, 42, 0.82);
+  --aurora-base: linear-gradient(180deg, rgba(14, 20, 25, 0.28), rgba(17, 24, 30, 0.34));
+  --aurora-a: rgba(103, 120, 132, 0.22);
+  --aurora-b: rgba(103, 122, 113, 0.18);
+  --aurora-c: rgba(118, 114, 132, 0.16);
+  --aurora-d: rgba(92, 119, 126, 0.14);
+}
+
+.primary-button,
+.send-button {
+  background: linear-gradient(135deg, var(--accent-strong), var(--accent)) !important;
+  border-color: color-mix(in srgb, var(--accent-strong) 58%, transparent) !important;
+}
+
+.side-nav-item.active,
+.assistant-mode-button.active,
+.history-panel-tabs .ghost-button.selected-toggle {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--accent) 36%, var(--line));
+}
+
+.status-dot.success,
+.desktop-update-progress-bar > span {
+  background: var(--success) !important;
+}
+
+.status-dot.warn {
+  background: var(--warn) !important;
+}
+
+.status-dot.error,
+.cli-log-bubble.error {
+  color: var(--danger);
+}
+
+.message-bubble.user {
+  background: var(--bubble-user);
+}
+
+.message-bubble.assistant {
+  background: var(--bubble-ai);
+}
+
+.cli-log-bubble {
+  background: var(--bubble-log);
+}
+
+:root[data-performance-mode='performance'] .workspace-aurora {
+  animation-duration: 64s;
+}
+
+:root[data-performance-mode='performance'] .workspace-aurora::after {
+  animation-duration: 48s;
+}
+
+:root[data-performance-mode='performance'] .workspace-aurora-blob,
+:root[data-performance-mode='performance'][data-theme='dark'] .workspace-aurora-blob {
+  animation-duration: 42s, 28s;
+}
+
+:root[data-window-active='inactive'] .workspace-aurora,
+:root[data-window-active='inactive'] .workspace-aurora::after,
+:root[data-window-active='inactive'] .workspace-aurora-blob {
+  animation-play-state: paused !important;
+}
+
+/* Final AIChat opaque popup surfaces */
 .picker-menu,
 .session-context-menu,
 .chat-history-panel,
@@ -7417,19 +7548,61 @@ body,
 .image-style-menu,
 .cli-extension-floating-tooltip,
 .markdown-code-action-menu {
-  background: rgb(var(--panel-strong-rgb) / calc(0.78 + 0.08 * var(--ui-solidness, 0)));
-  border: 1px solid color-mix(in srgb, var(--glass-border) 92%, transparent);
+  background: rgb(var(--panel-strong-rgb)) !important;
+  border: 1px solid var(--line);
   box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.36),
-    0 18px 40px rgb(17 24 39 / 0.14);
-  backdrop-filter: blur(15px) saturate(128%) !important;
-  -webkit-backdrop-filter: blur(15px) saturate(128%) !important;
+    inset 0 1px 0 rgb(255 255 255 / 0.42),
+    0 22px 46px rgb(17 24 39 / 0.14);
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
 }
 
 .modal-mask,
 .image-preview-modal-mask {
-  backdrop-filter: blur(15px) saturate(112%) !important;
-  -webkit-backdrop-filter: blur(15px) saturate(112%) !important;
+  background:
+    radial-gradient(
+      circle at 50% 16%,
+      color-mix(in srgb, var(--accent) 16%, transparent) 0%,
+      transparent 42%
+    ),
+    rgb(var(--bg-rgb) / 0.38) !important;
+  backdrop-filter: blur(30px) saturate(128%) contrast(0.98) !important;
+  -webkit-backdrop-filter: blur(30px) saturate(128%) contrast(0.98) !important;
+}
+
+.picker-menu .picker-menu-head,
+.picker-menu .picker-option,
+.assistant-menu .assistant-menu-toolbar,
+.session-context-menu .session-context-menu-item,
+.chat-history-panel .record-row,
+.cli-history-panel .record-row,
+.cli-plan-floating-panel .record-row,
+.modal-card .record-row,
+.announcement-modal-card .record-row,
+.desktop-announcement-item,
+.cli-extension-menu .message-extension-chip,
+.markdown-code-action-menu button {
+  background: rgb(var(--surface-strong-rgb)) !important;
+  border-color: var(--line);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.22);
+}
+
+.picker-menu .picker-option:hover,
+.picker-menu .picker-option:focus-visible,
+.picker-menu .picker-option.active,
+.session-context-menu .session-context-menu-item:hover,
+.session-context-menu .session-context-menu-item:focus-visible,
+.chat-history-panel .record-row:hover,
+.cli-history-panel .record-row:hover,
+.cli-plan-floating-panel .record-row:hover,
+.modal-card .record-row:hover,
+.announcement-modal-card .record-row:hover,
+.desktop-announcement-item:hover,
+.desktop-announcement-item.unread,
+.markdown-code-action-menu button:hover,
+.markdown-code-action-menu button:focus-visible {
+  background: color-mix(in srgb, var(--accent) 10%, rgb(var(--surface-strong-rgb))) !important;
+  border-color: color-mix(in srgb, var(--accent) 24%, var(--glass-border));
 }
 
 :root[data-theme='dark'] .picker-menu,
@@ -7447,14 +7620,60 @@ body,
 :root[data-theme='dark'] .image-style-menu,
 :root[data-theme='dark'] .cli-extension-floating-tooltip,
 :root[data-theme='dark'] .markdown-code-action-menu {
-  backdrop-filter: blur(15px) saturate(96%) !important;
-  -webkit-backdrop-filter: blur(15px) saturate(96%) !important;
+  background: rgb(var(--panel-strong-rgb)) !important;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.08),
+    0 24px 58px rgb(0 0 0 / 0.34);
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
 }
 
 :root[data-theme='dark'] .modal-mask,
 :root[data-theme='dark'] .image-preview-modal-mask {
-  backdrop-filter: blur(15px) saturate(90%) !important;
-  -webkit-backdrop-filter: blur(15px) saturate(90%) !important;
+  background:
+    radial-gradient(
+      circle at 50% 16%,
+      color-mix(in srgb, var(--accent) 12%, transparent) 0%,
+      transparent 42%
+    ),
+    rgb(var(--bg-rgb) / 0.62) !important;
+  backdrop-filter: blur(30px) saturate(104%) contrast(0.92) !important;
+  -webkit-backdrop-filter: blur(30px) saturate(104%) contrast(0.92) !important;
+}
+
+:root[data-theme='dark'] .picker-menu .picker-menu-head,
+:root[data-theme='dark'] .picker-menu .picker-option,
+:root[data-theme='dark'] .assistant-menu .assistant-menu-toolbar,
+:root[data-theme='dark'] .session-context-menu .session-context-menu-item,
+:root[data-theme='dark'] .chat-history-panel .record-row,
+:root[data-theme='dark'] .cli-history-panel .record-row,
+:root[data-theme='dark'] .cli-plan-floating-panel .record-row,
+:root[data-theme='dark'] .modal-card .record-row,
+:root[data-theme='dark'] .announcement-modal-card .record-row,
+:root[data-theme='dark'] .desktop-announcement-item,
+:root[data-theme='dark'] .cli-extension-menu .message-extension-chip,
+:root[data-theme='dark'] .markdown-code-action-menu button {
+  background: rgb(var(--surface-strong-rgb)) !important;
+  border-color: var(--line);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06);
+}
+
+:root[data-theme='dark'] .picker-menu .picker-option:hover,
+:root[data-theme='dark'] .picker-menu .picker-option:focus-visible,
+:root[data-theme='dark'] .picker-menu .picker-option.active,
+:root[data-theme='dark'] .session-context-menu .session-context-menu-item:hover,
+:root[data-theme='dark'] .session-context-menu .session-context-menu-item:focus-visible,
+:root[data-theme='dark'] .chat-history-panel .record-row:hover,
+:root[data-theme='dark'] .cli-history-panel .record-row:hover,
+:root[data-theme='dark'] .cli-plan-floating-panel .record-row:hover,
+:root[data-theme='dark'] .modal-card .record-row:hover,
+:root[data-theme='dark'] .announcement-modal-card .record-row:hover,
+:root[data-theme='dark'] .desktop-announcement-item:hover,
+:root[data-theme='dark'] .desktop-announcement-item.unread,
+:root[data-theme='dark'] .markdown-code-action-menu button:hover,
+:root[data-theme='dark'] .markdown-code-action-menu button:focus-visible {
+  background: color-mix(in srgb, var(--accent) 12%, rgb(var(--surface-strong-rgb))) !important;
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--glass-border));
 }
 
 /* Efficiency mode: disable aurora motion, glass blur, and translucent surfaces. */

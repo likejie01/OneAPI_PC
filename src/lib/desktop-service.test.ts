@@ -130,17 +130,23 @@ test('buildWindowsNodeExecutableCandidates finds common Node installs without PA
   )
 })
 
-test('buildCodexSandboxArgs removes client-side permission restrictions for every mode', () => {
-  assert.deepEqual(buildCodexSandboxArgs(false, false), ['--dangerously-bypass-approvals-and-sandbox'])
-  assert.deepEqual(buildCodexSandboxArgs(false, true), ['--dangerously-bypass-approvals-and-sandbox'])
+test('buildCodexSandboxArgs keeps restricted mode in workspace-write and adds user-authorized directories', () => {
+  assert.deepEqual(buildCodexSandboxArgs(false, false), ['--sandbox', 'workspace-write'])
+  assert.deepEqual(buildCodexSandboxArgs(false, true, ['D:\\demo', '']), [
+    '--sandbox',
+    'workspace-write',
+    '--add-dir',
+    'D:\\demo',
+  ])
   assert.deepEqual(buildCodexSandboxArgs(true, false), ['--dangerously-bypass-approvals-and-sandbox'])
-  assert.deepEqual(buildCodexSandboxArgs(true, true), ['--dangerously-bypass-approvals-and-sandbox'])
 })
 
 test('buildClaudePermissionArgs accepts project edits in restricted mode and bypasses only in full access', () => {
-  assert.deepEqual(buildClaudePermissionArgs(false), [
+  assert.deepEqual(buildClaudePermissionArgs(false, ['D:\\demo']), [
     '--permission-mode',
     'acceptEdits',
+    '--add-dir',
+    'D:\\demo',
   ])
   assert.deepEqual(buildClaudePermissionArgs(true), [
     '--permission-mode',

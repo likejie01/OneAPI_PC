@@ -76,6 +76,7 @@ import {
 } from '../src/lib/claude-cli-config.ts'
 import { extractCliUserTask } from '../src/lib/cli-prompt.ts'
 import { isCliSessionReadyForLatestTurn } from '../src/lib/cli-session-readiness.ts'
+import { normalizeDesktopCliApiKey } from '../src/lib/cli-deploy.ts'
 import {
   MIN_DESKTOP_CLI_NODE_MAJOR,
   buildClaudePermissionArgs,
@@ -173,6 +174,68 @@ let mobileBridgeLastHeartbeatAt = 0
 let mobileBridgeLastSnapshotSignature = ''
 let mobileBridgeLastSessionsSnapshotSignature = ''
 let mobileBridgeLastSessionsSnapshotAt = 0
+const assistantHistoryWriteSignatures = new Map<string, string>()
+const FILE_PREVIEW_MAX_BYTES = 10 * 1024 * 1024
+const EXTERNAL_URL_PROTOCOL_ALLOWLIST = new Set(['http:', 'https:', 'mailto:'])
+const cliUserAuthorizedDirectories = new Set<string>()
+
+function normalizeDirectoryForAccess(targetPath: string) {
+  const normalized = targetPath.trim()
+  return normalized ? path.resolve(normalized) : ''
+}
+
+function rememberCliAuthorizedDirectory(targetPath: string) {
+  const normalized = normalizeDirectoryForAccess(targetPath)
+  if (normalized) {
+    cliUserAuthorizedDirectories.add(normalized)
+  }
+}
+
+async function rememberCliAuthorizedOpenTarget(targetPath: string) {
+  const normalized = normalizeDirectoryForAccess(targetPath)
+  if (!normalized) {
+    return
+  }
+  const stat = await fs.stat(normalized).catch(() => null)
+  rememberCliAuthorizedDirectory(stat?.isFile() ? path.dirname(normalized) : normalized)
+}
+
+function getDesktopAttachmentDirectory() {
+  return path.join(app.getPath('userData'), 'attachments')
+}
+
+function resolveCliAdditionalAccessDirectories(projectPath: string) {
+  const projectRoot = normalizeDirectoryForAccess(projectPath)
+  const directories = new Set<string>()
+  directories.add(getDesktopAttachmentDirectory())
+  for (const directory of cliUserAuthorizedDirectories) {
+    if (!projectRoot || normalizeDirectoryForAccess(directory) !== projectRoot) {
+      directories.add(directory)
+    }
+  }
+  return Array.from(directories)
+}
+
+function assertAllowedExternalUrl(url: string) {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    throw new Error('外部链接格式无效。')
+  }
+  if (!EXTERNAL_URL_PROTOCOL_ALLOWLIST.has(parsed.protocol)) {
+    throw new Error(`不支持打开 ${parsed.protocol || '未知'} 协议链接。`)
+  }
+  return parsed.toString()
+}
+
+function openExternalSafely(url: string) {
+  try {
+    void shell.openExternal(assertAllowedExternalUrl(url)).catch(() => undefined)
+  } catch {
+    // Context-menu and window-open handlers cannot surface IPC errors to the renderer.
+  }
+}
 
 function startCliPowerSaveBlocker(requestId: string) {
   if (!requestId || activeCliPowerSaveBlockers.has(requestId)) {
@@ -748,7 +811,7 @@ function createWindow() {
   }
 
   win.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url)
+    openExternalSafely(url)
     return { action: 'deny' }
   })
   attachContextMenu(win)
@@ -1238,7 +1301,7 @@ function attachContextMenu(win: BrowserWindow) {
         {
           label: '打开链接',
           click: () => {
-            void shell.openExternal(params.linkURL)
+            openExternalSafely(params.linkURL)
           },
         },
         {
@@ -1256,7 +1319,7 @@ function attachContextMenu(win: BrowserWindow) {
         {
           label: '打开图片',
           click: () => {
-            void shell.openExternal(params.srcURL)
+            openExternalSafely(params.srcURL)
           },
         },
         {
@@ -1716,7 +1779,7 @@ async function syncMobileBridgeAssistantsSnapshot() {
   try {
     parsed = raw ? JSON.parse(raw) as Array<Record<string, unknown>> : []
   } catch {
-    parsed = []
+    // Keep the empty fallback initialized above.
   }
   const assistants = parsed
     .filter((item) => typeof item?.name === 'string' && String(item.name).trim())
@@ -1779,11 +1842,11 @@ async function buildMobileBridgeSessionSnapshot(client: CliClient, entry: CliHis
     .map((message) => message.modelLabel?.trim() || '')
     .find((value) => value && value.toLowerCase() !== client)
   const selectedModelRaw = await getRendererStorageValue(`oneapi-desktop-${client}-selected-model`)
-  let selectedModel = ''
+  let selectedModel = selectedModelRaw.trim()
   try {
     selectedModel = selectedModelRaw ? String(JSON.parse(selectedModelRaw)).trim() : ''
   } catch {
-    selectedModel = selectedModelRaw.trim()
+    // Keep the raw storage value when it was not JSON encoded.
   }
 
   return {
@@ -1893,7 +1956,14 @@ async function runMobileBridgeInteractionLoop(requestId: string, jobId: string, 
 }
 
 function safeMobileAttachmentName(value: string, fallback: string) {
-  const clean = (value || '').trim().replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_')
+  const clean = (value || '')
+    .trim()
+    .split('')
+    .map((char) => {
+      const code = char.charCodeAt(0)
+      return code < 32 || '<>:"/\\|?*'.includes(char) ? '_' : char
+    })
+    .join('')
   return clean || fallback
 }
 
@@ -3096,8 +3166,9 @@ async function saveDesktopAttachment(input: DesktopAttachmentSaveRequest) {
   const safeBaseName =
     sanitizedName ||
     'clipboard-file'
-  const targetDirectory = path.join(app.getPath('userData'), 'attachments')
+  const targetDirectory = getDesktopAttachmentDirectory()
   await fs.mkdir(targetDirectory, { recursive: true })
+  rememberCliAuthorizedDirectory(targetDirectory)
   const targetPath = path.join(
     targetDirectory,
     `${Date.now()}-${safeBaseName}${extension || ''}`
@@ -3114,6 +3185,9 @@ async function readFilePreview(targetPath: string) {
   const stat = await fs.stat(resolved)
   if (!stat.isFile()) {
     throw new Error('当前路径不是文件。')
+  }
+  if (stat.size > FILE_PREVIEW_MAX_BYTES) {
+    throw new Error('文件超过 10MB，已阻止预览以避免客户端卡顿。')
   }
 
   const buffer = await fs.readFile(resolved)
@@ -3228,12 +3302,18 @@ async function syncAssistantHistory(
         return
       }
       await fs.rm(path.join(root, item.name), { recursive: true, force: true })
+      assistantHistoryWriteSignatures.delete(`${scope}:${item.name}`)
     })
   )
 
   await Promise.all(
     normalizedEntries.map(async (item) => {
       const sessionDirectory = getAssistantHistorySessionDirectory(scope, item.id)
+      const signatureKey = `${scope}:${item.id}`
+      const signature = `${item.title}\n${item.updatedAt}\n${item.data.length}`
+      if (assistantHistoryWriteSignatures.get(signatureKey) === signature) {
+        return
+      }
       await fs.mkdir(sessionDirectory, { recursive: true })
       await fs.writeFile(
         path.join(sessionDirectory, 'session.json'),
@@ -3249,6 +3329,7 @@ async function syncAssistantHistory(
         ),
         'utf8'
       )
+      assistantHistoryWriteSignatures.set(signatureKey, signature)
     })
   )
 }
@@ -7332,7 +7413,7 @@ function buildCodexExecArgs(
   const args = ['exec']
 
   if (runtimeConfig?.apiKey?.trim() && runtimeConfig.baseUrl?.trim()) {
-    const apiKey = runtimeConfig.apiKey.trim()
+    const apiKey = normalizeDesktopCliApiKey(runtimeConfig.apiKey)
     const baseUrl = normalizeCodexBaseUrl(runtimeConfig.baseUrl)
     args.push(
       '--ignore-user-config',
@@ -7351,7 +7432,13 @@ function buildCodexExecArgs(
     )
   }
 
-  args.push(...buildCodexSandboxArgs(!!input.fullAccess, supportsAskForApproval))
+  args.push(
+    ...buildCodexSandboxArgs(
+      !!input.fullAccess,
+      supportsAskForApproval,
+      resolveCliAdditionalAccessDirectories(input.projectPath)
+    )
+  )
 
   if (input.model?.trim()) {
     args.push('--model', input.model.trim())
@@ -7412,7 +7499,7 @@ function buildClaudePromptArgs(input: CliRunRequest, resumeSessionId?: string) {
     '--output-format',
     'stream-json',
     '--include-partial-messages',
-    ...buildClaudePermissionArgs(!!input.fullAccess),
+    ...buildClaudePermissionArgs(!!input.fullAccess, resolveCliAdditionalAccessDirectories(input.projectPath)),
   ]
 
   if (input.model?.trim()) {
@@ -8514,6 +8601,7 @@ async function runClaudePrompt(
 
 async function writeCodexConfig(request: CliDeployRequest) {
   const targetPath = cliConfig.codex.configPath
+  const resolvedApiKey = normalizeDesktopCliApiKey(request.apiKey)
   await fs.mkdir(cliConfig.codex.dataPath, { recursive: true })
   const raw = (await pathExists(targetPath)) ? await fs.readFile(targetPath, 'utf8') : ''
   if (raw) {
@@ -8523,7 +8611,7 @@ async function writeCodexConfig(request: CliDeployRequest) {
     targetPath,
     mergeCodexConfig(
       raw,
-      resolveDesktopCliKeyRecord(request.apiKey),
+      resolvedApiKey,
       request.model?.trim() || 'gpt-5.5',
       normalizeCodexBaseUrl(request.baseUrl)
     ),
@@ -8546,7 +8634,7 @@ async function writeCodexConfig(request: CliDeployRequest) {
       {
         ...currentAuth,
         auth_mode: 'apikey',
-        OPENAI_API_KEY: resolveDesktopCliKeyRecord(request.apiKey),
+        OPENAI_API_KEY: resolvedApiKey,
         OPENAI_BASE_URL: normalizeCodexBaseUrl(request.baseUrl),
         OPENAI_API_BASE: normalizeCodexBaseUrl(request.baseUrl),
       },
@@ -8575,7 +8663,7 @@ async function writeClaudeConfig(request: CliDeployRequest) {
     ? current.env
     : {}) as Record<string, string>
 
-  const resolvedApiKey = resolveDesktopCliKeyRecord(request.apiKey)
+  const resolvedApiKey = normalizeDesktopCliApiKey(request.apiKey)
   const resolvedBaseUrl = normalizeClaudeBaseUrl(request.baseUrl)
   const resolvedModel = request.model?.trim() || DEFAULT_CLAUDE_MODEL
 
@@ -9645,6 +9733,23 @@ async function installCliPackage(
 async function deployCli(webContents: WebContents, request: CliDeployRequest, jobId: string) {
   const client = request.client
   const logger = createDeployLogger(webContents, jobId, client)
+  let normalizedApiKey: string
+
+  try {
+    normalizedApiKey = normalizeDesktopCliApiKey(request.apiKey)
+  } catch (error) {
+    logger.info(
+      'config',
+      'error',
+      `${client} 部署 Key 校验失败`,
+      error instanceof Error ? error.message : String(error)
+    )
+    return
+  }
+  const deployRequest = {
+    ...request,
+    apiKey: normalizedApiKey,
+  }
 
   logger.info('detect', 'running', `正在检测 ${client} 与 Node.js 环境`)
   let runtime: NodeRuntimeInfo
@@ -9711,9 +9816,9 @@ async function deployCli(webContents: WebContents, request: CliDeployRequest, jo
 
   try {
     if (client === 'codex') {
-      await writeCodexConfig(request)
+      await writeCodexConfig(deployRequest)
     } else {
-      await writeClaudeConfig(request)
+      await writeClaudeConfig(deployRequest)
     }
 
     await fs.mkdir(cliConfig[client].dataPath, { recursive: true })
@@ -9731,9 +9836,9 @@ async function deployCli(webContents: WebContents, request: CliDeployRequest, jo
   }
 
   if (client === 'codex') {
-    await diagnoseCodexEnvironment(logger, request)
+    await diagnoseCodexEnvironment(logger, deployRequest)
   } else {
-    await diagnoseClaudeEnvironment(logger, request)
+    await diagnoseClaudeEnvironment(logger, deployRequest)
   }
 
   logger.info('test', 'running', `正在验证 ${client} 连接`)
@@ -9741,7 +9846,7 @@ async function deployCli(webContents: WebContents, request: CliDeployRequest, jo
   const testProjectPath = path.join(os.homedir())
   if (client === 'claude') {
     logger.info('test', 'running', '正在预检 Claude 兼容接口鉴权')
-    const probe = await probeClaudeMessagesApi(request)
+    const probe = await probeClaudeMessagesApi(deployRequest)
     if (!probe.ok) {
       logger.info('test', 'error', 'Claude 兼容接口预检失败', probe.detail)
       return
@@ -9977,13 +10082,14 @@ ipcMain.handle('desktop:stop-api-request', async (_event, requestId: string) => 
   stopApiPowerSaveBlocker(requestId)
 })
 ipcMain.handle('desktop:open-external', async (_event, url: string) => {
-  await shell.openExternal(url)
+  await shell.openExternal(assertAllowedExternalUrl(url))
 })
 ipcMain.handle('desktop:open-path', async (_event, targetPath: string) => {
   const resolved = await resolveOpenTarget(targetPath)
   if (!resolved) {
     throw new Error('目标路径当前不可打开。')
   }
+  await rememberCliAuthorizedOpenTarget(resolved)
 
   const error = await shell.openPath(resolved)
   if (error) {
