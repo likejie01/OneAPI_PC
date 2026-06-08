@@ -782,6 +782,8 @@ function createWindow() {
     frame: false,
     backgroundColor: '#00000000',
     transparent: true,
+    ...(process.platform === 'win32' ? { backgroundMaterial: 'acrylic' as const } : {}),
+    ...(process.platform === 'darwin' ? { vibrancy: 'under-window' as const, visualEffectState: 'active' as const } : {}),
     icon: appIcon,
     autoHideMenuBar: true,
     webPreferences: {
@@ -1818,7 +1820,7 @@ async function buildMobileBridgeSessionSnapshot(client: CliClient, entry: CliHis
     return null
   }
 
-  const messages = (details?.messages || []).slice(-40).map((message) => ({
+  const messages = (details?.messages || []).map((message) => ({
     id: message.id,
     role: message.role,
     text: message.content,
@@ -1875,8 +1877,8 @@ async function syncMobileBridgeSessionsSnapshot(force = false) {
 
   const deviceId = await getMobileBridgeDeviceId()
   const [codexHistory, claudeHistory] = await Promise.all([
-    listCodexHistory(12).catch(() => [] as CliHistoryEntry[]),
-    listClaudeHistory(12).catch(() => [] as CliHistoryEntry[]),
+    listCodexHistory(0).catch(() => [] as CliHistoryEntry[]),
+    listClaudeHistory(0).catch(() => [] as CliHistoryEntry[]),
   ])
   const entries = await Promise.all([
     ...codexHistory.map((item) => buildMobileBridgeSessionSnapshot('codex', item)),
@@ -1885,7 +1887,6 @@ async function syncMobileBridgeSessionsSnapshot(force = false) {
   const sessions = entries
     .filter((item): item is MobileBridgeSessionSnapshot => !!item)
     .sort((left, right) => right.updatedAt - left.updatedAt)
-    .slice(0, 24)
 
   const signature = JSON.stringify(sessions.map((item) => ({
     id: item.id,
@@ -6243,7 +6244,7 @@ function parseCodexSession(lines: string[]): {
   }
 }
 
-async function listCodexHistory(limit = 12): Promise<CliHistoryEntry[]> {
+async function listCodexHistory(limit = 0): Promise<CliHistoryEntry[]> {
   const lines = await readJsonLines(path.join(os.homedir(), '.codex', 'history.jsonl'))
   const sessionMap = await buildCodexSessionMap()
   const grouped = new Map<string, CliHistoryEntry>()
@@ -6302,9 +6303,9 @@ async function listCodexHistory(limit = 12): Promise<CliHistoryEntry[]> {
     })
   }
 
-  return [...grouped.values()]
+  const sorted = [...grouped.values()]
     .sort((left, right) => right.updatedAt - left.updatedAt)
-    .slice(0, limit)
+  return limit > 0 ? sorted.slice(0, limit) : sorted
 }
 
 async function getCodexSession(sessionId: string): Promise<CliSessionDetails | null> {
@@ -6346,7 +6347,7 @@ async function getCodexSession(sessionId: string): Promise<CliSessionDetails | n
   }
 }
 
-async function listClaudeHistory(limit = 12): Promise<CliHistoryEntry[]> {
+async function listClaudeHistory(limit = 0): Promise<CliHistoryEntry[]> {
   const lines = await readJsonLines(path.join(os.homedir(), '.claude', 'history.jsonl'))
   const grouped = new Map<string, CliHistoryEntry>()
 
@@ -6393,7 +6394,6 @@ async function listClaudeHistory(limit = 12): Promise<CliHistoryEntry[]> {
     )
   )
     .sort((left, right) => right.stat.mtimeMs - left.stat.mtimeMs)
-    .slice(0, 60)
 
   for (const file of recentFiles) {
     const sessionId = path.basename(file.filePath, '.jsonl')
@@ -6416,9 +6416,9 @@ async function listClaudeHistory(limit = 12): Promise<CliHistoryEntry[]> {
     })
   }
 
-  return [...grouped.values()]
+  const sorted = [...grouped.values()]
     .sort((left, right) => right.updatedAt - left.updatedAt)
-    .slice(0, limit)
+  return limit > 0 ? sorted.slice(0, limit) : sorted
 }
 
 async function getClaudeSessionFile(sessionId: string) {

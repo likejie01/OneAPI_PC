@@ -301,6 +301,7 @@ type HistoryVisibilityTab = 'visible' | 'hidden'
 type ThemeMode = 'light' | 'dark'
 type AppPerformanceMode = 'performance' | 'efficiency'
 
+const THEME_MODE_STORAGE_KEY = 'oneapi-desktop-theme-mode'
 const APP_PERFORMANCE_MODE_STORAGE_KEY = 'oneapi-desktop-performance-mode'
 const AppPerformanceModeContext = createContext<AppPerformanceMode>('performance')
 
@@ -331,6 +332,23 @@ type ComposerAttachment = {
 
 function getCliPromptHistoryStorageKey(client: CliClient) {
   return `oneapi-desktop-${client}-prompt-history`
+}
+
+function resolveSystemThemeMode(): ThemeMode {
+  return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+}
+
+function readStoredThemeMode() {
+  try {
+    const raw = window.localStorage.getItem(THEME_MODE_STORAGE_KEY)
+    if (!raw) {
+      return null
+    }
+    const parsed = JSON.parse(raw)
+    return parsed === 'dark' || parsed === 'light' ? parsed : null
+  } catch {
+    return null
+  }
 }
 
 const assistantModes: Array<{ key: AssistantMode; label: string }> = [
@@ -2189,11 +2207,6 @@ const LazyMarkdownContent = memo(function LazyMarkdownContent(props: {
   renderMermaid?: boolean
 }) {
   const { content, className, onSelectionContextMenu, renderMermaid = true } = props
-  const performanceMode = useAppPerformanceMode()
-
-  if (performanceMode === 'efficiency') {
-    return <div className={`${className || 'markdown-body'} markdown-plain-mode`}>{content}</div>
-  }
 
   return (
     <Suspense fallback={<div className={className || 'markdown-body'}>{content}</div>}>
@@ -4914,7 +4927,13 @@ function AssistantsChatWorkspace(props: {
 
   useEffect(() => {
     function handleOpenHistory() {
-      setHistoryOpen(true)
+      setContextMenuOpen(false)
+      setHistoryOpen((current) => {
+        if (current) {
+          setSessionContextMenu(null)
+        }
+        return !current
+      })
     }
     window.addEventListener('oneapi:open-assistant-history', handleOpenHistory as EventListener)
     return () => window.removeEventListener('oneapi:open-assistant-history', handleOpenHistory as EventListener)
@@ -6506,7 +6525,12 @@ function DrawWorkspace(props: {
 
   useEffect(() => {
     function handleOpenHistory() {
-      setHistoryOpen(true)
+      setHistoryOpen((current) => {
+        if (current) {
+          setSessionContextMenu(null)
+        }
+        return !current
+      })
     }
     window.addEventListener('oneapi:open-draw-history', handleOpenHistory as EventListener)
     return () => window.removeEventListener('oneapi:open-draw-history', handleOpenHistory as EventListener)
@@ -7331,16 +7355,6 @@ function DrawWorkspace(props: {
                               onContextMenu={(event) => handleGeneratedImageContextMenu(event, message)}
                             />
                           </button>
-                          <div className='generated-image-actions'>
-                            <button
-                              className='ghost-button tiny'
-                              type='button'
-                              onClick={() => void handleDownloadImage(message.imageUrl || '', 'oneapi-image.png')}
-                            >
-                              <Download size={14} />
-                              <span>下载图片</span>
-                            </button>
-                          </div>
                           {visibleMessageContent.trim() ? (
                             <LazyMarkdownContent
                               content={visibleMessageContent}
@@ -10160,7 +10174,12 @@ function CliWorkspace(props: {
 
   useEffect(() => {
     function handleOpenHistory() {
-      setHistoryOpen(true)
+      setHistoryOpen((current) => {
+        if (current) {
+          setSessionContextMenu(null)
+        }
+        return !current
+      })
     }
     window.addEventListener(`oneapi:open-${client}-history`, handleOpenHistory as EventListener)
     return () => window.removeEventListener(`oneapi:open-${client}-history`, handleOpenHistory as EventListener)
@@ -12680,9 +12699,8 @@ export function App() {
   const [assistantMode, setAssistantMode] = useState<AssistantMode>('chat')
   const [sideTab, setSideTab] = useState<SideTab>('assistants')
   const [collapsed, setCollapsed] = useState(false)
-  const [themeMode, setThemeMode] = useState<ThemeMode>(() =>
-    readJsonStorage<ThemeMode>('oneapi-desktop-theme-mode', 'light')
-  )
+  const [themeMode, setThemeMode] = useState<ThemeMode>(() => readStoredThemeMode() ?? resolveSystemThemeMode())
+  const [manualThemeMode, setManualThemeMode] = useState(() => readStoredThemeMode() !== null)
   const [performanceMode, setPerformanceMode] = useState<AppPerformanceMode>(() =>
     readJsonStorage<AppPerformanceMode>(APP_PERFORMANCE_MODE_STORAGE_KEY, 'performance')
   )
@@ -12834,9 +12852,32 @@ export function App() {
 
   useEffect(() => {
     document.documentElement.dataset.theme = themeMode
-    writeJsonStorage('oneapi-desktop-theme-mode', themeMode)
+    if (manualThemeMode) {
+      writeJsonStorage(THEME_MODE_STORAGE_KEY, themeMode)
+    }
     void getDesktopBridge().setThemeMode(themeMode).catch(() => undefined)
-  }, [themeMode])
+  }, [manualThemeMode, themeMode])
+
+  useEffect(() => {
+    if (manualThemeMode) {
+      return
+    }
+
+    const media = window.matchMedia?.('(prefers-color-scheme: dark)')
+    if (!media) {
+      return
+    }
+
+    const handleSystemThemeChange = () => {
+      setThemeMode(resolveSystemThemeMode())
+    }
+
+    handleSystemThemeChange()
+    media.addEventListener?.('change', handleSystemThemeChange)
+    return () => {
+      media.removeEventListener?.('change', handleSystemThemeChange)
+    }
+  }, [manualThemeMode])
 
   useEffect(() => {
     document.documentElement.dataset.performanceMode = performanceMode
@@ -13336,7 +13377,10 @@ export function App() {
                 onTogglePerformanceMode={() =>
                   setPerformanceMode((current) => (current === 'efficiency' ? 'performance' : 'efficiency'))
                 }
-                onToggleTheme={() => setThemeMode((current) => (current === 'dark' ? 'light' : 'dark'))}
+                onToggleTheme={() => {
+                  setManualThemeMode(true)
+                  setThemeMode((current) => (current === 'dark' ? 'light' : 'dark'))
+                }}
                 visible={sideTab === 'me'}
               />
               {/* settings removed */}

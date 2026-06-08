@@ -7799,3 +7799,2882 @@ body,
 :root[data-performance-mode='efficiency'] .image-preview-modal-mask {
   background: var(--bg) !important;
 }
+
+/* macOS visual system: visual-only skin, preserving existing layout and flows. */
+:root {
+  color-scheme: light;
+  --radius-window: 22px;
+  --radius-card: 18px;
+  --radius-control: 13px;
+  --radius-chip: 10px;
+  --window-bg: rgba(243, 247, 252, 0.72);
+  --window-bg-rgb: 243 247 252;
+  --sidebar-bg: rgba(248, 250, 253, 0.5);
+  --panel-bg: rgba(255, 255, 255, 0.46);
+  --card-bg: rgba(255, 255, 255, 0.52);
+  --card-bg-strong: rgba(255, 255, 255, 0.68);
+  --popover-bg: rgba(252, 253, 255, 0.76);
+  --control-bg: rgba(255, 255, 255, 0.5);
+  --control-bg-hover: rgba(255, 255, 255, 0.66);
+  --control-bg-active: rgba(238, 244, 252, 0.74);
+  --border-subtle: rgba(78, 94, 117, 0.13);
+  --border-strong: rgba(78, 94, 117, 0.22);
+  --border-highlight: rgba(255, 255, 255, 0.74);
+  --text-primary: #17202b;
+  --text-secondary: #647080;
+  --text-tertiary: #8a94a3;
+  --text-disabled: rgba(100, 112, 128, 0.48);
+  --accent: #0a84ff;
+  --accent-rgb: 10 132 255;
+  --accent-soft: rgba(10, 132, 255, 0.12);
+  --accent-softer: rgba(10, 132, 255, 0.07);
+  --accent-strong: #006edb;
+  --accent-2: #5e5ce6;
+  --success: #34c759;
+  --warning: #ff9f0a;
+  --warn: var(--warning);
+  --danger: #ff453a;
+  --shadow-soft: 0 12px 34px rgba(32, 43, 59, 0.1);
+  --shadow-floating: 0 22px 58px rgba(24, 34, 48, 0.18);
+  --shadow-pressed: inset 0 1px 2px rgba(23, 32, 43, 0.1);
+  --inner-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  --glass-blur: blur(28px) saturate(155%);
+  --glass-blur-strong: blur(42px) saturate(168%);
+  --bg: #f2f6fb;
+  --bg-rgb: 242 246 251;
+  --panel: var(--panel-bg);
+  --panel-rgb: 255 255 255;
+  --panel-strong: var(--card-bg-strong);
+  --panel-strong-rgb: 255 255 255;
+  --surface: rgba(249, 251, 254, 0.5);
+  --surface-rgb: 249 251 254;
+  --surface-strong: rgba(255, 255, 255, 0.64);
+  --surface-strong-rgb: 255 255 255;
+  --sidebar-top-rgb: 249 251 254;
+  --sidebar-bottom-rgb: 239 246 253;
+  --line: var(--border-subtle);
+  --line-strong: var(--border-strong);
+  --text: var(--text-primary);
+  --muted: var(--text-secondary);
+  --shadow: var(--shadow-soft);
+  --glass-shadow: var(--shadow-soft);
+  --glass-shadow-strong: var(--shadow-floating);
+  --glass-highlight: var(--inner-highlight);
+  --glass-border: var(--border-subtle);
+  --bubble-user: rgba(232, 243, 255, 0.74);
+  --bubble-ai: rgba(255, 255, 255, 0.58);
+  --bubble-log: rgba(245, 248, 252, 0.62);
+  --aurora-a: rgba(64, 156, 255, 0.42);
+  --aurora-b: rgba(94, 92, 230, 0.24);
+  --aurora-c: rgba(255, 149, 0, 0.16);
+  --aurora-d: rgba(255, 45, 85, 0.14);
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --window-bg: rgba(12, 15, 22, 0.78);
+  --window-bg-rgb: 12 15 22;
+  --sidebar-bg: rgba(17, 22, 31, 0.58);
+  --panel-bg: rgba(22, 28, 39, 0.5);
+  --card-bg: rgba(27, 34, 47, 0.54);
+  --card-bg-strong: rgba(31, 39, 54, 0.68);
+  --popover-bg: rgba(26, 32, 44, 0.78);
+  --control-bg: rgba(255, 255, 255, 0.055);
+  --control-bg-hover: rgba(255, 255, 255, 0.09);
+  --control-bg-active: rgba(72, 99, 140, 0.22);
+  --border-subtle: rgba(226, 236, 247, 0.1);
+  --border-strong: rgba(226, 236, 247, 0.18);
+  --border-highlight: rgba(255, 255, 255, 0.08);
+  --text-primary: #f2f5fa;
+  --text-secondary: #a8b1bf;
+  --text-tertiary: #778291;
+  --text-disabled: rgba(168, 177, 191, 0.42);
+  --accent: #64d2ff;
+  --accent-rgb: 100 210 255;
+  --accent-soft: rgba(100, 210, 255, 0.14);
+  --accent-softer: rgba(100, 210, 255, 0.07);
+  --accent-strong: #0a84ff;
+  --accent-2: #5e5ce6;
+  --success: #30d158;
+  --warning: #ffd60a;
+  --warn: var(--warning);
+  --danger: #ff6961;
+  --shadow-soft: 0 18px 42px rgba(0, 0, 0, 0.34);
+  --shadow-floating: 0 30px 72px rgba(0, 0, 0, 0.5);
+  --shadow-pressed: inset 0 1px 2px rgba(0, 0, 0, 0.32);
+  --inner-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  --bg: #0e1118;
+  --bg-rgb: 14 17 24;
+  --panel: var(--panel-bg);
+  --panel-rgb: 22 28 39;
+  --panel-strong: var(--card-bg-strong);
+  --panel-strong-rgb: 31 39 54;
+  --surface: rgba(22, 28, 39, 0.5);
+  --surface-rgb: 22 28 39;
+  --surface-strong: rgba(35, 44, 60, 0.66);
+  --surface-strong-rgb: 35 44 60;
+  --sidebar-top-rgb: 17 22 31;
+  --sidebar-bottom-rgb: 12 16 23;
+  --line: var(--border-subtle);
+  --line-strong: var(--border-strong);
+  --text: var(--text-primary);
+  --muted: var(--text-secondary);
+  --shadow: var(--shadow-soft);
+  --glass-shadow: var(--shadow-soft);
+  --glass-shadow-strong: var(--shadow-floating);
+  --glass-highlight: var(--inner-highlight);
+  --glass-border: var(--border-subtle);
+  --bubble-user: rgba(36, 52, 76, 0.72);
+  --bubble-ai: rgba(24, 31, 43, 0.66);
+  --bubble-log: rgba(20, 26, 36, 0.68);
+  --aurora-a: rgba(10, 132, 255, 0.24);
+  --aurora-b: rgba(94, 92, 230, 0.18);
+  --aurora-c: rgba(191, 90, 242, 0.12);
+  --aurora-d: rgba(100, 210, 255, 0.08);
+}
+
+body {
+  color: var(--text-primary);
+  text-rendering: geometricPrecision;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
+button,
+input,
+select,
+textarea {
+  letter-spacing: 0;
+}
+
+.desktop-window-shell {
+  background:
+    radial-gradient(circle at 18% 18%, color-mix(in srgb, var(--aurora-a) 82%, transparent), transparent 33%),
+    radial-gradient(circle at 82% 12%, color-mix(in srgb, var(--aurora-b) 78%, transparent), transparent 30%),
+    radial-gradient(circle at 64% 88%, color-mix(in srgb, var(--aurora-c) 78%, transparent), transparent 34%),
+    linear-gradient(180deg, rgb(var(--window-bg-rgb) / 0.92), var(--window-bg)) !important;
+  backdrop-filter: var(--glass-blur-strong);
+  -webkit-backdrop-filter: var(--glass-blur-strong);
+}
+
+:root[data-theme='dark'] .desktop-window-shell {
+  background:
+    radial-gradient(circle at 20% 12%, rgba(10, 132, 255, 0.16), transparent 34%),
+    radial-gradient(circle at 84% 18%, rgba(94, 92, 230, 0.13), transparent 31%),
+    radial-gradient(circle at 66% 86%, rgba(100, 210, 255, 0.07), transparent 36%),
+    linear-gradient(180deg, #111722, #0a0d13 82%) !important;
+}
+
+.workspace-aurora {
+  opacity: calc(0.72 * var(--aurora-opacity, 1));
+  background:
+    radial-gradient(circle at 14% 18%, var(--aurora-a), transparent 30%),
+    radial-gradient(circle at 84% 14%, var(--aurora-b), transparent 26%),
+    radial-gradient(circle at 58% 86%, var(--aurora-c), transparent 32%),
+    linear-gradient(180deg, rgb(255 255 255 / 0.06), transparent);
+  filter: blur(0) saturate(110%);
+}
+
+:root[data-theme='dark'] .workspace-aurora {
+  opacity: calc(0.58 * var(--aurora-opacity, 1));
+  filter: saturate(82%) brightness(0.72);
+}
+
+.window-chrome {
+  background: linear-gradient(180deg, rgb(255 255 255 / 0.28), rgb(255 255 255 / 0.04));
+  border-bottom: 1px solid rgb(255 255 255 / 0.12);
+}
+
+:root[data-theme='dark'] .window-chrome {
+  background: linear-gradient(180deg, rgb(255 255 255 / 0.045), rgb(255 255 255 / 0.01));
+  border-bottom-color: rgb(255 255 255 / 0.055);
+}
+
+.window-chrome-title {
+  color: var(--text-secondary);
+  font-weight: 620;
+}
+
+.window-chrome-button {
+  color: var(--text-tertiary);
+  transition: background 160ms ease, color 160ms ease, transform 160ms ease;
+}
+
+.window-chrome-button:hover {
+  color: var(--text-primary);
+  background: var(--control-bg-hover);
+}
+
+.window-chrome-button:active {
+  transform: scale(0.94);
+  background: var(--control-bg-active);
+}
+
+.shell {
+  color: var(--text-primary);
+}
+
+.sidebar {
+  background:
+    linear-gradient(180deg, rgb(var(--sidebar-top-rgb) / 0.64), rgb(var(--sidebar-bottom-rgb) / 0.5)),
+    var(--sidebar-bg) !important;
+  border-right: 1px solid var(--border-subtle);
+  box-shadow:
+    inset 1px 0 0 rgb(255 255 255 / 0.2),
+    inset -1px 0 0 rgb(255 255 255 / 0.08),
+    12px 0 34px rgb(24 34 48 / 0.08);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+}
+
+:root[data-theme='dark'] .sidebar {
+  box-shadow:
+    inset 1px 0 0 rgb(255 255 255 / 0.04),
+    inset -1px 0 0 rgb(255 255 255 / 0.035),
+    12px 0 38px rgb(0 0 0 / 0.22);
+}
+
+.brand-name,
+.panel-header h2,
+.wallet-overview-head h3,
+.record-row strong,
+.status-card strong,
+.pricing-card b,
+.picker-option strong {
+  color: var(--text-primary);
+}
+
+.brand-sub,
+.helper-copy,
+.modal-copy,
+.picker-menu-head span,
+.list-block-header span,
+.wallet-overview-metric span,
+.usage-bar-row small,
+.timeline-row span,
+.record-row span,
+.status-card span,
+.mini-stat span,
+.pricing-card span,
+.pricing-card small,
+.empty-card p,
+.message-bubble small {
+  color: var(--text-secondary);
+}
+
+.side-nav-item {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  box-shadow: none;
+}
+
+.side-nav-item:hover,
+.side-nav-item:focus-visible {
+  background: var(--control-bg-hover);
+  color: var(--text-primary);
+  border-color: var(--border-subtle);
+  box-shadow: var(--inner-highlight);
+  transform: translateY(-1px);
+}
+
+.side-nav-item:active {
+  transform: translateY(0) scale(0.99);
+  background: var(--control-bg-active);
+  box-shadow: var(--shadow-pressed);
+}
+
+.side-nav-item.active {
+  color: var(--text-primary);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent-soft) 74%, white 8%), color-mix(in srgb, var(--accent-softer) 88%, transparent)),
+    var(--control-bg) !important;
+  border-color: color-mix(in srgb, var(--accent) 26%, var(--border-subtle)) !important;
+  box-shadow:
+    var(--inner-highlight),
+    0 10px 24px rgb(var(--accent-rgb) / 0.09) !important;
+}
+
+:root[data-theme='dark'] .side-nav-item.active {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent-soft) 78%, transparent), rgb(255 255 255 / 0.035)),
+    var(--control-bg) !important;
+  box-shadow:
+    var(--inner-highlight),
+    0 12px 26px rgb(0 0 0 / 0.22) !important;
+}
+
+.sidebar-account,
+.sidebar-user-row,
+.desktop-update-popover {
+  background: var(--card-bg);
+  border: 1px solid var(--border-subtle);
+  box-shadow: var(--inner-highlight), var(--shadow-soft);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+}
+
+.user-pill {
+  background: var(--control-bg);
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle);
+}
+
+.user-pill.secondary {
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--control-bg) 82%, transparent);
+}
+
+.main-panel {
+  background: transparent !important;
+}
+
+.assistant-topbar-tabs {
+  background: var(--panel-bg);
+  border: 1px solid var(--border-subtle);
+  box-shadow: var(--inner-highlight), 0 10px 26px rgb(28 39 54 / 0.08);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+}
+
+.assistant-mode-button,
+.history-panel-tabs .ghost-button {
+  color: var(--text-secondary);
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  box-shadow: none;
+}
+
+.assistant-mode-button:hover,
+.history-panel-tabs .ghost-button:hover {
+  color: var(--text-primary);
+  background: var(--control-bg-hover);
+  border-color: var(--border-subtle);
+}
+
+.assistant-mode-button.active,
+.history-panel-tabs .ghost-button.selected-toggle {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--control-bg-hover) 82%, var(--accent-soft)) !important;
+  border-color: color-mix(in srgb, var(--accent) 22%, var(--border-subtle)) !important;
+  box-shadow: var(--inner-highlight), 0 8px 18px rgb(24 34 48 / 0.08);
+}
+
+.panel,
+.modal-card,
+.login-card,
+.panel-block,
+.pricing-card,
+.mini-stat,
+.status-card,
+.service-status-card,
+.empty-card,
+.key-reveal,
+.result-block,
+.cli-history-panel,
+.chat-history-panel,
+.settings-card,
+.settings-intro-card,
+.billing-card,
+.record-row,
+.wallet-overview-card,
+.wallet-overview-metric,
+.inline-notice,
+.reasoning-card,
+.me-user-card,
+.me-key-list-card,
+.me-key-create-card,
+.me-claude-card,
+.me-codex-card,
+.me-device-binding-card {
+  border: 1px solid var(--border-subtle) !important;
+  border-radius: var(--radius-card);
+  background: var(--card-bg) !important;
+  box-shadow: var(--inner-highlight), var(--shadow-soft) !important;
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+}
+
+.panel:hover,
+.pricing-card:hover,
+.status-card:hover,
+.service-status-card:hover,
+.wallet-overview-metric:hover,
+.record-row:hover {
+  border-color: color-mix(in srgb, var(--accent) 18%, var(--border-subtle)) !important;
+  box-shadow: var(--inner-highlight), 0 16px 38px rgb(24 34 48 / 0.12) !important;
+}
+
+:root[data-theme='dark'] .panel:hover,
+:root[data-theme='dark'] .pricing-card:hover,
+:root[data-theme='dark'] .status-card:hover,
+:root[data-theme='dark'] .service-status-card:hover,
+:root[data-theme='dark'] .wallet-overview-metric:hover,
+:root[data-theme='dark'] .record-row:hover {
+  box-shadow: var(--inner-highlight), 0 18px 42px rgb(0 0 0 / 0.34) !important;
+}
+
+.panel-block,
+.pricing-card,
+.mini-stat,
+.status-card,
+.service-status-card,
+.wallet-overview-metric,
+.record-row {
+  background: color-mix(in srgb, var(--card-bg) 92%, transparent) !important;
+}
+
+.pricing-card.recommended,
+.subscription-plan-card.recommended,
+.record-row.highlighted,
+.picker-option.active {
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--border-subtle)) !important;
+  background: color-mix(in srgb, var(--accent-soft) 48%, var(--card-bg)) !important;
+}
+
+.subscription-plan-badge,
+.service-status-pill,
+.desktop-update-pill,
+.picker-filter-chip,
+.message-extension-chip,
+.quick-amount-chip {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-chip);
+  color: var(--text-secondary);
+  background: var(--control-bg);
+  box-shadow: var(--inner-highlight);
+}
+
+.service-status-pill.success,
+.status-dot.success {
+  color: color-mix(in srgb, var(--success) 86%, var(--text-primary));
+  background: color-mix(in srgb, var(--success) 15%, transparent) !important;
+}
+
+.service-status-pill.warn,
+.status-dot.warn {
+  color: color-mix(in srgb, var(--warning) 86%, var(--text-primary));
+  background: color-mix(in srgb, var(--warning) 15%, transparent) !important;
+}
+
+.service-status-pill.danger,
+.status-dot.error {
+  color: color-mix(in srgb, var(--danger) 88%, var(--text-primary));
+  background: color-mix(in srgb, var(--danger) 15%, transparent) !important;
+}
+
+.ghost-button,
+.collapse-button,
+.secondary-button,
+.theme-toggle-button,
+.picker-trigger,
+.icon-picker-trigger,
+.icon-pill-trigger,
+input,
+select,
+textarea,
+.conversation-scroll-button {
+  border: 1px solid var(--border-subtle) !important;
+  border-radius: var(--radius-control);
+  background: var(--control-bg) !important;
+  color: var(--text-primary);
+  box-shadow: var(--inner-highlight);
+  backdrop-filter: blur(18px) saturate(145%);
+  -webkit-backdrop-filter: blur(18px) saturate(145%);
+}
+
+.ghost-button:hover,
+.collapse-button:hover,
+.secondary-button:hover,
+.theme-toggle-button:hover,
+.picker-trigger:hover,
+.icon-picker-trigger:hover,
+.icon-pill-trigger:hover,
+.conversation-scroll-button:hover {
+  background: var(--control-bg-hover) !important;
+  border-color: var(--border-strong) !important;
+  color: var(--text-primary);
+  box-shadow: var(--inner-highlight), 0 8px 20px rgb(24 34 48 / 0.08);
+}
+
+.ghost-button:active,
+.collapse-button:active,
+.secondary-button:active,
+.theme-toggle-button:active,
+.picker-trigger:active,
+.icon-picker-trigger:active,
+.icon-pill-trigger:active,
+.primary-button:active,
+.send-button:active {
+  transform: translateY(0) scale(0.985);
+  box-shadow: var(--shadow-pressed);
+}
+
+.secondary-button {
+  color: var(--accent-strong);
+  background: color-mix(in srgb, var(--accent-soft) 54%, var(--control-bg)) !important;
+  border-color: color-mix(in srgb, var(--accent) 18%, var(--border-subtle)) !important;
+}
+
+.primary-button,
+.send-button {
+  color: #fff !important;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2)) !important;
+  border: 1px solid rgb(var(--accent-rgb) / 0.38) !important;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.28),
+    0 10px 24px rgb(var(--accent-rgb) / 0.2) !important;
+}
+
+:root[data-theme='dark'] .primary-button,
+:root[data-theme='dark'] .send-button {
+  color: #071018 !important;
+  background: linear-gradient(135deg, var(--accent), var(--accent-strong)) !important;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.32),
+    0 10px 26px rgb(10 132 255 / 0.18) !important;
+}
+
+button:disabled,
+.ghost-button:disabled,
+.secondary-button:disabled,
+.primary-button:disabled {
+  color: var(--text-disabled) !important;
+  opacity: 1;
+  background: color-mix(in srgb, var(--control-bg) 62%, transparent) !important;
+  border-color: color-mix(in srgb, var(--border-subtle) 70%, transparent) !important;
+  box-shadow: none !important;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-tertiary);
+}
+
+input:focus,
+select:focus,
+textarea:focus,
+button:focus-visible,
+.side-nav-item:focus-visible,
+.assistant-mode-button:focus-visible,
+.picker-option:focus-visible,
+.record-row:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--border-subtle)) !important;
+  box-shadow:
+    var(--inner-highlight),
+    0 0 0 3px rgb(var(--accent-rgb) / 0.16) !important;
+}
+
+.shell-composer,
+.chat-composer,
+.cli-composer,
+.composer-input-shell,
+.composer-input-zone {
+  border-color: var(--border-subtle) !important;
+  background: var(--panel-bg) !important;
+  box-shadow: var(--inner-highlight), var(--shadow-soft) !important;
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+}
+
+.shell-composer textarea,
+.chat-composer textarea,
+.cli-composer textarea,
+.composer-input-zone textarea {
+  background: color-mix(in srgb, var(--control-bg) 84%, transparent) !important;
+  border-color: var(--border-subtle) !important;
+  color: var(--text-primary) !important;
+}
+
+.message-bubble,
+.message-bubble.user,
+.message-bubble.assistant,
+.message-bubble.system,
+.cli-log-bubble,
+.timeline-code,
+.timeline-detail,
+.markdown-body pre,
+.markdown-code-block,
+.result-block {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
+  box-shadow: var(--inner-highlight);
+  backdrop-filter: blur(18px) saturate(135%);
+  -webkit-backdrop-filter: blur(18px) saturate(135%);
+}
+
+.message-bubble.user {
+  background: var(--bubble-user) !important;
+}
+
+.message-bubble.assistant,
+.message-bubble.system {
+  background: var(--bubble-ai) !important;
+}
+
+.cli-log-bubble,
+.timeline-code,
+.timeline-detail,
+.markdown-body pre,
+.markdown-code-block {
+  background: var(--bubble-log) !important;
+  color: var(--text-primary);
+}
+
+.picker-menu,
+.session-context-menu,
+.chat-history-panel,
+.cli-history-panel,
+.cli-plan-floating-panel,
+.modal-card,
+.image-preview-modal,
+.attachment-preview-modal,
+.desktop-update-popover,
+.announcement-modal-card,
+.cli-extension-menu,
+.assistant-menu,
+.image-style-menu,
+.cli-extension-floating-tooltip,
+.markdown-code-action-menu,
+.translation-modal-card {
+  background: var(--popover-bg) !important;
+  border: 1px solid var(--border-strong) !important;
+  box-shadow: var(--inner-highlight), var(--shadow-floating) !important;
+  backdrop-filter: var(--glass-blur-strong) !important;
+  -webkit-backdrop-filter: var(--glass-blur-strong) !important;
+}
+
+.picker-menu .picker-menu-head,
+.picker-menu .picker-option,
+.assistant-menu .assistant-menu-toolbar,
+.session-context-menu .session-context-menu-item,
+.chat-history-panel .record-row,
+.cli-history-panel .record-row,
+.cli-plan-floating-panel .record-row,
+.modal-card .record-row,
+.announcement-modal-card .record-row,
+.desktop-announcement-item,
+.cli-extension-menu .message-extension-chip,
+.markdown-code-action-menu button {
+  background: color-mix(in srgb, var(--card-bg-strong) 82%, transparent) !important;
+  border-color: var(--border-subtle) !important;
+  box-shadow: var(--inner-highlight) !important;
+}
+
+.picker-menu .picker-option:hover,
+.picker-menu .picker-option:focus-visible,
+.picker-menu .picker-option.active,
+.session-context-menu .session-context-menu-item:hover,
+.session-context-menu .session-context-menu-item:focus-visible,
+.chat-history-panel .record-row:hover,
+.cli-history-panel .record-row:hover,
+.cli-plan-floating-panel .record-row:hover,
+.modal-card .record-row:hover,
+.announcement-modal-card .record-row:hover,
+.desktop-announcement-item:hover,
+.desktop-announcement-item.unread,
+.markdown-code-action-menu button:hover,
+.markdown-code-action-menu button:focus-visible {
+  background: color-mix(in srgb, var(--accent-soft) 42%, var(--card-bg-strong)) !important;
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--border-subtle)) !important;
+}
+
+.modal-mask,
+.image-preview-modal-mask {
+  background:
+    radial-gradient(circle at 50% 18%, rgb(var(--accent-rgb) / 0.12), transparent 38%),
+    rgb(var(--bg-rgb) / 0.38) !important;
+  backdrop-filter: blur(34px) saturate(135%) !important;
+  -webkit-backdrop-filter: blur(34px) saturate(135%) !important;
+}
+
+:root[data-theme='dark'] .modal-mask,
+:root[data-theme='dark'] .image-preview-modal-mask {
+  background:
+    radial-gradient(circle at 50% 18%, rgb(var(--accent-rgb) / 0.1), transparent 38%),
+    rgb(4 6 10 / 0.6) !important;
+}
+
+.toast-bar {
+  color: var(--text-primary);
+  background: var(--popover-bg) !important;
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--inner-highlight), var(--shadow-floating);
+  backdrop-filter: var(--glass-blur-strong);
+  -webkit-backdrop-filter: var(--glass-blur-strong);
+}
+
+.usage-bar-track,
+.desktop-update-progress-bar {
+  background: color-mix(in srgb, var(--control-bg) 78%, transparent) !important;
+  border: 1px solid var(--border-subtle);
+  box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.08);
+}
+
+.usage-bar-fill,
+.desktop-update-progress-bar > span {
+  background: linear-gradient(90deg, var(--accent), var(--accent-2)) !important;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--text-tertiary) 34%, transparent) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  min-height: 42px;
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background:
+    linear-gradient(color-mix(in srgb, var(--text-tertiary) 36%, transparent), color-mix(in srgb, var(--text-tertiary) 36%, transparent))
+    padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background:
+    linear-gradient(color-mix(in srgb, var(--text-tertiary) 58%, transparent), color-mix(in srgb, var(--text-tertiary) 58%, transparent))
+    padding-box;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-aurora,
+  .workspace-aurora::after,
+  .workspace-aurora-blob,
+  .collapse-button,
+  .side-nav-item,
+  .ghost-button,
+  .primary-button,
+  .secondary-button,
+  .picker-option,
+  .assistant-mode-button,
+  .record-row,
+  .pricing-card,
+  .quick-amount-chip {
+    animation: none !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root {
+    --panel-bg: rgba(255, 255, 255, 0.88);
+    --card-bg: rgba(255, 255, 255, 0.94);
+    --popover-bg: rgba(255, 255, 255, 0.96);
+  }
+
+  :root[data-theme='dark'] {
+    --panel-bg: rgba(22, 28, 39, 0.94);
+    --card-bg: rgba(27, 34, 47, 0.96);
+    --popover-bg: rgba(26, 32, 44, 0.98);
+  }
+}
+
+:root[data-performance-mode='efficiency'] {
+  --window-bg: rgb(var(--bg-rgb));
+  --sidebar-bg: rgb(var(--panel-strong-rgb));
+  --panel-bg: rgb(var(--panel-rgb));
+  --card-bg: rgb(var(--panel-strong-rgb));
+  --card-bg-strong: rgb(var(--panel-strong-rgb));
+  --popover-bg: rgb(var(--panel-strong-rgb));
+  --control-bg: rgb(var(--surface-strong-rgb));
+  --control-bg-hover: rgb(var(--surface-strong-rgb));
+  --control-bg-active: rgb(var(--surface-rgb));
+  --shadow-soft: none;
+  --shadow-floating: none;
+  --inner-highlight: none;
+}
+
+:root[data-performance-mode='efficiency'] .desktop-window-shell,
+:root[data-performance-mode='efficiency'] .sidebar,
+:root[data-performance-mode='efficiency'] .assistant-topbar-tabs,
+:root[data-performance-mode='efficiency'] .panel,
+:root[data-performance-mode='efficiency'] .modal-card,
+:root[data-performance-mode='efficiency'] .login-card,
+:root[data-performance-mode='efficiency'] .panel-block,
+:root[data-performance-mode='efficiency'] .pricing-card,
+:root[data-performance-mode='efficiency'] .mini-stat,
+:root[data-performance-mode='efficiency'] .status-card,
+:root[data-performance-mode='efficiency'] .service-status-card,
+:root[data-performance-mode='efficiency'] .empty-card,
+:root[data-performance-mode='efficiency'] .key-reveal,
+:root[data-performance-mode='efficiency'] .result-block,
+:root[data-performance-mode='efficiency'] .cli-history-panel,
+:root[data-performance-mode='efficiency'] .chat-history-panel,
+:root[data-performance-mode='efficiency'] .record-row,
+:root[data-performance-mode='efficiency'] .wallet-overview-card,
+:root[data-performance-mode='efficiency'] .wallet-overview-metric,
+:root[data-performance-mode='efficiency'] .picker-menu,
+:root[data-performance-mode='efficiency'] .session-context-menu,
+:root[data-performance-mode='efficiency'] .desktop-update-popover,
+:root[data-performance-mode='efficiency'] .announcement-modal-card {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  box-shadow: none !important;
+}
+
+/* macOS refinement pass: remove extra shells, tighten glass, and keep existing layout. */
+:root {
+  --window-bg: rgba(244, 247, 251, 0.74);
+  --window-bg-rgb: 244 247 251;
+  --panel-bg: rgba(255, 255, 255, 0.3);
+  --card-bg: rgba(255, 255, 255, 0.56);
+  --card-bg-strong: rgba(255, 255, 255, 0.72);
+  --popover-bg: rgba(251, 253, 255, 0.68);
+  --control-bg: rgba(255, 255, 255, 0.54);
+  --control-bg-hover: rgba(255, 255, 255, 0.74);
+  --control-bg-active: rgba(231, 238, 247, 0.78);
+  --border-subtle: rgba(61, 76, 96, 0.12);
+  --border-strong: rgba(61, 76, 96, 0.2);
+  --text-primary: #18212c;
+  --text-secondary: #687383;
+  --text-tertiary: #929baa;
+  --accent: #1677d8;
+  --accent-rgb: 22 119 216;
+  --accent-soft: rgba(22, 119, 216, 0.11);
+  --accent-softer: rgba(22, 119, 216, 0.055);
+  --accent-strong: #0a63c4;
+  --accent-2: #6f91bd;
+  --shadow-soft: 0 12px 32px rgba(32, 42, 56, 0.085);
+  --shadow-floating: 0 24px 64px rgba(26, 34, 46, 0.18);
+  --aurora-a: rgba(92, 139, 185, 0.22);
+  --aurora-b: rgba(150, 166, 190, 0.16);
+  --aurora-c: rgba(218, 190, 150, 0.1);
+  --aurora-d: rgba(170, 162, 190, 0.09);
+}
+
+:root[data-theme='dark'] {
+  --window-bg: rgba(13, 16, 22, 0.8);
+  --window-bg-rgb: 13 16 22;
+  --panel-bg: rgba(22, 27, 37, 0.42);
+  --card-bg: rgba(28, 34, 45, 0.58);
+  --card-bg-strong: rgba(35, 42, 55, 0.72);
+  --popover-bg: rgba(28, 34, 45, 0.72);
+  --control-bg: rgba(255, 255, 255, 0.052);
+  --control-bg-hover: rgba(255, 255, 255, 0.085);
+  --control-bg-active: rgba(112, 137, 170, 0.18);
+  --border-subtle: rgba(226, 234, 244, 0.095);
+  --border-strong: rgba(226, 234, 244, 0.17);
+  --accent: #8fc5ff;
+  --accent-rgb: 143 197 255;
+  --accent-soft: rgba(143, 197, 255, 0.12);
+  --accent-softer: rgba(143, 197, 255, 0.06);
+  --accent-strong: #409cff;
+  --accent-2: #a7b4cc;
+  --shadow-soft: 0 18px 44px rgba(0, 0, 0, 0.32);
+  --shadow-floating: 0 30px 76px rgba(0, 0, 0, 0.48);
+  --aurora-a: rgba(87, 119, 154, 0.16);
+  --aurora-b: rgba(122, 128, 148, 0.12);
+  --aurora-c: rgba(154, 135, 116, 0.07);
+  --aurora-d: rgba(118, 128, 150, 0.08);
+}
+
+.desktop-window-shell {
+  background:
+    radial-gradient(circle at 14% 15%, color-mix(in srgb, var(--aurora-a) 78%, transparent), transparent 19%),
+    radial-gradient(circle at 86% 13%, color-mix(in srgb, var(--aurora-b) 74%, transparent), transparent 17%),
+    radial-gradient(circle at 58% 92%, color-mix(in srgb, var(--aurora-c) 72%, transparent), transparent 20%),
+    linear-gradient(180deg, rgb(var(--window-bg-rgb) / 0.94), var(--window-bg)) !important;
+}
+
+:root[data-theme='dark'] .desktop-window-shell {
+  background:
+    radial-gradient(circle at 16% 13%, rgba(87, 119, 154, 0.14), transparent 20%),
+    radial-gradient(circle at 84% 17%, rgba(122, 128, 148, 0.1), transparent 18%),
+    radial-gradient(circle at 60% 90%, rgba(154, 135, 116, 0.055), transparent 20%),
+    linear-gradient(180deg, #111722, #0b0e14 84%) !important;
+}
+
+.workspace-aurora {
+  opacity: calc(0.42 * var(--aurora-opacity, 1)) !important;
+  background:
+    radial-gradient(circle at 15% 17%, var(--aurora-a), transparent 18%),
+    radial-gradient(circle at 86% 14%, var(--aurora-b), transparent 16%),
+    radial-gradient(circle at 58% 88%, var(--aurora-c), transparent 19%),
+    linear-gradient(180deg, rgb(255 255 255 / 0.04), transparent) !important;
+  filter: saturate(92%) blur(0) !important;
+}
+
+:root[data-theme='dark'] .workspace-aurora {
+  opacity: calc(0.34 * var(--aurora-opacity, 1)) !important;
+  filter: saturate(76%) brightness(0.74) !important;
+}
+
+.workspace-aurora-blob,
+:root[data-theme='dark'] .workspace-aurora-blob {
+  width: min(34vw, 460px) !important;
+  height: min(34vw, 460px) !important;
+  opacity: 0.34 !important;
+  filter: blur(10px) saturate(82%) !important;
+}
+
+.assistant-page,
+.assistant-host,
+.assistant-host .workspace-shell,
+.assistant-host .workspace-shell.active,
+.assistant-host .chat-panel-surface,
+.assistant-host .cli-panel-surface,
+.assistant-host .chat-panel-surface.panel,
+.assistant-host .cli-panel-surface.panel,
+.chat-page,
+.cli-page {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.assistant-topbar-tabs {
+  gap: 22px;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.assistant-mode-button,
+.assistant-mode-button:hover,
+.assistant-mode-button:focus-visible,
+.assistant-mode-button.active,
+.history-panel-tabs .ghost-button,
+.history-panel-tabs .ghost-button:hover,
+.history-panel-tabs .ghost-button.selected-toggle {
+  position: relative;
+  min-height: 34px;
+  padding: 0 4px 7px;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.assistant-mode-button::after,
+.history-panel-tabs .ghost-button::after {
+  content: '';
+  position: absolute;
+  right: 2px;
+  bottom: 1px;
+  left: 2px;
+  height: 2px;
+  border-radius: 999px;
+  background: transparent;
+  transition: background 160ms ease, opacity 160ms ease;
+}
+
+.assistant-mode-button.active::after,
+.history-panel-tabs .ghost-button.selected-toggle::after {
+  background: var(--accent);
+}
+
+.assistant-mode-button:hover::after,
+.history-panel-tabs .ghost-button:hover::after {
+  background: color-mix(in srgb, var(--accent) 34%, transparent);
+}
+
+.shell-composer,
+.chat-composer,
+.cli-composer,
+.composer-input-shell,
+.composer-toolbar {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.composer-input-zone {
+  background: color-mix(in srgb, var(--card-bg-strong) 78%, transparent) !important;
+  border-color: var(--border-subtle) !important;
+  box-shadow: var(--inner-highlight), 0 10px 28px rgba(24, 34, 48, 0.07) !important;
+  backdrop-filter: blur(24px) saturate(130%) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(130%) !important;
+}
+
+.conversation-scroll-button,
+.conversation-scroll-button:hover,
+.conversation-scroll-button:focus-visible {
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.me-claude-card .deploy-timeline-list:has(> .empty-card),
+.me-codex-card .deploy-timeline-list:has(> .empty-card) {
+  display: contents;
+}
+
+.me-claude-card .deploy-timeline-list:has(> .empty-card) > .empty-card,
+.me-codex-card .deploy-timeline-list:has(> .empty-card) > .empty-card {
+  margin-top: 12px;
+}
+
+.me-key-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  overflow-x: hidden;
+  padding: 1px 2px 4px 1px;
+}
+
+.me-key-record {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  overflow: hidden;
+}
+
+.me-key-record > div:first-child {
+  min-width: 0;
+}
+
+.me-key-record strong,
+.me-key-record span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.me-key-record .record-actions {
+  flex: 0 0 auto;
+  min-width: 34px;
+  max-width: 64px;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: nowrap;
+}
+
+.me-key-record .record-actions small {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.me-key-record .record-actions .icon-only {
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  min-height: 32px;
+}
+
+.modal-mask,
+.image-preview-modal-mask {
+  background: rgb(var(--bg-rgb) / 0.34) !important;
+  backdrop-filter: blur(30px) saturate(150%) !important;
+  -webkit-backdrop-filter: blur(30px) saturate(150%) !important;
+}
+
+:root[data-theme='dark'] .modal-mask,
+:root[data-theme='dark'] .image-preview-modal-mask {
+  background: rgb(5 7 11 / 0.58) !important;
+}
+
+.picker-menu,
+.session-context-menu,
+.chat-history-panel,
+.cli-history-panel,
+.cli-plan-floating-panel,
+.modal-card,
+.image-preview-modal,
+.attachment-preview-modal,
+.desktop-update-popover,
+.announcement-modal-card,
+.cli-extension-menu,
+.assistant-menu,
+.image-style-menu,
+.cli-extension-floating-tooltip,
+.markdown-code-action-menu,
+.translation-modal-card {
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.18), rgb(255 255 255 / 0.045)),
+    var(--popover-bg) !important;
+  border-color: var(--border-strong) !important;
+  box-shadow: var(--inner-highlight), var(--shadow-floating) !important;
+  backdrop-filter: blur(34px) saturate(155%) !important;
+  -webkit-backdrop-filter: blur(34px) saturate(155%) !important;
+}
+
+:root[data-theme='dark'] .picker-menu,
+:root[data-theme='dark'] .session-context-menu,
+:root[data-theme='dark'] .chat-history-panel,
+:root[data-theme='dark'] .cli-history-panel,
+:root[data-theme='dark'] .cli-plan-floating-panel,
+:root[data-theme='dark'] .modal-card,
+:root[data-theme='dark'] .image-preview-modal,
+:root[data-theme='dark'] .attachment-preview-modal,
+:root[data-theme='dark'] .desktop-update-popover,
+:root[data-theme='dark'] .announcement-modal-card,
+:root[data-theme='dark'] .cli-extension-menu,
+:root[data-theme='dark'] .assistant-menu,
+:root[data-theme='dark'] .image-style-menu,
+:root[data-theme='dark'] .cli-extension-floating-tooltip,
+:root[data-theme='dark'] .markdown-code-action-menu,
+:root[data-theme='dark'] .translation-modal-card {
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.075), rgb(255 255 255 / 0.025)),
+    var(--popover-bg) !important;
+}
+
+/* macOS refinement pass 2: remove residual white shells and enforce real glass blur. */
+:root {
+  --popover-bg: rgba(246, 250, 255, 0.72);
+  --glass-blur: blur(36px) saturate(165%) contrast(0.98);
+  --glass-blur-strong: blur(56px) saturate(178%) contrast(0.96);
+}
+
+:root[data-theme='dark'] {
+  --popover-bg: rgba(28, 35, 47, 0.78);
+  --glass-blur: blur(38px) saturate(142%) contrast(0.92);
+  --glass-blur-strong: blur(58px) saturate(150%) contrast(0.9);
+}
+
+.window-chrome,
+:root[data-theme='dark'] .window-chrome {
+  background: transparent !important;
+  border: 0 !important;
+  border-bottom: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.desktop-window-content,
+.main-panel {
+  border-top: 0 !important;
+  box-shadow: none !important;
+}
+
+.panel.scroll-panel.page-surface,
+.scroll-panel.page-surface,
+article.panel.page-surface,
+.workspace-page > .panel.page-surface {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  outline: 0 !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.panel.scroll-panel.page-surface:hover,
+.scroll-panel.page-surface:hover,
+article.panel.page-surface:hover,
+.workspace-page > .panel.page-surface:hover {
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.panel-scroll {
+  background: transparent !important;
+}
+
+.shell-composer,
+.chat-composer,
+.cli-composer,
+.composer,
+.composer-input-shell,
+.composer-input-zone,
+.composer-toolbar,
+.composer-input-zone textarea,
+.shell-composer textarea,
+.chat-composer textarea,
+.cli-composer textarea {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.composer-input-zone:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 42%, transparent) !important;
+  box-shadow: 0 0 0 3px rgb(var(--accent-rgb) / 0.12) !important;
+}
+
+.sidebar-account,
+.sidebar-user-row,
+:root[data-theme='dark'] .sidebar-account,
+:root[data-theme='dark'] .sidebar-user-row {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.sidebar-account {
+  padding: 0 !important;
+}
+
+.sidebar-user-row {
+  padding: 0 !important;
+}
+
+.modal-mask,
+.image-preview-modal-mask {
+  background:
+    linear-gradient(180deg, rgb(246 250 255 / 0.6), rgb(232 238 247 / 0.5)) !important;
+  backdrop-filter: blur(58px) saturate(175%) contrast(0.96) !important;
+  -webkit-backdrop-filter: blur(58px) saturate(175%) contrast(0.96) !important;
+}
+
+:root[data-theme='dark'] .modal-mask,
+:root[data-theme='dark'] .image-preview-modal-mask {
+  background:
+    linear-gradient(180deg, rgb(9 12 18 / 0.72), rgb(14 18 25 / 0.62)) !important;
+  backdrop-filter: blur(60px) saturate(142%) contrast(0.9) !important;
+  -webkit-backdrop-filter: blur(60px) saturate(142%) contrast(0.9) !important;
+}
+
+.picker-menu,
+.session-context-menu,
+.chat-history-panel,
+.cli-history-panel,
+.cli-plan-floating-panel,
+.modal-card,
+.image-preview-modal,
+.attachment-preview-modal,
+.desktop-update-popover,
+.announcement-modal-card,
+.cli-extension-menu,
+.assistant-menu,
+.image-style-menu,
+.cli-extension-floating-tooltip,
+.markdown-code-action-menu,
+.translation-modal-card,
+.toast-bar {
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.28), rgb(255 255 255 / 0.075)),
+    var(--popover-bg) !important;
+  backdrop-filter: var(--glass-blur-strong) !important;
+  -webkit-backdrop-filter: var(--glass-blur-strong) !important;
+}
+
+:root[data-theme='dark'] .picker-menu,
+:root[data-theme='dark'] .session-context-menu,
+:root[data-theme='dark'] .chat-history-panel,
+:root[data-theme='dark'] .cli-history-panel,
+:root[data-theme='dark'] .cli-plan-floating-panel,
+:root[data-theme='dark'] .modal-card,
+:root[data-theme='dark'] .image-preview-modal,
+:root[data-theme='dark'] .attachment-preview-modal,
+:root[data-theme='dark'] .desktop-update-popover,
+:root[data-theme='dark'] .announcement-modal-card,
+:root[data-theme='dark'] .cli-extension-menu,
+:root[data-theme='dark'] .assistant-menu,
+:root[data-theme='dark'] .image-style-menu,
+:root[data-theme='dark'] .cli-extension-floating-tooltip,
+:root[data-theme='dark'] .markdown-code-action-menu,
+:root[data-theme='dark'] .translation-modal-card,
+:root[data-theme='dark'] .toast-bar {
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.09), rgb(255 255 255 / 0.026)),
+    var(--popover-bg) !important;
+}
+
+.workspace-aurora {
+  opacity: calc(0.62 * var(--aurora-opacity, 1)) !important;
+  background:
+    radial-gradient(circle at 16% 18%, color-mix(in srgb, var(--aurora-a) 96%, transparent), transparent 9%),
+    radial-gradient(circle at 27% 76%, color-mix(in srgb, var(--aurora-c) 92%, transparent), transparent 8%),
+    radial-gradient(circle at 78% 18%, color-mix(in srgb, var(--aurora-b) 92%, transparent), transparent 8%),
+    radial-gradient(circle at 67% 84%, color-mix(in srgb, var(--aurora-d) 92%, transparent), transparent 9%),
+    linear-gradient(180deg, rgb(255 255 255 / 0.035), transparent) !important;
+  background-size: 145% 145%, 138% 138%, 150% 150%, 142% 142%, 100% 100% !important;
+  animation: oneapi-aurora-flow 18s ease-in-out infinite alternate !important;
+  filter: saturate(108%) blur(0) !important;
+}
+
+:root[data-theme='dark'] .workspace-aurora {
+  opacity: calc(0.48 * var(--aurora-opacity, 1)) !important;
+  filter: saturate(92%) brightness(0.82) blur(0) !important;
+}
+
+.workspace-aurora-blob,
+:root[data-theme='dark'] .workspace-aurora-blob {
+  opacity: 0.48 !important;
+  filter: blur(6px) saturate(96%) !important;
+}
+
+.workspace-aurora-blob.blob-a {
+  background:
+    radial-gradient(circle at 36% 38%, var(--aurora-a), transparent 34%),
+    radial-gradient(circle at 70% 66%, color-mix(in srgb, var(--aurora-a) 46%, transparent), transparent 22%) !important;
+}
+
+.workspace-aurora-blob.blob-b {
+  background:
+    radial-gradient(circle at 44% 42%, var(--aurora-b), transparent 32%),
+    radial-gradient(circle at 68% 24%, color-mix(in srgb, var(--aurora-b) 42%, transparent), transparent 20%) !important;
+}
+
+.workspace-aurora-blob.blob-c {
+  background:
+    radial-gradient(circle at 52% 48%, var(--aurora-c), transparent 34%),
+    radial-gradient(circle at 28% 68%, color-mix(in srgb, var(--aurora-c) 45%, transparent), transparent 21%) !important;
+}
+
+.workspace-aurora-blob.blob-d {
+  background:
+    radial-gradient(circle at 50% 50%, var(--aurora-d), transparent 33%),
+    radial-gradient(circle at 72% 34%, color-mix(in srgb, var(--aurora-d) 45%, transparent), transparent 20%) !important;
+}
+
+@keyframes oneapi-aurora-flow {
+  0% {
+    background-position: 0% 0%, 18% 76%, 100% 12%, 56% 100%, 0 0;
+  }
+  45% {
+    background-position: 17% 20%, 4% 62%, 86% 28%, 70% 82%, 0 0;
+  }
+  100% {
+    background-position: 35% 10%, 30% 58%, 72% 20%, 82% 72%, 0 0;
+  }
+}
+
+/* macOS refinement pass 3: remove residual shells, tighten radii, and restore glass hierarchy. */
+:root {
+  --radius-window: 16px;
+  --radius-card: 14px;
+  --radius-control: 10px;
+  --radius-chip: 8px;
+  --window-bg: rgba(244, 247, 251, 0.8);
+  --panel-bg: rgba(255, 255, 255, 0.18);
+  --popover-bg: rgba(247, 250, 254, 0.8);
+  --glass-blur: blur(28px) saturate(160%);
+  --glass-blur-strong: blur(40px) saturate(190%);
+  --aurora-a: rgba(10, 132, 255, 0.72);
+  --aurora-b: rgba(94, 92, 230, 0.48);
+  --aurora-c: rgba(255, 149, 0, 0.36);
+  --aurora-d: rgba(255, 45, 85, 0.3);
+}
+
+:root[data-theme='dark'] {
+  --window-bg: rgba(13, 16, 22, 0.8);
+  --panel-bg: rgba(22, 27, 37, 0.18);
+  --popover-bg: rgba(24, 30, 41, 0.8);
+  --aurora-a: rgba(10, 132, 255, 0.54);
+  --aurora-b: rgba(94, 92, 230, 0.42);
+  --aurora-c: rgba(191, 90, 242, 0.3);
+  --aurora-d: rgba(100, 210, 255, 0.24);
+}
+
+.desktop-window-shell,
+.desktop-window-content {
+  background:
+    linear-gradient(180deg, rgb(var(--window-bg-rgb) / 0.8), var(--window-bg)) !important;
+  backdrop-filter: var(--glass-blur-strong) !important;
+  -webkit-backdrop-filter: var(--glass-blur-strong) !important;
+}
+
+.workspace-aurora {
+  opacity: calc(0.7 * var(--aurora-opacity, 1)) !important;
+  background:
+    radial-gradient(circle at 12% 18%, var(--aurora-a) 0 8%, transparent 9%),
+    radial-gradient(circle at 64% 28%, var(--aurora-b) 0 7%, transparent 8%),
+    radial-gradient(circle at 28% 74%, var(--aurora-c) 0 7%, transparent 8%),
+    radial-gradient(circle at 82% 72%, var(--aurora-d) 0 8%, transparent 9%) !important;
+  background-size: 14.5% 14.5%, 13.8% 13.8%, 15% 15%, 14.2% 14.2% !important;
+  background-repeat: repeat !important;
+  animation: oneapi-aurora-flow 22s ease-in-out infinite alternate !important;
+  filter: saturate(324%) blur(0) !important;
+}
+
+:root[data-theme='dark'] .workspace-aurora {
+  opacity: calc(0.54 * var(--aurora-opacity, 1)) !important;
+  filter: saturate(276%) brightness(0.78) blur(0) !important;
+}
+
+.workspace-aurora-blob,
+:root[data-theme='dark'] .workspace-aurora-blob {
+  opacity: 0.36 !important;
+  filter: blur(10px) saturate(220%) !important;
+}
+
+.workspace-page > .panel,
+.workspace-page > article.panel,
+.panel.scroll-panel.page-surface,
+.scroll-panel.page-surface,
+article.panel.page-surface,
+.workspace-page > .panel.page-surface,
+.chat-panel-surface,
+.chat-main-panel,
+.conversation-panel,
+.cli-panel-surface,
+.cli-main-panel {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  outline: 0 !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.workspace-page > .panel:hover,
+.workspace-page > article.panel:hover,
+.panel.scroll-panel.page-surface:hover,
+.scroll-panel.page-surface:hover,
+article.panel.page-surface:hover,
+.workspace-page > .panel.page-surface:hover,
+.chat-panel-surface:hover,
+.chat-main-panel:hover,
+.conversation-panel:hover,
+.cli-panel-surface:hover,
+.cli-main-panel:hover {
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.panel-scroll,
+.conversation-scroll-region,
+.message-stream {
+  background: transparent !important;
+}
+
+.shell-composer,
+.chat-composer,
+.cli-composer,
+.composer,
+.composer-input-shell,
+.composer-toolbar {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.composer-input-zone {
+  overflow: visible !important;
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.composer-input-zone:focus-within {
+  box-shadow: none !important;
+}
+
+input:not([type='checkbox']):not([type='radio']):not([type='range']),
+select,
+textarea,
+.session-rename-input,
+.composer-input-zone textarea,
+.shell-composer textarea,
+.chat-composer textarea,
+.cli-composer textarea {
+  border: 1px solid var(--border-strong) !important;
+  border-radius: var(--radius-control) !important;
+  background: rgb(var(--panel-rgb) / 0.22) !important;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.22) !important;
+  backdrop-filter: blur(18px) saturate(140%) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(140%) !important;
+}
+
+textarea:focus,
+input:not([type='checkbox']):not([type='radio']):not([type='range']):focus,
+select:focus,
+.composer-input-zone textarea:focus {
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--border-strong)) !important;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.26),
+    0 0 0 3px rgb(var(--accent-rgb) / 0.13) !important;
+  outline: none !important;
+}
+
+.sidebar-account {
+  padding: 0 !important;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.sidebar-user-row {
+  gap: 0 !important;
+  padding: 7px 9px !important;
+  border-radius: var(--radius-card) !important;
+  background: rgb(var(--panel-rgb) / 0.24) !important;
+  border: 1px solid var(--border-subtle) !important;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.28), 0 8px 22px rgb(24 34 48 / 0.06) !important;
+  backdrop-filter: var(--glass-blur) !important;
+  -webkit-backdrop-filter: var(--glass-blur) !important;
+}
+
+.sidebar-user-row .user-pill,
+.sidebar-user-row .ghost-button {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.sidebar-user-row .user-pill,
+.sidebar-user-row > .ghost-button {
+  min-height: 28px;
+  padding: 0 10px !important;
+  position: relative;
+}
+
+.sidebar-user-row .user-pill.secondary::before,
+.sidebar-user-row > .ghost-button::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 1px;
+  height: 33%;
+  min-height: 10px;
+  background: var(--border-strong);
+  transform: translateY(-50%);
+}
+
+.collapsed-logout-button {
+  background: rgb(var(--panel-rgb) / 0.24) !important;
+  border: 1px solid var(--border-subtle) !important;
+  border-radius: var(--radius-control) !important;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.22) !important;
+}
+
+.modal-card .panel-header,
+.modal-card .panel-header.compact,
+.modal-card .panel-header > div,
+.announcement-modal-head,
+.translation-modal-card > div:first-child,
+.picker-menu-head,
+.desktop-notice-section-head {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.modal-card h1,
+.modal-card h2,
+.modal-card h3,
+.announcement-modal-head h2,
+.translation-modal-card h2,
+.picker-menu-head strong,
+.picker-menu-head span {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.modal-mask,
+.image-preview-modal-mask {
+  background: rgb(var(--bg-rgb) / 0.18) !important;
+  backdrop-filter: blur(52px) saturate(190%) !important;
+  -webkit-backdrop-filter: blur(52px) saturate(190%) !important;
+}
+
+:root[data-theme='dark'] .modal-mask,
+:root[data-theme='dark'] .image-preview-modal-mask {
+  background: rgb(5 7 11 / 0.34) !important;
+  backdrop-filter: blur(54px) saturate(155%) !important;
+  -webkit-backdrop-filter: blur(54px) saturate(155%) !important;
+}
+
+.picker-menu,
+.session-context-menu,
+.chat-history-panel,
+.cli-history-panel,
+.cli-plan-floating-panel,
+.modal-card,
+.image-preview-modal,
+.attachment-preview-modal,
+.desktop-update-popover,
+.announcement-modal-card,
+.cli-extension-menu,
+.assistant-menu,
+.image-style-menu,
+.cli-extension-floating-tooltip,
+.markdown-code-action-menu,
+.translation-modal-card,
+.toast-bar {
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.16), rgb(255 255 255 / 0.04)),
+    var(--popover-bg) !important;
+  border: 1px solid var(--border-strong) !important;
+  border-radius: var(--radius-card) !important;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.28), var(--shadow-floating) !important;
+  backdrop-filter: var(--glass-blur-strong) !important;
+  -webkit-backdrop-filter: var(--glass-blur-strong) !important;
+}
+
+:root[data-theme='dark'] .picker-menu,
+:root[data-theme='dark'] .session-context-menu,
+:root[data-theme='dark'] .chat-history-panel,
+:root[data-theme='dark'] .cli-history-panel,
+:root[data-theme='dark'] .cli-plan-floating-panel,
+:root[data-theme='dark'] .modal-card,
+:root[data-theme='dark'] .image-preview-modal,
+:root[data-theme='dark'] .attachment-preview-modal,
+:root[data-theme='dark'] .desktop-update-popover,
+:root[data-theme='dark'] .announcement-modal-card,
+:root[data-theme='dark'] .cli-extension-menu,
+:root[data-theme='dark'] .assistant-menu,
+:root[data-theme='dark'] .image-style-menu,
+:root[data-theme='dark'] .cli-extension-floating-tooltip,
+:root[data-theme='dark'] .markdown-code-action-menu,
+:root[data-theme='dark'] .translation-modal-card,
+:root[data-theme='dark'] .toast-bar {
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.075), rgb(255 255 255 / 0.018)),
+    var(--popover-bg) !important;
+}
+
+.panel-block,
+.service-status-card,
+.status-card,
+.pricing-card,
+.billing-card,
+.wallet-overview-card,
+.usage-trend-card,
+.message-bubble,
+.pending-image-shimmer,
+.generated-image {
+  border-radius: var(--radius-card) !important;
+}
+
+.primary-button,
+.secondary-button,
+.ghost-button,
+.picker-trigger,
+.assistant-mode-button,
+.history-panel-tabs .ghost-button,
+.metric-pill,
+.desktop-update-pill,
+.subscription-plan-badge,
+.composer-token-chip {
+  border-radius: var(--radius-control) !important;
+}
+
+.message-bubble:has(.generated-image-block) {
+  width: fit-content !important;
+  max-width: min(100%, 820px) !important;
+}
+
+.message-bubble:has(.generated-image-block) .generated-image-block {
+  width: fit-content;
+  max-width: 100%;
+}
+
+.message-bubble:has(.generated-image-block) .generated-image {
+  width: auto !important;
+  max-width: min(760px, 100%) !important;
+  max-height: 62vh;
+}
+
+.generated-image-actions {
+  display: none !important;
+}
+
+/* macOS refinement pass 4: one connected glass field, no dot texture. */
+:root {
+  --window-bg: rgba(244, 248, 252, 0.8);
+  --glass-blur: blur(44px) saturate(185%);
+  --glass-blur-strong: blur(68px) saturate(220%);
+  --sidebar-bg: rgba(248, 251, 255, 0.2);
+  --popover-bg: rgba(248, 251, 255, 0.68);
+}
+
+:root[data-theme='dark'] {
+  --window-bg: rgba(12, 15, 21, 0.8);
+  --sidebar-bg: rgba(18, 23, 32, 0.22);
+  --popover-bg: rgba(22, 28, 39, 0.72);
+}
+
+.desktop-window-shell {
+  position: relative !important;
+  isolation: isolate !important;
+  overflow: hidden !important;
+  background: transparent !important;
+}
+
+.desktop-window-shell::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgb(var(--window-bg-rgb) / 0.18), rgb(var(--window-bg-rgb) / 0.1)),
+    var(--window-bg);
+  backdrop-filter: var(--glass-blur-strong);
+  -webkit-backdrop-filter: var(--glass-blur-strong);
+}
+
+.workspace-aurora {
+  z-index: 0 !important;
+  opacity: calc(0.78 * var(--aurora-opacity, 1)) !important;
+  background:
+    radial-gradient(ellipse 72% 56% at 16% 18%, color-mix(in srgb, var(--aurora-a) 72%, transparent), transparent 66%),
+    radial-gradient(ellipse 66% 52% at 84% 14%, color-mix(in srgb, var(--aurora-b) 66%, transparent), transparent 68%),
+    radial-gradient(ellipse 74% 58% at 58% 88%, color-mix(in srgb, var(--aurora-c) 58%, transparent), transparent 70%),
+    radial-gradient(ellipse 54% 46% at 84% 82%, color-mix(in srgb, var(--aurora-d) 48%, transparent), transparent 70%),
+    linear-gradient(135deg, rgb(110 190 255 / 0.14), rgb(171 156 255 / 0.12) 46%, rgb(255 203 145 / 0.1)) !important;
+  background-size: 190% 190%, 180% 180%, 210% 210%, 170% 170%, 160% 160% !important;
+  background-repeat: no-repeat !important;
+  animation: oneapi-liquid-glass-flow 4.4s ease-in-out infinite alternate !important;
+  filter: saturate(180%) blur(0) !important;
+}
+
+:root[data-theme='dark'] .workspace-aurora {
+  opacity: calc(0.58 * var(--aurora-opacity, 1)) !important;
+  filter: saturate(150%) brightness(0.82) blur(0) !important;
+}
+
+.workspace-aurora::after,
+.workspace-aurora-veil,
+.workspace-aurora-blob {
+  display: none !important;
+  content: none !important;
+}
+
+.window-chrome,
+:root[data-theme='dark'] .window-chrome {
+  position: relative !important;
+  z-index: 3 !important;
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.2), rgb(255 255 255 / 0.045)) !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: var(--glass-blur-strong) !important;
+  -webkit-backdrop-filter: var(--glass-blur-strong) !important;
+}
+
+:root[data-theme='dark'] .window-chrome {
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.08), rgb(255 255 255 / 0.018)) !important;
+}
+
+.desktop-window-content {
+  position: relative !important;
+  z-index: 2 !important;
+  background: transparent !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.sidebar,
+:root[data-theme='dark'] .sidebar {
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.16), rgb(255 255 255 / 0.045)),
+    var(--sidebar-bg) !important;
+  border-right: 1px solid rgb(128 148 170 / 0.16) !important;
+  box-shadow:
+    inset 1px 0 0 rgb(255 255 255 / 0.22),
+    inset -1px 0 0 rgb(255 255 255 / 0.06),
+    12px 0 28px rgb(24 34 48 / 0.06) !important;
+  backdrop-filter: var(--glass-blur-strong) !important;
+  -webkit-backdrop-filter: var(--glass-blur-strong) !important;
+}
+
+:root[data-theme='dark'] .sidebar {
+  border-right-color: rgb(230 240 255 / 0.08) !important;
+  box-shadow:
+    inset 1px 0 0 rgb(255 255 255 / 0.055),
+    inset -1px 0 0 rgb(255 255 255 / 0.028),
+    12px 0 30px rgb(0 0 0 / 0.18) !important;
+}
+
+.assistant-topbar-tabs,
+.assistant-topbar-tabs:hover,
+.assistant-topbar-tabs:focus-within {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.modal-card,
+.image-preview-modal,
+.attachment-preview-modal,
+.announcement-modal-card,
+.translation-modal-card,
+.picker-menu,
+.session-context-menu,
+.chat-history-panel,
+.cli-history-panel,
+.cli-plan-floating-panel,
+.desktop-update-popover,
+.cli-extension-menu,
+.assistant-menu,
+.image-style-menu,
+.cli-extension-floating-tooltip,
+.markdown-code-action-menu,
+.toast-bar {
+  position: relative;
+  isolation: isolate;
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.24), rgb(255 255 255 / 0.055)),
+    var(--popover-bg) !important;
+  backdrop-filter: var(--glass-blur-strong) !important;
+  -webkit-backdrop-filter: var(--glass-blur-strong) !important;
+}
+
+:root[data-theme='dark'] .modal-card,
+:root[data-theme='dark'] .image-preview-modal,
+:root[data-theme='dark'] .attachment-preview-modal,
+:root[data-theme='dark'] .announcement-modal-card,
+:root[data-theme='dark'] .translation-modal-card,
+:root[data-theme='dark'] .picker-menu,
+:root[data-theme='dark'] .session-context-menu,
+:root[data-theme='dark'] .chat-history-panel,
+:root[data-theme='dark'] .cli-history-panel,
+:root[data-theme='dark'] .cli-plan-floating-panel,
+:root[data-theme='dark'] .desktop-update-popover,
+:root[data-theme='dark'] .cli-extension-menu,
+:root[data-theme='dark'] .assistant-menu,
+:root[data-theme='dark'] .image-style-menu,
+:root[data-theme='dark'] .cli-extension-floating-tooltip,
+:root[data-theme='dark'] .markdown-code-action-menu,
+:root[data-theme='dark'] .toast-bar {
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.08), rgb(255 255 255 / 0.018)),
+    var(--popover-bg) !important;
+}
+
+.modal-mask,
+.image-preview-modal-mask {
+  background: rgb(var(--bg-rgb) / 0.08) !important;
+  backdrop-filter: blur(72px) saturate(220%) !important;
+  -webkit-backdrop-filter: blur(72px) saturate(220%) !important;
+}
+
+:root[data-theme='dark'] .modal-mask,
+:root[data-theme='dark'] .image-preview-modal-mask {
+  background: rgb(5 7 11 / 0.18) !important;
+  backdrop-filter: blur(76px) saturate(170%) !important;
+  -webkit-backdrop-filter: blur(76px) saturate(170%) !important;
+}
+
+@keyframes oneapi-liquid-glass-flow {
+  0% {
+    background-position: 0% 6%, 96% 0%, 42% 100%, 100% 82%, 0% 0%;
+  }
+  50% {
+    background-position: 32% 20%, 70% 24%, 58% 72%, 78% 48%, 42% 34%;
+  }
+  100% {
+    background-position: 64% 8%, 46% 34%, 30% 64%, 56% 28%, 100% 72%;
+  }
+}
+
+/* macOS refinement pass 5: smaller liquid chunks and real dialog-surface glass. */
+.workspace-aurora {
+  opacity: calc(0.76 * var(--aurora-opacity, 1)) !important;
+  background:
+    radial-gradient(ellipse 38% 28% at 18% 18%, color-mix(in srgb, var(--aurora-a) 68%, transparent), transparent 58%),
+    radial-gradient(ellipse 34% 26% at 54% 14%, color-mix(in srgb, var(--aurora-b) 54%, transparent), transparent 58%),
+    radial-gradient(ellipse 36% 28% at 86% 24%, color-mix(in srgb, var(--aurora-a) 42%, transparent), transparent 60%),
+    radial-gradient(ellipse 42% 30% at 24% 72%, color-mix(in srgb, var(--aurora-c) 44%, transparent), transparent 62%),
+    radial-gradient(ellipse 34% 24% at 66% 78%, color-mix(in srgb, var(--aurora-d) 40%, transparent), transparent 62%),
+    linear-gradient(135deg, rgb(100 182 255 / 0.1), rgb(160 142 255 / 0.1) 48%, rgb(255 202 150 / 0.08)) !important;
+  background-size: 118% 118%, 112% 112%, 120% 120%, 116% 116%, 110% 110%, 126% 126% !important;
+  background-repeat: no-repeat !important;
+  animation: oneapi-liquid-chunk-flow 3.6s ease-in-out infinite alternate !important;
+  filter: saturate(170%) blur(0) !important;
+}
+
+:root[data-theme='dark'] .workspace-aurora {
+  opacity: calc(0.56 * var(--aurora-opacity, 1)) !important;
+  filter: saturate(145%) brightness(0.8) blur(0) !important;
+}
+
+.modal-card,
+.image-preview-modal,
+.attachment-preview-modal,
+.announcement-modal-card,
+.translation-modal-card,
+.picker-menu,
+.session-context-menu,
+.chat-history-panel,
+.cli-history-panel,
+.cli-plan-floating-panel,
+.desktop-update-popover,
+.cli-extension-menu,
+.assistant-menu,
+.image-style-menu,
+.cli-extension-floating-tooltip,
+.markdown-code-action-menu,
+.toast-bar,
+.modal-mask > .modal-card,
+.modal-mask > .announcement-modal-card,
+.modal-mask > .translation-modal-card,
+.image-preview-modal-mask > .image-preview-modal,
+.image-preview-modal-mask > .attachment-preview-modal {
+  position: relative !important;
+  isolation: isolate !important;
+  overflow: hidden !important;
+  background: transparent !important;
+  border: 1px solid color-mix(in srgb, var(--border-strong) 86%, transparent) !important;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.32),
+    var(--shadow-floating) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.modal-card::before,
+.image-preview-modal::before,
+.attachment-preview-modal::before,
+.announcement-modal-card::before,
+.translation-modal-card::before,
+.picker-menu::before,
+.session-context-menu::before,
+.chat-history-panel::before,
+.cli-history-panel::before,
+.cli-plan-floating-panel::before,
+.desktop-update-popover::before,
+.cli-extension-menu::before,
+.assistant-menu::before,
+.image-style-menu::before,
+.cli-extension-floating-tooltip::before,
+.markdown-code-action-menu::before,
+.toast-bar::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.28), rgb(255 255 255 / 0.06)),
+    rgb(248 251 255 / 0.54);
+  backdrop-filter: blur(72px) saturate(230%) contrast(0.96);
+  -webkit-backdrop-filter: blur(72px) saturate(230%) contrast(0.96);
+}
+
+:root[data-theme='dark'] .modal-card::before,
+:root[data-theme='dark'] .image-preview-modal::before,
+:root[data-theme='dark'] .attachment-preview-modal::before,
+:root[data-theme='dark'] .announcement-modal-card::before,
+:root[data-theme='dark'] .translation-modal-card::before,
+:root[data-theme='dark'] .picker-menu::before,
+:root[data-theme='dark'] .session-context-menu::before,
+:root[data-theme='dark'] .chat-history-panel::before,
+:root[data-theme='dark'] .cli-history-panel::before,
+:root[data-theme='dark'] .cli-plan-floating-panel::before,
+:root[data-theme='dark'] .desktop-update-popover::before,
+:root[data-theme='dark'] .cli-extension-menu::before,
+:root[data-theme='dark'] .assistant-menu::before,
+:root[data-theme='dark'] .image-style-menu::before,
+:root[data-theme='dark'] .cli-extension-floating-tooltip::before,
+:root[data-theme='dark'] .markdown-code-action-menu::before,
+:root[data-theme='dark'] .toast-bar::before {
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.1), rgb(255 255 255 / 0.025)),
+    rgb(21 27 38 / 0.62);
+  backdrop-filter: blur(76px) saturate(175%) contrast(0.9);
+  -webkit-backdrop-filter: blur(76px) saturate(175%) contrast(0.9);
+}
+
+.modal-card > *,
+.image-preview-modal > *,
+.attachment-preview-modal > *,
+.announcement-modal-card > *,
+.translation-modal-card > *,
+.picker-menu > *,
+.session-context-menu > *,
+.chat-history-panel > *,
+.cli-history-panel > *,
+.cli-plan-floating-panel > *,
+.desktop-update-popover > *,
+.cli-extension-menu > *,
+.assistant-menu > *,
+.image-style-menu > *,
+.cli-extension-floating-tooltip > *,
+.markdown-code-action-menu > *,
+.toast-bar > * {
+  position: relative;
+  z-index: 1;
+}
+
+.modal-mask,
+.image-preview-modal-mask {
+  background: rgb(var(--bg-rgb) / 0.06) !important;
+  backdrop-filter: blur(78px) saturate(230%) !important;
+  -webkit-backdrop-filter: blur(78px) saturate(230%) !important;
+}
+
+:root[data-theme='dark'] .modal-mask,
+:root[data-theme='dark'] .image-preview-modal-mask {
+  background: rgb(5 7 11 / 0.14) !important;
+  backdrop-filter: blur(82px) saturate(175%) !important;
+  -webkit-backdrop-filter: blur(82px) saturate(175%) !important;
+}
+
+@keyframes oneapi-liquid-chunk-flow {
+  0% {
+    background-position: 4% 8%, 42% 0%, 100% 12%, 10% 94%, 70% 86%, 0% 0%;
+  }
+  50% {
+    background-position: 22% 24%, 58% 18%, 76% 32%, 28% 70%, 56% 62%, 48% 36%;
+  }
+  100% {
+    background-position: 42% 12%, 72% 30%, 58% 18%, 44% 62%, 34% 48%, 100% 78%;
+  }
+}
+
+/* macOS refinement pass 6: transparent app-level glass background, no page backplates. */
+:root {
+  --app-glass-tint: rgba(246, 250, 255, 0.16);
+  --app-glass-highlight: rgba(255, 255, 255, 0.18);
+  --dialog-glass-bg: rgba(248, 251, 255, 0.62);
+  --dialog-glass-line: rgba(95, 115, 140, 0.18);
+}
+
+:root[data-theme='dark'] {
+  --app-glass-tint: rgba(10, 13, 19, 0.24);
+  --app-glass-highlight: rgba(255, 255, 255, 0.05);
+  --dialog-glass-bg: rgba(21, 27, 38, 0.68);
+  --dialog-glass-line: rgba(224, 236, 255, 0.12);
+}
+
+html,
+body,
+#root,
+.desktop-window-shell,
+.desktop-window-content,
+.shell,
+.main-panel,
+.workspace-host,
+.workspace-content-layer,
+.workspace-page,
+.chat-layout,
+.cli-layout,
+.conversation-scroll-region,
+.message-stream,
+.panel-scroll {
+  background: transparent !important;
+}
+
+.desktop-window-shell {
+  position: relative !important;
+  isolation: isolate !important;
+  overflow: hidden !important;
+  backdrop-filter: blur(56px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(56px) saturate(180%) !important;
+}
+
+.desktop-window-shell::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, var(--app-glass-highlight), transparent 38%),
+    var(--app-glass-tint) !important;
+  backdrop-filter: blur(72px) saturate(190%) !important;
+  -webkit-backdrop-filter: blur(72px) saturate(190%) !important;
+}
+
+.workspace-aurora {
+  z-index: 0 !important;
+  opacity: calc(0.72 * var(--aurora-opacity, 1)) !important;
+  background:
+    radial-gradient(ellipse 30% 24% at 16% 18%, color-mix(in srgb, var(--aurora-a) 58%, transparent), transparent 62%),
+    radial-gradient(ellipse 28% 22% at 42% 12%, color-mix(in srgb, var(--aurora-b) 48%, transparent), transparent 62%),
+    radial-gradient(ellipse 32% 24% at 78% 20%, color-mix(in srgb, var(--aurora-a) 38%, transparent), transparent 64%),
+    radial-gradient(ellipse 34% 26% at 22% 74%, color-mix(in srgb, var(--aurora-c) 42%, transparent), transparent 64%),
+    radial-gradient(ellipse 30% 22% at 58% 82%, color-mix(in srgb, var(--aurora-d) 36%, transparent), transparent 64%),
+    radial-gradient(ellipse 28% 22% at 88% 72%, color-mix(in srgb, var(--aurora-b) 32%, transparent), transparent 66%) !important;
+  background-size: 116% 116%, 110% 110%, 118% 118%, 112% 112%, 108% 108%, 114% 114% !important;
+  background-repeat: no-repeat !important;
+  animation: oneapi-transparent-glass-flow 4s ease-in-out infinite alternate !important;
+  filter: blur(18px) saturate(165%) !important;
+}
+
+:root[data-theme='dark'] .workspace-aurora {
+  opacity: calc(0.54 * var(--aurora-opacity, 1)) !important;
+  filter: blur(18px) saturate(140%) brightness(0.78) !important;
+}
+
+.workspace-aurora::after,
+.workspace-aurora-veil,
+.workspace-aurora-blob {
+  display: none !important;
+  content: none !important;
+}
+
+.desktop-window-content,
+.window-chrome {
+  position: relative !important;
+  z-index: 2 !important;
+}
+
+.window-chrome,
+:root[data-theme='dark'] .window-chrome {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.sidebar,
+:root[data-theme='dark'] .sidebar {
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.08), rgb(255 255 255 / 0.02)),
+    rgba(248, 251, 255, 0.08) !important;
+  border-right: 1px solid rgb(120 140 166 / 0.12) !important;
+  box-shadow:
+    inset 1px 0 0 rgb(255 255 255 / 0.16),
+    inset -1px 0 0 rgb(255 255 255 / 0.04),
+    10px 0 24px rgb(24 34 48 / 0.045) !important;
+  backdrop-filter: blur(46px) saturate(175%) !important;
+  -webkit-backdrop-filter: blur(46px) saturate(175%) !important;
+}
+
+:root[data-theme='dark'] .sidebar {
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.045), rgb(255 255 255 / 0.01)),
+    rgba(15, 20, 29, 0.16) !important;
+  border-right-color: rgb(224 236 255 / 0.08) !important;
+}
+
+.workspace-page > .panel,
+.workspace-page > article.panel,
+.panel.scroll-panel.page-surface,
+.scroll-panel.page-surface,
+article.panel.page-surface,
+.workspace-page > .panel.page-surface,
+.chat-panel-surface,
+.chat-main-panel,
+.conversation-panel,
+.cli-panel-surface,
+.cli-main-panel {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  outline: 0 !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.modal-card::before,
+.image-preview-modal::before,
+.attachment-preview-modal::before,
+.announcement-modal-card::before,
+.translation-modal-card::before,
+.picker-menu::before,
+.session-context-menu::before,
+.chat-history-panel::before,
+.cli-history-panel::before,
+.cli-plan-floating-panel::before,
+.desktop-update-popover::before,
+.cli-extension-menu::before,
+.assistant-menu::before,
+.image-style-menu::before,
+.cli-extension-floating-tooltip::before,
+.markdown-code-action-menu::before,
+.toast-bar::before {
+  display: none !important;
+  content: none !important;
+}
+
+.modal-card,
+.image-preview-modal,
+.attachment-preview-modal,
+.announcement-modal-card,
+.translation-modal-card,
+.picker-menu,
+.session-context-menu,
+.chat-history-panel,
+.cli-history-panel,
+.cli-plan-floating-panel,
+.desktop-update-popover,
+.cli-extension-menu,
+.assistant-menu,
+.image-style-menu,
+.cli-extension-floating-tooltip,
+.markdown-code-action-menu,
+.toast-bar,
+.modal-mask > .modal-card,
+.modal-mask > .announcement-modal-card,
+.modal-mask > .translation-modal-card,
+.image-preview-modal-mask > .image-preview-modal,
+.image-preview-modal-mask > .attachment-preview-modal {
+  isolation: auto !important;
+  overflow: visible !important;
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.22), rgb(255 255 255 / 0.055)),
+    var(--dialog-glass-bg) !important;
+  border: 1px solid var(--dialog-glass-line) !important;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.28),
+    0 22px 62px rgb(25 35 50 / 0.18) !important;
+  backdrop-filter: blur(64px) saturate(220%) contrast(0.96) !important;
+  -webkit-backdrop-filter: blur(64px) saturate(220%) contrast(0.96) !important;
+}
+
+:root[data-theme='dark'] .modal-card,
+:root[data-theme='dark'] .image-preview-modal,
+:root[data-theme='dark'] .attachment-preview-modal,
+:root[data-theme='dark'] .announcement-modal-card,
+:root[data-theme='dark'] .translation-modal-card,
+:root[data-theme='dark'] .picker-menu,
+:root[data-theme='dark'] .session-context-menu,
+:root[data-theme='dark'] .chat-history-panel,
+:root[data-theme='dark'] .cli-history-panel,
+:root[data-theme='dark'] .cli-plan-floating-panel,
+:root[data-theme='dark'] .desktop-update-popover,
+:root[data-theme='dark'] .cli-extension-menu,
+:root[data-theme='dark'] .assistant-menu,
+:root[data-theme='dark'] .image-style-menu,
+:root[data-theme='dark'] .cli-extension-floating-tooltip,
+:root[data-theme='dark'] .markdown-code-action-menu,
+:root[data-theme='dark'] .toast-bar {
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.085), rgb(255 255 255 / 0.018)),
+    var(--dialog-glass-bg) !important;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.08),
+    0 26px 70px rgb(0 0 0 / 0.42) !important;
+  backdrop-filter: blur(66px) saturate(170%) contrast(0.9) !important;
+  -webkit-backdrop-filter: blur(66px) saturate(170%) contrast(0.9) !important;
+}
+
+.picker-menu,
+.assistant-menu,
+.image-style-menu,
+.model-menu,
+.image-config-menu,
+.cli-extension-menu {
+  overflow: hidden !important;
+}
+
+.modal-mask,
+.image-preview-modal-mask {
+  background: rgb(var(--bg-rgb) / 0.06) !important;
+  backdrop-filter: blur(28px) saturate(170%) !important;
+  -webkit-backdrop-filter: blur(28px) saturate(170%) !important;
+}
+
+:root[data-theme='dark'] .modal-mask,
+:root[data-theme='dark'] .image-preview-modal-mask {
+  background: rgb(5 7 11 / 0.14) !important;
+  backdrop-filter: blur(30px) saturate(140%) !important;
+  -webkit-backdrop-filter: blur(30px) saturate(140%) !important;
+}
+
+@keyframes oneapi-transparent-glass-flow {
+  0% {
+    background-position: 0% 10%, 38% 2%, 100% 18%, 6% 92%, 60% 88%, 100% 76%;
+  }
+  45% {
+    background-position: 18% 22%, 52% 18%, 78% 34%, 28% 68%, 48% 66%, 82% 56%;
+  }
+  100% {
+    background-position: 40% 8%, 72% 30%, 58% 18%, 44% 62%, 30% 46%, 62% 34%;
+  }
+}
+
+/* macOS refinement pass 7: true transparent client substrate plus dialog glass. */
+:root {
+  --app-glass-tint: rgba(248, 251, 255, 0.035);
+  --app-glass-highlight: rgba(255, 255, 255, 0.08);
+  --app-glass-line: rgba(120, 142, 168, 0.09);
+  --dialog-glass-bg: rgba(249, 252, 255, 0.48);
+  --dialog-glass-line: rgba(94, 116, 142, 0.2);
+  --dialog-glass-highlight: rgba(255, 255, 255, 0.26);
+  --sidebar-bg: rgba(248, 251, 255, 0.075);
+}
+
+:root[data-theme='dark'] {
+  --app-glass-tint: rgba(8, 11, 17, 0.09);
+  --app-glass-highlight: rgba(255, 255, 255, 0.032);
+  --app-glass-line: rgba(220, 234, 255, 0.055);
+  --dialog-glass-bg: rgba(18, 24, 35, 0.52);
+  --dialog-glass-line: rgba(225, 237, 255, 0.13);
+  --dialog-glass-highlight: rgba(255, 255, 255, 0.075);
+  --sidebar-bg: rgba(12, 17, 26, 0.1);
+}
+
+html,
+body,
+#root,
+.desktop-window-shell,
+.desktop-window-content,
+.shell,
+.main-panel,
+.workspace-host,
+.workspace-content-layer,
+.workspace-page,
+.full-bleed-page,
+.chat-page,
+.cli-page,
+.chat-layout,
+.cli-layout,
+.conversation-scroll-region,
+.message-stream,
+.cli-thread,
+.panel-scroll {
+  background: transparent !important;
+}
+
+.desktop-window-shell {
+  position: relative !important;
+  isolation: isolate !important;
+  overflow: hidden !important;
+  background: transparent !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.desktop-window-shell::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, var(--app-glass-highlight), transparent 36%),
+    var(--app-glass-tint) !important;
+  border: 1px solid var(--app-glass-line);
+  backdrop-filter: blur(82px) saturate(210%) contrast(0.96) !important;
+  -webkit-backdrop-filter: blur(82px) saturate(210%) contrast(0.96) !important;
+}
+
+:root[data-theme='dark'] .desktop-window-shell::before {
+  backdrop-filter: blur(86px) saturate(170%) contrast(0.9) !important;
+  -webkit-backdrop-filter: blur(86px) saturate(170%) contrast(0.9) !important;
+}
+
+.workspace-aurora {
+  position: absolute !important;
+  inset: -18% !important;
+  z-index: 0 !important;
+  pointer-events: none !important;
+  opacity: calc(0.82 * var(--aurora-opacity, 1)) !important;
+  background:
+    radial-gradient(ellipse 18% 16% at 12% 20%, color-mix(in srgb, var(--aurora-a) 70%, transparent), transparent 68%),
+    radial-gradient(ellipse 16% 14% at 36% 10%, color-mix(in srgb, var(--aurora-b) 58%, transparent), transparent 68%),
+    radial-gradient(ellipse 19% 15% at 66% 22%, color-mix(in srgb, var(--aurora-c) 48%, transparent), transparent 70%),
+    radial-gradient(ellipse 17% 14% at 88% 14%, color-mix(in srgb, var(--aurora-d) 56%, transparent), transparent 70%),
+    radial-gradient(ellipse 20% 16% at 18% 78%, color-mix(in srgb, var(--aurora-c) 44%, transparent), transparent 70%),
+    radial-gradient(ellipse 17% 14% at 48% 88%, color-mix(in srgb, var(--aurora-a) 46%, transparent), transparent 70%),
+    radial-gradient(ellipse 18% 15% at 82% 76%, color-mix(in srgb, var(--aurora-b) 44%, transparent), transparent 72%) !important;
+  background-size: 118% 118%, 112% 112%, 122% 122%, 116% 116%, 120% 120%, 114% 114%, 118% 118% !important;
+  background-repeat: no-repeat !important;
+  animation: oneapi-small-liquid-flow 2.8s ease-in-out infinite alternate !important;
+  filter: blur(16px) saturate(220%) !important;
+}
+
+:root[data-theme='dark'] .workspace-aurora {
+  opacity: calc(0.62 * var(--aurora-opacity, 1)) !important;
+  filter: blur(16px) saturate(175%) brightness(0.8) !important;
+}
+
+.workspace-aurora::after,
+.workspace-aurora-veil,
+.workspace-aurora-blob {
+  display: none !important;
+  content: none !important;
+}
+
+.desktop-window-content,
+.window-chrome {
+  position: relative !important;
+  z-index: 2 !important;
+}
+
+.window-chrome,
+:root[data-theme='dark'] .window-chrome {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.sidebar,
+:root[data-theme='dark'] .sidebar {
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.07), rgb(255 255 255 / 0.018)),
+    var(--sidebar-bg) !important;
+  border-right: 1px solid var(--app-glass-line) !important;
+  box-shadow:
+    inset 1px 0 0 rgb(255 255 255 / 0.13),
+    inset -1px 0 0 rgb(255 255 255 / 0.035) !important;
+  backdrop-filter: blur(48px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(48px) saturate(180%) !important;
+}
+
+:root[data-theme='dark'] .sidebar {
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.04), rgb(255 255 255 / 0.01)),
+    var(--sidebar-bg) !important;
+  box-shadow:
+    inset 1px 0 0 rgb(255 255 255 / 0.05),
+    inset -1px 0 0 rgb(255 255 255 / 0.025) !important;
+}
+
+.workspace-page > .panel,
+.workspace-page > article.panel,
+.panel.scroll-panel.page-surface,
+.scroll-panel.page-surface,
+article.panel.page-surface,
+.workspace-page > .panel.page-surface,
+.page-surface.panel,
+.chat-panel-surface,
+.chat-main-panel,
+.conversation-panel,
+.cli-panel-surface,
+.cli-main-panel,
+.workspace-page > .chat-main-panel,
+.workspace-page > .cli-main-panel {
+  background: transparent !important;
+  border-color: transparent !important;
+  border-width: 0 !important;
+  box-shadow: none !important;
+  outline: 0 !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.workspace-page > .panel:hover,
+.workspace-page > article.panel:hover,
+.panel.scroll-panel.page-surface:hover,
+.scroll-panel.page-surface:hover,
+article.panel.page-surface:hover,
+.workspace-page > .panel.page-surface:hover,
+.chat-main-panel:hover,
+.cli-main-panel:hover {
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.modal-card::before,
+.image-preview-modal::before,
+.attachment-preview-modal::before,
+.announcement-modal-card::before,
+.translation-modal-card::before,
+.picker-menu::before,
+.session-context-menu::before,
+.chat-history-panel::before,
+.cli-history-panel::before,
+.cli-plan-floating-panel::before,
+.desktop-update-popover::before,
+.cli-extension-menu::before,
+.assistant-menu::before,
+.image-style-menu::before,
+.cli-extension-floating-tooltip::before,
+.markdown-code-action-menu::before,
+.toast-bar::before {
+  display: none !important;
+  content: none !important;
+}
+
+.modal-card,
+.image-preview-modal,
+.attachment-preview-modal,
+.announcement-modal-card,
+.translation-modal-card,
+.picker-menu,
+.session-context-menu,
+.chat-history-panel,
+.cli-history-panel,
+.cli-plan-floating-panel,
+.desktop-update-popover,
+.cli-extension-menu,
+.assistant-menu,
+.image-style-menu,
+.cli-extension-floating-tooltip,
+.markdown-code-action-menu,
+.toast-bar,
+.modal-mask > .modal-card,
+.modal-mask > .announcement-modal-card,
+.modal-mask > .translation-modal-card,
+.image-preview-modal-mask > .image-preview-modal,
+.image-preview-modal-mask > .attachment-preview-modal {
+  position: relative !important;
+  isolation: auto !important;
+  background:
+    linear-gradient(180deg, var(--dialog-glass-highlight), rgb(255 255 255 / 0.035)),
+    var(--dialog-glass-bg) !important;
+  border: 1px solid var(--dialog-glass-line) !important;
+  box-shadow:
+    inset 0 1px 0 var(--dialog-glass-highlight),
+    0 24px 70px rgb(20 30 46 / 0.22) !important;
+  backdrop-filter: blur(54px) saturate(210%) contrast(0.96) !important;
+  -webkit-backdrop-filter: blur(54px) saturate(210%) contrast(0.96) !important;
+}
+
+:root[data-theme='dark'] .modal-card,
+:root[data-theme='dark'] .image-preview-modal,
+:root[data-theme='dark'] .attachment-preview-modal,
+:root[data-theme='dark'] .announcement-modal-card,
+:root[data-theme='dark'] .translation-modal-card,
+:root[data-theme='dark'] .picker-menu,
+:root[data-theme='dark'] .session-context-menu,
+:root[data-theme='dark'] .chat-history-panel,
+:root[data-theme='dark'] .cli-history-panel,
+:root[data-theme='dark'] .cli-plan-floating-panel,
+:root[data-theme='dark'] .desktop-update-popover,
+:root[data-theme='dark'] .cli-extension-menu,
+:root[data-theme='dark'] .assistant-menu,
+:root[data-theme='dark'] .image-style-menu,
+:root[data-theme='dark'] .cli-extension-floating-tooltip,
+:root[data-theme='dark'] .markdown-code-action-menu,
+:root[data-theme='dark'] .toast-bar {
+  background:
+    linear-gradient(180deg, var(--dialog-glass-highlight), rgb(255 255 255 / 0.018)),
+    var(--dialog-glass-bg) !important;
+  box-shadow:
+    inset 0 1px 0 var(--dialog-glass-highlight),
+    0 28px 76px rgb(0 0 0 / 0.48) !important;
+  backdrop-filter: blur(58px) saturate(170%) contrast(0.9) !important;
+  -webkit-backdrop-filter: blur(58px) saturate(170%) contrast(0.9) !important;
+}
+
+.modal-card,
+.image-preview-modal,
+.attachment-preview-modal,
+.announcement-modal-card,
+.translation-modal-card {
+  overflow: hidden !important;
+}
+
+.picker-menu,
+.assistant-menu,
+.image-style-menu,
+.model-menu,
+.image-config-menu,
+.cli-extension-menu,
+.chat-history-panel,
+.cli-history-panel {
+  overflow: hidden !important;
+}
+
+.session-context-menu,
+.desktop-update-popover,
+.cli-plan-floating-panel,
+.cli-extension-floating-tooltip,
+.markdown-code-action-menu,
+.toast-bar {
+  overflow: visible !important;
+}
+
+.modal-mask,
+.image-preview-modal-mask {
+  background: rgb(var(--bg-rgb) / 0.035) !important;
+  backdrop-filter: blur(32px) saturate(185%) !important;
+  -webkit-backdrop-filter: blur(32px) saturate(185%) !important;
+}
+
+:root[data-theme='dark'] .modal-mask,
+:root[data-theme='dark'] .image-preview-modal-mask {
+  background: rgb(5 7 11 / 0.12) !important;
+  backdrop-filter: blur(34px) saturate(150%) !important;
+  -webkit-backdrop-filter: blur(34px) saturate(150%) !important;
+}
+
+@keyframes oneapi-small-liquid-flow {
+  0% {
+    background-position: 0% 8%, 34% 0%, 70% 18%, 100% 4%, 6% 86%, 42% 100%, 98% 78%;
+  }
+  50% {
+    background-position: 18% 22%, 48% 16%, 56% 36%, 78% 26%, 28% 66%, 56% 78%, 72% 54%;
+  }
+  100% {
+    background-position: 36% 10%, 66% 28%, 40% 20%, 58% 42%, 46% 58%, 28% 70%, 54% 36%;
+  }
+}
+
+/* macOS refinement pass 8: remove decorative effects and keep efficiency visuals always. */
+:root {
+  --aurora-opacity: 0;
+  --ui-opacity: 1;
+  --ui-solidness: 1;
+  --panel: rgb(var(--panel-rgb));
+  --panel-strong: rgb(var(--panel-strong-rgb));
+  --surface: rgb(var(--surface-rgb));
+  --surface-strong: rgb(var(--surface-strong-rgb));
+  --bubble-user: rgb(var(--surface-strong-rgb));
+  --bubble-ai: rgb(var(--panel-rgb));
+  --bubble-log: rgb(var(--surface-rgb));
+  --glass-shadow: none;
+  --glass-shadow-strong: none;
+  --glass-highlight: none;
+  --glass-border: var(--line);
+  --shadow: none;
+}
+
+*,
+*::before,
+*::after {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.workspace-aurora,
+.workspace-aurora::after,
+.workspace-aurora-veil,
+.workspace-aurora-blob {
+  display: none !important;
+  opacity: 0 !important;
+  animation: none !important;
+  filter: none !important;
+  background: transparent !important;
+}
+
+.desktop-window-shell::before {
+  display: none !important;
+  content: none !important;
+}
+
+.desktop-window-shell,
+.main-panel {
+  background: var(--bg) !important;
+  box-shadow: none !important;
+}
+
+.window-chrome,
+:root[data-theme='dark'] .window-chrome {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.sidebar,
+:root[data-theme='dark'] .sidebar {
+  background: var(--panel-strong) !important;
+  border-right: 1px solid var(--line) !important;
+  box-shadow: none !important;
+}
+
+.chat-panel-surface,
+.cli-panel-surface,
+.page-surface,
+.workspace-page > .panel,
+.workspace-page > article.panel,
+.panel.scroll-panel.page-surface,
+.scroll-panel.page-surface,
+article.panel.page-surface,
+.workspace-page > .panel.page-surface,
+.page-surface.panel,
+.chat-main-panel,
+.cli-main-panel {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.panel,
+.modal-card,
+.login-card,
+.panel-block,
+.pricing-card,
+.mini-stat,
+.status-card,
+.service-status-card,
+.empty-card,
+.key-reveal,
+.result-block,
+.cli-history-panel,
+.chat-history-panel,
+.settings-card,
+.settings-intro-card,
+.billing-card,
+.record-row,
+.wallet-overview-card,
+.wallet-overview-metric,
+.inline-notice,
+.reasoning-card,
+.picker-menu,
+.session-context-menu,
+.cli-plan-floating-panel,
+.image-preview-modal,
+.attachment-preview-modal,
+.desktop-update-popover,
+.announcement-modal-card,
+.translation-modal-card,
+.cli-extension-menu,
+.assistant-menu,
+.image-style-menu,
+.cli-extension-floating-tooltip,
+.markdown-code-action-menu,
+.toast-bar {
+  background: var(--panel-strong) !important;
+  border-color: var(--line) !important;
+  box-shadow: none !important;
+}
+
+.message-bubble.user,
+.message-bubble.assistant,
+.message-bubble.system,
+.cli-log-bubble,
+.cli-log-bubble.error {
+  background: var(--panel-strong) !important;
+  border-color: var(--line) !important;
+  box-shadow: none !important;
+}
+
+.ghost-button,
+.collapse-button,
+.secondary-button,
+.theme-toggle-button,
+.picker-trigger,
+.icon-picker-trigger,
+.icon-pill-trigger,
+input,
+select,
+textarea,
+.message-extension-chip,
+.composer-token-chip {
+  background: var(--surface-strong) !important;
+  border-color: var(--line) !important;
+  box-shadow: none !important;
+}
+
+.modal-mask,
+.image-preview-modal-mask {
+  background: color-mix(in srgb, var(--bg) 92%, transparent) !important;
+}
+
+.toolbar-picker {
+  position: relative !important;
+}
+
+.toolbar-picker > .picker-menu,
+.toolbar-picker > .model-menu,
+.toolbar-picker > .assistant-menu,
+.toolbar-picker > .image-config-menu {
+  position: absolute !important;
+  left: 0 !important;
+  right: auto !important;
+  top: auto !important;
+  bottom: calc(100% + 8px) !important;
+  z-index: 80 !important;
+}
+
+.toolbar-picker > .model-menu {
+  width: min(312px, 76vw) !important;
+}
+
+.composer-input-shell {
+  position: relative !important;
+}
+
+.composer-overlay-panel {
+  position: absolute !important;
+  left: 0 !important;
+  right: auto !important;
+  top: auto !important;
+  bottom: calc(100% + 10px) !important;
+  z-index: 80 !important;
+  width: 100% !important;
+  pointer-events: none;
+}
+
+.composer-overlay-panel > * {
+  pointer-events: auto;
+}
+
+/* macOS refinement pass 9: restore popup geometry after visual overrides. */
+.conversation-scroll-region {
+  position: relative !important;
+}
+
+.cli-plan-floating-panel {
+  position: absolute !important;
+  top: 10px !important;
+  right: 10px !important;
+  bottom: auto !important;
+  left: auto !important;
+  z-index: 30 !important;
+  width: min(260px, calc(100% - 24px)) !important;
+  max-height: calc(50% - 20px) !important;
+  overflow: hidden !important;
+}
+
+.session-context-menu {
+  position: fixed !important;
+  right: auto !important;
+  bottom: auto !important;
+  z-index: 90 !important;
+}
+
+.desktop-update-popover {
+  position: absolute !important;
+  left: 0 !important;
+  right: 0 !important;
+  top: auto !important;
+  bottom: calc(100% + 10px) !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  z-index: 40 !important;
+}
+
+.markdown-code-action-menu {
+  position: absolute !important;
+  top: calc(100% + 6px) !important;
+  right: 0 !important;
+  bottom: auto !important;
+  left: auto !important;
+  z-index: 50 !important;
+}
+
+.composer-input-shell {
+  overflow: visible !important;
+}
+
+.composer-overlay-panel {
+  overflow: visible !important;
+}
+
+.composer-overlay-panel .cli-extension-overlay-anchor {
+  position: absolute !important;
+  top: auto !important;
+  bottom: 0 !important;
+  right: auto !important;
+  z-index: 82 !important;
+}
+
+.composer-overlay-panel .cli-extension-overlay-anchor.anchored-to-composer {
+  left: 0 !important;
+  width: 100% !important;
+}
+
+.composer-overlay-panel .cli-extension-overlay-anchor.anchored-to-button {
+  right: auto !important;
+}
+
+.composer-overlay-panel .cli-extension-menu {
+  position: relative !important;
+  left: auto !important;
+  right: auto !important;
+  top: auto !important;
+  bottom: auto !important;
+  width: 100% !important;
+  max-width: min(360px, calc(100vw - 40px)) !important;
+}
