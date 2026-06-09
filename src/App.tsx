@@ -933,6 +933,7 @@ type CliLogEntry = {
   command?: string
   exitCode?: number
   interaction?: CliInteractionPrompt
+  done?: boolean
 }
 
 type CliExtensionPreferenceBucket = {
@@ -10478,6 +10479,7 @@ function CliWorkspace(props: {
         command: payload.command,
         exitCode: payload.exitCode,
         interaction: payload.interaction,
+        done: payload.done,
       } satisfies CliLogEntry
       enqueueCliLogEntry(targetSessionId, nextEntry, !!payload.done)
 
@@ -11447,6 +11449,9 @@ function CliWorkspace(props: {
     clearAttachments()
     window.setTimeout(() => resizePrompt(), 0)
     setRunning(true)
+    let finalSessionKey = currentSessionKey
+    let finalRequestSourceKind = 'result'
+    let finalRequestMessage = `${client === 'codex' ? 'Codex' : 'Claude'} 已完成本次回复。`
 
     try {
       const response = await runCliPrompt({
@@ -11461,6 +11466,7 @@ function CliWorkspace(props: {
       })
 
       const nextSessionId = response.sessionId || currentSessionKey
+      finalSessionKey = nextSessionId
       bindProjectSession(requestProjectPath, nextSessionId)
 
       if (nextSessionId !== currentSessionKey) {
@@ -11527,14 +11533,41 @@ function CliWorkspace(props: {
       }
 
       if (!response.success && response.metadata?.aborted !== true) {
+        finalRequestSourceKind = 'request.failed'
+        finalRequestMessage = `${client === 'codex' ? 'Codex' : 'Claude'} 执行失败。`
         toast(response.error || `${client} 执行失败`)
+      } else if (response.metadata?.aborted === true) {
+        finalRequestSourceKind = 'request.aborted'
+        finalRequestMessage = `${client === 'codex' ? 'Codex' : 'Claude'} 已停止本次回复。`
       }
       void refreshCliState(true)
     } catch (error) {
+      finalRequestSourceKind = stoppingRunRef.current ? 'request.aborted' : 'request.failed'
+      finalRequestMessage = stoppingRunRef.current
+        ? `${client === 'codex' ? 'Codex' : 'Claude'} 已停止本次回复。`
+        : `${client === 'codex' ? 'Codex' : 'Claude'} 执行失败。`
       if (!stoppingRunRef.current && !isAbortError(error)) {
         toast(error instanceof Error ? error.message : '执行失败')
       }
     } finally {
+      const completedAt = Date.now()
+      setSessionLogsMap((current) => ({
+        ...current,
+        [finalSessionKey]: [
+          ...(current[finalSessionKey] || []),
+          {
+            id: `${requestId}-local-terminal-${completedAt}`,
+            requestId,
+            sessionId: finalSessionKey,
+            level: finalRequestSourceKind === 'request.failed' ? 'error' : 'status',
+            logKind: finalRequestSourceKind === 'request.failed' ? 'error' : 'status',
+            sourceKind: finalRequestSourceKind,
+            content: finalRequestMessage,
+            createdAt: completedAt,
+            done: true,
+          },
+        ],
+      }))
       setRequestSessionMap((current) => {
         const next = { ...current }
         delete next[requestId]

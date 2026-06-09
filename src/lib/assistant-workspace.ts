@@ -20,6 +20,7 @@ export type CliLogEntryLike = {
   command?: string
   exitCode?: number
   interaction?: CliInteractionPrompt
+  done?: boolean
 }
 
 export type CliTimelineLogEvent = {
@@ -36,6 +37,7 @@ export type CliTimelineLogEvent = {
   command?: string
   exitCode?: number
   interaction?: CliInteractionPrompt
+  done?: boolean
 }
 
 export function buildCliAbortLogEntry(input: {
@@ -426,6 +428,7 @@ export function buildCliTimeline(input: {
       detail: item.detail,
       command: item.command,
       exitCode: item.exitCode,
+      done: item.done,
       ...(item.interaction ? { interaction: item.interaction } : {}),
     }
     const lastGroup = groups.at(-1)
@@ -565,6 +568,7 @@ export function resolveCliLogGroupStatus(
     level: 'status' | 'error'
     sourceKind?: string
     interaction?: CliInteractionPrompt
+    done?: boolean
   }>
 ) {
   const pendingInteraction = [...events].reverse().find((item) => item.interaction?.status === 'pending')
@@ -575,6 +579,7 @@ export function resolveCliLogGroupStatus(
   const terminal = [...events].reverse().find((item) => {
     const sourceKind = item.sourceKind || ''
     return (
+      item.done ||
       item.level === 'error' ||
       sourceKind === 'request.failed' ||
       sourceKind === 'request.aborted' ||
@@ -596,6 +601,7 @@ export function resolveCliLogGroupStatus(
     return { tone: 'error', label: '执行失败' as const }
   }
   if (
+    terminal?.done ||
     terminal?.sourceKind === 'result' ||
     terminal?.sourceKind === 'turn.completed' ||
     terminal?.sourceKind === 'request.stream.completed'

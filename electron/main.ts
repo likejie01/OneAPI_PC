@@ -150,6 +150,10 @@ const activeCliRequestStates = new Map<string, {
   client: CliClient
   child: ChildProcess
   webContents: WebContents | null
+  sessionId: string
+  projectPath: string
+  prompt: string
+  startedAt: number
   fullAccess: boolean
   autoApprove: boolean
   interactions: Map<string, CliInteractionPrompt>
@@ -1816,6 +1820,57 @@ function cliTimestampToMillis(value: number) {
   return value > 10_000_000_000 ? Math.floor(value) : Math.floor(value * 1000)
 }
 
+function updateActiveCliSessionState(requestId: string, sessionId?: string) {
+  const clean = sessionId?.trim()
+  if (!requestId || !clean) {
+    return
+  }
+  const state = activeCliRequestStates.get(requestId)
+  if (state) {
+    state.sessionId = clean
+  }
+}
+
+function activeCliSnapshotForSession(client: CliClient, sessionId: string) {
+  const cleanSessionId = sessionId.trim()
+  if (!cleanSessionId) {
+    return null
+  }
+  for (const [requestId, state] of activeCliRequestStates.entries()) {
+    if (state.client === client && state.sessionId.trim() === cleanSessionId) {
+      return { requestId, state }
+    }
+  }
+  return null
+}
+
+function buildActiveMobileBridgeSessionSnapshot(requestId: string, state: NonNullable<ReturnType<typeof activeCliSnapshotForSession>>['state']): MobileBridgeSessionSnapshot {
+  const projectPath = state.projectPath.trim()
+  const projectName = projectPath ? path.basename(projectPath) || projectPath : '本机项目'
+  const sessionId = state.sessionId.trim() || `running-${state.client}-${requestId}`
+  const prompt = normalizeWhitespace(extractCliUserTask(state.prompt) || state.prompt)
+  return {
+    id: sessionId,
+    client: state.client,
+    sessionId,
+    title: projectName,
+    preview: prompt || `${state.client === 'codex' ? 'Codex' : 'Claude'} 正在执行`,
+    projectName,
+    projectPath,
+    model: '',
+    status: 'running',
+    updatedAt: Date.now(),
+    purposes: [],
+    messages: prompt ? [{
+      id: `running-${requestId}-prompt`,
+      role: 'user',
+      text: prompt,
+      timestamp: state.startedAt,
+    }] : [],
+    logs: [],
+  }
+}
+
 async function buildMobileBridgeSessionSnapshot(client: CliClient, entry: CliHistoryEntry): Promise<MobileBridgeSessionSnapshot | null> {
   const details = client === 'codex'
     ? await getCodexSession(entry.id).catch(() => null)
@@ -1855,16 +1910,19 @@ async function buildMobileBridgeSessionSnapshot(client: CliClient, entry: CliHis
     // Keep the raw storage value when it was not JSON encoded.
   }
 
+  const sessionId = details?.id || entry.id
+  const active = activeCliSnapshotForSession(client, sessionId)
+
   return {
     id: details?.id || entry.id,
     client,
-    sessionId: details?.id || entry.id,
+    sessionId,
     title: entry.title || projectName,
     preview,
     projectName,
     projectPath,
     model: selectedModel || model,
-    status: 'synced',
+    status: active ? 'running' : 'synced',
     updatedAt,
     purposes: [],
     messages,
@@ -1891,6 +1949,17 @@ async function syncMobileBridgeSessionsSnapshot(force = false) {
   const sessions = entries
     .filter((item): item is MobileBridgeSessionSnapshot => !!item)
     .sort((left, right) => right.updatedAt - left.updatedAt)
+  const existingKeys = new Set(sessions.map((item) => `${item.client}\n${item.sessionId}`))
+  for (const [requestId, state] of activeCliRequestStates.entries()) {
+    const sessionId = state.sessionId.trim()
+    const key = `${state.client}\n${sessionId}`
+    if (sessionId && existingKeys.has(key)) {
+      continue
+    }
+    const snapshot = buildActiveMobileBridgeSessionSnapshot(requestId, state)
+    sessions.unshift(snapshot)
+    existingKeys.add(`${snapshot.client}\n${snapshot.sessionId}`)
+  }
 
   const signature = JSON.stringify(sessions.map((item) => ({
     id: item.id,
@@ -1898,6 +1967,7 @@ async function syncMobileBridgeSessionsSnapshot(force = false) {
     updatedAt: item.updatedAt,
     model: item.model || '',
     projectPath: item.projectPath,
+    status: item.status,
     preview: item.preview.slice(0, 200),
     messageCount: item.messages.length,
   })))
@@ -2699,6 +2769,10 @@ function createMobileBridgeEventMapper(jobId: string) {
   return (payload: CliProgressPayload): Array<Record<string, unknown>> => {
     const events: Array<Record<string, unknown>> = []
     const assistantChunk = payload.assistantChunk?.trim() || ''
+
+    if (payload.client === 'claude' && payload.sourceKind === 'runtime.spawn') {
+      return events
+    }
 
     if (payload.kind === 'partial') {
       const delta = assistantChunk || takePartialDelta(payload)
@@ -7788,11 +7862,16 @@ async function runCodexPrompt(
         client: 'codex',
         child,
         webContents,
+        sessionId: sessionId || input.sessionId || `running-codex-${input.requestId}`,
+        projectPath: input.projectPath,
+        prompt: input.prompt,
+        startedAt: requestStartedAtMs,
         fullAccess: !!input.fullAccess,
         autoApprove: false,
         interactions: new Map(),
         interactionKeys: new Set(),
       })
+      void syncMobileBridgeSessionsSnapshot(true).catch(() => undefined)
     },
     onStdoutLine: (line) => {
       const parsed = parseJsonLine(line)
@@ -7812,6 +7891,7 @@ async function runCodexPrompt(
 
       if (parsed.type === 'thread.started' && typeof parsed.thread_id === 'string') {
         sessionId = parsed.thread_id
+        updateActiveCliSessionState(input.requestId, sessionId)
         progress.intent('已连接到 Codex 会话。', sessionId, 'thread.started', undefined, 'thread.started')
         return
       }
@@ -7993,6 +8073,7 @@ async function runCodexPrompt(
   activeCliProcesses.delete(input.requestId)
   activeCliRequestStates.delete(input.requestId)
   stopCliPowerSaveBlocker(input.requestId)
+  void syncMobileBridgeSessionsSnapshot(true).catch(() => undefined)
   const aborted = stoppedCliRequests.delete(input.requestId)
   if (aborted) {
     progress.status('Codex 已停止本次回复。', sessionId, true, undefined, { logKind: 'status', sourceKind: 'request.aborted', plan: planState })
@@ -8093,6 +8174,7 @@ async function runCodexPrompt(
       plan: planState,
     })
   }
+  await syncMobileBridgeSessionsSnapshot(true).catch(() => undefined)
 
   return {
     success: success || completedWithWarnings,
@@ -8318,11 +8400,16 @@ async function runClaudePrompt(
         client: 'claude',
         child,
         webContents,
+        sessionId: sessionId || input.sessionId || `running-claude-${input.requestId}`,
+        projectPath: input.projectPath,
+        prompt: input.prompt,
+        startedAt: requestStartedAtMs,
         fullAccess: !!input.fullAccess,
         autoApprove: false,
         interactions: new Map(),
         interactionKeys: new Set(),
       })
+      void syncMobileBridgeSessionsSnapshot(true).catch(() => undefined)
     },
     onStdoutLine: (line) => {
       const parsed = parseJsonLine(line)
@@ -8346,6 +8433,7 @@ async function runClaudePrompt(
         sessionId !== parsed.session_id
       ) {
         sessionId = parsed.session_id
+        updateActiveCliSessionState(input.requestId, sessionId)
         progress.intent('已连接到 Claude 会话。', sessionId, 'session.connected', undefined, 'session.connected')
       }
 
@@ -8581,6 +8669,7 @@ async function runClaudePrompt(
   activeCliProcesses.delete(input.requestId)
   activeCliRequestStates.delete(input.requestId)
   stopCliPowerSaveBlocker(input.requestId)
+  void syncMobileBridgeSessionsSnapshot(true).catch(() => undefined)
   const aborted = stoppedCliRequests.delete(input.requestId)
   if (aborted) {
     progress.status('Claude 已停止本次回复。', sessionId, true, undefined, { logKind: 'status', sourceKind: 'request.aborted', plan: planState })
@@ -8694,6 +8783,7 @@ async function runClaudePrompt(
       plan: planState,
     })
   }
+  await syncMobileBridgeSessionsSnapshot(true).catch(() => undefined)
 
   return {
     success: success || completedWithWarnings,
