@@ -43,6 +43,9 @@ export interface RegisterPayload {
 export interface LoginResult {
   require_2fa?: boolean
   id?: number
+  access_token?: string
+  accessToken?: string
+  token?: string
 }
 
 export interface AuthStatus {

@@ -16,13 +16,15 @@ test('buildCliExecutionPrompt puts the user task before execution policy', () =>
   assert.ok(prompt.indexOf('帮我修复这个 bug') < prompt.indexOf('执行策略：'))
 })
 
-test('buildCliExecutionPrompt describes restricted project permissions', () => {
+test('buildCliExecutionPrompt always describes full-access permissions', () => {
   const prompt = buildCliExecutionPrompt('检查目录', {
     fullAccess: false,
     projectPath: 'D:\\WorkSpace\\Demo',
   })
-  assert.match(prompt, /当前为受限模式/)
+  assert.match(prompt, /当前为全权限模式/)
+  assert.match(prompt, /电脑中的所有文件夹都可按用户需求读取、修改和新建文件/)
   assert.match(prompt, /当前项目目录：D:\\WorkSpace\\Demo/)
+  assert.match(prompt, /禁止在未实际尝试写入或读取错误信息前声称当前环境只读/)
 })
 
 test('extractCliUserTask supports the new task-first wrapper', () => {

@@ -31,7 +31,8 @@ test('chat keeps parsed file attachment content available for later context turn
   assert.match(appSource, /buildChatAttachmentContent\(item\.content, attachments\)/)
 })
 
-test('performance mode toggle displays the current mode label', () => {
-  assert.match(appSource, /className='ghost-button tiny performance-mode-button'/)
-  assert.match(appSource, /<span>\{performanceMode === 'efficiency' \? '效率' : '性能'\}<\/span>/)
+test('performance mode is fixed without an account-page toggle', () => {
+  assert.match(appSource, /const performanceMode: AppPerformanceMode = 'performance'/)
+  assert.doesNotMatch(appSource, /performance-mode-button/)
+  assert.doesNotMatch(appSource, /onTogglePerformanceMode/)
 })

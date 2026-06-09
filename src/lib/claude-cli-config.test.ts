@@ -14,12 +14,19 @@ test('normalizeClaudeApiKey keeps sk-prefixed keys and normalizes bare keys', ()
   assert.equal(normalizeClaudeApiKey(''), '')
 })
 
-test('pickClaudeApiKeyFromUnknown reads auth token fields', () => {
+test('pickClaudeApiKeyFromUnknown reads only API key and ignores legacy auth token', () => {
+  assert.equal(
+    pickClaudeApiKeyFromUnknown({
+      ANTHROPIC_API_KEY: 'sk-api',
+      ANTHROPIC_AUTH_TOKEN: 'sk-auth',
+    }),
+    'sk-api'
+  )
   assert.equal(
     pickClaudeApiKeyFromUnknown({
       ANTHROPIC_AUTH_TOKEN: 'sk-auth',
     }),
-    'sk-auth'
+    ''
   )
   assert.equal(
     pickClaudeApiKeyFromUnknown({
@@ -53,7 +60,7 @@ test('resolveClaudeDesktopEnv restores missing base url from auth document', () 
   })
 
   assert.equal(env.ANTHROPIC_API_KEY, 'sk-demo')
-  assert.equal(env.ANTHROPIC_AUTH_TOKEN, 'sk-demo')
+  assert.equal(env.ANTHROPIC_AUTH_TOKEN, undefined)
   assert.equal(env.ANTHROPIC_BASE_URL, 'https://ai.oneapi.center')
 })
 
@@ -66,6 +73,6 @@ test('resolveClaudeDesktopEnv falls back to default base url and fallback key', 
   })
 
   assert.equal(env.ANTHROPIC_API_KEY, 'sk-demo')
-  assert.equal(env.ANTHROPIC_AUTH_TOKEN, 'sk-demo')
+  assert.equal(env.ANTHROPIC_AUTH_TOKEN, undefined)
   assert.equal(env.ANTHROPIC_BASE_URL, 'https://ai.oneapi.center')
 })

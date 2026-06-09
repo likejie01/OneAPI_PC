@@ -20,7 +20,6 @@ import {
   EyeOff,
   FileText,
   FolderOpen,
-  Gauge,
   Shuffle,
   KeyRound,
   LoaderCircle,
@@ -47,7 +46,6 @@ import {
   UserPlus,
   Wallet,
   X,
-  Zap,
 } from 'lucide-react'
 import {
   createAssistant,
@@ -111,7 +109,7 @@ import {
   installUpdate,
   onUpdateState,
 } from './domains/update'
-import { createDesktopCliKey, ensureDesktopServiceKey, fetchApiKeySecret, getApiKeys } from './domains/keys'
+import { ensureDesktopServiceKey, fetchApiKeySecret, getApiKeys } from './domains/keys'
 import {
   deleteMobileDesktopBinding,
   deleteMobileDesktopDevice,
@@ -170,7 +168,13 @@ import {
   isDraftCliSessionId,
 } from './lib/cli-session'
 import { shouldRenderCliLogEventRow, shouldRenderCliLogOutputEntry } from './lib/cli-log-rendering'
-import { AUTH_EXPIRED_EVENT, clearStoredDesktopUserId, saveStoredDesktopUserId } from './lib/desktop-client'
+import {
+  AUTH_EXPIRED_EVENT,
+  clearStoredDesktopAccessToken,
+  clearStoredDesktopUserId,
+  saveStoredDesktopAccessToken,
+  saveStoredDesktopUserId,
+} from './lib/desktop-client'
 import { deriveDesktopChatDisplayState, normalizeStoredDesktopChatMessage } from './lib/chat-reasoning'
 import {
   applyAssistantSelectionToEmptyChatSession,
@@ -300,9 +304,12 @@ type SideTab = 'assistants' | 'subscriptions' | 'wallet' | 'service-status' | 'm
 type HistoryVisibilityTab = 'visible' | 'hidden'
 type ThemeMode = 'light' | 'dark'
 type AppPerformanceMode = 'performance' | 'efficiency'
+type CliRunningState = {
+  running: boolean
+  requestId: string
+}
 
 const THEME_MODE_STORAGE_KEY = 'oneapi-desktop-theme-mode'
-const APP_PERFORMANCE_MODE_STORAGE_KEY = 'oneapi-desktop-performance-mode'
 const AppPerformanceModeContext = createContext<AppPerformanceMode>('performance')
 
 function useAppPerformanceMode() {
@@ -392,6 +399,16 @@ function writeServiceStatusCache(value: ServiceStatusCacheStore) {
 
 function countPlanPurchases(records: SubscriptionSelfData['all_subscriptions'], planId: number) {
   return records.filter((item) => item.subscription.plan_id === planId).length
+}
+
+function isAssistantHistoryTriggerTarget(target: EventTarget | null) {
+  return target instanceof Element && !!target.closest('.assistant-history-button')
+}
+
+function isSubscriptionExhausted(subscription: SubscriptionSelfData['all_subscriptions'][number]['subscription']) {
+  const total = Number(subscription.amount_total || 0)
+  const used = Number(subscription.amount_used || 0)
+  return total > 0 && used >= total
 }
 
 function resolveSubscriptionStatusLabel(status?: string) {
@@ -925,8 +942,29 @@ type CliExtensionPreferenceBucket = {
 }
 
 type CliExtensionPreferenceStore = Record<string, CliExtensionPreferenceBucket>
+type CliExtensionTranslationCache = Record<string, string>
 
 type CliMessageOverlayStore = Record<string, CliMessageOverlay[]>
+
+function hashStorageText(value: string) {
+  let hash = 5381
+  for (let index = 0; index < value.length; index += 1) {
+    hash = ((hash << 5) + hash) ^ value.charCodeAt(index)
+  }
+  return (hash >>> 0).toString(36)
+}
+
+function resolveCliExtensionTranslationCacheKey(client: CliClient, item: CliExtensionViewItem, description: string) {
+  return [
+    client,
+    item.kind,
+    item.installKey ||
+      [item.catalogSource?.repoUrl, item.catalogSource?.subdir, item.catalogSource?.sha].filter(Boolean).join('#') ||
+      item.id ||
+      item.name,
+    hashStorageText(description),
+  ].join(':')
+}
 
 type ComposerActionItem = {
   key: string
@@ -1504,6 +1542,77 @@ const DRAW_QUALITY_OPTIONS = [
   { label: '高清', value: 'high' },
 ] as const
 
+type PickerMenuWidthStyle = CSSProperties & {
+  '--picker-menu-width'?: string
+  '--picker-menu-safe-width'?: string
+  '--picker-menu-list-height'?: string
+  '--picker-menu-list-max-height'?: string
+}
+
+function estimatePickerTextUnits(value: string) {
+  return Array.from(value || '').reduce((total, char) => {
+    if (/\s/.test(char)) {
+      return total + 0.35
+    }
+    if (/[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]/.test(char)) {
+      return total + 1
+    }
+    if (/[A-Z0-9]/.test(char)) {
+      return total + 0.64
+    }
+    if (/[-_./:·|()[\]]/.test(char)) {
+      return total + 0.42
+    }
+    return total + 0.58
+  }, 0)
+}
+
+function createPickerMenuWidthStyle(
+  labels: string[],
+  options: {
+    min?: number
+    max?: number
+    padding?: number
+    itemCount?: number
+    rowHeight?: number
+    rowGap?: number
+    minListHeight?: number
+    maxListHeight?: number
+  } = {}
+): PickerMenuWidthStyle {
+  const {
+    min = 188,
+    max = 420,
+    padding = 72,
+    itemCount = labels.length,
+    rowHeight = 40,
+    rowGap = 6,
+    minListHeight = 0,
+    maxListHeight = 240,
+  } = options
+  const longestUnits = labels.reduce((longest, label) => Math.max(longest, estimatePickerTextUnits(label)), 0)
+  const width = Math.max(min, Math.min(max, Math.ceil(longestUnits * 13 + padding)))
+  const widthValue = `${width}px`
+  const safeWidthValue = `min(${widthValue}, calc(100vw - 48px))`
+  const effectiveItemCount = Math.max(1, itemCount)
+  const listHeight = Math.max(
+    minListHeight,
+    Math.min(maxListHeight, Math.ceil(effectiveItemCount * rowHeight + Math.max(0, effectiveItemCount - 1) * rowGap))
+  )
+  const listHeightValue = `min(${listHeight}px, calc(100vh - 240px))`
+  const listMaxHeightValue = `min(${maxListHeight}px, calc(100vh - 240px))`
+  return {
+    '--picker-menu-width': widthValue,
+    '--picker-menu-safe-width': safeWidthValue,
+    '--picker-menu-list-height': listHeightValue,
+    '--picker-menu-list-max-height': listMaxHeightValue,
+    width: safeWidthValue,
+    minWidth: safeWidthValue,
+    maxWidth: safeWidthValue,
+    flexBasis: safeWidthValue,
+  }
+}
+
 type ChatContextWindow = (typeof CHAT_CONTEXT_WINDOW_OPTIONS)[number]['value']
 
 function isImageGenerationModel(value: string) {
@@ -1734,28 +1843,8 @@ function BubbleMeta(props: {
   return (
     <div className={`message-meta ${side}`}>
       <div className='message-meta-main'>
-        {side === 'right' && (
-          <div className='bubble-actions'>
-            {actions.map((action) => {
-              const Icon = action.icon
-              return (
-                <button
-                  key={action.key}
-                  className='bubble-action'
-                  type='button'
-                  onClick={action.onClick}
-                  title={action.label}
-                  aria-label={action.label}
-                  disabled={action.disabled}
-                >
-                  <Icon size={14} />
-                </button>
-              )
-            })}
-          </div>
-        )}
         <small>{formatDateTime(createdAt)}</small>
-        {side === 'left' && (
+        {actions.length > 0 ? (
           <div className='bubble-actions'>
             {actions.map((action) => {
               const Icon = action.icon
@@ -1774,7 +1863,7 @@ function BubbleMeta(props: {
               )
             })}
           </div>
-        )}
+        ) : null}
       </div>
       {extra ? <div className='message-meta-extra'>{extra}</div> : null}
     </div>
@@ -1968,7 +2057,11 @@ const USAGE_CHART_COLORS = [
   '#54708c',
 ]
 
-function buildSmoothLinePath(points: Array<{ x: number; y: number }>) {
+function clampChartCoordinate(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(value, max))
+}
+
+function buildSmoothLinePath(points: Array<{ x: number; y: number }>, minY?: number, maxY?: number) {
   if (points.length === 0) {
     return ''
   }
@@ -1984,7 +2077,13 @@ function buildSmoothLinePath(points: Array<{ x: number; y: number }>) {
     const previous = points[index]
     const current = rest[index]
     const midX = (previous.x + current.x) / 2
-    path += ` Q ${midX} ${previous.y} ${current.x} ${current.y}`
+    const controlY1 = typeof minY === 'number' && typeof maxY === 'number'
+      ? clampChartCoordinate(previous.y, minY, maxY)
+      : previous.y
+    const controlY2 = typeof minY === 'number' && typeof maxY === 'number'
+      ? clampChartCoordinate(current.y, minY, maxY)
+      : current.y
+    path += ` C ${midX} ${controlY1} ${midX} ${controlY2} ${current.x} ${current.y}`
   }
 
   return path
@@ -2068,9 +2167,10 @@ function UsageTrendChart(props: {
   const left = 36
   const right = 24
   const top = 18
-  const bottom = 40
+  const bottom = 52
   const chartWidth = width - left - right
   const chartHeight = height - top - bottom
+  const chartBottom = top + chartHeight
   const maxValue = Math.max(
     1,
     ...chart.labels.flatMap((label) => chart.models.map((model) => chart.buckets.get(label)?.get(model) || 0))
@@ -2087,6 +2187,11 @@ function UsageTrendChart(props: {
         aria-label='模型调用分析趋势图'
         onMouseLeave={() => setHoveredPoint(null)}
       >
+        <defs>
+          <clipPath id='usage-trend-chart-clip'>
+            <rect x={left} y={top} width={chartWidth} height={chartHeight} />
+          </clipPath>
+        </defs>
         {Array.from({ length: gridRows + 1 }).map((_, index) => {
           const y = top + (chartHeight / gridRows) * index
           return (
@@ -2101,20 +2206,20 @@ function UsageTrendChart(props: {
           )
         })}
 
-        {chart.models.map((model, modelIndex) => {
-          const values = chart.labels.map((label) => chart.buckets.get(label)?.get(model) || 0)
-          const points = values.map((value, index) => {
-            const x = left + (chartWidth * index) / Math.max(chart.labels.length - 1, 1)
-            const y = top + chartHeight - (value / maxValue) * chartHeight
-            return { x, y }
-          })
+        <g clipPath='url(#usage-trend-chart-clip)'>
+          {chart.models.map((model, modelIndex) => {
+            const values = chart.labels.map((label) => chart.buckets.get(label)?.get(model) || 0)
+            const points = values.map((value, index) => {
+              const x = left + (chartWidth * index) / Math.max(chart.labels.length - 1, 1)
+              const y = clampChartCoordinate(top + chartHeight - (value / maxValue) * chartHeight, top, chartBottom)
+              return { x, y }
+            })
+            const color = USAGE_CHART_COLORS[modelIndex % USAGE_CHART_COLORS.length]
 
-          return (
-            <g key={model}>
-              <path d={buildSmoothLinePath(points)} fill='none' stroke={USAGE_CHART_COLORS[modelIndex % USAGE_CHART_COLORS.length]} strokeWidth='2.5' strokeLinecap='round' />
-              {points.map((point, index) => {
-                const color = USAGE_CHART_COLORS[modelIndex % USAGE_CHART_COLORS.length]
-                return (
+            return (
+              <g key={model}>
+                <path d={buildSmoothLinePath(points, top, chartBottom)} fill='none' stroke={color} strokeWidth='2.5' strokeLinecap='round' />
+                {points.map((point, index) => (
                   <circle
                     key={`${model}-${index}`}
                     cx={point.x}
@@ -2139,11 +2244,11 @@ function UsageTrendChart(props: {
                       )
                     }}
                   />
-                )
-              })}
-            </g>
-          )
-        })}
+                ))}
+              </g>
+            )
+          })}
+        </g>
 
         {chart.labels.map((label, index) => {
           if (index % tickStep !== 0 && index !== chart.labels.length - 1) {
@@ -2462,12 +2567,43 @@ function SessionContextMenu(props: {
 
 function AttachmentPreviewModal(props: {
   preview: AttachmentPreviewState | null
+  toast: (message: string) => void
   onClose: () => void
   onImageContextMenu?: (event: MouseEvent<HTMLImageElement | HTMLDivElement>, preview: Extract<AttachmentPreviewState, { mode: 'image' }>) => void
 }) {
-  const { preview, onClose, onImageContextMenu } = props
+  const { preview, toast, onClose, onImageContextMenu } = props
   if (!preview) {
     return null
+  }
+
+  async function handleCopyPreviewImage() {
+    if (!preview || preview.mode !== 'image') {
+      return
+    }
+    try {
+      await copyImageToClipboard({
+        filePath: preview.path,
+        sourceUrl: preview.src.startsWith('file:') ? undefined : preview.src,
+      })
+      toast('图片已复制到剪贴板。')
+    } catch (error) {
+      toast(error instanceof Error ? error.message : '复制图片失败')
+    }
+  }
+
+  async function handleDownloadPreviewImage() {
+    if (!preview || preview.mode !== 'image') {
+      return
+    }
+    try {
+      const result = await saveImageToDisk({
+        suggestedName: preview.name || `oneapi-image-${Date.now()}.png`,
+        sourceUrl: preview.src.startsWith('file:') ? undefined : preview.src,
+      })
+      toast(result.path ? `已保存到：${result.path}` : '图片已保存。')
+    } catch (error) {
+      toast(error instanceof Error ? error.message : '保存图片失败')
+    }
   }
 
   let previewContent: ReactNode
@@ -2497,21 +2633,29 @@ function AttachmentPreviewModal(props: {
 
   return (
     <div className='modal-mask image-preview-modal-mask' onClick={onClose}>
-      <div className='image-preview-modal attachment-preview-modal' onClick={(event) => event.stopPropagation()}>
-        <div className='image-preview-actions'>
-          <div className='attachment-preview-title-block'>
-            <strong>{preview.name}</strong>
-            <span title={preview.path}>{preview.path}</span>
-          </div>
-          <button className='ghost-button tiny' type='button' onClick={onClose}>
-            <X size={14} />
-            <span>关闭</span>
-          </button>
-        </div>
+      <div
+        className={`image-preview-modal attachment-preview-modal ${preview.mode === 'image' ? 'image-only' : ''}`}
+        onClick={(event) => event.stopPropagation()}
+      >
         <div
           className='image-preview-stage attachment-preview-stage'
           onContextMenu={preview.mode === 'image' ? (event) => onImageContextMenu?.(event, preview) : undefined}
         >
+          <div className='image-preview-overlay-actions'>
+            {preview.mode === 'image' ? (
+              <>
+                <button className='ghost-button icon-only tiny image-preview-icon-button' type='button' onClick={() => void handleCopyPreviewImage()} title='复制图片' aria-label='复制图片'>
+                  <Copy size={15} />
+                </button>
+                <button className='ghost-button icon-only tiny image-preview-icon-button' type='button' onClick={() => void handleDownloadPreviewImage()} title='下载图片' aria-label='下载图片'>
+                  <Download size={15} />
+                </button>
+              </>
+            ) : null}
+            <button className='ghost-button icon-only tiny image-preview-icon-button' type='button' onClick={onClose} title='关闭' aria-label='关闭'>
+              <X size={15} />
+            </button>
+          </div>
           {previewContent}
         </div>
       </div>
@@ -2619,8 +2763,8 @@ function MessageCliExtensionChips(props: {
 }
 
 function CliExtensionPalette(props: {
-  title: string
   loading: boolean
+  menuStyle?: PickerMenuWidthStyle
   paletteItems: CliPaletteItem[]
   availableTabs: CliPaletteTab[]
   activeTab: CliPaletteTab
@@ -2638,6 +2782,7 @@ function CliExtensionPalette(props: {
   searchActive: boolean
   onKeyDown: (event: ReactKeyboardEvent<HTMLElement>) => void
   onToggleFavorite: (item: CliExtensionViewItem) => void
+  getCachedTranslatedDetail: (item: CliExtensionViewItem) => string
   onTranslateDetail: (item: CliExtensionViewItem) => Promise<string>
   onContextMenu: (event: MouseEvent, item: CliExtensionViewItem) => void
   autoInvokeEnabled: boolean
@@ -2645,8 +2790,8 @@ function CliExtensionPalette(props: {
   menuHostRef?: React.RefObject<HTMLDivElement | null>
 }) {
   const {
-    title,
     loading,
+    menuStyle,
     paletteItems,
     availableTabs,
     activeTab,
@@ -2664,6 +2809,7 @@ function CliExtensionPalette(props: {
     searchActive,
     onKeyDown,
     onToggleFavorite,
+    getCachedTranslatedDetail,
     onTranslateDetail,
     onContextMenu,
     autoInvokeEnabled,
@@ -2674,8 +2820,7 @@ function CliExtensionPalette(props: {
   const tooltipHideTimerRef = useRef<number | null>(null)
   const [hoveredTooltip, setHoveredTooltip] = useState<{
     left: number
-    top?: number
-    bottom?: number
+    top: number
     item: CliExtensionViewItem
     originalDescription: string
     translatedDescription: string
@@ -2696,41 +2841,32 @@ function CliExtensionPalette(props: {
     tooltipHideTimerRef.current = window.setTimeout(() => {
       setHoveredTooltip(null)
       tooltipHideTimerRef.current = null
-    }, 120)
+    }, 220)
   }
 
   function openDetailTooltip(trigger: HTMLElement, item: CliExtensionViewItem) {
     clearTooltipHideTimer()
-    const menuRect = menuRef.current?.getBoundingClientRect()
-    if (!menuRect) {
-      return
-    }
     const triggerRect = trigger.getBoundingClientRect()
     const originalDescription = item.description.trim()
-    const translatedDescription = translateCliExtensionDescription(item.name, originalDescription)
+    const cachedTranslation = getCachedTranslatedDetail(item)
+    const localTranslation = translateCliExtensionDescription(item.name, originalDescription).trim()
+    const translatedDescription = cachedTranslation || localTranslation
     const tooltipWidth = 280
-    const menuPadding = 12
-    const tooltipGap = 10
-    const estimatedTooltipHeight = 180
-    const relativeLeft = Math.max(
-      menuPadding,
-      Math.min(
-        triggerRect.right - menuRect.left - tooltipWidth,
-        menuRect.width - tooltipWidth - menuPadding
-      )
+    const tooltipGap = 6
+    const viewportPadding = 12
+    const fixedLeft = Math.max(
+      viewportPadding,
+      Math.min(triggerRect.right - tooltipWidth, window.innerWidth - tooltipWidth - viewportPadding)
     )
-    const spaceAbove = triggerRect.top - menuRect.top
-    const spaceBelow = menuRect.bottom - triggerRect.bottom
-    const placeBelow = spaceBelow >= estimatedTooltipHeight || spaceBelow >= spaceAbove
+    const fixedTop = Math.max(viewportPadding, triggerRect.top - tooltipGap)
 
     setHoveredTooltip({
-      left: relativeLeft,
-      top: placeBelow ? triggerRect.bottom - menuRect.top + tooltipGap : undefined,
-      bottom: placeBelow ? undefined : menuRect.bottom - triggerRect.top + tooltipGap,
+      left: fixedLeft,
+      top: fixedTop,
       item,
       originalDescription,
       translatedDescription,
-      showTranslated: false,
+      showTranslated: Boolean(translatedDescription && translatedDescription !== originalDescription),
       translating: false,
       translationUnavailable: false,
     })
@@ -2746,22 +2882,14 @@ function CliExtensionPalette(props: {
           menuHostRef.current = node
         }
       }}
-      className='picker-menu cli-extension-menu'
+      className='picker-menu cli-extension-menu fixed-width-menu'
+      style={menuStyle}
       onMouseLeave={scheduleTooltipHide}
     >
-      <div className='picker-menu-head cli-extension-menu-head'>
-        <strong>{title}</strong>
-        <input
-          className='cli-extension-search'
-          value={searchValue}
-          placeholder='搜索扩展'
-          autoFocus
-          onChange={(event) => onSearchChange(event.target.value)}
-          onKeyDown={onKeyDown}
-        />
-      </div>
-      {availableTabs.length > 1 ? (
-        <div className='picker-filter-row cli-extension-filter-row'>
+      <div className='picker-filter-row cli-extension-filter-row'>
+        <div className='cli-extension-filter-tabs'>
+          {availableTabs.length > 1 ? (
+            <>
           {availableTabs.map((tab) => (
             <button
               key={tab}
@@ -2772,41 +2900,42 @@ function CliExtensionPalette(props: {
               <span>{tab}</span>
             </button>
           ))}
+            </>
+          ) : null}
         </div>
-      ) : null}
-      <div className='cli-extension-toolbar'>
-        <button
-          className='ghost-button icon-only tiny'
-          type='button'
-          onClick={onRefresh}
-          title={loading ? '正在刷新' : searchActive ? '搜索已生效' : '刷新扩展'}
-        >
-          {loading ? <LoaderCircle className='spin' size={14} /> : searchActive ? <Search size={14} /> : <RotateCcw size={14} />}
-        </button>
-        <span className='cli-extension-toolbar-status'>
-          {loading
-            ? '正在刷新扩展列表...'
-            : searchActive
-              ? `搜索中，命中 ${paletteItems.length} 项`
-              : `共 ${paletteItems.length} 项`}
-        </span>
-        <label className='cli-extension-auto-toggle'>
-          <span>自动调用</span>
+        <div className='cli-extension-toolbar'>
           <input
-            type='checkbox'
-            checked={autoInvokeEnabled}
-            onChange={(event) => onAutoInvokeChange(event.target.checked)}
+            className='cli-extension-search'
+            value={searchValue}
+            placeholder='搜索扩展'
+            autoFocus
+            onChange={(event) => onSearchChange(event.target.value)}
+            onKeyDown={onKeyDown}
           />
-        </label>
+          <button
+            className='ghost-button icon-only tiny'
+            type='button'
+            onClick={onRefresh}
+            title={loading ? '正在刷新' : searchActive ? '搜索已生效' : '刷新扩展'}
+          >
+            {loading ? <LoaderCircle className='spin' size={14} /> : searchActive ? <Search size={14} /> : <RotateCcw size={14} />}
+          </button>
+          <label className='cli-extension-auto-toggle'>
+            <span>自动调用</span>
+            <input
+              type='checkbox'
+              checked={autoInvokeEnabled}
+              onChange={(event) => onAutoInvokeChange(event.target.checked)}
+            />
+          </label>
+        </div>
       </div>
-      {hoveredTooltip ? (
+      {hoveredTooltip ? createPortal(
         <div
           className='cli-extension-floating-tooltip'
           style={{
             left: hoveredTooltip.left,
-            ...(typeof hoveredTooltip.top === 'number'
-              ? { top: hoveredTooltip.top }
-              : { bottom: hoveredTooltip.bottom }),
+            top: hoveredTooltip.top,
           }}
           onMouseEnter={clearTooltipHideTimer}
           onMouseLeave={scheduleTooltipHide}
@@ -2816,18 +2945,10 @@ function CliExtensionPalette(props: {
             <button
               className='ghost-button icon-only tiny cli-extension-tooltip-action'
               type='button'
-              title={hoveredTooltip.showTranslated ? '查看原文' : '翻译为中文'}
-              aria-label={hoveredTooltip.showTranslated ? '查看原文' : '翻译为中文'}
+              title='翻译为中文'
+              aria-label='翻译为中文'
               onClick={async (event) => {
                 event.stopPropagation()
-                if (hoveredTooltip.showTranslated) {
-                  setHoveredTooltip((current) =>
-                    current && current.item.id === hoveredTooltip.item.id
-                      ? { ...current, showTranslated: false, translationUnavailable: false }
-                      : current
-                  )
-                  return
-                }
 
                 if (
                   hoveredTooltip.translatedDescription &&
@@ -2869,15 +2990,13 @@ function CliExtensionPalette(props: {
             </button>
           </div>
           <p>
-            {hoveredTooltip.showTranslated
+          {hoveredTooltip.showTranslated
               ? hoveredTooltip.translatedDescription || hoveredTooltip.originalDescription || '未提供描述'
               : hoveredTooltip.originalDescription || '未提供描述'}
           </p>
-          {hoveredTooltip.showTranslated && hoveredTooltip.originalDescription && hoveredTooltip.translatedDescription !== hoveredTooltip.originalDescription ? (
-            <p className='muted'>{hoveredTooltip.originalDescription}</p>
-          ) : null}
           {hoveredTooltip.translationUnavailable ? <p className='muted'>当前仅能显示原文。</p> : null}
-        </div>
+        </div>,
+        document.body
       ) : null}
       <div className='cli-extension-list'>
         {loading ? (
@@ -3042,6 +3161,7 @@ function CliExtensionPalette(props: {
 function ImageStylePresetPalette(props: {
   mode: 'list' | 'create' | 'edit'
   searchValue: string
+  menuStyle?: PickerMenuWidthStyle
   items: Array<ImageStylePreset & { favorite: boolean }>
   selectedPresetId?: string
   onSelect: (item: ImageStylePreset) => void
@@ -3067,6 +3187,7 @@ function ImageStylePresetPalette(props: {
   const {
     mode,
     searchValue,
+    menuStyle,
     items,
     selectedPresetId = '',
     onSelect,
@@ -3091,11 +3212,10 @@ function ImageStylePresetPalette(props: {
   } = props
 
   return (
-    <div className='picker-menu assistant-menu image-style-menu'>
+    <div className='picker-menu assistant-menu image-style-menu fixed-width-menu' style={menuStyle}>
       {mode === 'list' ? (
         <>
-          <div className='picker-menu-head assistant-menu-head image-style-menu-head'>
-            <strong>助手</strong>
+          <div className='assistant-menu-toolbar'>
             <input
               className='assistant-search'
               value={searchValue}
@@ -3103,9 +3223,6 @@ function ImageStylePresetPalette(props: {
               autoFocus
               onChange={(event) => onSearchChange(event.target.value)}
             />
-          </div>
-          <div className='assistant-menu-toolbar'>
-            <span>一次会话仅保留一个图像风格助手，收藏可置顶，右键可编辑。</span>
             <button className='secondary-button tiny' type='button' onClick={onOpenCreateEditor}>
               <Plus size={14} />
               <span>新建自定义助手</span>
@@ -4727,6 +4844,48 @@ function AssistantsChatWorkspace(props: {
       '默认模型',
     [activeAssistant?.model, chatModeModels, selectedModel]
   )
+  const assistantMenuWidthStyle = useMemo(
+    () =>
+      createPickerMenuWidthStyle(
+        assistants.flatMap((item) => [item.name, item.description]),
+        { min: 320, max: 420, padding: 96, itemCount: assistants.length, rowHeight: 50, maxListHeight: 420 }
+      ),
+    [assistants]
+  )
+  const chatModelMenuWidthStyle = useMemo(
+    () =>
+      createPickerMenuWidthStyle(
+        [
+          ...chatModeModels.flatMap((item) => [item.label, item.value]),
+          ...chatModelVendorFilterOptions.map((item) => item.label),
+          '切换当前对话所用模型',
+        ],
+        { min: 260, max: 460, padding: 112, itemCount: chatModeModels.length, rowHeight: 42, maxListHeight: 260 }
+      ),
+    [chatModeModels, chatModelVendorFilterOptions]
+  )
+  const chatReasoningMenuWidthStyle = useMemo(
+    () =>
+      createPickerMenuWidthStyle(CHAT_REASONING_OPTIONS.map((item) => item.label), {
+        min: 188,
+        max: 260,
+        itemCount: CHAT_REASONING_OPTIONS.length,
+        rowHeight: 46,
+        maxListHeight: 260,
+      }),
+    []
+  )
+  const chatContextMenuWidthStyle = useMemo(
+    () =>
+      createPickerMenuWidthStyle(CHAT_CONTEXT_WINDOW_OPTIONS.map((item) => item.label), {
+        min: 188,
+        max: 260,
+        itemCount: CHAT_CONTEXT_WINDOW_OPTIONS.length,
+        rowHeight: 46,
+        maxListHeight: 220,
+      }),
+    []
+  )
   const visibleChatSessions = useMemo(
     () => chatSessions.filter((item) => !hiddenChatSessionIds.includes(item.id)),
     [chatSessions, hiddenChatSessionIds]
@@ -4896,6 +5055,9 @@ function AssistantsChatWorkspace(props: {
     function handlePointerDown(event: PointerEvent) {
       const target = event.target as Node | null
       if (!target) {
+        return
+      }
+      if (isAssistantHistoryTriggerTarget(event.target)) {
         return
       }
 
@@ -5899,11 +6061,10 @@ function AssistantsChatWorkspace(props: {
                       <strong>{activeAssistant?.name || assistants[0]?.name || '助手'}</strong>
                     </button>
                     {assistantMenuOpen && (
-                      <div className='picker-menu assistant-menu'>
+                      <div className='picker-menu assistant-menu fixed-width-menu' style={assistantMenuWidthStyle}>
                         {assistantMenuMode === 'list' ? (
                           <>
-                            <div className='picker-menu-head assistant-menu-head'>
-                              <strong>助手</strong>
+                            <div className='assistant-menu-toolbar'>
                               <input
                                 className='assistant-search'
                                 value={assistantSearch}
@@ -5911,9 +6072,6 @@ function AssistantsChatWorkspace(props: {
                                 autoFocus
                                 onChange={(event) => setAssistantSearch(event.target.value)}
                               />
-                            </div>
-                            <div className='assistant-menu-toolbar'>
-                              <span>收藏可置顶，搜索会匹配名称、描述和提示词。</span>
                               <button className='secondary-button tiny' type='button' onClick={openAssistantCreateEditor}>
                                 <Plus size={14} />
                                 <span>新建自定义助手</span>
@@ -6009,11 +6167,7 @@ function AssistantsChatWorkspace(props: {
                       <strong>{activeModelLabel}</strong>
                     </button>
                     {modelMenuOpen && (
-                      <div className='picker-menu model-menu'>
-                        <div className='picker-menu-head'>
-                          <strong>AI 选择</strong>
-                          <span>切换当前对话所用模型</span>
-                        </div>
+                      <div className='picker-menu model-menu fixed-width-menu' style={chatModelMenuWidthStyle}>
                         {chatModelVendorFilterOptions.length > 1 ? (
                           <div className='picker-filter-row'>
                             {chatModelVendorFilterOptions.map((item) => (
@@ -6085,10 +6239,7 @@ function AssistantsChatWorkspace(props: {
                       <strong>{selectedReasoningLabel}</strong>
                     </button>
                     {reasoningMenuOpen && (
-                      <div className='picker-menu model-menu'>
-                        <div className='picker-menu-head'>
-                          <strong>思考长度</strong>
-                        </div>
+                      <div className='picker-menu model-menu fixed-width-menu' style={chatReasoningMenuWidthStyle}>
                         <div className='picker-menu-list'>
                           {CHAT_REASONING_OPTIONS.map((item) => (
                             <button
@@ -6129,10 +6280,7 @@ function AssistantsChatWorkspace(props: {
                       <strong>{selectedContextWindowLabel}</strong>
                     </button>
                     {contextMenuOpen && (
-                      <div className='picker-menu model-menu'>
-                        <div className='picker-menu-head'>
-                          <strong>上下文</strong>
-                        </div>
+                      <div className='picker-menu model-menu fixed-width-menu' style={chatContextMenuWidthStyle}>
                         <div className='picker-menu-list'>
                           {CHAT_CONTEXT_WINDOW_OPTIONS.map((item) => (
                             <button
@@ -6307,6 +6455,7 @@ function AssistantsChatWorkspace(props: {
       </div>
       <AttachmentPreviewModal
         preview={attachmentPreview}
+        toast={toast}
         onClose={() => setAttachmentPreview(null)}
         onImageContextMenu={handleAttachmentPreviewContextMenu}
       />
@@ -6419,6 +6568,42 @@ function DrawWorkspace(props: {
     () => decorateImageStylePresets(imageStylePresets, imageStyleFavorites, imageStyleSearch),
     [imageStyleFavorites, imageStylePresets, imageStyleSearch]
   )
+  const imageStyleMenuWidthStyle = useMemo(
+    () =>
+      createPickerMenuWidthStyle(
+        imageStylePresets.flatMap((item) => [
+          item.title,
+          item.description,
+          item.category,
+          `${item.title} ${item.description} ${item.category} ${item.size} ${item.quality}`,
+        ]),
+        {
+          min: 320,
+          max: 420,
+          padding: 100,
+          itemCount: imageStylePresets.length,
+          rowHeight: 54,
+          maxListHeight: 420,
+        }
+      ),
+    [imageStylePresets]
+  )
+  const drawSizeMenuWidthStyle = useMemo(
+    () =>
+      createPickerMenuWidthStyle(
+        DRAW_SIZE_OPTIONS.map((item) => `${item.label} · ${item.value}`),
+        { min: 190, max: 300, itemCount: DRAW_SIZE_OPTIONS.length, rowHeight: 46, maxListHeight: 220 }
+      ),
+    []
+  )
+  const drawQualityMenuWidthStyle = useMemo(
+    () =>
+      createPickerMenuWidthStyle(
+        DRAW_QUALITY_OPTIONS.map((item) => `${item.label} · ${item.value}`),
+        { min: 180, max: 260, itemCount: DRAW_QUALITY_OPTIONS.length, rowHeight: 46, maxListHeight: 180 }
+      ),
+    []
+  )
   const imageStyleTitleById = useMemo(
     () => Object.fromEntries(imageStylePresets.map((item) => [item.id, item.title])),
     [imageStylePresets]
@@ -6502,6 +6687,9 @@ function DrawWorkspace(props: {
     function handlePointerDown(event: PointerEvent) {
       const target = event.target as Node | null
       if (!target) {
+        return
+      }
+      if (isAssistantHistoryTriggerTarget(event.target)) {
         return
       }
       if (historyOpen && historyPanelRef.current && !historyPanelRef.current.contains(target)) {
@@ -7529,6 +7717,7 @@ function DrawWorkspace(props: {
                         onQualityChange={setImageStyleQualityDraft}
                         onCancelEditor={closeImageStyleEditor}
                         onSaveEditor={handleSaveImageStylePreset}
+                        menuStyle={imageStyleMenuWidthStyle}
                       />
                     )}
                   </div>
@@ -7554,10 +7743,7 @@ function DrawWorkspace(props: {
                       <span className='toolbar-icon-label'>{drawSizeLabel}</span>
                     </button>
                     {drawSizeMenuOpen && (
-                      <div className='picker-menu image-config-menu'>
-                        <div className='picker-menu-head'>
-                          <strong>尺寸</strong>
-                        </div>
+                      <div className='picker-menu image-config-menu fixed-width-menu' style={drawSizeMenuWidthStyle}>
                         <div className='picker-menu-list'>
                           {DRAW_SIZE_OPTIONS.map((item) => (
                             <button
@@ -7598,10 +7784,7 @@ function DrawWorkspace(props: {
                       <span className='toolbar-icon-label'>{drawQualityLabel}</span>
                     </button>
                     {drawQualityMenuOpen && (
-                      <div className='picker-menu image-config-menu'>
-                        <div className='picker-menu-head'>
-                          <strong>质量</strong>
-                        </div>
+                      <div className='picker-menu image-config-menu fixed-width-menu' style={drawQualityMenuWidthStyle}>
                         <div className='picker-menu-list'>
                           {DRAW_QUALITY_OPTIONS.map((item) => (
                             <button
@@ -7741,17 +7924,18 @@ function DrawWorkspace(props: {
             onClick={(event) => event.stopPropagation()}
             onContextMenu={handlePreviewImageContextMenu}
           >
-            <div className='image-preview-actions'>
-              <button className='ghost-button tiny' type='button' onClick={() => void handleDownloadImage(previewImage.src, previewImage.name)}>
-                <Download size={14} />
-                <span>下载图片</span>
-              </button>
-              <button className='ghost-button tiny' type='button' onClick={() => setPreviewImage(null)}>
-                <X size={14} />
-                <span>关闭</span>
-              </button>
-            </div>
             <div className='image-preview-stage' onContextMenu={handlePreviewImageContextMenu}>
+              <div className='image-preview-overlay-actions'>
+                <button className='ghost-button icon-only tiny image-preview-icon-button' type='button' onClick={() => void handleCopyImage(previewImage.src)} title='复制图片' aria-label='复制图片'>
+                  <Copy size={15} />
+                </button>
+                <button className='ghost-button icon-only tiny image-preview-icon-button' type='button' onClick={() => void handleDownloadImage(previewImage.src, previewImage.name)} title='下载图片' aria-label='下载图片'>
+                  <Download size={15} />
+                </button>
+                <button className='ghost-button icon-only tiny image-preview-icon-button' type='button' onClick={() => setPreviewImage(null)} title='关闭' aria-label='关闭'>
+                  <X size={15} />
+                </button>
+              </div>
               <img
                 src={previewImage.src}
                 alt={previewImage.name}
@@ -7764,6 +7948,7 @@ function DrawWorkspace(props: {
       )}
       <AttachmentPreviewModal
         preview={attachmentPreview}
+        toast={toast}
         onClose={() => setAttachmentPreview(null)}
         onImageContextMenu={handleAttachmentPreviewContextMenu}
       />
@@ -7794,7 +7979,9 @@ function SubscriptionsWorkspace(props: {
   const [paymentInfo, setPaymentInfo] = useState<SubscriptionPaymentInfo | null>(null)
   const [quotaPerUnit, setQuotaPerUnit] = useState(500_000)
   const [buyingPlanId, setBuyingPlanId] = useState(0)
-  const activeSubscriptions = subscriptionSelf?.subscriptions || []
+  const activeSubscriptions = (subscriptionSelf?.subscriptions || []).filter(
+    (item) => !isSubscriptionExhausted(item.subscription)
+  )
   const allSubscriptions = subscriptionSelf?.all_subscriptions || []
   const recommendedPlanId = useMemo(() => resolveRecommendedSubscriptionPlanId(plans), [plans])
   const planById = useMemo(
@@ -7965,9 +8152,7 @@ function SubscriptionsWorkspace(props: {
                           <span className={`subscription-plan-badge ${limitReached ? 'muted' : 'subtle'}`}>
                             限购 {purchaseCount}/{purchaseLimit}
                           </span>
-                        ) : (
-                          <span className='subscription-plan-badge subtle'>不限购</span>
-                        )}
+                        ) : null}
                       </div>
 
                       <div className='subscription-plan-head'>
@@ -8084,6 +8269,7 @@ function WalletWorkspace(props: {
   const [redeemCode, setRedeemCode] = useState('')
   const [usageData, setUsageData] = useState<UsageData | null>(null)
   const [perfMetrics, setPerfMetrics] = useState<{ requestCount24h: number; avgLatencyMs: number } | null>(null)
+  const [usageDistributionPage, setUsageDistributionPage] = useState(0)
 
   const recentBills = useMemo(
     () =>
@@ -8102,7 +8288,12 @@ function WalletWorkspace(props: {
     [usageData?.items]
   )
   const totalQuota = modelSummary.reduce((sum, item) => sum + item.quota, 0)
-  const topModels = modelSummary.slice(0, 8)
+  const usageDistributionPageSize = 5
+  const usageDistributionPageCount = Math.max(1, Math.ceil(modelSummary.length / usageDistributionPageSize))
+  const visibleUsageModels = modelSummary.slice(
+    usageDistributionPage * usageDistributionPageSize,
+    usageDistributionPage * usageDistributionPageSize + usageDistributionPageSize
+  )
   const avgTpm = useMemo(() => {
     const logs = usageData?.items || []
     const timestamps = logs
@@ -8231,6 +8422,10 @@ function WalletWorkspace(props: {
     }
   }, [toast])
 
+  useEffect(() => {
+    setUsageDistributionPage((current) => Math.min(current, usageDistributionPageCount - 1))
+  }, [usageDistributionPageCount])
+
   async function handleRedeem() {
     if (!redeemCode.trim()) {
       toast('请输入兑换码。')
@@ -8344,23 +8539,49 @@ function WalletWorkspace(props: {
                 <strong>消耗分布</strong>
                 <span>按模型统计当前账户的额度消耗</span>
               </div>
-              {topModels.length === 0 ? (
+              {modelSummary.length === 0 ? (
                 <EmptyState title='当前没有用量记录' description='模型调用后会在这里显示消耗分布。' />
               ) : (
-                <div className='usage-bars'>
-                  {topModels.map((item) => (
-                    <div key={item.model} className='usage-bar-row'>
-                      <div className='usage-bar-head'>
-                        <strong>{item.model}</strong>
-                        <span>{formatQuota(item.quota)}</span>
+                <>
+                  <div className='usage-bars'>
+                    {visibleUsageModels.map((item) => (
+                      <div key={item.model} className='usage-bar-row'>
+                        <div className='usage-bar-head'>
+                          <strong>{item.model}</strong>
+                          <span>
+                            {formatQuota(item.quota)}
+                            <b>|</b>
+                            占比 {percentageOf(item.quota, totalQuota).toFixed(1)}%
+                          </span>
+                        </div>
+                        <div className='usage-bar-track'>
+                          <div className='usage-bar-fill' style={{ width: `${percentageOf(item.quota, totalQuota)}%` }} />
+                        </div>
                       </div>
-                      <div className='usage-bar-track'>
-                        <div className='usage-bar-fill' style={{ width: `${percentageOf(item.quota, totalQuota)}%` }} />
-                      </div>
-                      <small>占比 {percentageOf(item.quota, totalQuota).toFixed(1)}%</small>
+                    ))}
+                  </div>
+                  {usageDistributionPageCount > 1 ? (
+                    <div className='usage-distribution-pager'>
+                      <button
+                        className='ghost-button tiny'
+                        type='button'
+                        disabled={usageDistributionPage <= 0}
+                        onClick={() => setUsageDistributionPage((current) => Math.max(0, current - 1))}
+                      >
+                        上一页
+                      </button>
+                      <span>{usageDistributionPage + 1} / {usageDistributionPageCount}</span>
+                      <button
+                        className='ghost-button tiny'
+                        type='button'
+                        disabled={usageDistributionPage >= usageDistributionPageCount - 1}
+                        onClick={() => setUsageDistributionPage((current) => Math.min(usageDistributionPageCount - 1, current + 1))}
+                      >
+                        下一页
+                      </button>
                     </div>
-                  ))}
-                </div>
+                  ) : null}
+                </>
               )}
             </div>
             <div className='panel-block'>
@@ -8386,6 +8607,11 @@ function ServiceStatusWorkspace(props: {
   const [serviceStatusLoading, setServiceStatusLoading] = useState(false)
   const [serviceStatusError, setServiceStatusError] = useState('')
   const [serviceStatusRefreshedAt, setServiceStatusRefreshedAt] = useState(initialServiceStatusCache.refreshedAt)
+  const [serviceStatusTooltip, setServiceStatusTooltip] = useState<{
+    x: number
+    y: number
+    text: string
+  } | null>(null)
   const [, setServiceStatusMode] = useState<'status-page' | 'channel-test'>(initialServiceStatusCache.mode)
   const serviceStatusRequestedRef = useRef(false)
   const serviceStatusRefreshingRef = useRef(false)
@@ -8463,6 +8689,18 @@ function ServiceStatusWorkspace(props: {
     return () => window.clearInterval(intervalId)
   }, [refreshServiceStatus])
 
+  useEffect(() => {
+    function handlePointerDown(event: globalThis.PointerEvent) {
+      if (event.target instanceof Element && event.target.closest('.service-status-history-dot')) {
+        return
+      }
+      setServiceStatusTooltip(null)
+    }
+
+    window.addEventListener('pointerdown', handlePointerDown)
+    return () => window.removeEventListener('pointerdown', handlePointerDown)
+  }, [])
+
   return (
     <section className='workspace-page full-bleed-page'>
       <article className='panel scroll-panel page-surface'>
@@ -8519,7 +8757,29 @@ function ServiceStatusWorkspace(props: {
                                 <span
                                   key={`${item.id}-history-${entry.checkedAt}-${index}`}
                                   className={`service-status-history-dot ${historyMeta.className}`}
-                                  title={resolveServiceStatusHistoryTitle(item, entry.checkedAt, index)}
+                                  role='button'
+                                  tabIndex={0}
+                                  aria-label={resolveServiceStatusHistoryTitle(item, entry.checkedAt, index)}
+                                  onClick={(event) => {
+                                    event.stopPropagation()
+                                    setServiceStatusTooltip({
+                                      x: event.clientX,
+                                      y: event.clientY,
+                                      text: resolveServiceStatusHistoryTitle(item, entry.checkedAt, index),
+                                    })
+                                  }}
+                                  onKeyDown={(event) => {
+                                    if (event.key !== 'Enter' && event.key !== ' ') {
+                                      return
+                                    }
+                                    event.preventDefault()
+                                    const rect = event.currentTarget.getBoundingClientRect()
+                                    setServiceStatusTooltip({
+                                      x: rect.left + rect.width / 2,
+                                      y: rect.top + rect.height / 2,
+                                      text: resolveServiceStatusHistoryTitle(item, entry.checkedAt, index),
+                                    })
+                                  }}
                                 />
                               )
                             })}
@@ -8536,6 +8796,18 @@ function ServiceStatusWorkspace(props: {
                 </div>
               </>
             )}
+            {serviceStatusTooltip ? createPortal(
+              <div
+                className='service-status-point-tooltip'
+                style={{
+                  left: serviceStatusTooltip.x,
+                  top: serviceStatusTooltip.y,
+                }}
+              >
+                {serviceStatusTooltip.text}
+              </div>,
+              document.body
+            ) : null}
           </div>
         </div>
       </article>
@@ -8560,12 +8832,10 @@ function MeWorkspace(props: {
   user: UserProfile
   toast: (message: string) => void
   themeMode: ThemeMode
-  performanceMode: AppPerformanceMode
-  onTogglePerformanceMode: () => void
   onToggleTheme: () => void
   visible: boolean
 }) {
-  const { user, toast, themeMode, performanceMode, onTogglePerformanceMode, onToggleTheme, visible } = props
+  const { user, toast, themeMode, onToggleTheme, visible } = props
   const [apiKeys, setApiKeys] = useState<
     Array<{
       id: number
@@ -8681,12 +8951,13 @@ function MeWorkspace(props: {
 
     if (purpose === 'create-key') {
       try {
-        const result = await createDesktopCliKey(
-          resolveNextClientKeyName(apiKeys),
-          user.group || ''
-        )
+        const result = await ensureDesktopServiceKey({
+          name: resolveNextClientKeyName(apiKeys),
+          group: user.group || '',
+          preferredNames: apiKeys.map((item) => item.name),
+        })
         setRevealedKey(result.key)
-        toast('新的 API Key 已创建。')
+        toast(result.reused ? '已复用服务器现有有效 Key。' : '新的 API Key 已创建。')
         await refreshMe()
       } catch (error) {
         toast(error instanceof Error ? error.message : '创建 Key 失败')
@@ -8777,16 +9048,6 @@ function MeWorkspace(props: {
               <h2>账户与部署</h2>
             </div>
             <div className='inline-actions'>
-              <button
-                className='ghost-button tiny performance-mode-button'
-                type='button'
-                onClick={onTogglePerformanceMode}
-                title={performanceMode === 'efficiency' ? '效率模式：已降低客户端渲染开销，点击切换到性能模式' : '性能模式：完整渲染体验，点击切换到效率模式'}
-                aria-label={performanceMode === 'efficiency' ? '切换到性能模式' : '切换到效率模式'}
-              >
-                {performanceMode === 'efficiency' ? <Zap size={16} /> : <Gauge size={16} />}
-                <span>{performanceMode === 'efficiency' ? '效率' : '性能'}</span>
-              </button>
               <button
                 className='ghost-button tiny theme-toggle-button'
                 type='button'
@@ -9067,8 +9328,10 @@ function CliWorkspace(props: {
   openSettings: () => void
   active: boolean
   serverBaseUrl: string
+  runningState: CliRunningState
+  onRunningStateChange: (client: CliClient, state: CliRunningState) => void
 }) {
-  const { client, toast, openSettings, active, serverBaseUrl } = props
+  const { client, toast, openSettings, active, serverBaseUrl, runningState, onRunningStateChange } = props
   const performanceMode = useAppPerformanceMode()
   const lastProjectPathStorageKey = `oneapi-desktop-${client}-last-project-path`
   const projectSessionMapStorageKey = `oneapi-desktop-${client}-project-session-map`
@@ -9085,7 +9348,7 @@ function CliWorkspace(props: {
   const [prompt, setPrompt] = useState('')
   const cliPromptHistory = useComposerPromptHistory(getCliPromptHistoryStorageKey(client))
   const [running, setRunning] = useState(false)
-  const [fullAccess, setFullAccess] = useState(false)
+  const [fullAccess, setFullAccess] = useState(true)
   const [projectSessionMap, setProjectSessionMap] = useState<Record<string, string>>(() =>
     readJsonStorage<Record<string, string>>(projectSessionMapStorageKey, {})
   )
@@ -9212,6 +9475,8 @@ function CliWorkspace(props: {
   )
   const activePartial = activeSessionId ? sessionPartialMap[activeSessionId] || '' : ''
   const activePlan = activeSessionId ? sessionPlansMap[activeSessionId] || null : null
+  const effectiveRunning = running || runningState.running
+  const effectiveRequestId = activeRequestIdRef.current || runningState.requestId
   const activeExtensionPreferenceBucket =
     cliExtensionPreferences[currentExtensionPreferenceKey] || createEmptyCliExtensionPreferenceBucket()
   const autoInvokeExtensions = activeExtensionPreferenceBucket.autoInvokeEnabled !== false
@@ -9246,13 +9511,44 @@ function CliWorkspace(props: {
     compatibleCliModels.find((item) => item.value === selectedModel)?.label || selectedModel || preferredCliModel
   const selectedEffortLabel =
     reasoningOptions.find((item) => item.value === reasoningEffort)?.label || reasoningEffort
-  const filteredCliExtensions = useMemo(() => {
+  const cliModelMenuWidthStyle = useMemo(
+    () =>
+      createPickerMenuWidthStyle(
+        [
+          ...compatibleCliModels.flatMap((item) => [item.label, item.value]),
+          ...cliModelVendorFilterOptions.map((item) => item.label),
+          '切换当前 CLI 会话模型',
+        ],
+        { min: 260, max: 460, padding: 112, itemCount: compatibleCliModels.length, rowHeight: 42, maxListHeight: 260 }
+      ),
+    [cliModelVendorFilterOptions, compatibleCliModels]
+  )
+  const cliReasoningMenuWidthStyle = useMemo(
+    () =>
+      createPickerMenuWidthStyle(reasoningOptions.map((item) => item.label), {
+        min: 188,
+        max: 260,
+        itemCount: reasoningOptions.length,
+        rowHeight: 46,
+        maxListHeight: 260,
+      }),
+    [reasoningOptions]
+  )
+  const unfilteredCliExtensions = useMemo(() => {
     const selectedIds = new Set(selectedExtensions.map((item) => item.id))
-    const decoratedEntries = decorateCliExtensions(
+    return decorateCliExtensions(
       cliExtensions,
       activeExtensionPreferenceBucket.favoriteIds,
       activeExtensionPreferenceBucket.notes
     ).filter((item) => !selectedIds.has(item.id))
+  }, [
+    activeExtensionPreferenceBucket.favoriteIds,
+    activeExtensionPreferenceBucket.notes,
+    cliExtensions,
+    selectedExtensions,
+  ])
+  const filteredCliExtensions = useMemo(() => {
+    const decoratedEntries = unfilteredCliExtensions
     const normalizedSearch = extensionSearch.trim().toLowerCase()
     if (!normalizedSearch) {
       return decoratedEntries
@@ -9270,15 +9566,16 @@ function CliWorkspace(props: {
       ].some((value) => value.toLowerCase().includes(normalizedSearch))
     )
   }, [
-    activeExtensionPreferenceBucket.favoriteIds,
-    activeExtensionPreferenceBucket.notes,
-    cliExtensions,
     extensionSearch,
-    selectedExtensions,
+    unfilteredCliExtensions,
   ])
+  const allBuiltinCliCommands = useMemo(
+    () => listCliBuiltinCommands(client),
+    [client]
+  )
   const builtinCliCommands = useMemo(
     () =>
-      listCliBuiltinCommands(client).filter((item) => {
+      allBuiltinCliCommands.filter((item) => {
         const normalizedSearch = extensionSearch.trim().toLowerCase()
         if (!normalizedSearch) {
           return true
@@ -9287,7 +9584,7 @@ function CliWorkspace(props: {
           value.toLowerCase().includes(normalizedSearch)
         )
       }),
-    [client, extensionSearch]
+    [allBuiltinCliCommands, extensionSearch]
   )
   const displayedCliExtensions = useMemo(
     () =>
@@ -9323,6 +9620,60 @@ function CliWorkspace(props: {
     )
     return items
   }, [builtinCliCommands, displayedCliExtensions, extensionsMenuAnchor])
+  const allPaletteWidthItems = useMemo<CliPaletteItem[]>(() => {
+    const items: CliPaletteItem[] = []
+    if (extensionsMenuAnchor === 'composer') {
+      items.push(
+        ...allBuiltinCliCommands.map((builtin) => ({
+          id: `builtin:${builtin.id}`,
+          section: 'command' as const,
+          source: 'builtin' as const,
+          builtin,
+        }))
+      )
+    }
+    const sourceExtensions = extensionsMenuAnchor === 'button'
+      ? unfilteredCliExtensions.filter((extension) => extension.kind !== 'command')
+      : unfilteredCliExtensions
+    const groupedExtensions = [
+      ...sourceExtensions.filter((extension) => extension.kind === 'command'),
+      ...sourceExtensions.filter((extension) => extension.kind === 'skill'),
+      ...sourceExtensions.filter((extension) => extension.kind === 'plugin'),
+    ]
+    items.push(
+      ...groupedExtensions.map((extension) => ({
+        id: extension.id,
+        section: extension.kind,
+        source: 'extension' as const,
+        extension,
+      }))
+    )
+    return items
+  }, [allBuiltinCliCommands, extensionsMenuAnchor, unfilteredCliExtensions])
+  const cliExtensionPaletteWidthStyle = useMemo(
+    () =>
+      createPickerMenuWidthStyle(
+        allPaletteWidthItems.flatMap((item) =>
+          item.source === 'builtin'
+            ? [item.builtin.command, item.builtin.title, item.builtin.description]
+            : [
+                buildCliExtensionDisplayName(item.extension.name, item.extension.note),
+                item.extension.displayName,
+                item.extension.description,
+              ]
+        ),
+        {
+          min: 340,
+          max: 460,
+          padding: 112,
+          itemCount: allPaletteWidthItems.length,
+          rowHeight: 64,
+          rowGap: 8,
+          maxListHeight: 420,
+        }
+      ),
+    [allPaletteWidthItems]
+  )
   const availablePaletteTabs = useMemo<CliPaletteTab[]>(
     () => Array.from(new Set(allPaletteItems.map((item) => item.section))) as CliPaletteTab[],
     [allPaletteItems]
@@ -9656,17 +10007,13 @@ function CliWorkspace(props: {
     setEffortMenuOpen(false)
     setExtensionsMenuAnchor(anchor)
     setExtensionPaletteTab(anchor === 'composer' ? 'command' : 'skill')
-    if (anchor === 'button') {
+    if (anchor === 'composer') {
       const composerShell = extensionsMenuRef.current?.querySelector<HTMLElement>('.composer-input-shell')
-      const buttonRect = extensionsButtonRef.current?.getBoundingClientRect()
       const shellRect = composerShell?.getBoundingClientRect()
-      if (buttonRect && shellRect) {
+      if (shellRect) {
         const paletteWidth = Math.min(360, Math.max(320, Math.min(shellRect.width - 16, 360)))
-        const buttonCenter = buttonRect.left - shellRect.left + buttonRect.width / 2
-        const requestedLeft = buttonCenter - paletteWidth / 2
-        const maxLeft = Math.max(0, shellRect.width - paletteWidth)
         setExtensionsOverlayStyle({
-          left: Math.max(0, Math.min(requestedLeft, maxLeft)),
+          left: 0,
           width: paletteWidth,
         })
       } else {
@@ -9806,14 +10153,36 @@ function CliWorkspace(props: {
     return false
   }, [closeCliExtensionsMenu, extensionsMenuOpen, paletteItems, selectHighlightedCliExtension])
 
+  const extensionTranslationStorageKey = `oneapi-desktop-${client}-extension-detail-translations`
+
+  const getCachedCliExtensionTranslation = useCallback((item: CliExtensionViewItem) => {
+    const originalDescription = item.description.trim()
+    if (!originalDescription) {
+      return ''
+    }
+    const cache = readJsonStorage<CliExtensionTranslationCache>(extensionTranslationStorageKey, {})
+    const cacheKey = resolveCliExtensionTranslationCacheKey(client, item, originalDescription)
+    return cache[cacheKey]?.trim() || ''
+  }, [client, extensionTranslationStorageKey])
+
   const translateCliExtensionDetail = useCallback(async (item: CliExtensionViewItem) => {
     const originalDescription = item.description.trim()
     if (!originalDescription) {
       return ''
     }
 
+    const cachedTranslation = getCachedCliExtensionTranslation(item)
+    if (cachedTranslation) {
+      return cachedTranslation
+    }
+
     const localTranslation = translateCliExtensionDescription(item.name, originalDescription).trim()
     if (localTranslation && localTranslation !== originalDescription) {
+      const cache = readJsonStorage<CliExtensionTranslationCache>(extensionTranslationStorageKey, {})
+      writeJsonStorage(extensionTranslationStorageKey, {
+        ...cache,
+        [resolveCliExtensionTranslationCacheKey(client, item, originalDescription)]: localTranslation,
+      })
       return localTranslation
     }
 
@@ -9837,11 +10206,26 @@ function CliWorkspace(props: {
           },
         ],
       })
-      return response.choices[0]?.message?.content?.trim() || localTranslation || originalDescription
+      const translated = response.choices[0]?.message?.content?.trim() || localTranslation || originalDescription
+      if (translated && translated !== originalDescription) {
+        const cache = readJsonStorage<CliExtensionTranslationCache>(extensionTranslationStorageKey, {})
+        writeJsonStorage(extensionTranslationStorageKey, {
+          ...cache,
+          [resolveCliExtensionTranslationCacheKey(client, item, originalDescription)]: translated,
+        })
+      }
+      return translated
     } catch {
       return localTranslation || originalDescription
     }
-  }, [compatibleCliModels, preferredCliModel, selectedModel])
+  }, [
+    client,
+    compatibleCliModels,
+    extensionTranslationStorageKey,
+    getCachedCliExtensionTranslation,
+    preferredCliModel,
+    selectedModel,
+  ])
 
   useEffect(() => {
     requestSessionMapRef.current = requestSessionMap
@@ -9918,7 +10302,7 @@ function CliWorkspace(props: {
   }, [client, preferredCliModel])
 
   useEffect(() => {
-    const shouldPollActively = active || running
+    const shouldPollActively = active || effectiveRunning
     if (shouldPollActively) {
       window.setTimeout(() => {
         void refreshCliState(true)
@@ -9932,7 +10316,7 @@ function CliWorkspace(props: {
     return () => {
       window.clearInterval(timer)
     }
-  }, [active, refreshCliState, running])
+  }, [active, effectiveRunning, refreshCliState])
 
   useEffect(() => {
     window.setTimeout(() => {
@@ -9989,6 +10373,7 @@ function CliWorkspace(props: {
         activeRequestIdRef.current = payload.requestId
         stoppingRunRef.current = false
         setRunning(true)
+        onRunningStateChange(client, { running: true, requestId: payload.requestId })
       }
       const currentSession = payload.sessionId || tracked?.sessionId
       if (!currentSession) {
@@ -10054,6 +10439,7 @@ function CliWorkspace(props: {
         activeRequestIdRef.current = ''
         stoppingRunRef.current = false
         setRunning(false)
+        onRunningStateChange(client, { running: false, requestId: '' })
       }
 
       if (payload.kind === 'partial') {
@@ -10104,7 +10490,7 @@ function CliWorkspace(props: {
     })
 
     return unsubscribe
-  }, [client, enqueueCliLogEntry, moveCliSessionOverlay, persistCliMessageOverlay, projectPath])
+  }, [client, enqueueCliLogEntry, moveCliSessionOverlay, onRunningStateChange, persistCliMessageOverlay, projectPath])
 
   useEffect(() => {
     const resetTimer = window.setTimeout(() => {
@@ -10121,6 +10507,12 @@ function CliWorkspace(props: {
     function handlePointerDown(event: PointerEvent) {
       const target = event.target as Node | null
       if (!target) {
+        return
+      }
+      if (isAssistantHistoryTriggerTarget(event.target)) {
+        return
+      }
+      if (event.target instanceof Element && event.target.closest('.cli-extension-floating-tooltip')) {
         return
       }
 
@@ -10150,6 +10542,7 @@ function CliWorkspace(props: {
         target &&
         extensionsPaletteRef.current &&
         !extensionsPaletteRef.current.contains(target) &&
+        !(event.target instanceof Element && event.target.closest('.cli-extension-floating-tooltip')) &&
         (!extensionsButtonRef.current || !extensionsButtonRef.current.contains(target))
       ) {
         closeCliExtensionsMenu(false)
@@ -10912,7 +11305,7 @@ function CliWorkspace(props: {
     const targetAttachments = options.nextAttachments ?? attachments
     const cleanedPrompt = promptValue.trim()
 
-    if (!targetProjectPath || !cleanedPrompt || running) {
+    if (!targetProjectPath || !cleanedPrompt || effectiveRunning) {
       if (!options.silentValidation) {
         toast('请选择项目目录并输入消息。')
       }
@@ -11004,6 +11397,7 @@ function CliWorkspace(props: {
     }))
     activeRequestIdRef.current = requestId
     stoppingRunRef.current = false
+    onRunningStateChange(client, { running: true, requestId })
     setSessionMessagesMap((current) => ({
       ...current,
       [currentSessionKey]: [...(current[currentSessionKey] || []), userMessage],
@@ -11020,7 +11414,7 @@ function CliWorkspace(props: {
         requestId,
         intent: visiblePrompt,
         finalPrompt: promptWithAttachments,
-        commandTitle: directCommand ? '直接命令准备' : '扩展与上下文准备',
+        commandTitle: directCommand ? '直接命令准备' : '任务准备',
         command: directCommand ? cleanedPrompt : '',
         extensions: selectedExtensions.map((item) => ({
           kind: item.kind,
@@ -11149,6 +11543,7 @@ function CliWorkspace(props: {
       activeRequestIdRef.current = ''
       stoppingRunRef.current = false
       setRunning(false)
+      onRunningStateChange(client, { running: false, requestId: '' })
     }
   }, [
     activeSessionId,
@@ -11164,13 +11559,14 @@ function CliWorkspace(props: {
     reasoningEffort,
     refreshCliState,
     resizePrompt,
-    running,
+    effectiveRunning,
     selectedModel,
     selectedModelLabel,
     selectedExtensions,
     toast,
     fullAccess,
     hydrateCliSession,
+    onRunningStateChange,
   ])
 
   async function handleRun() {
@@ -11178,7 +11574,7 @@ function CliWorkspace(props: {
   }
 
   useEffect(() => {
-    if (!active || running || prompt.trim() || !cliStatusReady) {
+    if (!active || effectiveRunning || prompt.trim() || !cliStatusReady) {
       return
     }
     if (!hasPendingCliVerification(client)) {
@@ -11209,10 +11605,10 @@ function CliWorkspace(props: {
       }
       window.clearTimeout(submitTimer)
     }
-  }, [active, cliStatusReady, client, projectPath, prompt, running, status.dataPath, submitCliPrompt])
+  }, [active, cliStatusReady, client, effectiveRunning, projectPath, prompt, status.dataPath, submitCliPrompt])
 
   async function handleStopRun() {
-    const requestId = activeRequestIdRef.current
+    const requestId = effectiveRequestId
     if (!requestId) {
       return
     }
@@ -11220,6 +11616,7 @@ function CliWorkspace(props: {
     stoppingRunRef.current = true
     activeRequestIdRef.current = ''
     setRunning(false)
+    onRunningStateChange(client, { running: false, requestId: '' })
     if (activeSessionId) {
       const abortLog = buildCliAbortLogEntry({
         client,
@@ -11249,8 +11646,8 @@ function CliWorkspace(props: {
 
   const extensionsPalette = extensionsMenuOpen ? (
     <CliExtensionPalette
-      title={availablePaletteTabs.includes('command') ? '命令 / 技能 / 插件' : '技能 / 插件'}
       loading={extensionsLoading}
+      menuStyle={cliExtensionPaletteWidthStyle}
       paletteItems={paletteItems}
       availableTabs={availablePaletteTabs}
       activeTab={activePaletteTab}
@@ -11276,6 +11673,7 @@ function CliWorkspace(props: {
       searchActive={extensionSearch.trim().length > 0}
       onKeyDown={handleCliExtensionPaletteKeyDown}
       onToggleFavorite={toggleFavoriteCliExtension}
+      getCachedTranslatedDetail={getCachedCliExtensionTranslation}
       onTranslateDetail={translateCliExtensionDetail}
       autoInvokeEnabled={autoInvokeExtensions}
       onAutoInvokeChange={setCliExtensionAutoInvokeEnabled}
@@ -11332,9 +11730,9 @@ function CliWorkspace(props: {
       }}
     />
   ) : null
-  const extensionsOverlayPanel = extensionsPalette ? (
+  const extensionsOverlayPanel = extensionsPalette && extensionsMenuAnchor === 'composer' ? (
     <div
-      className={`cli-extension-overlay-anchor ${extensionsMenuAnchor === 'button' ? 'anchored-to-button' : 'anchored-to-composer'}`}
+      className='cli-extension-overlay-anchor anchored-to-composer'
       style={extensionsOverlayStyle}
     >
       {extensionsPalette}
@@ -11442,7 +11840,7 @@ function CliWorkspace(props: {
                           label: '删除',
                           icon: Trash2,
                           onClick: () => void handleDeleteCliMessage(item),
-                          disabled: running || item.kind === 'partial',
+                          disabled: effectiveRunning || item.kind === 'partial',
                         },
                         {
                           key: 'edit',
@@ -11480,7 +11878,7 @@ function CliWorkspace(props: {
                 cliPromptHistory.syncInputValue(value)
               },
               onKeyDown: (event) => {
-                if ((event.ctrlKey || event.metaKey) && event.key === 'Enter' && !running) {
+                if ((event.ctrlKey || event.metaKey) && event.key === 'Enter' && !effectiveRunning) {
                   event.preventDefault()
                   void handleRun()
                   return
@@ -11548,13 +11946,13 @@ function CliWorkspace(props: {
                 key: 'permission',
                 node: (
                   <button
-                    className={`ghost-button tiny icon-pill-trigger ${fullAccess ? 'selected-toggle' : ''}`}
+                    className='ghost-button tiny icon-pill-trigger selected-toggle'
                     type='button'
-                    onClick={() => setFullAccess((current) => !current)}
+                    onClick={() => setFullAccess(true)}
                     title='全权限'
                   >
                     <LockKeyhole size={16} />
-                    <strong>{fullAccess ? '全权限' : '受限'}</strong>
+                    <strong>全权限</strong>
                   </button>
                 ),
               },
@@ -11576,11 +11974,7 @@ function CliWorkspace(props: {
                       <strong>{selectedModelLabel}</strong>
                     </button>
                     {modelMenuOpen && (
-                      <div className='picker-menu model-menu'>
-                        <div className='picker-menu-head'>
-                          <strong>AI 版本</strong>
-                          <span>切换当前 CLI 会话模型</span>
-                        </div>
+                      <div className='picker-menu model-menu fixed-width-menu' style={cliModelMenuWidthStyle}>
                         {cliModelVendorFilterOptions.length > 1 ? (
                           <div className='picker-filter-row'>
                             {cliModelVendorFilterOptions.map((item) => (
@@ -11650,10 +12044,7 @@ function CliWorkspace(props: {
                       <strong>{selectedEffortLabel}</strong>
                     </button>
                     {effortMenuOpen && (
-                      <div className='picker-menu model-menu'>
-                        <div className='picker-menu-head'>
-                          <strong>思考长度</strong>
-                        </div>
+                      <div className='picker-menu model-menu fixed-width-menu' style={cliReasoningMenuWidthStyle}>
                         <div className='picker-menu-list'>
                           {reasoningOptions.map((item) => (
                             <button
@@ -11695,19 +12086,20 @@ function CliWorkspace(props: {
                       <Blocks size={16} />
                       <strong>技能/插件</strong>
                     </button>
+                    {extensionsMenuOpen && extensionsMenuAnchor === 'button' ? extensionsPalette : null}
                   </div>
                 ),
               },
             ],
               sendButton: (
                 <button
-                  className={`primary-button icon-only send-button ${running ? 'stop-button' : ''}`}
+                  className={`primary-button icon-only send-button ${effectiveRunning ? 'stop-button' : ''}`}
                   type='button'
-                  onClick={() => void (running ? handleStopRun() : handleRun())}
-                  title={running ? '停止回复' : '发送消息（Ctrl+Enter）'}
-                  aria-label={running ? '停止回复' : '发送消息（Ctrl+Enter）'}
+                  onClick={() => void (effectiveRunning ? handleStopRun() : handleRun())}
+                  title={effectiveRunning ? '停止回复' : '发送消息（Ctrl+Enter）'}
+                  aria-label={effectiveRunning ? '停止回复' : '发送消息（Ctrl+Enter）'}
                 >
-                  {running ? <Square size={14} /> : <Send size={16} />}
+                  {effectiveRunning ? <Square size={14} /> : <Send size={16} />}
                 </button>
               ),
             })}
@@ -11727,7 +12119,7 @@ function CliWorkspace(props: {
                   className='secondary-button tiny'
                   type='button'
                   onClick={createCliSession}
-                  disabled={running}
+                  disabled={effectiveRunning}
                   title='新建独立会话'
                 >
                   <Plus size={16} />
@@ -11846,6 +12238,7 @@ function CliWorkspace(props: {
       </div>
       <AttachmentPreviewModal
         preview={attachmentPreview}
+        toast={toast}
         onClose={() => setAttachmentPreview(null)}
         onImageContextMenu={handleAttachmentPreviewContextMenu}
       />
@@ -11973,10 +12366,19 @@ function CliSetupCard(props: {
       setDeploying(true)
       setActiveDeployClient(client)
       setDeployLog([])
-      const generated = await createDesktopCliKey(
-        `OneAPI Desktop ${client.toUpperCase()} Key ${Date.now()}`,
-        user.group || ''
-      )
+      const generated = await ensureDesktopServiceKey({
+        name: 'OneAPI Desktop Internal Key',
+        group: user.group || '',
+        preferredNames: [
+          `OneAPI Desktop ${client.toUpperCase()} Key`,
+          'OneAPI Desktop CODEX Key',
+          'OneAPI Desktop CLAUDE Key',
+          'OneAPI Desktop Internal Key',
+          '桌面端专用 Key',
+          'CODEX 桌面安装 Key',
+          'CLAUDE 桌面安装 Key',
+        ],
+      })
       const resolvedDeploySettings = resolveCliDeploySettings({
         preset,
         generatedApiKey: generated.key,
@@ -12095,6 +12497,22 @@ function AssistantWorkspace(props: {
   serverBaseUrl: string
 }) {
   const { mode, setMode, toast, openSettings, visible, enabledModes, serverBaseUrl } = props
+  const [cliRunningState, setCliRunningState] = useState<Record<CliClient, CliRunningState>>({
+    codex: { running: false, requestId: '' },
+    claude: { running: false, requestId: '' },
+  })
+  const updateCliRunningState = useCallback((client: CliClient, state: CliRunningState) => {
+    setCliRunningState((current) => {
+      const previous = current[client]
+      if (previous.running === state.running && previous.requestId === state.requestId) {
+        return current
+      }
+      return {
+        ...current,
+        [client]: state,
+      }
+    })
+  }, [])
 
   return (
     <section className={`workspace-page assistant-page ${visible ? '' : 'workspace-hidden'}`}>
@@ -12140,6 +12558,8 @@ function AssistantWorkspace(props: {
             openSettings={openSettings}
             active={visible && mode === 'codex'}
             serverBaseUrl={serverBaseUrl}
+            runningState={cliRunningState.codex}
+            onRunningStateChange={updateCliRunningState}
           />
         </div>
         <div className={mode === 'claude' ? 'workspace-shell active' : 'workspace-shell'}>
@@ -12149,6 +12569,8 @@ function AssistantWorkspace(props: {
             openSettings={openSettings}
             active={visible && mode === 'claude'}
             serverBaseUrl={serverBaseUrl}
+            runningState={cliRunningState.claude}
+            onRunningStateChange={updateCliRunningState}
           />
         </div>
       </div>
@@ -12230,6 +12652,10 @@ function LoginScreen(props: {
       }
       if (result?.id) {
         saveStoredDesktopUserId(result.id)
+      }
+      const accessToken = result?.access_token || result?.accessToken || result?.token || ''
+      if (accessToken) {
+        saveStoredDesktopAccessToken(accessToken)
       }
       const profile = await requireSuccess(getSelfProfile())
       const nextUser = profile as UserProfile
@@ -12343,6 +12769,10 @@ function LoginScreen(props: {
       const result = await unwrapEnvelope(login2fa(twoFactorCode.trim()))
       if (result?.id) {
         saveStoredDesktopUserId(result.id)
+      }
+      const accessToken = result?.access_token || result?.accessToken || result?.token || ''
+      if (accessToken) {
+        saveStoredDesktopAccessToken(accessToken)
       }
       const profile = await requireSuccess(getSelfProfile())
       const nextUser = profile as UserProfile
@@ -12701,9 +13131,7 @@ export function App() {
   const [collapsed, setCollapsed] = useState(false)
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => readStoredThemeMode() ?? resolveSystemThemeMode())
   const [manualThemeMode, setManualThemeMode] = useState(() => readStoredThemeMode() !== null)
-  const [performanceMode, setPerformanceMode] = useState<AppPerformanceMode>(() =>
-    readJsonStorage<AppPerformanceMode>(APP_PERFORMANCE_MODE_STORAGE_KEY, 'performance')
-  )
+  const performanceMode: AppPerformanceMode = 'performance'
   const [auroraOpacity] = useState<number>(() => {
     const value = readJsonStorage<number>(AURORA_OPACITY_STORAGE_KEY, DEFAULT_AURORA_OPACITY)
     return Math.max(0, Math.min(100, Number.isFinite(value) ? value : DEFAULT_AURORA_OPACITY))
@@ -12838,6 +13266,7 @@ export function App() {
     function handleAuthExpired(event: Event) {
       const detail = (event as CustomEvent<{ message?: string }>).detail
       clearStoredDesktopUserId()
+      clearStoredDesktopAccessToken()
       useAuthStore.getState().reset()
       setUser(null)
       setBootstrapping(false)
@@ -12881,8 +13310,7 @@ export function App() {
 
   useEffect(() => {
     document.documentElement.dataset.performanceMode = performanceMode
-    writeJsonStorage(APP_PERFORMANCE_MODE_STORAGE_KEY, performanceMode)
-  }, [performanceMode])
+  }, [])
 
   useEffect(() => {
     const syncWindowActivity = () => {
@@ -12960,6 +13388,7 @@ export function App() {
       setServerBaseUrlDialogOpen(false)
       setSidebarSecretClicks(0)
       clearStoredDesktopUserId()
+      clearStoredDesktopAccessToken()
       auth.reset()
       auth.setUser(null)
       setMessage(`服务地址已切换为 ${nextBaseUrl}，请重新登录。`)
@@ -13123,6 +13552,7 @@ export function App() {
       clearVerificationValid(currentUserId)
     }
     clearStoredDesktopUserId()
+    clearStoredDesktopAccessToken()
     auth.reset()
     auth.setUser(null)
     setMessage('已退出登录。')
@@ -13373,10 +13803,6 @@ export function App() {
                 user={auth.user}
                 toast={setMessage}
                 themeMode={themeMode}
-                performanceMode={performanceMode}
-                onTogglePerformanceMode={() =>
-                  setPerformanceMode((current) => (current === 'efficiency' ? 'performance' : 'efficiency'))
-                }
                 onToggleTheme={() => {
                   setManualThemeMode(true)
                   setThemeMode((current) => (current === 'dark' ? 'light' : 'dark'))

@@ -42,8 +42,13 @@ test('opaque popup polish keeps efficiency mode as the final override', () => {
   assert.match(stylesSource, /\.picker-menu \.picker-option:hover[\s\S]*?color-mix\(in srgb, var\(--accent\) 10%, rgb\(var\(--surface-strong-rgb\)\)\) !important/)
 })
 
-test('performance mode slows aurora and inactive windows pause aurora animation', () => {
-  assert.match(stylesSource, /:root\[data-performance-mode='performance'\] \.workspace-aurora\s*{[\s\S]*?animation-duration:\s*64s/)
-  assert.match(stylesSource, /:root\[data-performance-mode='performance'\] \.workspace-aurora::after\s*{[\s\S]*?animation-duration:\s*48s/)
-  assert.match(stylesSource, /:root\[data-window-active='inactive'\] \.workspace-aurora,[\s\S]*?animation-play-state:\s*paused !important/)
+test('final performance pass removes glass blur and background motion globally', () => {
+  const performancePassIndex = stylesSource.indexOf('/* performance pass: remove costly glass/background effects. */')
+  const previousGlassPassIndex = stylesSource.indexOf('/* macOS refinement pass 17')
+
+  assert.ok(performancePassIndex > previousGlassPassIndex)
+  assert.match(stylesSource.slice(performancePassIndex), /\*,\s*\n\*::before,\s*\n\*::after\s*{[\s\S]*?backdrop-filter:\s*none !important/)
+  assert.match(stylesSource.slice(performancePassIndex), /\.workspace-aurora,[\s\S]*?\.workspace-aurora-blob,[\s\S]*?display:\s*none !important/)
+  assert.match(stylesSource.slice(performancePassIndex), /\.desktop-window-shell,[\s\S]*?\.image-preview-modal-mask\s*{[\s\S]*?animation:\s*none !important[\s\S]*?filter:\s*none !important/)
+  assert.match(stylesSource.slice(performancePassIndex), /\.desktop-window-shell::before,[\s\S]*?background-image:\s*none !important/)
 })

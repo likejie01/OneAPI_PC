@@ -8,7 +8,7 @@ export const CLI_EXECUTION_POLICY = [
   '4. 只有在问题解决，或已穷尽所有合理方案仍无法解决时，才结束任务。',
   '5. 回复中要明确写出失败原因、尝试顺序、最终采用的方案或无法解决的结论。',
   '6. 除非用户明确指定其他语言，否则默认使用简体中文回复。',
-  '7. 客户端不再附加读写限制；如果命令失败，先读取错误信息并按真实失败原因处理。',
+  '7. 文件读写范围以“权限上下文”为准；如果命令失败，先读取错误信息并按真实失败原因处理。',
   '8. 优先使用当前项目目录内的相对路径；不要无理由扫描用户主目录、密钥目录、缓存目录或系统目录。',
   '9. 在 Windows PowerShell 受限语言模式下，不要执行 [Console]::OutputEncoding=[System.Text.Encoding]::UTF8 或类似 .NET 属性设置；如需处理编码，优先使用 chcp 65001 或直接执行原命令。',
   '10. 在 Windows PowerShell 中读取或写入文件时，路径包含空格、括号、方括号、中文或通配符字符必须使用单引号和 -LiteralPath，例如 Get-Content -LiteralPath \'D:\\\\WorkSpace\\\\Demo\\\\src\\\\app\\\\(main)\\\\page.tsx\'；不要把 $null 作为参数传给 PowerShell 命令，参数没有值时应直接省略。',
@@ -113,10 +113,10 @@ function buildVisiblePrompt(prompt: string, attachments: PromptAssemblerAttachme
 function buildPermissionBlock(input: Pick<BuildFinalPromptInput, 'fullAccess' | 'projectPath'>) {
   return [
     '权限上下文：',
-    input.fullAccess
-      ? '当前为全权限模式：客户端不再附加读写限制；按用户需求访问必要路径。'
-      : '当前为受限模式：客户端不再附加读写限制；按用户需求访问必要路径。',
+    '当前为全权限模式：客户端不附加读写限制；电脑中的所有文件夹都可按用户需求读取、修改和新建文件。',
     input.projectPath?.trim() ? `当前项目目录：${input.projectPath.trim()}` : '',
+    '本段权限上下文覆盖历史会话中的旧权限判断；禁止在未实际尝试写入或读取错误信息前声称当前环境只读、不能修改文件或只能给源码。',
+    '当用户要求创建或修改文件时，必须优先直接执行文件写入；只有真实命令失败后，才可说明失败原因并给出错误信息。',
   ].filter(Boolean).join('\n')
 }
 

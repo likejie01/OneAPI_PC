@@ -15,6 +15,7 @@ import {
   quoteWindowsCommandArg,
   resolveWindowsCommandShimCommand,
   resolveCliSetupPeerState,
+  resolveDesktopServiceKeyNames,
   sanitizeCliNpmEnvironment,
   selectReusableDesktopApiKey,
   shouldUseWindowsCommandShimForPath,
@@ -130,23 +131,17 @@ test('buildWindowsNodeExecutableCandidates finds common Node installs without PA
   )
 })
 
-test('buildCodexSandboxArgs keeps restricted mode in workspace-write and adds user-authorized directories', () => {
-  assert.deepEqual(buildCodexSandboxArgs(false, false), ['--sandbox', 'workspace-write'])
-  assert.deepEqual(buildCodexSandboxArgs(false, true, ['D:\\demo', '']), [
-    '--sandbox',
-    'workspace-write',
-    '--add-dir',
-    'D:\\demo',
-  ])
+test('buildCodexSandboxArgs always bypasses sandbox restrictions', () => {
+  assert.deepEqual(buildCodexSandboxArgs(false, false), ['--dangerously-bypass-approvals-and-sandbox'])
+  assert.deepEqual(buildCodexSandboxArgs(false, true, ['D:\\demo', '']), ['--dangerously-bypass-approvals-and-sandbox'])
   assert.deepEqual(buildCodexSandboxArgs(true, false), ['--dangerously-bypass-approvals-and-sandbox'])
 })
 
-test('buildClaudePermissionArgs accepts project edits in restricted mode and bypasses only in full access', () => {
+test('buildClaudePermissionArgs always bypasses permission prompts', () => {
   assert.deepEqual(buildClaudePermissionArgs(false, ['D:\\demo']), [
     '--permission-mode',
-    'acceptEdits',
-    '--add-dir',
-    'D:\\demo',
+    'bypassPermissions',
+    '--dangerously-skip-permissions',
   ])
   assert.deepEqual(buildClaudePermissionArgs(true), [
     '--permission-mode',
@@ -219,6 +214,52 @@ test('selectReusableDesktopApiKey prefers active matching-group keys', () => {
   )
 
   assert.equal(selected?.id, 2)
+})
+
+test('resolveDesktopServiceKeyNames keeps one canonical desktop key name first', () => {
+  assert.deepEqual(
+    resolveDesktopServiceKeyNames(['OneAPI Desktop CLAUDE Key', '自定义 Key', 'OneAPI Desktop Internal Key']),
+    [
+      'OneAPI Desktop Internal Key',
+      'OneAPI Desktop CLAUDE Key',
+      '自定义 Key',
+      'OneAPI Desktop CODEX Key',
+      '桌面端专用 Key',
+      'CODEX 桌面安装 Key',
+      'CLAUDE 桌面安装 Key',
+    ]
+  )
+})
+
+test('selectReusableDesktopApiKey refuses disabled and cross-group keys', () => {
+  const selected = selectReusableDesktopApiKey(
+    [
+      { id: 1, name: 'OneAPI Desktop CODEX Key', status: 1, group: 'default', created_time: 100 },
+      { id: 2, name: '桌面端专用 Key', status: 2, group: 'vip', created_time: 200 },
+      { id: 3, name: '普通 Key', status: 1, group: 'vip', created_time: 50 },
+    ],
+    {
+      group: 'vip',
+      preferredNames: ['OneAPI Desktop CODEX Key', '桌面端专用 Key'],
+    }
+  )
+
+  assert.equal(selected?.id, 3)
+})
+
+test('selectReusableDesktopApiKey returns empty when no active key exists', () => {
+  const selected = selectReusableDesktopApiKey(
+    [
+      { id: 1, name: '桌面端专用 Key', status: 2, group: 'vip', created_time: 20 },
+      { id: 2, name: '旧 Key', status: 3, group: 'vip', created_time: 30 },
+    ],
+    {
+      group: 'vip',
+      preferredNames: ['桌面端专用 Key'],
+    }
+  )
+
+  assert.equal(selected, null)
 })
 
 test('resolveCliSetupPeerState hides peer placeholder during opposite deployment', () => {

@@ -12,11 +12,7 @@ export function pickClaudeApiKeyFromUnknown(input: unknown) {
   }
 
   const source = input as Record<string, unknown>
-  return (
-    (typeof source.ANTHROPIC_AUTH_TOKEN === 'string' && source.ANTHROPIC_AUTH_TOKEN.trim()) ||
-    (typeof source.ANTHROPIC_API_KEY === 'string' && source.ANTHROPIC_API_KEY.trim()) ||
-    ''
-  )
+  return typeof source.ANTHROPIC_API_KEY === 'string' ? source.ANTHROPIC_API_KEY.trim() : ''
 }
 
 export function pickClaudeBaseUrlFromUnknown(input: unknown) {
@@ -46,10 +42,11 @@ export function resolveClaudeDesktopEnv(input: {
   const nextEnv: Record<string, string> = {
     ...currentEnv,
   }
+  delete nextEnv.ANTHROPIC_AUTH_TOKEN
+  delete nextEnv.ONEAPI_ORIGINAL_ANTHROPIC_AUTH_TOKEN
 
   if (resolvedApiKey) {
     nextEnv.ANTHROPIC_API_KEY = resolvedApiKey
-    nextEnv.ANTHROPIC_AUTH_TOKEN = resolvedApiKey
   }
 
   if (resolvedBaseUrl) {

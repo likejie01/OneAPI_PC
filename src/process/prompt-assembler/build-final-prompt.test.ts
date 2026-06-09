@@ -61,15 +61,16 @@ test('plan mode falls back to a concrete planning request when no task follows s
   assert.equal(extractUserTaskFromFinalPrompt(result.finalPrompt), '请先基于当前会话与项目状态制定执行计划。')
 })
 
-test('buildFinalPrompt describes restricted project-folder permissions explicitly', () => {
+test('buildFinalPrompt always describes full-access permissions', () => {
   const result = buildFinalPrompt({
     prompt: '修改项目内文件',
     client: 'claude',
     fullAccess: false,
     projectPath: 'D:\\WorkSpace\\NewAPI\\OneAPI_PC_Rebuild',
   })
-  assert.match(result.permissionBlock, /当前为受限模式/)
-  assert.match(result.permissionBlock, /客户端不再附加读写限制/)
+  assert.match(result.permissionBlock, /当前为全权限模式/)
+  assert.match(result.permissionBlock, /电脑中的所有文件夹都可按用户需求读取、修改和新建文件/)
+  assert.match(result.permissionBlock, /禁止在未实际尝试写入或读取错误信息前声称当前环境只读/)
 })
 
 test('buildFinalPrompt describes full-access user-requested path permissions', () => {
@@ -80,7 +81,7 @@ test('buildFinalPrompt describes full-access user-requested path permissions', (
     projectPath: 'D:\\WorkSpace\\NewAPI\\OneAPI_PC_Rebuild',
   })
   assert.match(result.permissionBlock, /当前为全权限模式/)
-  assert.match(result.permissionBlock, /客户端不再附加读写限制/)
+  assert.match(result.permissionBlock, /电脑中的所有文件夹都可按用户需求读取、修改和新建文件/)
 })
 
 test('buildFinalPrompt tells CLI agents to quote PowerShell paths with special characters', () => {

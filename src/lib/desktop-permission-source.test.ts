@@ -22,19 +22,56 @@ test('external links are limited to browser-safe protocols', () => {
   assert.match(mainSource, /shell\.openExternal\(assertAllowedExternalUrl\(url\)\)/)
 })
 
-test('restricted cli runs receive user-authorized directories without bypassing sandbox', () => {
+test('cli runs use full-access flags even when stale callers pass restricted state', () => {
   assert.match(mainSource, /const cliUserAuthorizedDirectories = new Set<string>\(\)/)
   assert.match(mainSource, /function rememberCliAuthorizedDirectory\(targetPath: string\)/)
   assert.match(mainSource, /async function rememberCliAuthorizedOpenTarget\(targetPath: string\)/)
   assert.match(mainSource, /rememberCliAuthorizedDirectory\(stat\?\.isFile\(\) \? path\.dirname\(normalized\) : normalized\)/)
   assert.match(mainSource, /await rememberCliAuthorizedOpenTarget\(resolved\)/)
+  assert.match(mainSource, /function resolveCliAdditionalAccessDirectories\(projectPath: string\)/)
+  assert.match(mainSource, /if \(projectRoot\) \{\s*directories\.add\(projectRoot\)\s*\}/)
   assert.match(mainSource, /resolveCliAdditionalAccessDirectories\(input\.projectPath\)/)
   assert.match(mainSource, /buildCodexSandboxArgs\([\s\S]*?resolveCliAdditionalAccessDirectories\(input\.projectPath\)/)
   assert.match(mainSource, /buildClaudePermissionArgs\([\s\S]*?resolveCliAdditionalAccessDirectories\(input\.projectPath\)/)
+  assert.match(mainSource, /args\.push\('--json', '-C', input\.projectPath, '--skip-git-repo-check'\)/)
+  assert.match(mainSource, /if \(resumeSessionId\) \{\s*args\.push\('resume', resumeSessionId, input\.prompt\)\s*\}/)
+  assert.doesNotMatch(mainSource, /function buildCliPermissionDiagnostic/)
+  assert.doesNotMatch(mainSource, /sourceKind: 'runtime\.permission'/)
+  assert.doesNotMatch(mainSource, /权限诊断/)
+  assert.match(mainSource, /--dangerously-bypass-approvals-and-sandbox/)
+  assert.match(mainSource, /--dangerously-skip-permissions/)
+  assert.doesNotMatch(mainSource, /args\.includes\('--sandbox'\) && args\.includes\('workspace-write'\)/)
+  assert.doesNotMatch(mainSource, /args\.includes\('--permission-mode'\) && args\.includes\('acceptEdits'\)/)
+})
+
+test('stopped cli runs return aborted result before waiting for session persistence', () => {
+  assert.match(mainSource, /ipcMain\.handle\('desktop:stop-cli'[\s\S]*?stoppedCliRequests\.add\(requestId\)[\s\S]*?stopChildProcess\(activeCliProcesses\.get\(requestId\)\)/)
+  assert.match(mainSource, /const aborted = stoppedCliRequests\.delete\(input\.requestId\)[\s\S]*?if \(aborted\) \{[\s\S]*?sourceKind: 'request\.aborted'[\s\S]*?metadata: \{[\s\S]*?aborted: true/)
+  assert.match(mainSource, /if \(aborted\) \{[\s\S]*?return \{[\s\S]*?error: '用户已停止当前回复'[\s\S]*?\}[\s\S]*?const events = parseJsonObjectsFromText\(result\.stdout\)/)
+})
+
+test('mobile bridge forwards requested project path and permission mode', () => {
+  assert.match(mainSource, /project_path\?: string/)
+  assert.match(mainSource, /permission_mode\?: string/)
+  assert.match(mainSource, /projectPath: raw\.projectPath \|\| raw\.project_path \|\| ''/)
+  assert.match(mainSource, /permissionMode: raw\.permissionMode \|\| raw\.permission_mode \|\| ''/)
+  assert.match(mainSource, /const projectPath = job\.projectPath\.trim\(\) \|\| \(await readBridgeClientProjectPath\(job\.client\)\)\.trim\(\) \|\| os\.homedir\(\)/)
+  assert.match(mainSource, /const fullAccess = job\.permissionMode === 'full' \|\| job\.permissionMode === 'full_access'/)
+  assert.match(mainSource, /buildFinalPrompt\(\{[\s\S]*?fullAccess,[\s\S]*?\}\)/)
+})
+
+test('mobile bridge marks cli jobs as running before cli output arrives', () => {
+  assert.match(mainSource, /id: `\$\{requestId\}-running`[\s\S]*?phase: 'running'[\s\S]*?title: `\$\{job\.client === 'codex' \? 'Codex' : 'Claude'\} 正在执行`/)
+  assert.match(mainSource, /id: `\$\{request\.requestId\}-running`[\s\S]*?phase: 'running'[\s\S]*?title: `\$\{request\.client === 'codex' \? 'Codex' : 'Claude'\} 正在执行`/)
+})
+
+test('cli one-click deploy uses one shared desktop api key name', () => {
+  assert.match(appSource, /name: 'OneAPI Desktop Internal Key'[\s\S]*?preferredNames: \[[\s\S]*?`OneAPI Desktop \$\{client\.toUpperCase\(\)\} Key`/)
+  assert.doesNotMatch(appSource, /name: `OneAPI Desktop \$\{client\.toUpperCase\(\)\} Key`/)
 })
 
 test('inactive windows pause aurora and hidden cli panes poll less often', () => {
   assert.match(appSource, /document\.documentElement\.dataset\.windowActive = active \? 'active' : 'inactive'/)
-  assert.match(appSource, /const shouldPollActively = active \|\| running/)
+  assert.match(appSource, /const shouldPollActively = active \|\| effectiveRunning/)
   assert.match(appSource, /const intervalMs = shouldPollActively \? 30000 : 180000/)
 })

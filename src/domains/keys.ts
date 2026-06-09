@@ -1,5 +1,9 @@
 import { desktopEnvelope } from '../lib/desktop-client'
-import { selectReusableDesktopApiKey } from '../lib/desktop-service'
+import {
+  DESKTOP_SERVICE_KEY_NAME,
+  resolveDesktopServiceKeyNames,
+  selectReusableDesktopApiKey,
+} from '../lib/desktop-service'
 import type { ApiEnvelope, ApiKeyFormInput, ApiKeyPageData } from '../shared/contracts'
 
 export async function getApiKeys(page = 1, size = 10) {
@@ -69,7 +73,7 @@ export async function createDesktopCliKey(name: string, group: string) {
 
   const keys = await searchApiKeys(name)
   const target = [...keys]
-    .filter((item) => item.name === name)
+    .filter((item) => item.name === name && item.status === 1 && item.group === group)
     .sort((left, right) => (right.created_time || 0) - (left.created_time || 0))[0]
   if (!target) {
     throw new Error('专用 Key 已创建，但未能定位到新 Key 记录。')
@@ -87,12 +91,18 @@ export async function ensureDesktopServiceKey(options: {
   group?: string
   preferredNames?: string[]
 }) {
-  const name = options.name?.trim() || 'OneAPI Desktop Internal Key'
+  const name = options.name?.trim() || DESKTOP_SERVICE_KEY_NAME
   const group = options.group?.trim() || ''
-  const keys = (await getApiKeys(1, 100))?.items ?? []
+  const preferredNames = resolveDesktopServiceKeyNames([name, ...(options.preferredNames || [])])
+  const searchNames = resolveDesktopServiceKeyNames([name])
+  const searchedKeys = (
+    await Promise.all(searchNames.map((preferredName) => searchApiKeys(preferredName).catch(() => [])))
+  ).flat()
+  const listedKeys = (await getApiKeys(1, 100))?.items ?? []
+  const keys = [...searchedKeys, ...listedKeys]
   const target = selectReusableDesktopApiKey(keys, {
     group,
-    preferredNames: [name, ...(options.preferredNames || [])],
+    preferredNames,
   })
 
   if (target) {

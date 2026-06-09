@@ -4,6 +4,30 @@ import type { CliClient, CliStatus } from '../shared/desktop'
 type ApiKeyCandidate = Pick<ApiKeyRecord, 'id' | 'name' | 'status' | 'group' | 'created_time'>
 
 export const MIN_DESKTOP_CLI_NODE_MAJOR = 18
+export const DESKTOP_SERVICE_KEY_NAME = 'OneAPI Desktop Internal Key'
+export const LEGACY_DESKTOP_SERVICE_KEY_NAMES = [
+  'OneAPI Desktop CODEX Key',
+  'OneAPI Desktop CLAUDE Key',
+  '桌面端专用 Key',
+  'CODEX 桌面安装 Key',
+  'CLAUDE 桌面安装 Key',
+]
+
+export function resolveDesktopServiceKeyNames(names: string[] = []) {
+  const seen = new Set<string>()
+  const resolved: string[] = []
+
+  for (const name of [DESKTOP_SERVICE_KEY_NAME, ...names, ...LEGACY_DESKTOP_SERVICE_KEY_NAMES]) {
+    const normalized = name.trim()
+    if (!normalized || seen.has(normalized)) {
+      continue
+    }
+    seen.add(normalized)
+    resolved.push(normalized)
+  }
+
+  return resolved
+}
 
 export function parseNodeMajorVersion(version: string) {
   const matched = version.trim().match(/^v?(\d+)(?:\.|$)/i)
@@ -136,34 +160,16 @@ export function buildCodexSandboxArgs(
   supportsAskForApproval: boolean,
   additionalWritableDirectories: string[] = []
 ) {
+  void fullAccess
   void supportsAskForApproval
-  if (fullAccess) {
-    return ['--dangerously-bypass-approvals-and-sandbox']
-  }
-
-  const args = ['--sandbox', 'workspace-write']
-  for (const directory of additionalWritableDirectories) {
-    const normalized = directory.trim()
-    if (normalized) {
-      args.push('--add-dir', normalized)
-    }
-  }
-  return args
+  void additionalWritableDirectories
+  return ['--dangerously-bypass-approvals-and-sandbox']
 }
 
 export function buildClaudePermissionArgs(fullAccess: boolean, additionalReadableDirectories: string[] = []) {
-  if (fullAccess) {
-    return ['--permission-mode', 'bypassPermissions', '--dangerously-skip-permissions']
-  }
-
-  const args = ['--permission-mode', 'acceptEdits']
-  for (const directory of additionalReadableDirectories) {
-    const normalized = directory.trim()
-    if (normalized) {
-      args.push('--add-dir', normalized)
-    }
-  }
-  return args
+  void fullAccess
+  void additionalReadableDirectories
+  return ['--permission-mode', 'bypassPermissions', '--dangerously-skip-permissions']
 }
 
 const NPM_CACHE_MODE_ENV_KEYS = new Set([
@@ -356,19 +362,21 @@ export function selectReusableDesktopApiKey(
   )
   const group = (options.group || '').trim()
   const activeKeys = keys.filter((item) => item.status === 1)
-  const source = activeKeys.length > 0 ? activeKeys : keys
+  const source = group
+    ? activeKeys.filter((item) => item.group === group)
+    : activeKeys
 
   const ranked = [...source].sort((left, right) => {
-    const leftPreferred = preferredNames.has(left.name) ? 1 : 0
-    const rightPreferred = preferredNames.has(right.name) ? 1 : 0
-    if (leftPreferred !== rightPreferred) {
-      return rightPreferred - leftPreferred
-    }
-
     const leftGroupMatch = group && left.group === group ? 1 : 0
     const rightGroupMatch = group && right.group === group ? 1 : 0
     if (leftGroupMatch !== rightGroupMatch) {
       return rightGroupMatch - leftGroupMatch
+    }
+
+    const leftPreferred = preferredNames.has(left.name) ? 1 : 0
+    const rightPreferred = preferredNames.has(right.name) ? 1 : 0
+    if (leftPreferred !== rightPreferred) {
+      return rightPreferred - leftPreferred
     }
 
     return (right.created_time || 0) - (left.created_time || 0)

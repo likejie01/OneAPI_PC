@@ -2,6 +2,7 @@ import type { DesktopApiRequest } from '../shared/desktop'
 import type { ApiEnvelope } from '../shared/contracts'
 
 const DESKTOP_USER_ID_KEY = 'uid'
+const DESKTOP_ACCESS_TOKEN_KEY = 'oneapi_desktop_access_token'
 export const AUTH_EXPIRED_EVENT = 'oneapi:auth-expired'
 
 function getBridge() {
@@ -22,6 +23,35 @@ export function getStoredDesktopUserId() {
 export function saveStoredDesktopUserId(userId: number | string) {
   try {
     window.localStorage.setItem(DESKTOP_USER_ID_KEY, String(userId))
+  } catch {
+    /* empty */
+  }
+}
+
+export function getStoredDesktopAccessToken() {
+  try {
+    return window.localStorage.getItem(DESKTOP_ACCESS_TOKEN_KEY) || ''
+  } catch {
+    return ''
+  }
+}
+
+export function saveStoredDesktopAccessToken(token: string) {
+  try {
+    const normalized = token.trim()
+    if (normalized) {
+      window.localStorage.setItem(DESKTOP_ACCESS_TOKEN_KEY, normalized)
+    } else {
+      window.localStorage.removeItem(DESKTOP_ACCESS_TOKEN_KEY)
+    }
+  } catch {
+    /* empty */
+  }
+}
+
+export function clearStoredDesktopAccessToken() {
+  try {
+    window.localStorage.removeItem(DESKTOP_ACCESS_TOKEN_KEY)
   } catch {
     /* empty */
   }
@@ -51,6 +81,12 @@ function withDesktopAuthHeaders(input: DesktopApiRequest) {
     const userId = getStoredDesktopUserId()
     if (userId) {
       headers['New-Api-User'] = userId
+    }
+  }
+  if (shouldAttachUserId && !headers.Authorization) {
+    const token = getStoredDesktopAccessToken()
+    if (token) {
+      headers.Authorization = `Bearer ${token}`
     }
   }
 
@@ -96,6 +132,7 @@ export function notifyDesktopAuthExpiredIfNeeded(status: number, message: string
   }
 
   clearStoredDesktopUserId()
+  clearStoredDesktopAccessToken()
   window.dispatchEvent(
     new CustomEvent(AUTH_EXPIRED_EVENT, {
       detail: {
