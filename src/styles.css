@@ -12253,3 +12253,239 @@ article.panel.page-surface,
   box-shadow: none !important;
   content: none !important;
 }
+
+/* translucent layer system: background texture remains visible through real modules. */
+:root {
+  --client-bg-image: url('/light.jpg') !important;
+  --layer-sidebar-bg: rgba(247, 250, 255, 0.9);
+  --layer-module-bg: rgba(255, 255, 255, 0.66);
+  --layer-card-bg: rgba(255, 255, 255, 0.76);
+  --layer-control-bg: rgba(255, 255, 255, 0.7);
+  --layer-popover-bg: rgba(255, 255, 255, 0.9);
+  --layer-border: rgba(62, 74, 92, 0.14);
+  --layer-border-strong: rgba(62, 74, 92, 0.22);
+  --layer-shadow: 0 18px 44px rgba(32, 43, 56, 0.08);
+  --layer-shadow-strong: 0 24px 64px rgba(32, 43, 56, 0.14);
+}
+
+:root[data-theme='dark'] {
+  --client-bg-image: url('/dark.jpg') !important;
+  --layer-sidebar-bg: rgba(18, 18, 20, 0.6);
+  --layer-module-bg: rgba(23, 23, 25, 0.3);
+  --layer-card-bg: rgba(30, 30, 32, 0.4);
+  --layer-control-bg: rgba(38, 38, 40, 0.5);
+  --layer-popover-bg: rgba(31, 31, 33, 0.6);
+  --layer-border: rgba(235, 235, 237, 0.1);
+  --layer-border-strong: rgba(235, 235, 237, 0.17);
+  --layer-shadow: 0 18px 44px rgba(0, 0, 0, 0.22);
+  --layer-shadow-strong: 0 24px 64px rgba(0, 0, 0, 0.32);
+}
+
+.desktop-window-shell {
+  background:
+    linear-gradient(180deg, rgb(var(--bg-rgb) / 0.12), rgb(var(--bg-rgb) / 0.16)),
+    var(--client-bg-image) center / cover no-repeat !important;
+}
+
+:root[data-theme='dark'] .desktop-window-shell {
+  background:
+    linear-gradient(180deg, rgb(var(--bg-rgb) / 0.18), rgb(var(--bg-rgb) / 0.24)),
+    var(--client-bg-image) center / cover no-repeat !important;
+}
+
+.sidebar,
+:root[data-theme='dark'] .sidebar {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.018)),
+    var(--layer-sidebar-bg) !important;
+  border-color: var(--layer-border) !important;
+  box-shadow: var(--layer-shadow) !important;
+}
+
+.panel-block,
+.list-block,
+.subform,
+.me-user-card,
+.me-device-binding-card,
+.me-key-list-card,
+.me-key-create-card,
+.me-claude-card,
+.me-codex-card,
+.wallet-overview-card,
+.usage-trend-card,
+.pricing-card,
+.subscription-plan-card,
+.service-status-card,
+.status-card,
+.metric-card,
+.billing-card,
+.cli-log-bubble,
+.cli-log-phase-section,
+.timeline-detail,
+.result-block,
+.markdown-code-block,
+.markdown-body pre {
+  background: var(--layer-module-bg) !important;
+  border-color: var(--layer-border) !important;
+  box-shadow: var(--layer-shadow) !important;
+}
+
+.record-row,
+.action-row,
+.inline-settings-card,
+.status-button,
+.wallet-overview-metric,
+.usage-bar-row,
+.message-bubble,
+.shell-composer,
+.chat-composer,
+.cli-composer,
+.deploy-timeline-list,
+.empty-card,
+.key-reveal,
+.desktop-update-inline-row {
+  background: var(--layer-card-bg) !important;
+  border-color: var(--layer-border) !important;
+}
+
+input,
+select,
+textarea,
+.secondary-button,
+.status-grid-slim .status-button,
+.model-select-trigger,
+.assistant-mode-button,
+.composer-token-chip,
+.message-extension-chip,
+.usage-bar-track {
+  background: var(--layer-control-bg) !important;
+  border-color: var(--layer-border) !important;
+}
+
+.modal-card,
+.image-preview-modal,
+.attachment-preview-modal,
+.announcement-modal-card,
+.translation-modal-card,
+.picker-menu,
+.session-context-menu,
+.chat-history-panel,
+.cli-history-panel,
+.cli-plan-floating-panel,
+.desktop-update-popover,
+.cli-extension-menu,
+.assistant-menu,
+.image-style-menu,
+.cli-extension-floating-tooltip,
+.markdown-code-action-menu,
+.toast-bar {
+  background: var(--layer-popover-bg) !important;
+  border-color: var(--layer-border-strong) !important;
+  box-shadow: var(--layer-shadow-strong) !important;
+}
+
+.assistant-topbar-tabs,
+.assistant-topbar-tabs:hover,
+.assistant-topbar-tabs:focus-within {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.assistant-topbar-tabs .assistant-mode-button,
+.assistant-topbar-tabs .assistant-mode-button:hover,
+.assistant-topbar-tabs .assistant-mode-button:focus-visible,
+.assistant-topbar-tabs .assistant-mode-button.active {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+:root[data-theme='dark'] .desktop-window-content {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+}
+
+:root[data-theme='dark'] .panel-block,
+:root[data-theme='dark'] .list-block,
+:root[data-theme='dark'] .subform,
+:root[data-theme='dark'] .me-user-card,
+:root[data-theme='dark'] .me-device-binding-card,
+:root[data-theme='dark'] .me-key-list-card,
+:root[data-theme='dark'] .me-key-create-card,
+:root[data-theme='dark'] .me-claude-card,
+:root[data-theme='dark'] .me-codex-card,
+:root[data-theme='dark'] .wallet-overview-card,
+:root[data-theme='dark'] .usage-trend-card,
+:root[data-theme='dark'] .pricing-card,
+:root[data-theme='dark'] .subscription-plan-card,
+:root[data-theme='dark'] .service-status-card,
+:root[data-theme='dark'] .status-card,
+:root[data-theme='dark'] .metric-card,
+:root[data-theme='dark'] .billing-card,
+:root[data-theme='dark'] .cli-log-bubble,
+:root[data-theme='dark'] .cli-log-phase-section,
+:root[data-theme='dark'] .timeline-detail,
+:root[data-theme='dark'] .result-block,
+:root[data-theme='dark'] .markdown-code-block,
+:root[data-theme='dark'] .markdown-body pre {
+  background: var(--layer-module-bg) !important;
+  background-color: var(--layer-module-bg) !important;
+  background-image: none !important;
+}
+
+:root[data-theme='dark'] .record-row,
+:root[data-theme='dark'] .action-row,
+:root[data-theme='dark'] .inline-settings-card,
+:root[data-theme='dark'] .status-button,
+:root[data-theme='dark'] .wallet-overview-metric,
+:root[data-theme='dark'] .usage-bar-row,
+:root[data-theme='dark'] .message-bubble,
+:root[data-theme='dark'] .shell-composer,
+:root[data-theme='dark'] .chat-composer,
+:root[data-theme='dark'] .cli-composer,
+:root[data-theme='dark'] .deploy-timeline-list,
+:root[data-theme='dark'] .empty-card,
+:root[data-theme='dark'] .key-reveal,
+:root[data-theme='dark'] .desktop-update-inline-row {
+  background: var(--layer-card-bg) !important;
+  background-color: var(--layer-card-bg) !important;
+  background-image: none !important;
+}
+
+:root[data-theme='dark'] input,
+:root[data-theme='dark'] select,
+:root[data-theme='dark'] textarea,
+:root[data-theme='dark'] .secondary-button,
+:root[data-theme='dark'] .status-grid-slim .status-button,
+:root[data-theme='dark'] .model-select-trigger,
+:root[data-theme='dark'] .composer-token-chip,
+:root[data-theme='dark'] .message-extension-chip,
+:root[data-theme='dark'] .usage-bar-track {
+  background: var(--layer-control-bg) !important;
+  background-color: var(--layer-control-bg) !important;
+  background-image: none !important;
+}
+
+:root[data-theme='dark'] .modal-card,
+:root[data-theme='dark'] .image-preview-modal,
+:root[data-theme='dark'] .attachment-preview-modal,
+:root[data-theme='dark'] .announcement-modal-card,
+:root[data-theme='dark'] .translation-modal-card,
+:root[data-theme='dark'] .picker-menu,
+:root[data-theme='dark'] .session-context-menu,
+:root[data-theme='dark'] .chat-history-panel,
+:root[data-theme='dark'] .cli-history-panel,
+:root[data-theme='dark'] .cli-plan-floating-panel,
+:root[data-theme='dark'] .desktop-update-popover,
+:root[data-theme='dark'] .cli-extension-menu,
+:root[data-theme='dark'] .assistant-menu,
+:root[data-theme='dark'] .image-style-menu,
+:root[data-theme='dark'] .cli-extension-floating-tooltip,
+:root[data-theme='dark'] .markdown-code-action-menu,
+:root[data-theme='dark'] .toast-bar {
+  background: var(--layer-popover-bg) !important;
+  background-color: var(--layer-popover-bg) !important;
+  background-image: none !important;
+}
