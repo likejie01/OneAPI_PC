@@ -10295,6 +10295,19 @@ function CliWorkspace(props: {
   }, [client, selectedModel])
 
   useEffect(() => {
+    const handleDesktopModelSelection = (event: Event) => {
+      const detail = (event as CustomEvent<{ client?: string; model?: string }>).detail
+      const nextClient = detail?.client
+      const nextModel = detail?.model?.trim()
+      if (nextClient === client && nextModel) {
+        setSelectedModel(nextModel)
+      }
+    }
+    window.addEventListener('oneapi:desktop-model-selection', handleDesktopModelSelection)
+    return () => window.removeEventListener('oneapi:desktop-model-selection', handleDesktopModelSelection)
+  }, [client])
+
+  useEffect(() => {
     let disposed = false
 
     void (async () => {

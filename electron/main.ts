@@ -356,6 +356,13 @@ interface MobileBridgeInteractionResponse {
   action: CliInteractionResponseRequest['action']
 }
 
+interface MobileBridgeModelSelection {
+  selectionId?: string
+  selection_id?: string
+  client?: string
+  model?: string
+}
+
 function applyThemeMode(mode: ThemeMode) {
   nativeTheme.themeSource = mode
   const backgroundColor = '#00000000'
@@ -2030,6 +2037,37 @@ async function runMobileBridgeInteractionLoop(requestId: string, jobId: string, 
   }
 }
 
+async function applyMobileBridgeModelSelections() {
+  const deviceId = await getMobileBridgeDeviceId()
+  const selections = await requestMobileBridgeJson<MobileBridgeModelSelection[]>({
+    method: 'GET',
+    path: '/api/mobile/desktop-model-selection/pending',
+    query: {
+      device_id: deviceId,
+    },
+  })
+  let changed = false
+  for (const item of selections) {
+    const selectionId = (item.selectionId || item.selection_id || '').trim()
+    const client = (item.client || '').trim().toLowerCase() as CliClient
+    const model = (item.model || '').trim()
+    if ((client === 'codex' || client === 'claude') && model) {
+      await applyRendererDesktopModelSelection(client, model)
+      changed = true
+    }
+    if (selectionId) {
+      await requestMobileBridgeJson({
+        method: 'POST',
+        path: `/api/mobile/desktop-model-selection/${encodeURIComponent(selectionId)}/ack`,
+      }).catch(() => undefined)
+    }
+  }
+  if (changed) {
+    mobileBridgeLastSessionsSnapshotSignature = ''
+    await syncMobileBridgeSessionsSnapshot(true).catch(() => undefined)
+  }
+}
+
 function safeMobileAttachmentName(value: string, fallback: string) {
   const clean = (value || '')
     .trim()
@@ -2487,6 +2525,7 @@ async function startMobileBridgeLoop() {
       await heartbeatMobileBridgeDevice()
       await syncMobileBridgeExtensionsSnapshot()
       await syncMobileBridgeAssistantsSnapshot()
+      await applyMobileBridgeModelSelections()
       await syncMobileBridgeSessionsSnapshot()
 
       const jobs = await requestMobileBridgeJson<MobileBridgeJob[]>({
@@ -2616,6 +2655,31 @@ async function getRendererStorageValue(key: string) {
   } catch {
     return ''
   }
+}
+
+async function setRendererStorageValue(key: string, value: string) {
+  if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) {
+    return
+  }
+  await mainWindow.webContents.executeJavaScript(
+    `window.localStorage.setItem(${JSON.stringify(key)}, ${JSON.stringify(value)})`,
+    true,
+  ).catch(() => undefined)
+}
+
+async function applyRendererDesktopModelSelection(client: CliClient, model: string) {
+  const clean = model.trim()
+  if (!clean) {
+    return
+  }
+  await setRendererStorageValue(`oneapi-desktop-${client}-selected-model`, JSON.stringify(clean))
+  if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) {
+    return
+  }
+  await mainWindow.webContents.executeJavaScript(
+    `window.dispatchEvent(new CustomEvent('oneapi:desktop-model-selection', { detail: ${JSON.stringify({ client, model: clean })} }))`,
+    true,
+  ).catch(() => undefined)
 }
 
 async function getDesktopUserHeaderValue() {
