@@ -1,5 +1,5 @@
 :root {
-  color: #17314a;
+  color: var(--text-primary);
   background: transparent;
   color-scheme: light;
   font-family: "Microsoft YaHei UI", "PingFang SC", "Segoe UI", sans-serif;
@@ -242,8 +242,8 @@ select {
 
 .collapse-button,
 .ghost-button {
-  background: rgba(23, 49, 74, 0.05);
-  color: #35556f;
+  background: var(--control-bg);
+  color: var(--text-secondary);
 }
 
 .collapse-text-button {
@@ -257,7 +257,7 @@ select {
   border-radius: 0;
   font-size: 22px;
   line-height: 1;
-  color: #35556f;
+  color: var(--text-secondary);
 }
 
 .collapse-text-button:hover {
@@ -273,7 +273,7 @@ select {
 .sidebar.collapsed .side-nav-item.active {
   background: linear-gradient(135deg, rgba(29, 107, 120, 0.16), rgba(201, 110, 75, 0.11));
   box-shadow: 0 10px 24px rgba(29, 107, 120, 0.1);
-  color: #143d51;
+  color: var(--text-primary);
 }
 
 .sidebar.collapsed .collapsed-logout-button {
@@ -282,7 +282,7 @@ select {
 
 .secondary-button {
   background: rgba(29, 107, 120, 0.1);
-  color: #1b5e68;
+  color: var(--text-primary);
 }
 
 .primary-button {
@@ -324,7 +324,7 @@ select {
   padding: 14px;
   border-radius: 18px;
   text-align: left;
-  color: #324d66;
+  color: var(--text-secondary);
 }
 
 .side-nav-item span {
@@ -345,7 +345,7 @@ select {
 
 .side-nav-item.active {
   background: linear-gradient(135deg, rgba(29, 107, 120, 0.16), rgba(201, 110, 75, 0.11));
-  color: #143d51;
+  color: var(--text-primary);
   box-shadow: 0 14px 32px rgba(29, 107, 120, 0.1);
 }
 
@@ -472,7 +472,7 @@ select {
 .desktop-update-inline-copy small,
 .desktop-update-meta,
 .desktop-update-progress small {
-  color: #5f7486;
+  color: var(--text-secondary);
   font-size: 11px;
 }
 
@@ -530,7 +530,7 @@ select {
   padding: 0 9px;
   border-radius: 999px;
   background: rgba(239, 68, 68, 0.12);
-  color: #c53030;
+  color: var(--danger);
   font-size: 11px;
   font-weight: 600;
 }
@@ -540,7 +540,7 @@ select {
   margin: 10px 0 0;
   font-size: 12px;
   line-height: 1.55;
-  color: #264256;
+  color: var(--text-primary);
   white-space: pre-wrap;
 }
 
@@ -1079,23 +1079,23 @@ select {
 
 .subscription-plan-badge.recommended {
   background: rgba(29, 107, 120, 0.14);
-  color: #195662;
+  color: var(--text-primary);
 }
 
 .subscription-plan-badge.annual {
   background: linear-gradient(135deg, rgba(214, 168, 66, 0.2), rgba(255, 233, 164, 0.34));
-  color: #8d6500;
+  color: var(--warning);
   border-color: rgba(196, 147, 31, 0.22);
 }
 
 .subscription-plan-badge.subtle {
-  background: rgba(23, 49, 74, 0.06);
-  color: #4f667b;
+  background: var(--control-bg);
+  color: var(--text-secondary);
 }
 
 .subscription-plan-badge.muted {
   background: rgba(201, 110, 75, 0.12);
-  color: #93583c;
+  color: var(--warning);
 }
 
 .subscription-plan-head {
@@ -1121,7 +1121,7 @@ select {
   display: block;
   margin: 2px 0 1px;
   font-size: 24px;
-  color: #153f54;
+  color: var(--text-primary);
 }
 
 .subscription-plan-price-unit {
@@ -1224,8 +1224,8 @@ select {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: rgba(23, 49, 74, 0.06);
-  color: #476179;
+  background: var(--control-bg);
+  color: var(--text-secondary);
   font-size: 13px;
   flex-shrink: 0;
 }
@@ -1236,12 +1236,12 @@ select {
 
 .metric-pill.success {
   background: rgba(47, 138, 97, 0.12);
-  color: #206545;
+  color: var(--success);
 }
 
 .metric-pill.warn {
   background: rgba(201, 110, 75, 0.12);
-  color: #8b5811;
+  color: var(--warning);
 }
 
 .password-field {
@@ -1262,12 +1262,12 @@ select {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: #607489;
+  color: var(--text-secondary);
   transform: translateY(-50%);
 }
 
 .password-toggle:hover {
-  background: rgba(23, 49, 74, 0.06);
+  background: var(--control-bg);
 }
 
 .password-toggle:focus-visible {
@@ -1371,7 +1371,7 @@ select {
 
 .conversation-find-button:hover,
 .conversation-find-button:focus-visible {
-  background: rgba(23, 49, 74, 0.08);
+  background: var(--border-subtle);
   color: var(--text);
 }
 
@@ -1396,7 +1396,7 @@ select {
 }
 
 .conversation-search-mark-active {
-  color: #0f3d43;
+  color: var(--text-primary);
   background: rgba(29, 107, 120, 0.42);
   box-shadow:
     0 0 0 1px rgba(29, 107, 120, 0.24),
@@ -1470,7 +1470,7 @@ select {
   align-items: center;
   gap: 8px;
   margin: 6px 0 8px;
-  color: #35556f;
+  color: var(--text-secondary);
   font-size: 13px;
   line-height: 1.6;
 }
@@ -1478,7 +1478,7 @@ select {
 .cli-log-list {
   margin: 8px 0 10px;
   padding-left: 18px;
-  color: #29455a;
+  color: var(--text-secondary);
 }
 
 .cli-log-list li + li {
@@ -1495,7 +1495,7 @@ select {
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.03em;
-  color: #2a556f;
+  color: var(--text-secondary);
 }
 
 .message-meta {
@@ -1524,7 +1524,7 @@ select {
 
 .message-meta-extra {
   margin-left: auto;
-  color: #607788;
+  color: var(--text-tertiary);
   font-size: 11px;
   line-height: 1.4;
   text-align: right;
@@ -1553,11 +1553,11 @@ select {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: #567084;
+  color: var(--text-tertiary);
 }
 
 .bubble-action:hover {
-  background: rgba(23, 49, 74, 0.06);
+  background: var(--control-bg);
 }
 
 .chat-page .message-stream {
@@ -1626,8 +1626,8 @@ select {
   height: 64px;
   border-radius: 12px;
   overflow: hidden;
-  background: rgba(23, 49, 74, 0.06);
-  border: 1px solid rgba(23, 49, 74, 0.08);
+  background: var(--control-bg);
+  border: 1px solid var(--border-subtle);
 }
 
 .composer-asset-preview {
@@ -1684,7 +1684,7 @@ select {
 .chat-composer textarea,
 .cli-composer textarea {
   min-height: 0;
-  border: 1px solid rgba(23, 49, 74, 0.08);
+  border: 1px solid var(--border-subtle);
   background: var(--surface);
   box-shadow: none;
   padding: 12px 14px;
@@ -1746,7 +1746,7 @@ select {
 .composer-toolbar .ghost-button,
 .composer-toolbar .secondary-button {
   background: var(--surface);
-  border: 1px solid rgba(23, 49, 74, 0.06);
+  border: 1px solid var(--control-bg);
   box-shadow: none;
 }
 
@@ -1844,12 +1844,12 @@ select {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-weight: 600;
-  color: #234a61;
+  color: var(--text-secondary);
 }
 
 .toolbar-icon-label {
   font-size: 13px;
-  color: #5d7488;
+  color: var(--text-secondary);
   white-space: nowrap;
 }
 
@@ -1861,7 +1861,7 @@ select {
 .toolbar-icon-button.active {
   background: rgba(29, 107, 120, 0.12);
   border-color: rgba(29, 107, 120, 0.24);
-  color: #1b5e68;
+  color: var(--text-primary);
 }
 
 .picker-menu {
@@ -1901,18 +1901,18 @@ select {
   appearance: none;
   padding: 4px 9px;
   border-radius: 999px;
-  border: 1px solid rgba(23, 49, 74, 0.08);
-  background: rgba(23, 49, 74, 0.03);
+  border: 1px solid var(--border-subtle);
+  background: var(--border-subtle);
   font-size: 11px;
   line-height: 1.2;
-  color: #36506a;
+  color: var(--text-secondary);
   cursor: pointer;
 }
 
 .picker-filter-chip.active {
   border-color: rgba(29, 107, 120, 0.22);
   background: rgba(29, 107, 120, 0.12);
-  color: #133f4b;
+  color: var(--text-primary);
 }
 
 .cli-extension-filter-row {
@@ -1922,10 +1922,10 @@ select {
 .picker-empty-state {
   padding: 10px 12px;
   border-radius: 12px;
-  background: rgba(23, 49, 74, 0.03);
+  background: var(--border-subtle);
   font-size: 11px;
   line-height: 1.4;
-  color: #6d8196;
+  color: var(--text-tertiary);
 }
 
 .picker-option {
@@ -1933,7 +1933,7 @@ select {
   padding: 7px 10px;
   border-radius: 12px;
   text-align: left;
-  background: rgba(23, 49, 74, 0.04);
+  background: var(--control-bg);
   border: 1px solid transparent;
   display: flex;
   flex-direction: column;
@@ -2024,7 +2024,7 @@ select {
 .assistant-picker-empty {
   padding: 12px 10px;
   border-radius: 12px;
-  background: rgba(23, 49, 74, 0.04);
+  background: var(--control-bg);
   color: var(--muted);
   font-size: 12px;
   line-height: 1.5;
@@ -2136,13 +2136,13 @@ select {
   padding: 0 8px 4px;
   border-radius: 0;
   background: transparent;
-  color: #688196;
+  color: var(--text-tertiary);
   border-bottom: 2px solid transparent;
   box-shadow: none;
 }
 
 .assistant-mode-button.active {
-  color: #173d55;
+  color: var(--text-primary);
   background: transparent;
   box-shadow: none;
   border-bottom-color: var(--accent);
@@ -2154,7 +2154,7 @@ select {
 
 .selected-toggle {
   background: transparent;
-  color: #173d55;
+  color: var(--text-primary);
   box-shadow: none;
   border-color: transparent;
 }
@@ -2189,7 +2189,7 @@ select {
   border-radius: 0;
   border: 0;
   background: transparent;
-  color: #2d4e63;
+  color: var(--text-secondary);
   box-shadow: none;
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
@@ -2331,7 +2331,7 @@ select {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: #28485d;
+  color: var(--text-secondary);
   font-size: 12px;
   line-height: 1.25;
 }
@@ -2532,8 +2532,8 @@ select {
 .cli-log-overview-strip span {
   padding: 5px 10px;
   border-radius: 999px;
-  background: rgba(23, 49, 74, 0.06);
-  border: 1px solid rgba(23, 49, 74, 0.08);
+  background: var(--control-bg);
+  border: 1px solid var(--border-subtle);
   color: var(--muted);
   font-size: 11px;
   line-height: 1;
@@ -2834,33 +2834,33 @@ select {
   border-radius: 999px;
   font-size: 11px;
   font-weight: 600;
-  background: rgba(23, 49, 74, 0.06);
-  color: #36506a;
+  background: var(--control-bg);
+  color: var(--text-secondary);
 }
 
 .cli-log-status-pill.running {
   background: rgba(29, 107, 120, 0.12);
-  color: #0f5866;
+  color: var(--text-primary);
 }
 
 .cli-log-status-pill.success {
   background: rgba(47, 138, 97, 0.14);
-  color: #1b6f49;
+  color: var(--success);
 }
 
 .cli-log-status-pill.warning {
   background: rgba(200, 139, 42, 0.16);
-  color: #8a5a12;
+  color: var(--warning);
 }
 
 .cli-log-status-pill.error {
   background: rgba(201, 110, 75, 0.14);
-  color: #ad4f2d;
+  color: var(--danger);
 }
 
 .cli-log-status-pill.aborted {
   background: rgba(129, 140, 156, 0.16);
-  color: #4c6278;
+  color: var(--text-secondary);
 }
 
 .cli-log-event-row {
@@ -3087,7 +3087,7 @@ select {
 }
 
 .cli-log-file.directory {
-  color: #24546a;
+  color: var(--text-primary);
   background: rgba(36, 84, 106, 0.08);
 }
 
@@ -3264,7 +3264,7 @@ select {
 
 .history-panel-tabs .ghost-button.tiny {
   background: transparent;
-  color: #688196;
+  color: var(--text-tertiary);
   box-shadow: none;
   border-bottom: 2px solid transparent;
   border-radius: 0;
@@ -3272,7 +3272,7 @@ select {
 }
 
 .history-panel-tabs .ghost-button.tiny.selected-toggle {
-  color: #173d55;
+  color: var(--text-primary);
   border-bottom-color: var(--accent);
 }
 
@@ -3469,7 +3469,7 @@ select {
 
 .markdown-code-action-menu button:hover,
 .markdown-code-action-menu button:focus-visible {
-  background: rgba(23, 49, 74, 0.06);
+  background: var(--control-bg);
 }
 
 .markdown-code-copy {
@@ -3485,13 +3485,13 @@ select {
   border-radius: 10px;
   border: 1px solid transparent;
   background: transparent;
-  color: #234a61;
+  color: var(--text-secondary);
   line-height: 1;
 }
 
 .markdown-code-copy:hover,
 .markdown-code-copy:focus-visible {
-  border-color: rgba(23, 49, 74, 0.08);
+  border-color: var(--border-subtle);
   background: rgba(255, 255, 255, 0.92);
 }
 
@@ -3504,7 +3504,7 @@ select {
   margin: 8px 0 10px;
   padding-left: 12px;
   border-left: 3px solid rgba(29, 107, 120, 0.24);
-  color: #486276;
+  color: var(--text-secondary);
 }
 
 .markdown-body table {
@@ -3516,7 +3516,7 @@ select {
 .markdown-body th,
 .markdown-body td {
   padding: 8px 10px;
-  border: 1px solid rgba(23, 49, 74, 0.1);
+  border: 1px solid var(--border-subtle);
   text-align: left;
 }
 
@@ -3544,7 +3544,7 @@ select {
   width: 76px;
   border-radius: 14px;
   overflow: hidden;
-  border: 1px solid rgba(23, 49, 74, 0.1);
+  border: 1px solid var(--border-subtle);
   background: rgba(255, 255, 255, 0.8);
   display: flex;
   flex-direction: column;
@@ -3562,7 +3562,7 @@ select {
   height: 60px;
   display: grid;
   place-items: center;
-  background: rgba(23, 49, 74, 0.04);
+  background: var(--control-bg);
   overflow: hidden;
 }
 
@@ -3635,7 +3635,7 @@ select {
   padding: 18px 20px;
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.9);
-  border: 1px solid rgba(23, 49, 74, 0.08);
+  border: 1px solid var(--border-subtle);
   line-height: 1.7;
   white-space: pre-wrap;
   word-break: break-word;
@@ -3658,7 +3658,7 @@ select {
   margin-top: 8px;
   padding: 10px 12px;
   border-radius: 14px;
-  border: 1px solid rgba(23, 49, 74, 0.1);
+  border: 1px solid var(--border-subtle);
   background: rgba(255, 255, 255, 0.72);
 }
 
@@ -3688,7 +3688,7 @@ select {
 
 .quick-amount-chip.active {
   background: rgba(29, 107, 120, 0.12);
-  color: #184e58;
+  color: var(--text-primary);
   border-color: rgba(29, 107, 120, 0.22);
 }
 
@@ -3712,7 +3712,7 @@ select {
 .usage-bar-track {
   height: 10px;
   border-radius: 999px;
-  background: rgba(23, 49, 74, 0.08);
+  background: var(--border-subtle);
   overflow: hidden;
 }
 
@@ -3736,7 +3736,7 @@ select {
 }
 
 .usage-trend-grid {
-  stroke: rgba(23, 49, 74, 0.09);
+  stroke: var(--border-subtle);
   stroke-width: 1;
 }
 
@@ -3757,7 +3757,7 @@ select {
   gap: 8px;
   padding: 8px 10px;
   border-radius: 999px;
-  background: rgba(23, 49, 74, 0.04);
+  background: var(--control-bg);
 }
 
 .usage-trend-tooltip {
@@ -3767,7 +3767,7 @@ select {
   gap: 4px;
   min-width: 132px;
   padding: 10px 12px;
-  border: 1px solid rgba(23, 49, 74, 0.12);
+  border: 1px solid var(--border-strong);
   border-radius: 12px;
   background: rgb(var(--surface-rgb) / 0.96);
   box-shadow: 0 12px 32px rgb(0 0 0 / 0.12);
@@ -3913,7 +3913,7 @@ select {
 
 .selected-toggle {
   background: transparent;
-  color: #173d55;
+  color: var(--text-primary);
   box-shadow: none;
   border-color: transparent;
 }
@@ -3935,7 +3935,7 @@ select {
 }
 
 .model-favorite.active {
-  color: #c9852d;
+  color: var(--warning);
 }
 
 .subscription-progress-inline {
@@ -4078,7 +4078,7 @@ select {
 
 .boot-screen {
   gap: 10px;
-  color: #36576f;
+  color: var(--text-secondary);
 }
 
 .login-shell {
@@ -4144,7 +4144,7 @@ select {
 }
 
 .login-server-hint strong {
-  color: #213848;
+  color: var(--text-primary);
   font-size: 14px;
   line-height: 1.5;
   word-break: break-all;
@@ -4451,7 +4451,7 @@ textarea:focus {
   background: transparent;
   border: 0;
   box-shadow: none;
-  color: #486276;
+  color: var(--text-secondary);
 }
 
 .side-nav {
@@ -4464,7 +4464,7 @@ textarea:focus {
   border: 1px solid transparent;
   border-radius: 24px;
   background: transparent;
-  color: #496276;
+  color: var(--text-secondary);
 }
 
 .side-nav-item strong {
@@ -4474,7 +4474,7 @@ textarea:focus {
 
 .side-nav-item small {
   margin-top: 2px;
-  color: #7e8994;
+  color: var(--text-tertiary);
   line-height: 1.42;
 }
 
@@ -4521,14 +4521,14 @@ textarea:focus {
 .assistant-mode-button {
   min-height: 40px;
   padding: 0 8px 8px;
-  color: #758190;
+  color: var(--text-tertiary);
   font-size: 16px;
   font-weight: 550;
   letter-spacing: -0.01em;
 }
 
 .assistant-mode-button.active {
-  color: #1f3544;
+  color: var(--text-primary);
   border-bottom-color: rgba(43, 91, 102, 0.9);
 }
 
@@ -4660,7 +4660,7 @@ textarea:focus {
 
 .message-role {
   margin-bottom: 6px;
-  color: #2d5160;
+  color: var(--text-secondary);
   font-size: 12px;
   letter-spacing: 0.06em;
 }
@@ -4748,7 +4748,7 @@ textarea:focus {
 .chip,
 .tag {
   background: rgba(244, 239, 233, 0.88);
-  color: #566a7d;
+  color: var(--text-secondary);
 }
 
 .inline-notice {
@@ -4770,12 +4770,12 @@ textarea:focus {
   border: 0;
   background: transparent;
   box-shadow: none;
-  color: #788492;
+  color: var(--text-tertiary);
   border-bottom: 2px solid transparent;
 }
 
 .history-panel-tabs .ghost-button.selected-toggle {
-  color: #213848;
+  color: var(--text-primary);
   border-bottom-color: rgba(43, 91, 102, 0.9);
 }
 
@@ -5057,7 +5057,7 @@ textarea:focus {
   gap: 10px;
   padding: 16px 18px;
   border-radius: 18px;
-  border: 1px solid rgba(23, 49, 74, 0.08);
+  border: 1px solid var(--border-subtle);
   background: rgba(255, 255, 255, 0.8);
 }
 
@@ -5074,7 +5074,7 @@ textarea:focus {
   height: 10px;
   border-radius: 999px;
   display: inline-flex;
-  box-shadow: 0 0 0 1px rgba(23, 49, 74, 0.08);
+  box-shadow: 0 0 0 1px var(--border-subtle);
   transition: transform 160ms ease, box-shadow 160ms ease, filter 160ms ease;
 }
 
@@ -5082,7 +5082,7 @@ textarea:focus {
   transform: translateY(-1px) scale(1.28);
   filter: saturate(1.08);
   box-shadow:
-    0 0 0 1px rgba(23, 49, 74, 0.12),
+    0 0 0 1px var(--border-strong),
     0 0 0 5px rgba(61, 153, 112, 0.08);
 }
 
@@ -5099,7 +5099,7 @@ textarea:focus {
 }
 
 .service-status-history-dot.muted {
-  background: rgba(23, 49, 74, 0.2);
+  background: var(--control-bg-active);
 }
 
 .service-status-card-head,
@@ -5152,21 +5152,21 @@ textarea:focus {
 
 .service-status-pill.success {
   background: rgba(61, 153, 112, 0.14);
-  color: #206c4a;
+  color: var(--success);
 }
 
 .service-status-pill.warn {
   background: rgba(214, 146, 42, 0.14);
-  color: #946100;
+  color: var(--warning);
 }
 
 .service-status-pill.danger {
   background: rgba(210, 78, 78, 0.14);
-  color: #a33737;
+  color: var(--danger);
 }
 
 .service-status-pill.muted {
-  background: rgba(23, 49, 74, 0.08);
+  background: var(--border-subtle);
   color: var(--muted);
 }
 
@@ -5462,7 +5462,7 @@ body,
 
 .session-context-menu-item:hover,
 .session-context-menu-item:focus-visible {
-  background: rgba(23, 49, 74, 0.06);
+  background: var(--control-bg);
 }
 
 .session-context-menu-item.danger {
@@ -5780,7 +5780,7 @@ textarea,
 :root[data-theme='dark'] .conversation-scroll-button {
   border-color: transparent;
   background: transparent;
-  color: #e3ebf3;
+  color: var(--text-primary);
   box-shadow: none;
 }
 
@@ -5951,7 +5951,7 @@ textarea,
 
 :root[data-theme='dark'] .pricing-actions .primary-button {
   background: linear-gradient(135deg, #5b6f75, #48595f);
-  color: #edf5f7;
+  color: #fff;
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
 }
 
@@ -7279,7 +7279,7 @@ body,
 }
 
 .cli-plan-status-icon.completed {
-  color: #2f8b57;
+  color: var(--success);
 }
 
 .cli-plan-status-icon.in_progress {
@@ -7336,7 +7336,7 @@ body,
   justify-content: center;
   border-radius: 9px;
   background: rgb(var(--surface-rgb) / 0.92);
-  color: #28485d;
+  color: var(--text-secondary);
 }
 
 .message-link-chip-copy {
@@ -8325,7 +8325,7 @@ textarea,
 
 :root[data-theme='dark'] .primary-button,
 :root[data-theme='dark'] .send-button {
-  color: #071018 !important;
+  color: #fff !important;
   background: linear-gradient(135deg, var(--accent), var(--accent-strong)) !important;
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / 0.32),
@@ -10811,7 +10811,7 @@ article.panel.page-surface,
 }
 
 .model-favorite.active {
-  color: #d19a32 !important;
+  color: var(--warning) !important;
 }
 
 .model-favorite.active svg,
@@ -11390,7 +11390,7 @@ article.panel.page-surface,
 
 :root[data-theme='dark'] .send-button,
 :root[data-theme='dark'] .composer-toolbar .send-button {
-  color: #f5f8fb !important;
+  color: var(--text-primary) !important;
   background: transparent !important;
   border-color: transparent !important;
   box-shadow: none !important;
@@ -11398,7 +11398,7 @@ article.panel.page-surface,
 
 :root[data-theme='dark'] .send-button.stop-button,
 :root[data-theme='dark'] .composer-toolbar .send-button.stop-button {
-  color: #ff8f7f !important;
+  color: var(--danger) !important;
 }
 
 :root[data-theme='dark'] .send-button:hover,
@@ -16008,4 +16008,1244 @@ body:has(.cli-extension-floating-tooltip)::after,
   filter: none !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
+}
+
+/* ============================================================
+   macOS Sequoia refinement pass 12 — final polish
+   Palette: SF Blue #007AFF light / #0A84FF dark (Apple HIG 2024)
+   Typography: SF Pro via -apple-system stack
+   Shadows: layered, depth-aware
+   Interactions: scale + opacity feedback, no color flash
+   ============================================================ */
+
+/* --- Pass 12: Core palette — macOS Sequoia authentic blue --- */
+:root {
+  --accent: #007aff;
+  --accent-rgb: 0 122 255;
+  --accent-soft: rgba(0, 122, 255, 0.10);
+  --accent-softer: rgba(0, 122, 255, 0.05);
+  --accent-strong: #0063d1;
+  --accent-tint: rgba(0, 122, 255, 0.07);
+
+  /* Backgrounds — clean, near-white frosted */
+  --bg: #f5f5f7;
+  --bg-rgb: 245 245 247;
+  --window-bg: rgba(247, 247, 249, 0.82);
+  --window-bg-rgb: 247 247 249;
+  --panel-bg: rgba(255, 255, 255, 0.52);
+  --card-bg: rgba(255, 255, 255, 0.72);
+  --card-bg-strong: rgba(255, 255, 255, 0.88);
+  --popover-bg: rgba(252, 252, 254, 0.88);
+  --sidebar-bg: rgba(250, 250, 252, 0.64);
+
+  /* Controls */
+  --control-bg: rgba(255, 255, 255, 0.64);
+  --control-bg-hover: rgba(255, 255, 255, 0.82);
+  --control-bg-active: rgba(228, 236, 248, 0.82);
+
+  /* Borders */
+  --border-subtle: rgba(60, 60, 67, 0.12);
+  --border-strong: rgba(60, 60, 67, 0.20);
+  --border-highlight: rgba(255, 255, 255, 0.80);
+
+  /* Text — SF Pro hierarchy */
+  --text-primary: #1c1c1e;
+  --text-secondary: #636366;
+  --text-tertiary: #8e8e93;
+  --text-disabled: rgba(60, 60, 67, 0.30);
+
+  /* Semantic colours */
+  --success: #34c759;
+  --warning: #ff9f0a;
+  --danger: #ff3b30;
+
+  /* Shadows — layered like macOS windows */
+  --shadow-soft: 0 2px 8px rgba(0,0,0,0.06), 0 8px 24px rgba(0,0,0,0.08);
+  --shadow-floating: 0 4px 12px rgba(0,0,0,0.08), 0 16px 48px rgba(0,0,0,0.14);
+  --shadow-pressed: inset 0 1px 2px rgba(0,0,0,0.08);
+  --inner-highlight: inset 0 1px 0 rgba(255,255,255,0.72);
+
+  /* Bubbles */
+  --bubble-user: rgba(0, 122, 255, 0.09);
+  --bubble-ai: rgba(255, 255, 255, 0.72);
+  --bubble-log: rgba(245, 245, 247, 0.72);
+
+  /* Radii — Sequoia geometry */
+  --radius-window: 20px;
+  --radius-card: 12px;
+  --radius-control: 8px;
+  --radius-chip: 6px;
+
+  /* Typography — SF Pro system stack */
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+  --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "SF Mono", ui-monospace, "Cascadia Code", "Fira Code", monospace;
+
+  /* Glass */
+  --glass-blur: blur(32px) saturate(160%);
+  --glass-blur-strong: blur(56px) saturate(180%);
+}
+
+:root[data-theme='dark'] {
+  --accent: #0a84ff;
+  --accent-rgb: 10 132 255;
+  --accent-soft: rgba(10, 132, 255, 0.14);
+  --accent-softer: rgba(10, 132, 255, 0.07);
+  --accent-strong: #409cff;
+  --accent-tint: rgba(10, 132, 255, 0.08);
+
+  /* Backgrounds — deep navy/graphite Apple palette */
+  --bg: #000000;
+  --bg-rgb: 0 0 0;
+  --window-bg: rgba(28, 28, 30, 0.88);
+  --window-bg-rgb: 28 28 30;
+  --panel-bg: rgba(44, 44, 46, 0.60);
+  --card-bg: rgba(58, 58, 60, 0.62);
+  --card-bg-strong: rgba(72, 72, 74, 0.72);
+  --popover-bg: rgba(44, 44, 46, 0.92);
+  --sidebar-bg: rgba(36, 36, 38, 0.68);
+
+  /* Controls */
+  --control-bg: rgba(255, 255, 255, 0.06);
+  --control-bg-hover: rgba(255, 255, 255, 0.10);
+  --control-bg-active: rgba(10, 132, 255, 0.16);
+
+  /* Borders */
+  --border-subtle: rgba(255, 255, 255, 0.09);
+  --border-strong: rgba(255, 255, 255, 0.16);
+  --border-highlight: rgba(255, 255, 255, 0.06);
+
+  /* Text */
+  --text-primary: #f2f2f7;
+  --text-secondary: #aeaeb2;
+  --text-tertiary: #636366;
+  --text-disabled: rgba(235, 235, 245, 0.28);
+
+  /* Semantic */
+  --success: #30d158;
+  --warning: #ffd60a;
+  --danger: #ff453a;
+
+  /* Shadows */
+  --shadow-soft: 0 2px 8px rgba(0,0,0,0.28), 0 8px 24px rgba(0,0,0,0.38);
+  --shadow-floating: 0 4px 12px rgba(0,0,0,0.36), 0 20px 60px rgba(0,0,0,0.52);
+  --shadow-pressed: inset 0 1px 2px rgba(0,0,0,0.42);
+  --inner-highlight: inset 0 1px 0 rgba(255,255,255,0.06);
+
+  /* Bubbles */
+  --bubble-user: rgba(10, 132, 255, 0.12);
+  --bubble-ai: rgba(44, 44, 46, 0.68);
+  --bubble-log: rgba(36, 36, 38, 0.70);
+
+  /* Glass */
+  --glass-blur: blur(32px) saturate(150%);
+  --glass-blur-strong: blur(56px) saturate(165%);
+}
+
+/* --- Pass 12: Typography — apply SF Pro globally --- */
+body,
+button,
+input,
+textarea,
+select {
+  font-family: var(--font-sans) !important;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.desktop-window-shell,
+.desktop-window-content,
+h1, h2, h3, h4, h5, h6,
+.page-title,
+.modal-title,
+.section-title,
+.panel-title {
+  font-family: var(--font-display) !important;
+}
+
+code, pre, kbd, samp,
+.code-block,
+.cli-output,
+.message-code-block {
+  font-family: var(--font-mono) !important;
+}
+
+/* --- Pass 12: Button system — Sequoia feel --- */
+button:not([disabled]),
+.btn:not([disabled]),
+.button:not([disabled]),
+[role='button']:not([disabled]) {
+  transition: opacity 0.14s ease, transform 0.12s ease, background-color 0.14s ease, box-shadow 0.14s ease !important;
+  cursor: pointer;
+}
+
+button:not([disabled]):active,
+.btn:not([disabled]):active,
+.button:not([disabled]):active,
+[role='button']:not([disabled]):active {
+  transform: scale(0.975) !important;
+  opacity: 0.88 !important;
+}
+
+/* Primary / accent buttons */
+.btn-primary,
+.button-primary,
+.primary-button,
+.accent-button,
+.submit-button,
+[data-variant='primary'],
+button[data-type='primary'] {
+  background: var(--accent) !important;
+  color: #fff !important;
+  border: 1px solid transparent !important;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.14), 0 0 0 0.5px rgba(0,122,255,0.24) !important;
+  border-radius: var(--radius-control) !important;
+  font-weight: 510 !important;
+  letter-spacing: -0.01em !important;
+}
+
+.btn-primary:hover,
+.button-primary:hover,
+.primary-button:hover,
+.accent-button:hover,
+[data-variant='primary']:hover {
+  background: var(--accent-strong) !important;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.18), 0 0 0 0.5px rgba(0,122,255,0.28) !important;
+}
+
+:root[data-theme='dark'] .btn-primary,
+:root[data-theme='dark'] .button-primary,
+:root[data-theme='dark'] .primary-button,
+:root[data-theme='dark'] .accent-button,
+:root[data-theme='dark'] [data-variant='primary'] {
+  box-shadow: 0 1px 3px rgba(0,0,0,0.32), 0 0 0 0.5px rgba(10,132,255,0.30) !important;
+}
+
+/* Secondary / ghost buttons */
+.btn-secondary,
+.button-secondary,
+.ghost-button,
+.outline-button,
+[data-variant='secondary'] {
+  background: var(--control-bg) !important;
+  border: 1px solid var(--border-subtle) !important;
+  box-shadow: var(--inner-highlight) !important;
+  border-radius: var(--radius-control) !important;
+  font-weight: 490 !important;
+}
+
+.btn-secondary:hover,
+.ghost-button:hover,
+.outline-button:hover,
+[data-variant='secondary']:hover {
+  background: var(--control-bg-hover) !important;
+  border-color: var(--border-strong) !important;
+}
+
+/* Destructive */
+.btn-danger,
+.button-danger,
+.danger-button,
+.delete-button,
+[data-variant='danger'] {
+  background: var(--danger) !important;
+  color: #fff !important;
+  border: 1px solid transparent !important;
+  border-radius: var(--radius-control) !important;
+  font-weight: 510 !important;
+}
+
+/* --- Pass 12: Input / textarea — Sequoia feel --- */
+input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color']),
+textarea,
+select {
+  background: var(--control-bg) !important;
+  border: 1px solid var(--border-subtle) !important;
+  border-radius: var(--radius-control) !important;
+  color: var(--text-primary) !important;
+  box-shadow: var(--inner-highlight) !important;
+  transition: border-color 0.14s ease, box-shadow 0.14s ease !important;
+}
+
+input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color']):focus,
+textarea:focus,
+select:focus {
+  outline: none !important;
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 3px var(--accent-soft), var(--inner-highlight) !important;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-tertiary) !important;
+  opacity: 1 !important;
+}
+
+/* --- Pass 12: Card / surface polish --- */
+.card,
+.panel-card,
+.config-card,
+.model-card,
+.subscription-card,
+.wallet-card,
+.info-card {
+  background: var(--card-bg) !important;
+  border: 1px solid var(--border-subtle) !important;
+  border-radius: var(--radius-card) !important;
+  box-shadow: var(--shadow-soft) !important;
+}
+
+.card:hover,
+.model-card:hover,
+.config-card:hover {
+  border-color: var(--border-strong) !important;
+  box-shadow: var(--shadow-floating) !important;
+}
+
+/* --- Pass 12: Sidebar refinement --- */
+.sidebar,
+.nav-sidebar,
+.left-sidebar,
+.side-panel {
+  background: var(--sidebar-bg) !important;
+  border-right: 1px solid var(--border-subtle) !important;
+}
+
+.sidebar-item,
+.nav-item,
+.conversation-item {
+  border-radius: var(--radius-control) !important;
+  transition: background-color 0.12s ease !important;
+}
+
+.sidebar-item:hover,
+.nav-item:hover,
+.conversation-item:hover {
+  background: var(--control-bg-hover) !important;
+}
+
+.sidebar-item.active,
+.nav-item.active,
+.sidebar-item.selected,
+.conversation-item.selected {
+  background: var(--accent-tint) !important;
+  color: var(--accent) !important;
+}
+
+/* --- Pass 12: Chat bubbles — refined --- */
+.message-bubble-user,
+.user-bubble,
+.bubble-user {
+  background: var(--bubble-user) !important;
+  border: 1px solid var(--border-subtle) !important;
+  border-radius: 18px 18px 4px 18px !important;
+  box-shadow: var(--shadow-soft) !important;
+}
+
+.message-bubble-ai,
+.ai-bubble,
+.assistant-bubble,
+.bubble-ai {
+  background: var(--bubble-ai) !important;
+  border: 1px solid var(--border-subtle) !important;
+  border-radius: 18px 18px 18px 4px !important;
+  box-shadow: var(--shadow-soft) !important;
+}
+
+/* --- Pass 12: Scrollbar — macOS thin style --- */
+::-webkit-scrollbar {
+  width: 6px !important;
+  height: 6px !important;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent !important;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong) !important;
+  border-radius: 3px !important;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-tertiary) !important;
+}
+
+/* --- Pass 12: Badge / pill / chip --- */
+.badge,
+.pill,
+.tag,
+.chip,
+.label-chip,
+.status-pill {
+  border-radius: 999px !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.01em !important;
+  padding: 2px 8px !important;
+}
+
+.badge-accent,
+.pill-accent,
+[data-badge='accent'] {
+  background: var(--accent-soft) !important;
+  color: var(--accent) !important;
+  border: 1px solid var(--accent-soft) !important;
+}
+
+/* --- Pass 12: Toast notification --- */
+.toast-bar,
+.toast,
+.notification-toast {
+  background: var(--oneapi-popup-bg) !important;
+  border: 1px solid var(--oneapi-popup-border) !important;
+  border-radius: var(--radius-card) !important;
+  box-shadow: var(--shadow-floating) !important;
+  backdrop-filter: none !important;
+  font-weight: 490 !important;
+}
+
+/* --- Pass 12: Progress bar --- */
+progress,
+.progress-bar,
+.progress-fill,
+[role='progressbar'] {
+  border-radius: 999px !important;
+  overflow: hidden !important;
+}
+
+.progress-track,
+progress::-webkit-progress-bar {
+  background: var(--border-subtle) !important;
+  border-radius: 999px !important;
+}
+
+.progress-fill,
+progress::-webkit-progress-value {
+  background: var(--accent) !important;
+  border-radius: 999px !important;
+  transition: width 0.3s ease !important;
+}
+
+/* --- Pass 12: Focus ring — accessible, macOS-style --- */
+*:focus-visible {
+  outline: 2px solid var(--accent) !important;
+  outline-offset: 2px !important;
+  box-shadow: 0 0 0 4px var(--accent-soft) !important;
+}
+
+/* --- Pass 12: Selection --- */
+::selection {
+  background: var(--accent-soft) !important;
+  color: var(--text-primary) !important;
+}
+
+/* --- Pass 12: Dividers / separator --- */
+hr,
+.divider,
+.separator {
+  border: none !important;
+  border-top: 1px solid var(--border-subtle) !important;
+  margin: 0 !important;
+}
+
+/* --- Pass 12: Code blocks --- */
+.code-block,
+pre,
+.message-code-block {
+  background: var(--card-bg-strong) !important;
+  border: 1px solid var(--border-subtle) !important;
+  border-radius: var(--radius-card) !important;
+  box-shadow: var(--shadow-pressed) !important;
+}
+
+/* --- Pass 12: Link style --- */
+a:not(.btn):not(.button) {
+  color: var(--accent) !important;
+  text-decoration: none !important;
+}
+
+a:not(.btn):not(.button):hover {
+  text-decoration: underline !important;
+  opacity: 0.85 !important;
+}
+
+/* --- Pass 12: Login / auth page --- */
+.login-page,
+.auth-page,
+.login-card,
+.auth-card {
+  background: var(--card-bg-strong) !important;
+  border: 1px solid var(--border-subtle) !important;
+  border-radius: var(--radius-card) !important;
+  box-shadow: var(--shadow-floating) !important;
+}
+
+/* --- Pass 12: Wallet / subscription cards --- */
+.wallet-balance,
+.subscription-tier,
+.plan-card {
+  background: var(--card-bg) !important;
+  border: 1px solid var(--border-subtle) !important;
+  border-radius: var(--radius-card) !important;
+  box-shadow: var(--shadow-soft) !important;
+}
+
+/* --- Pass 12: Dropdown / select menu --- */
+.dropdown-menu,
+.context-menu,
+.menu-list {
+  background: var(--popover-bg) !important;
+  border: 1px solid var(--border-subtle) !important;
+  border-radius: var(--radius-card) !important;
+  box-shadow: var(--shadow-floating) !important;
+  overflow: hidden !important;
+}
+
+.dropdown-item,
+.context-menu-item,
+.menu-item {
+  border-radius: 6px !important;
+  transition: background-color 0.10s ease !important;
+}
+
+.dropdown-item:hover,
+.context-menu-item:hover,
+.menu-item:hover {
+  background: var(--control-bg-hover) !important;
+}
+
+/* --- Pass 12: Skeleton / loading shimmer --- */
+.skeleton,
+.loading-placeholder {
+  background: linear-gradient(
+    90deg,
+    var(--control-bg) 25%,
+    var(--control-bg-hover) 50%,
+    var(--control-bg) 75%
+  ) !important;
+  background-size: 200% 100% !important;
+  animation: skeleton-shimmer 1.4s ease infinite !important;
+  border-radius: var(--radius-control) !important;
+}
+
+@keyframes skeleton-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* --- Pass 12: Checkbox / radio — macOS style --- */
+input[type='checkbox'],
+input[type='radio'] {
+  accent-color: var(--accent) !important;
+}
+
+/* --- Pass 12: Range slider --- */
+input[type='range'] {
+  accent-color: var(--accent) !important;
+}
+
+/* --- Pass 12: Toggle / switch --- */
+.toggle,
+.switch,
+.toggle-track {
+  background: var(--control-bg) !important;
+  border: 1px solid var(--border-subtle) !important;
+  border-radius: 999px !important;
+  transition: background-color 0.18s ease !important;
+}
+
+.toggle.active,
+.switch.active,
+.toggle-track.on,
+input:checked + .toggle-track {
+  background: var(--accent) !important;
+  border-color: transparent !important;
+}
+
+/* --- Pass 12: Modal / dialog backdrop --- */
+.modal-mask,
+.dialog-mask,
+.overlay-mask {
+  background: rgba(0, 0, 0, 0.36) !important;
+  backdrop-filter: blur(4px) !important;
+}
+
+:root[data-theme='dark'] .modal-mask,
+:root[data-theme='dark'] .dialog-mask {
+  background: rgba(0, 0, 0, 0.54) !important;
+}
+
+/* --- Pass 12: Efficiency mode — preserve appearance --- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+[data-performance='efficiency'] button:active,
+[data-performance='efficiency'] .btn:active {
+  transform: none !important;
+  opacity: 0.78 !important;
+}
+
+/* ============================================================
+   macOS Sequoia refinement pass 13 — targeted component polish
+   Covers real classNames found in actual TSX components
+   ============================================================ */
+
+/* --- Pass 13: message-role / message-meta / bubble-action --- */
+.message-role {
+  color: var(--accent) !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.04em !important;
+  text-transform: uppercase !important;
+  opacity: 0.72 !important;
+}
+
+.message-meta-extra {
+  color: var(--text-tertiary) !important;
+}
+
+.bubble-action {
+  color: var(--text-tertiary) !important;
+  border-radius: 7px !important;
+  transition: background 0.12s ease, color 0.12s ease !important;
+}
+
+.bubble-action:hover {
+  background: var(--control-bg-hover) !important;
+  color: var(--text-primary) !important;
+}
+
+/* --- Pass 13: session-row (history list items) --- */
+.session-row-preview {
+  color: var(--text-primary) !important;
+  font-size: 12.5px !important;
+}
+
+.session-row small {
+  color: var(--text-tertiary) !important;
+}
+
+.session-rename-input {
+  background: var(--control-bg) !important;
+  border: 1px solid var(--accent) !important;
+  color: var(--text-primary) !important;
+  box-shadow: 0 0 0 3px var(--accent-soft) !important;
+}
+
+/* --- Pass 13: history-panel-tabs --- */
+.history-panel-tabs .ghost-button.tiny {
+  color: var(--text-secondary) !important;
+  border-bottom: 2px solid transparent !important;
+  border-radius: 0 !important;
+}
+
+.history-panel-tabs .ghost-button.tiny.selected-toggle {
+  color: var(--accent) !important;
+  border-bottom-color: var(--accent) !important;
+  font-weight: 600 !important;
+}
+
+/* --- Pass 13: panel-header eyebrow --- */
+.eyebrow {
+  color: var(--text-tertiary) !important;
+  font-size: 11px !important;
+  letter-spacing: 0.07em !important;
+}
+
+.panel-header h2 {
+  color: var(--text-primary) !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.02em !important;
+}
+
+/* --- Pass 13: pending-message / inline-notice / streaming-bubble --- */
+.pending-message {
+  color: var(--text-secondary) !important;
+}
+
+.inline-notice {
+  background: var(--card-bg) !important;
+  border-color: var(--border-subtle) !important;
+}
+
+.inline-notice.warn {
+  background: rgba(255, 59, 48, 0.06) !important;
+  border-color: rgba(255, 59, 48, 0.18) !important;
+}
+
+.streaming-bubble {
+  border-style: solid !important;
+  border-color: var(--accent-soft) !important;
+}
+
+/* --- Pass 13: usage-trend component --- */
+.usage-trend-legend-item {
+  background: var(--control-bg) !important;
+  border: 1px solid var(--border-subtle) !important;
+  border-radius: 999px !important;
+  color: var(--text-secondary) !important;
+}
+
+.usage-trend-grid {
+  stroke: var(--border-subtle) !important;
+}
+
+.usage-trend-tooltip {
+  background: var(--popover-bg) !important;
+  border-color: var(--border-subtle) !important;
+  box-shadow: var(--shadow-floating) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* --- Pass 13: composer asset cards --- */
+.composer-asset-card {
+  background: var(--card-bg) !important;
+  border: 1px solid var(--border-subtle) !important;
+  border-radius: 10px !important;
+}
+
+.composer-asset-name {
+  color: var(--text-secondary) !important;
+  font-size: 11px !important;
+}
+
+/* --- Pass 13: cli-log cards --- */
+.cli-log-card-head {
+  color: var(--text-primary) !important;
+}
+
+.cli-log-card-head small {
+  color: var(--text-tertiary) !important;
+}
+
+/* --- Pass 13: markdown-body text hierarchy --- */
+.markdown-body {
+  color: var(--text-primary) !important;
+  line-height: 1.65 !important;
+}
+
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4 {
+  color: var(--text-primary) !important;
+  font-family: var(--font-display) !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.02em !important;
+}
+
+.markdown-body p,
+.markdown-body li {
+  color: var(--text-primary) !important;
+}
+
+.markdown-body code {
+  background: var(--control-bg) !important;
+  border: 1px solid var(--border-subtle) !important;
+  border-radius: 5px !important;
+  padding: 1px 5px !important;
+  font-family: var(--font-mono) !important;
+  font-size: 0.9em !important;
+}
+
+.markdown-body a {
+  color: var(--accent) !important;
+}
+
+/* --- Pass 13: conversation scroll dock button --- */
+.conversation-scroll-button {
+  background: var(--card-bg-strong) !important;
+  border: 1px solid var(--border-subtle) !important;
+  box-shadow: var(--shadow-soft) !important;
+  color: var(--text-secondary) !important;
+  border-radius: 999px !important;
+}
+
+.conversation-scroll-button:hover,
+.conversation-scroll-button:focus-visible {
+  background: var(--control-bg-hover) !important;
+  color: var(--text-primary) !important;
+}
+
+/* --- Pass 13: dark mode hardcoded color overrides --- */
+:root[data-theme='dark'] .message-role {
+  color: var(--accent) !important;
+  opacity: 0.78 !important;
+}
+
+:root[data-theme='dark'] .inline-notice {
+  background: var(--card-bg) !important;
+  border-color: var(--border-subtle) !important;
+}
+
+:root[data-theme='dark'] .inline-notice.warn {
+  background: rgba(255, 69, 58, 0.08) !important;
+  border-color: rgba(255, 69, 58, 0.22) !important;
+}
+
+:root[data-theme='dark'] .markdown-body code {
+  background: rgba(255, 255, 255, 0.07) !important;
+  border-color: var(--border-subtle) !important;
+}
+
+:root[data-theme='dark'] .history-panel-tabs .ghost-button.tiny {
+  color: var(--text-tertiary) !important;
+}
+
+:root[data-theme='dark'] .history-panel-tabs .ghost-button.tiny.selected-toggle {
+  color: var(--accent) !important;
+}
+
+/* ============================================================
+   macOS Sequoia refinement pass 14 — hardcoded color purge
+   Replaces all rgba(23,49,74,...) teal-navy legacy colors
+   and remaining hardcoded hex text colors with CSS variables
+   ============================================================ */
+
+/* Legacy teal-navy border/bg pattern → border-subtle / control-bg */
+.composer-asset-card,
+.shell-composer textarea,
+.chat-composer textarea,
+.cli-composer textarea,
+.composer-token-chip,
+.composer-token-strip,
+.message-attachment-card,
+.message-attachment-strip,
+.message-link-chip,
+.message-link-chip-strip,
+.inline-file-preview,
+.session-context-menu-item,
+.picker-filter-chip,
+.cli-extension-badge,
+.model-option-head,
+.picker-menu-head,
+.list-block-header,
+.record-row,
+.timeline-row,
+.status-card,
+.mini-stat,
+.pricing-card,
+.empty-card,
+.assistant-picker-row,
+.assistant-editor-fields,
+.cli-extension-list > * {
+  border-color: var(--border-subtle) !important;
+  background-color: var(--control-bg) !important;
+}
+
+/* Hover states that used rgba(23,49,74,0.06) */
+.composer-asset-card:hover,
+.message-attachment-card:hover,
+.message-link-chip:hover,
+.cli-extension-card:hover,
+.assistant-picker-row:hover,
+.record-row:hover,
+.timeline-row:hover,
+.status-card:hover {
+  background: var(--control-bg-hover) !important;
+  border-color: var(--border-strong) !important;
+}
+
+/* Hardcoded text colors → semantic variables */
+.session-row-preview,
+.chat-history-panel .history-group-head,
+.cli-history-panel .history-group-head {
+  color: var(--text-primary) !important;
+}
+
+.message-meta-extra,
+.session-row small,
+.usage-trend-axis,
+.cli-log-time-head,
+.cli-log-phase-headline,
+.file-preview-path,
+.composer-asset-name,
+.cli-extension-desc-line,
+.cli-extension-meta,
+.assistant-picker-empty,
+.picker-empty-state,
+.empty-card p {
+  color: var(--text-tertiary) !important;
+}
+
+/* cli-log text */
+.cli-log-output-inline,
+.cli-log-event-body,
+.cli-log-detail-label {
+  color: var(--text-secondary) !important;
+}
+
+/* usage-trend strokes */
+.usage-trend-grid {
+  stroke: var(--border-subtle) !important;
+}
+
+/* usage-trend tooltip — already done in pass 13 but ensure no backdrop */
+.usage-trend-tooltip {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* composer textarea border */
+.shell-composer textarea:focus,
+.chat-composer textarea:focus,
+.cli-composer textarea:focus {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 3px var(--accent-soft) !important;
+}
+
+/* pending-image shimmer */
+.pending-image-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--control-bg) 25%,
+    var(--control-bg-hover) 50%,
+    var(--control-bg) 75%
+  ) !important;
+  background-size: 200% 100% !important;
+  animation: skeleton-shimmer 1.4s ease infinite !important;
+}
+
+/* reasoning-card-body */
+.reasoning-card-body {
+  background: var(--card-bg) !important;
+  border: 1px solid var(--border-subtle) !important;
+  border-radius: var(--radius-card) !important;
+}
+
+/* --- Pass 14: Dark mode residual hardcoded hex colors --- */
+:root[data-theme='dark'] .composer-asset-card,
+:root[data-theme='dark'] .shell-composer textarea,
+:root[data-theme='dark'] .chat-composer textarea,
+:root[data-theme='dark'] .cli-composer textarea {
+  background-color: var(--control-bg) !important;
+  border-color: var(--border-subtle) !important;
+}
+
+:root[data-theme='dark'] .usage-trend-legend-item {
+  background: var(--control-bg) !important;
+  color: var(--text-secondary) !important;
+}
+
+:root[data-theme='dark'] .reasoning-card-body {
+  background: var(--card-bg) !important;
+  border-color: var(--border-subtle) !important;
+}
+
+/* ============================================================
+   pass 15 — popup glass system FINAL OVERRIDE
+   Glass only on popup container. modal-mask = dim only.
+   Light: white-frost. Dark: graphite-frost.
+   ============================================================ */
+
+:root {
+  --popup-glass-bg: rgba(248, 250, 255, 0.80);
+  --popup-glass-blur: blur(40px) saturate(180%) brightness(1.04);
+  --popup-glass-border: rgba(60, 60, 67, 0.14);
+  --popup-glass-shadow: 0 2px 1px rgba(0,0,0,0.04), 0 8px 24px rgba(0,0,0,0.10), 0 24px 56px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.82);
+  --popup-item-bg: rgba(255,255,255,0.55);
+  --popup-item-hover: rgba(0,122,255,0.07);
+  --popup-item-active: rgba(0,122,255,0.12);
+  --popup-item-border: rgba(60,60,67,0.10);
+  --popup-input-bg: rgba(255,255,255,0.62);
+  --popup-mask-bg: rgba(0,0,0,0.28);
+}
+
+:root[data-theme='dark'] {
+  --popup-glass-bg: rgba(30, 30, 32, 0.84);
+  --popup-glass-blur: blur(40px) saturate(160%) brightness(0.96);
+  --popup-glass-border: rgba(255,255,255,0.10);
+  --popup-glass-shadow: 0 2px 1px rgba(0,0,0,0.18), 0 8px 24px rgba(0,0,0,0.36), 0 28px 64px rgba(0,0,0,0.42), inset 0 1px 0 rgba(255,255,255,0.06);
+  --popup-item-bg: rgba(255,255,255,0.05);
+  --popup-item-hover: rgba(10,132,255,0.10);
+  --popup-item-active: rgba(10,132,255,0.16);
+  --popup-item-border: rgba(255,255,255,0.08);
+  --popup-input-bg: rgba(255,255,255,0.07);
+  --popup-mask-bg: rgba(0,0,0,0.50);
+}
+
+/* Reset all previous bg/filter overrides on popup surfaces */
+.picker-menu, .assistant-menu, .image-style-menu, .image-config-menu,
+.model-menu, .cli-extension-menu, .glass-picker-menu, .session-context-menu,
+.chat-history-panel, .cli-history-panel, .cli-plan-floating-panel,
+.desktop-update-popover, .modal-card, .announcement-modal-card,
+.translation-modal-card, .markdown-code-action-menu,
+.cli-extension-floating-tooltip, .toast-bar,
+.image-preview-modal, .attachment-preview-modal {
+  background: unset !important;
+  background-color: unset !important;
+  background-image: unset !important;
+  backdrop-filter: unset !important;
+  -webkit-backdrop-filter: unset !important;
+}
+
+/* Apply glass to picker/dropdown surfaces */
+.picker-menu:not(.glass-picker-menu), .model-menu, .image-config-menu,
+.markdown-code-action-menu, .cli-extension-floating-tooltip,
+.session-context-menu, .assistant-menu:not(.glass-picker-menu),
+.image-style-menu:not(.glass-picker-menu),
+.cli-extension-menu:not(.glass-picker-menu) {
+  background: var(--popup-glass-bg) !important;
+  backdrop-filter: var(--popup-glass-blur) !important;
+  -webkit-backdrop-filter: var(--popup-glass-blur) !important;
+  border: 1px solid var(--popup-glass-border) !important;
+  box-shadow: var(--popup-glass-shadow) !important;
+  border-radius: 16px !important;
+}
+
+/* GlassPickerMenu wrapper */
+.glass-picker-menu {
+  background: transparent !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  border: none !important;
+  box-shadow: none !important;
+  position: relative !important;
+  isolation: isolate !important;
+}
+
+.glass-picker-menu-bg {
+  position: absolute !important;
+  inset: 0 !important;
+  border-radius: inherit !important;
+  background: var(--popup-glass-bg) !important;
+  backdrop-filter: var(--popup-glass-blur) !important;
+  -webkit-backdrop-filter: var(--popup-glass-blur) !important;
+  border: 1px solid var(--popup-glass-border) !important;
+  box-shadow: var(--popup-glass-shadow) !important;
+  z-index: -1 !important;
+  pointer-events: none !important;
+}
+
+.glass-picker-menu-content {
+  position: relative !important;
+  z-index: 1 !important;
+}
+
+/* History panels and floating panels */
+.chat-history-panel, .cli-history-panel,
+.cli-plan-floating-panel, .desktop-update-popover {
+  background: var(--popup-glass-bg) !important;
+  backdrop-filter: var(--popup-glass-blur) !important;
+  -webkit-backdrop-filter: var(--popup-glass-blur) !important;
+  border: 1px solid var(--popup-glass-border) !important;
+  box-shadow: var(--popup-glass-shadow) !important;
+}
+
+/* Modal cards — glass on card only */
+.modal-card, .announcement-modal-card, .translation-modal-card {
+  background: var(--popup-glass-bg) !important;
+  backdrop-filter: var(--popup-glass-blur) !important;
+  -webkit-backdrop-filter: var(--popup-glass-blur) !important;
+  border: 1px solid var(--popup-glass-border) !important;
+  box-shadow: var(--popup-glass-shadow) !important;
+  border-radius: 20px !important;
+}
+
+/* modal-mask: dim overlay only — NO backdrop-filter (avoid full-screen blur) */
+.modal-mask, .image-preview-modal-mask {
+  background: var(--popup-mask-bg) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* Image preview */
+.image-preview-modal, .attachment-preview-modal {
+  background: var(--popup-glass-bg) !important;
+  backdrop-filter: var(--popup-glass-blur) !important;
+  -webkit-backdrop-filter: var(--popup-glass-blur) !important;
+  border: 1px solid var(--popup-glass-border) !important;
+  box-shadow: var(--popup-glass-shadow) !important;
+  border-radius: 20px !important;
+}
+
+/* Toast */
+.toast-bar {
+  background: var(--popup-glass-bg) !important;
+  backdrop-filter: var(--popup-glass-blur) !important;
+  -webkit-backdrop-filter: var(--popup-glass-blur) !important;
+  border: 1px solid var(--popup-glass-border) !important;
+  box-shadow: var(--popup-glass-shadow) !important;
+  border-radius: 14px !important;
+}
+
+/* Inner items */
+.picker-menu .picker-option,
+.assistant-menu .picker-option,
+.assistant-menu .assistant-picker-option,
+.image-style-menu .image-style-picker-option,
+.cli-extension-menu .cli-extension-card,
+.session-context-menu .session-context-menu-item,
+.markdown-code-action-menu button {
+  background: var(--popup-item-bg) !important;
+  border: 1px solid var(--popup-item-border) !important;
+  border-radius: 10px !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  transition: background 0.12s ease, border-color 0.12s ease !important;
+}
+
+.picker-menu .picker-option:hover,
+.picker-menu .picker-option:focus-visible,
+.assistant-menu .assistant-picker-option:hover,
+.assistant-menu .assistant-picker-option:focus-visible,
+.image-style-menu .image-style-picker-option:hover,
+.image-style-menu .image-style-picker-option:focus-visible,
+.cli-extension-menu .cli-extension-card:hover,
+.cli-extension-menu .cli-extension-card:focus-visible,
+.session-context-menu .session-context-menu-item:hover,
+.session-context-menu .session-context-menu-item:focus-visible,
+.markdown-code-action-menu button:hover,
+.markdown-code-action-menu button:focus-visible {
+  background: var(--popup-item-hover) !important;
+  border-color: rgba(0,122,255,0.18) !important;
+}
+
+.picker-menu .picker-option.active,
+.assistant-menu .assistant-picker-option.active,
+.image-style-menu .image-style-picker-option.active,
+.picker-menu .picker-filter-chip.active {
+  background: var(--popup-item-active) !important;
+  border-color: rgba(0,122,255,0.24) !important;
+  color: var(--accent) !important;
+}
+
+/* Inputs inside popups */
+.picker-menu input:not([type='checkbox']):not([type='radio']):not([type='range']),
+.picker-menu textarea, .picker-menu select,
+.assistant-menu .assistant-search,
+.cli-extension-menu .cli-extension-search {
+  background: var(--popup-input-bg) !important;
+  border: 1px solid var(--popup-glass-border) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  box-shadow: none !important;
+}
+
+/* Section headers */
+.picker-menu .picker-menu-head,
+.assistant-menu .picker-menu-head,
+.cli-extension-menu .picker-menu-head {
+  background: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* Filter chips */
+.picker-filter-chip {
+  background: var(--popup-item-bg) !important;
+  border-color: var(--popup-item-border) !important;
+}
+
+.picker-filter-chip.active {
+  background: var(--popup-item-active) !important;
+  border-color: rgba(0,122,255,0.24) !important;
+  color: var(--accent) !important;
+}
+
+/* Remove pseudo-element decorations */
+.picker-menu::before, .picker-menu::after,
+.assistant-menu::before, .assistant-menu::after,
+.image-style-menu::before, .image-style-menu::after,
+.image-config-menu::before, .image-config-menu::after,
+.model-menu::before, .model-menu::after,
+.cli-extension-menu::before, .cli-extension-menu::after,
+.modal-card::before, .modal-card::after {
+  display: none !important;
+  content: none !important;
+}
+
+/* ============================================================
+   pass 16 — targeted fixes
+   1. Hide scroll-dock button backgrounds
+   2. Remove duplicate code block background layer
+   3. Fix light mode popup glass opacity/depth
+   ============================================================ */
+
+/* Fix 1: conversation scroll buttons — transparent, no background */
+.conversation-scroll-dock {
+  background: transparent !important;
+  box-shadow: none !important;
+  border: none !important;
+}
+
+.conversation-scroll-button {
+  background: transparent !important;
+  background-color: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.conversation-scroll-button:hover,
+.conversation-scroll-button:focus-visible {
+  background: transparent !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
+}
+
+/* Fix 2: code block — single background layer only.
+   .markdown-code-block is the outer container.
+   .markdown-body pre inside it adds a second bg — remove it. */
+.markdown-code-block pre,
+.markdown-code-block .markdown-body pre {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  margin: 0 !important;
+  border-radius: 0 !important;
+}
+
+/* Also remove the outer-level blur/border that was added on top of the already-styled block */
+.markdown-code-block {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* Fix 3: Light mode popup glass — increase opacity and add depth shadow
+   to match dark mode visual weight */
+:root {
+  --popup-glass-bg: rgba(248, 250, 255, 0.92);
+  --popup-glass-shadow:
+    0 0 0 0.5px rgba(60,60,67,0.12),
+    0 2px 6px rgba(0,0,0,0.06),
+    0 8px 24px rgba(0,0,0,0.12),
+    0 24px 56px rgba(0,0,0,0.10),
+    inset 0 1px 0 rgba(255,255,255,0.90);
+}
+
+/* Dark mode — keep existing depth, just ensure parity */
+:root[data-theme='dark'] {
+  --popup-glass-bg: rgba(28, 28, 30, 0.88);
+  --popup-glass-shadow:
+    0 0 0 0.5px rgba(255,255,255,0.08),
+    0 2px 6px rgba(0,0,0,0.22),
+    0 8px 24px rgba(0,0,0,0.38),
+    0 28px 64px rgba(0,0,0,0.44),
+    inset 0 1px 0 rgba(255,255,255,0.06);
+}
+
+/* Keep the sidebar account popover out of footer layout flow. */
+.sidebar-user-stack > .desktop-update-popover {
+  position: absolute !important;
+  left: 0 !important;
+  right: 0 !important;
+  top: auto !important;
+  bottom: calc(100% + 10px) !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  z-index: 10002 !important;
 }
