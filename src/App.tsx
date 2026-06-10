@@ -1,6 +1,6 @@
-import { createContext, lazy, memo, startTransition, Suspense, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createContext, forwardRef, lazy, memo, startTransition, Suspense, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import type { CSSProperties, ChangeEvent, ClipboardEvent, Dispatch, DragEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent, PointerEvent as ReactPointerEvent, ReactNode, SetStateAction } from 'react'
+import type { CSSProperties, ChangeEvent, ClipboardEvent, Dispatch, DragEvent, HTMLAttributes, KeyboardEvent as ReactKeyboardEvent, MouseEvent, PointerEvent as ReactPointerEvent, ReactNode, SetStateAction } from 'react'
 import {
   Activity,
   Blocks,
@@ -1550,6 +1550,22 @@ type PickerMenuWidthStyle = CSSProperties & {
   '--picker-menu-list-max-height'?: string
 }
 
+type GlassPickerMenuProps = HTMLAttributes<HTMLDivElement> & {
+  children: ReactNode
+}
+
+const GlassPickerMenu = forwardRef<HTMLDivElement, GlassPickerMenuProps>(function GlassPickerMenu(
+  { className = '', children, ...props },
+  ref
+) {
+  return (
+    <div ref={ref} className={`${className} glass-picker-menu`.trim()} {...props}>
+      <div className='glass-picker-menu-bg' aria-hidden='true' />
+      <div className='glass-picker-menu-content'>{children}</div>
+    </div>
+  )
+})
+
 function estimatePickerTextUnits(value: string) {
   return Array.from(value || '').reduce((total, char) => {
     if (/\s/.test(char)) {
@@ -2876,7 +2892,7 @@ function CliExtensionPalette(props: {
   useEffect(() => () => clearTooltipHideTimer(), [])
 
   return (
-    <div
+    <GlassPickerMenu
       ref={(node) => {
         menuRef.current = node
         if (menuHostRef) {
@@ -3155,7 +3171,7 @@ function CliExtensionPalette(props: {
           )
         })}
       </div>
-    </div>
+    </GlassPickerMenu>
   )
 }
 
@@ -3213,7 +3229,7 @@ function ImageStylePresetPalette(props: {
   } = props
 
   return (
-    <div className='picker-menu assistant-menu image-style-menu fixed-width-menu' style={menuStyle}>
+    <GlassPickerMenu className='picker-menu assistant-menu image-style-menu fixed-width-menu' style={menuStyle}>
       {mode === 'list' ? (
         <>
           <div className='assistant-menu-toolbar'>
@@ -3312,7 +3328,7 @@ function ImageStylePresetPalette(props: {
           </div>
         </div>
       )}
-    </div>
+    </GlassPickerMenu>
   )
 }
 
@@ -6062,7 +6078,7 @@ function AssistantsChatWorkspace(props: {
                       <strong>{activeAssistant?.name || assistants[0]?.name || '助手'}</strong>
                     </button>
                     {assistantMenuOpen && (
-                      <div className='picker-menu assistant-menu fixed-width-menu' style={assistantMenuWidthStyle}>
+                      <GlassPickerMenu className='picker-menu assistant-menu fixed-width-menu' style={assistantMenuWidthStyle}>
                         {assistantMenuMode === 'list' ? (
                           <>
                             <div className='assistant-menu-toolbar'>
@@ -6143,7 +6159,7 @@ function AssistantsChatWorkspace(props: {
                             </div>
                           </div>
                         )}
-                      </div>
+                      </GlassPickerMenu>
                     )}
                   </div>
                 ),
@@ -6168,7 +6184,7 @@ function AssistantsChatWorkspace(props: {
                       <strong>{activeModelLabel}</strong>
                     </button>
                     {modelMenuOpen && (
-                      <div className='picker-menu model-menu fixed-width-menu' style={chatModelMenuWidthStyle}>
+                      <GlassPickerMenu className='picker-menu model-menu fixed-width-menu' style={chatModelMenuWidthStyle}>
                         {chatModelVendorFilterOptions.length > 1 ? (
                           <div className='picker-filter-row'>
                             {chatModelVendorFilterOptions.map((item) => (
@@ -6215,7 +6231,7 @@ function AssistantsChatWorkspace(props: {
                             <div className='picker-empty-state'>当前筛选下没有可用模型</div>
                           )}
                         </div>
-                      </div>
+                      </GlassPickerMenu>
                     )}
                   </div>
                 ),
@@ -6240,7 +6256,7 @@ function AssistantsChatWorkspace(props: {
                       <strong>{selectedReasoningLabel}</strong>
                     </button>
                     {reasoningMenuOpen && (
-                      <div className='picker-menu model-menu fixed-width-menu' style={chatReasoningMenuWidthStyle}>
+                      <GlassPickerMenu className='picker-menu model-menu fixed-width-menu' style={chatReasoningMenuWidthStyle}>
                         <div className='picker-menu-list'>
                           {CHAT_REASONING_OPTIONS.map((item) => (
                             <button
@@ -6256,7 +6272,7 @@ function AssistantsChatWorkspace(props: {
                             </button>
                           ))}
                         </div>
-                      </div>
+                      </GlassPickerMenu>
                     )}
                   </div>
                 ),
@@ -6281,7 +6297,7 @@ function AssistantsChatWorkspace(props: {
                       <strong>{selectedContextWindowLabel}</strong>
                     </button>
                     {contextMenuOpen && (
-                      <div className='picker-menu model-menu fixed-width-menu' style={chatContextMenuWidthStyle}>
+                      <GlassPickerMenu className='picker-menu model-menu fixed-width-menu' style={chatContextMenuWidthStyle}>
                         <div className='picker-menu-list'>
                           {CHAT_CONTEXT_WINDOW_OPTIONS.map((item) => (
                             <button
@@ -6297,7 +6313,7 @@ function AssistantsChatWorkspace(props: {
                             </button>
                           ))}
                         </div>
-                      </div>
+                      </GlassPickerMenu>
                     )}
                   </div>
                 ),
@@ -7744,7 +7760,7 @@ function DrawWorkspace(props: {
                       <span className='toolbar-icon-label'>{drawSizeLabel}</span>
                     </button>
                     {drawSizeMenuOpen && (
-                      <div className='picker-menu image-config-menu fixed-width-menu' style={drawSizeMenuWidthStyle}>
+                      <GlassPickerMenu className='picker-menu image-config-menu fixed-width-menu' style={drawSizeMenuWidthStyle}>
                         <div className='picker-menu-list'>
                           {DRAW_SIZE_OPTIONS.map((item) => (
                             <button
@@ -7760,7 +7776,7 @@ function DrawWorkspace(props: {
                             </button>
                           ))}
                         </div>
-                      </div>
+                      </GlassPickerMenu>
                     )}
                   </div>
                 ),
@@ -7785,7 +7801,7 @@ function DrawWorkspace(props: {
                       <span className='toolbar-icon-label'>{drawQualityLabel}</span>
                     </button>
                     {drawQualityMenuOpen && (
-                      <div className='picker-menu image-config-menu fixed-width-menu' style={drawQualityMenuWidthStyle}>
+                      <GlassPickerMenu className='picker-menu image-config-menu fixed-width-menu' style={drawQualityMenuWidthStyle}>
                         <div className='picker-menu-list'>
                           {DRAW_QUALITY_OPTIONS.map((item) => (
                             <button
@@ -7801,7 +7817,7 @@ function DrawWorkspace(props: {
                             </button>
                           ))}
                         </div>
-                      </div>
+                      </GlassPickerMenu>
                     )}
                   </div>
                 ),
@@ -12007,7 +12023,7 @@ function CliWorkspace(props: {
                       <strong>{selectedModelLabel}</strong>
                     </button>
                     {modelMenuOpen && (
-                      <div className='picker-menu model-menu fixed-width-menu' style={cliModelMenuWidthStyle}>
+                      <GlassPickerMenu className='picker-menu model-menu fixed-width-menu' style={cliModelMenuWidthStyle}>
                         {cliModelVendorFilterOptions.length > 1 ? (
                           <div className='picker-filter-row'>
                             {cliModelVendorFilterOptions.map((item) => (
@@ -12054,7 +12070,7 @@ function CliWorkspace(props: {
                             <div className='picker-empty-state'>当前筛选下没有可用模型</div>
                           )}
                         </div>
-                      </div>
+                      </GlassPickerMenu>
                     )}
                   </div>
                 ),
@@ -12077,7 +12093,7 @@ function CliWorkspace(props: {
                       <strong>{selectedEffortLabel}</strong>
                     </button>
                     {effortMenuOpen && (
-                      <div className='picker-menu model-menu fixed-width-menu' style={cliReasoningMenuWidthStyle}>
+                      <GlassPickerMenu className='picker-menu model-menu fixed-width-menu' style={cliReasoningMenuWidthStyle}>
                         <div className='picker-menu-list'>
                           {reasoningOptions.map((item) => (
                             <button
@@ -12093,7 +12109,7 @@ function CliWorkspace(props: {
                             </button>
                           ))}
                         </div>
-                      </div>
+                      </GlassPickerMenu>
                     )}
                   </div>
                 ),

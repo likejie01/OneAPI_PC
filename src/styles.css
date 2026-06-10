@@ -14985,3 +14985,1027 @@ body:has(.model-menu)::after,
   background-color: rgba(255, 255, 255, 0.045) !important;
   border-color: rgba(158, 178, 208, 0.18) !important;
 }
+
+/* Popup authority: glass is local to the popup surface, never a full-screen layer. */
+body:has(.picker-menu)::before,
+body:has(.picker-menu)::after,
+body:has(.assistant-menu)::before,
+body:has(.assistant-menu)::after,
+body:has(.image-style-menu)::before,
+body:has(.image-style-menu)::after,
+body:has(.image-config-menu)::before,
+body:has(.image-config-menu)::after,
+body:has(.model-menu)::before,
+body:has(.model-menu)::after,
+body:has(.cli-extension-menu)::before,
+body:has(.cli-extension-menu)::after,
+#root:has(.picker-menu)::before,
+#root:has(.picker-menu)::after,
+#root:has(.assistant-menu)::before,
+#root:has(.assistant-menu)::after,
+#root:has(.image-style-menu)::before,
+#root:has(.image-style-menu)::after,
+#root:has(.image-config-menu)::before,
+#root:has(.image-config-menu)::after,
+#root:has(.model-menu)::before,
+#root:has(.model-menu)::after,
+#root:has(.cli-extension-menu)::before,
+#root:has(.cli-extension-menu)::after {
+  display: none !important;
+  content: none !important;
+  opacity: 0 !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.glass-picker-menu,
+.picker-menu.glass-picker-menu,
+.assistant-menu.glass-picker-menu,
+.model-menu.glass-picker-menu,
+.image-style-menu.glass-picker-menu,
+.image-config-menu.glass-picker-menu,
+.cli-extension-menu.glass-picker-menu {
+  position: absolute;
+  isolation: isolate !important;
+  overflow: visible !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.glass-picker-menu::before,
+.glass-picker-menu::after {
+  display: none !important;
+  content: none !important;
+  background: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.glass-picker-menu-bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border: 1px solid rgba(218, 226, 238, 0.74);
+  border-radius: inherit;
+  pointer-events: none;
+  background: rgba(244, 248, 255, 0.78);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.62),
+    0 22px 58px rgba(24, 35, 52, 0.22);
+  backdrop-filter: blur(34px) saturate(155%) contrast(0.98);
+  -webkit-backdrop-filter: blur(34px) saturate(155%) contrast(0.98);
+}
+
+:root[data-theme='dark'] .glass-picker-menu-bg {
+  border-color: rgba(142, 160, 188, 0.26);
+  background: rgba(20, 24, 31, 0.74);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 26px 70px rgba(0, 0, 0, 0.48);
+  backdrop-filter: blur(38px) saturate(122%) contrast(0.92);
+  -webkit-backdrop-filter: blur(38px) saturate(122%) contrast(0.92);
+}
+
+.glass-picker-menu-content {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+}
+
+.glass-picker-menu .assistant-menu-toolbar,
+.glass-picker-menu .assistant-menu-head,
+.glass-picker-menu .image-style-menu-head,
+.glass-picker-menu .picker-menu-head,
+.glass-picker-menu .picker-filter-row,
+.glass-picker-menu .cli-extension-filter-row,
+.glass-picker-menu .cli-extension-toolbar,
+.glass-picker-menu .cli-extension-menu-head,
+.glass-picker-menu .picker-menu-list,
+.glass-picker-menu .assistant-picker-list,
+.glass-picker-menu .cli-extension-list,
+.glass-picker-menu .assistant-picker-row,
+.glass-picker-menu .model-option-head,
+.glass-picker-menu .assistant-editor-head {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  text-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.glass-picker-menu .assistant-menu-toolbar::before,
+.glass-picker-menu .assistant-menu-toolbar::after,
+.glass-picker-menu .picker-menu-head::before,
+.glass-picker-menu .picker-menu-head::after,
+.glass-picker-menu .picker-filter-row::before,
+.glass-picker-menu .picker-filter-row::after,
+.glass-picker-menu .picker-menu-list::before,
+.glass-picker-menu .picker-menu-list::after,
+.glass-picker-menu .assistant-picker-list::before,
+.glass-picker-menu .assistant-picker-list::after,
+.glass-picker-menu .assistant-picker-row::before,
+.glass-picker-menu .assistant-picker-row::after,
+.glass-picker-menu .cli-extension-filter-row::before,
+.glass-picker-menu .cli-extension-filter-row::after,
+.glass-picker-menu .cli-extension-toolbar::before,
+.glass-picker-menu .cli-extension-toolbar::after,
+.glass-picker-menu .cli-extension-list::before,
+.glass-picker-menu .cli-extension-list::after,
+.glass-picker-menu .assistant-editor-head::before,
+.glass-picker-menu .assistant-editor-head::after {
+  display: none !important;
+  content: none !important;
+  background: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.glass-picker-menu.fixed-width-menu .picker-menu-list,
+.glass-picker-menu.fixed-width-menu .assistant-picker-list,
+.glass-picker-menu.fixed-width-menu .cli-extension-list {
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: var(--picker-menu-list-max-height, min(420px, calc(100vh - 240px))) !important;
+}
+
+.glass-picker-menu .picker-option,
+.glass-picker-menu .assistant-picker-option,
+.glass-picker-menu .image-style-picker-option,
+.glass-picker-menu .cli-extension-card {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border-color: rgba(212, 222, 236, 0.18) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+:root[data-theme='dark'] .glass-picker-menu .picker-option,
+:root[data-theme='dark'] .glass-picker-menu .assistant-picker-option,
+:root[data-theme='dark'] .glass-picker-menu .image-style-picker-option,
+:root[data-theme='dark'] .glass-picker-menu .cli-extension-card {
+  border-color: rgba(142, 160, 188, 0.14) !important;
+}
+
+.glass-picker-menu .picker-option:hover,
+.glass-picker-menu .picker-option:focus-visible,
+.glass-picker-menu .assistant-picker-option:hover,
+.glass-picker-menu .assistant-picker-option:focus-visible,
+.glass-picker-menu .image-style-picker-option:hover,
+.glass-picker-menu .image-style-picker-option:focus-visible,
+.glass-picker-menu .cli-extension-card:hover,
+.glass-picker-menu .cli-extension-card:focus-visible,
+.glass-picker-menu .cli-extension-card.selected {
+  background: rgba(255, 255, 255, 0.18) !important;
+  background-color: rgba(255, 255, 255, 0.18) !important;
+  border-color: rgba(212, 222, 236, 0.36) !important;
+}
+
+:root[data-theme='dark'] .glass-picker-menu .picker-option:hover,
+:root[data-theme='dark'] .glass-picker-menu .picker-option:focus-visible,
+:root[data-theme='dark'] .glass-picker-menu .assistant-picker-option:hover,
+:root[data-theme='dark'] .glass-picker-menu .assistant-picker-option:focus-visible,
+:root[data-theme='dark'] .glass-picker-menu .image-style-picker-option:hover,
+:root[data-theme='dark'] .glass-picker-menu .image-style-picker-option:focus-visible,
+:root[data-theme='dark'] .glass-picker-menu .cli-extension-card:hover,
+:root[data-theme='dark'] .glass-picker-menu .cli-extension-card:focus-visible,
+:root[data-theme='dark'] .glass-picker-menu .cli-extension-card.selected {
+  background: rgba(255, 255, 255, 0.07) !important;
+  background-color: rgba(255, 255, 255, 0.07) !important;
+  border-color: rgba(142, 160, 188, 0.24) !important;
+}
+
+.glass-picker-menu .picker-option.active,
+.glass-picker-menu .assistant-picker-option.active,
+.glass-picker-menu .image-style-picker-option.active,
+.glass-picker-menu .picker-filter-chip.active {
+  background: rgba(255, 255, 255, 0.2) !important;
+  background-color: rgba(255, 255, 255, 0.2) !important;
+  border-color: rgba(74, 126, 190, 0.36) !important;
+}
+
+:root[data-theme='dark'] .glass-picker-menu .picker-option.active,
+:root[data-theme='dark'] .glass-picker-menu .assistant-picker-option.active,
+:root[data-theme='dark'] .glass-picker-menu .image-style-picker-option.active,
+:root[data-theme='dark'] .glass-picker-menu .picker-filter-chip.active {
+  background: rgba(96, 140, 190, 0.16) !important;
+  background-color: rgba(96, 140, 190, 0.16) !important;
+  border-color: rgba(118, 158, 210, 0.32) !important;
+}
+
+.glass-picker-menu .assistant-search,
+.glass-picker-menu .cli-extension-search,
+.glass-picker-menu input:not([type='checkbox']):not([type='radio']):not([type='range']),
+.glass-picker-menu textarea,
+.glass-picker-menu select {
+  background: rgba(255, 255, 255, 0.16) !important;
+  background-color: rgba(255, 255, 255, 0.16) !important;
+  background-image: none !important;
+  border: 1px solid rgba(212, 222, 236, 0.42) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+:root[data-theme='dark'] .glass-picker-menu .assistant-search,
+:root[data-theme='dark'] .glass-picker-menu .cli-extension-search,
+:root[data-theme='dark'] .glass-picker-menu input:not([type='checkbox']):not([type='radio']):not([type='range']),
+:root[data-theme='dark'] .glass-picker-menu textarea,
+:root[data-theme='dark'] .glass-picker-menu select {
+  background: rgba(8, 12, 18, 0.18) !important;
+  background-color: rgba(8, 12, 18, 0.18) !important;
+  border-color: rgba(142, 160, 188, 0.24) !important;
+  color: var(--text-primary) !important;
+}
+
+/* Popup final correction: no app-wide brightening and no assistant toolbar backplate. */
+html:has(.picker-menu)::before,
+html:has(.picker-menu)::after,
+html:has(.assistant-menu)::before,
+html:has(.assistant-menu)::after,
+html:has(.image-style-menu)::before,
+html:has(.image-style-menu)::after,
+html:has(.image-config-menu)::before,
+html:has(.image-config-menu)::after,
+html:has(.model-menu)::before,
+html:has(.model-menu)::after,
+html:has(.cli-extension-menu)::before,
+html:has(.cli-extension-menu)::after,
+body:has(.picker-menu)::before,
+body:has(.picker-menu)::after,
+body:has(.assistant-menu)::before,
+body:has(.assistant-menu)::after,
+body:has(.image-style-menu)::before,
+body:has(.image-style-menu)::after,
+body:has(.image-config-menu)::before,
+body:has(.image-config-menu)::after,
+body:has(.model-menu)::before,
+body:has(.model-menu)::after,
+body:has(.cli-extension-menu)::before,
+body:has(.cli-extension-menu)::after,
+#root:has(.picker-menu)::before,
+#root:has(.picker-menu)::after,
+#root:has(.assistant-menu)::before,
+#root:has(.assistant-menu)::after,
+#root:has(.image-style-menu)::before,
+#root:has(.image-style-menu)::after,
+#root:has(.image-config-menu)::before,
+#root:has(.image-config-menu)::after,
+#root:has(.model-menu)::before,
+#root:has(.model-menu)::after,
+#root:has(.cli-extension-menu)::before,
+#root:has(.cli-extension-menu)::after,
+.desktop-window-shell:has(.picker-menu)::before,
+.desktop-window-shell:has(.picker-menu)::after,
+.desktop-window-shell:has(.assistant-menu)::before,
+.desktop-window-shell:has(.assistant-menu)::after,
+.desktop-window-content:has(.picker-menu)::before,
+.desktop-window-content:has(.picker-menu)::after,
+.desktop-window-content:has(.assistant-menu)::before,
+.desktop-window-content:has(.assistant-menu)::after,
+.workspace-page:has(.picker-menu)::before,
+.workspace-page:has(.picker-menu)::after,
+.workspace-page:has(.assistant-menu)::before,
+.workspace-page:has(.assistant-menu)::after,
+.workspace-shell:has(.picker-menu)::before,
+.workspace-shell:has(.picker-menu)::after,
+.workspace-shell:has(.assistant-menu)::before,
+.workspace-shell:has(.assistant-menu)::after,
+.main-panel:has(.picker-menu)::before,
+.main-panel:has(.picker-menu)::after,
+.main-panel:has(.assistant-menu)::before,
+.main-panel:has(.assistant-menu)::after {
+  display: none !important;
+  content: none !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  filter: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  box-shadow: none !important;
+}
+
+.glass-picker-menu-bg {
+  background: rgba(244, 248, 255, 0.85) !important;
+}
+
+:root[data-theme='dark'] .glass-picker-menu-bg {
+  background: rgba(20, 24, 31, 0.85) !important;
+}
+
+.glass-picker-menu.assistant-menu .glass-picker-menu-content {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.glass-picker-menu.assistant-menu .assistant-menu-toolbar {
+  display: contents !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.glass-picker-menu.assistant-menu .assistant-menu-toolbar > .assistant-search {
+  grid-column: 1;
+  width: 100% !important;
+  justify-self: stretch !important;
+}
+
+.glass-picker-menu.assistant-menu .assistant-menu-toolbar > button {
+  grid-column: 2;
+  justify-self: end;
+  white-space: nowrap;
+}
+
+.glass-picker-menu.assistant-menu .assistant-picker-list,
+.glass-picker-menu.assistant-menu .assistant-editor {
+  grid-column: 1 / -1;
+}
+
+.glass-picker-menu.assistant-menu .assistant-menu-toolbar > *,
+.glass-picker-menu.assistant-menu .assistant-menu-toolbar > *::before,
+.glass-picker-menu.assistant-menu .assistant-menu-toolbar > *::after {
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
+/* Popup residue cleanup: remove assistant top highlight, favorite-column backplates and remaining global open/close effects. */
+:root {
+  --layer-sidebar-bg: rgba(247, 250, 255, 0.81) !important;
+}
+
+:root[data-theme='dark'] {
+  --layer-sidebar-bg: rgba(18, 18, 20, 0.54) !important;
+}
+
+.glass-picker-menu.assistant-menu .glass-picker-menu-bg {
+  border: 0 !important;
+  border-color: transparent !important;
+  box-shadow: 0 22px 58px rgba(24, 35, 52, 0.22) !important;
+}
+
+:root[data-theme='dark'] .glass-picker-menu.assistant-menu .glass-picker-menu-bg {
+  box-shadow: 0 26px 70px rgba(0, 0, 0, 0.48) !important;
+}
+
+.glass-picker-menu.assistant-menu .assistant-picker-row {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) 28px !important;
+  align-items: center !important;
+  gap: 6px !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  outline: 0 !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.glass-picker-menu.assistant-menu .assistant-picker-row::before,
+.glass-picker-menu.assistant-menu .assistant-picker-row::after {
+  display: none !important;
+  content: none !important;
+  background: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.glass-picker-menu.assistant-menu .assistant-picker-row > .model-favorite,
+.glass-picker-menu.assistant-menu .assistant-picker-row > .model-favorite:hover,
+.glass-picker-menu.assistant-menu .assistant-picker-row > .model-favorite:focus-visible,
+.glass-picker-menu.assistant-menu .assistant-picker-row > .model-favorite.active {
+  justify-self: center !important;
+  width: 24px !important;
+  height: 24px !important;
+  min-width: 24px !important;
+  padding: 0 !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  outline: 0 !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.glass-picker-menu.assistant-menu .assistant-picker-row > .model-favorite::before,
+.glass-picker-menu.assistant-menu .assistant-picker-row > .model-favorite::after {
+  display: none !important;
+  content: none !important;
+  background: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.shell:has(.picker-menu)::before,
+.shell:has(.picker-menu)::after,
+.shell:has(.assistant-menu)::before,
+.shell:has(.assistant-menu)::after,
+.chat-layout:has(.picker-menu)::before,
+.chat-layout:has(.picker-menu)::after,
+.chat-layout:has(.assistant-menu)::before,
+.chat-layout:has(.assistant-menu)::after,
+.conversation-panel:has(.picker-menu)::before,
+.conversation-panel:has(.picker-menu)::after,
+.conversation-panel:has(.assistant-menu)::before,
+.conversation-panel:has(.assistant-menu)::after,
+.chat-main-panel:has(.picker-menu)::before,
+.chat-main-panel:has(.picker-menu)::after,
+.chat-main-panel:has(.assistant-menu)::before,
+.chat-main-panel:has(.assistant-menu)::after,
+.panel:has(.picker-menu)::before,
+.panel:has(.picker-menu)::after,
+.panel:has(.assistant-menu)::before,
+.panel:has(.assistant-menu)::after,
+.composer:has(.picker-menu)::before,
+.composer:has(.picker-menu)::after,
+.composer:has(.assistant-menu)::before,
+.composer:has(.assistant-menu)::after,
+.composer-input-shell:has(.picker-menu)::before,
+.composer-input-shell:has(.picker-menu)::after,
+.composer-input-shell:has(.assistant-menu)::before,
+.composer-input-shell:has(.assistant-menu)::after,
+.toolbar-picker:has(.picker-menu)::before,
+.toolbar-picker:has(.picker-menu)::after,
+.toolbar-picker:has(.assistant-menu)::before,
+.toolbar-picker:has(.assistant-menu)::after {
+  display: none !important;
+  content: none !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  filter: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  box-shadow: none !important;
+}
+
+/* Popup no-glass authority: opaque local surfaces, no full-screen visual effects. */
+html:has(.picker-menu)::before,
+html:has(.picker-menu)::after,
+html:has(.assistant-menu)::before,
+html:has(.assistant-menu)::after,
+html:has(.image-style-menu)::before,
+html:has(.image-style-menu)::after,
+html:has(.image-config-menu)::before,
+html:has(.image-config-menu)::after,
+html:has(.model-menu)::before,
+html:has(.model-menu)::after,
+html:has(.cli-extension-menu)::before,
+html:has(.cli-extension-menu)::after,
+html:has(.session-context-menu)::before,
+html:has(.session-context-menu)::after,
+html:has(.chat-history-panel)::before,
+html:has(.chat-history-panel)::after,
+html:has(.cli-history-panel)::before,
+html:has(.cli-history-panel)::after,
+html:has(.cli-plan-floating-panel)::before,
+html:has(.cli-plan-floating-panel)::after,
+html:has(.modal-card)::before,
+html:has(.modal-card)::after,
+html:has(.desktop-update-popover)::before,
+html:has(.desktop-update-popover)::after,
+html:has(.announcement-modal-card)::before,
+html:has(.announcement-modal-card)::after,
+html:has(.translation-modal-card)::before,
+html:has(.translation-modal-card)::after,
+html:has(.markdown-code-action-menu)::before,
+html:has(.markdown-code-action-menu)::after,
+html:has(.cli-extension-floating-tooltip)::before,
+html:has(.cli-extension-floating-tooltip)::after,
+body:has(.picker-menu)::before,
+body:has(.picker-menu)::after,
+body:has(.assistant-menu)::before,
+body:has(.assistant-menu)::after,
+body:has(.image-style-menu)::before,
+body:has(.image-style-menu)::after,
+body:has(.image-config-menu)::before,
+body:has(.image-config-menu)::after,
+body:has(.model-menu)::before,
+body:has(.model-menu)::after,
+body:has(.cli-extension-menu)::before,
+body:has(.cli-extension-menu)::after,
+body:has(.session-context-menu)::before,
+body:has(.session-context-menu)::after,
+body:has(.chat-history-panel)::before,
+body:has(.chat-history-panel)::after,
+body:has(.cli-history-panel)::before,
+body:has(.cli-history-panel)::after,
+body:has(.cli-plan-floating-panel)::before,
+body:has(.cli-plan-floating-panel)::after,
+body:has(.modal-card)::before,
+body:has(.modal-card)::after,
+body:has(.desktop-update-popover)::before,
+body:has(.desktop-update-popover)::after,
+body:has(.announcement-modal-card)::before,
+body:has(.announcement-modal-card)::after,
+body:has(.translation-modal-card)::before,
+body:has(.translation-modal-card)::after,
+body:has(.markdown-code-action-menu)::before,
+body:has(.markdown-code-action-menu)::after,
+body:has(.cli-extension-floating-tooltip)::before,
+body:has(.cli-extension-floating-tooltip)::after,
+#root:has(.picker-menu)::before,
+#root:has(.picker-menu)::after,
+#root:has(.assistant-menu)::before,
+#root:has(.assistant-menu)::after,
+#root:has(.image-style-menu)::before,
+#root:has(.image-style-menu)::after,
+#root:has(.image-config-menu)::before,
+#root:has(.image-config-menu)::after,
+#root:has(.model-menu)::before,
+#root:has(.model-menu)::after,
+#root:has(.cli-extension-menu)::before,
+#root:has(.cli-extension-menu)::after,
+#root:has(.session-context-menu)::before,
+#root:has(.session-context-menu)::after,
+#root:has(.chat-history-panel)::before,
+#root:has(.chat-history-panel)::after,
+#root:has(.cli-history-panel)::before,
+#root:has(.cli-history-panel)::after,
+#root:has(.cli-plan-floating-panel)::before,
+#root:has(.cli-plan-floating-panel)::after,
+#root:has(.modal-card)::before,
+#root:has(.modal-card)::after,
+#root:has(.desktop-update-popover)::before,
+#root:has(.desktop-update-popover)::after,
+#root:has(.announcement-modal-card)::before,
+#root:has(.announcement-modal-card)::after,
+#root:has(.translation-modal-card)::before,
+#root:has(.translation-modal-card)::after,
+#root:has(.markdown-code-action-menu)::before,
+#root:has(.markdown-code-action-menu)::after,
+#root:has(.cli-extension-floating-tooltip)::before,
+#root:has(.cli-extension-floating-tooltip)::after,
+.desktop-window-shell:has(.picker-menu)::before,
+.desktop-window-shell:has(.picker-menu)::after,
+.desktop-window-content:has(.picker-menu)::before,
+.desktop-window-content:has(.picker-menu)::after,
+.shell:has(.picker-menu)::before,
+.shell:has(.picker-menu)::after,
+.workspace-page:has(.picker-menu)::before,
+.workspace-page:has(.picker-menu)::after,
+.workspace-shell:has(.picker-menu)::before,
+.workspace-shell:has(.picker-menu)::after,
+.main-panel:has(.picker-menu)::before,
+.main-panel:has(.picker-menu)::after,
+.panel:has(.picker-menu)::before,
+.panel:has(.picker-menu)::after,
+.composer:has(.picker-menu)::before,
+.composer:has(.picker-menu)::after,
+.composer-input-shell:has(.picker-menu)::before,
+.composer-input-shell:has(.picker-menu)::after,
+.toolbar-picker:has(.picker-menu)::before,
+.toolbar-picker:has(.picker-menu)::after {
+  display: none !important;
+  content: none !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  filter: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.modal-mask,
+.image-preview-modal-mask {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  filter: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.picker-menu,
+.glass-picker-menu,
+.session-context-menu,
+.chat-history-panel,
+.cli-history-panel,
+.cli-plan-floating-panel,
+.desktop-update-popover,
+.modal-card,
+.announcement-modal-card,
+.translation-modal-card,
+.markdown-code-action-menu,
+.cli-extension-floating-tooltip,
+.toast-bar,
+.image-preview-modal,
+.attachment-preview-modal {
+  background-image: none !important;
+  filter: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.picker-menu::before,
+.picker-menu::after,
+.glass-picker-menu::before,
+.glass-picker-menu::after,
+.session-context-menu::before,
+.session-context-menu::after,
+.chat-history-panel::before,
+.chat-history-panel::after,
+.cli-history-panel::before,
+.cli-history-panel::after,
+.cli-plan-floating-panel::before,
+.cli-plan-floating-panel::after,
+.desktop-update-popover::before,
+.desktop-update-popover::after,
+.modal-card::before,
+.modal-card::after,
+.announcement-modal-card::before,
+.announcement-modal-card::after,
+.translation-modal-card::before,
+.translation-modal-card::after,
+.markdown-code-action-menu::before,
+.markdown-code-action-menu::after,
+.cli-extension-floating-tooltip::before,
+.cli-extension-floating-tooltip::after,
+.toast-bar::before,
+.toast-bar::after,
+.image-preview-modal::before,
+.image-preview-modal::after,
+.attachment-preview-modal::before,
+.attachment-preview-modal::after {
+  display: none !important;
+  content: none !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  filter: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.glass-picker-menu-bg,
+.picker-menu:not(.glass-picker-menu),
+.session-context-menu,
+.chat-history-panel,
+.cli-history-panel,
+.cli-plan-floating-panel,
+.desktop-update-popover,
+.modal-mask > .modal-card,
+.modal-mask > .announcement-modal-card,
+.modal-mask > .translation-modal-card,
+.markdown-code-action-menu,
+.cli-extension-floating-tooltip,
+.toast-bar,
+.image-preview-modal-mask > .image-preview-modal,
+.image-preview-modal-mask > .attachment-preview-modal {
+  background: rgba(246, 249, 254, 0.9) !important;
+  background-color: rgba(246, 249, 254, 0.9) !important;
+  background-image: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+:root[data-theme='dark'] .glass-picker-menu-bg,
+:root[data-theme='dark'] .picker-menu:not(.glass-picker-menu),
+:root[data-theme='dark'] .session-context-menu,
+:root[data-theme='dark'] .chat-history-panel,
+:root[data-theme='dark'] .cli-history-panel,
+:root[data-theme='dark'] .cli-plan-floating-panel,
+:root[data-theme='dark'] .desktop-update-popover,
+:root[data-theme='dark'] .modal-mask > .modal-card,
+:root[data-theme='dark'] .modal-mask > .announcement-modal-card,
+:root[data-theme='dark'] .modal-mask > .translation-modal-card,
+:root[data-theme='dark'] .markdown-code-action-menu,
+:root[data-theme='dark'] .cli-extension-floating-tooltip,
+:root[data-theme='dark'] .toast-bar,
+:root[data-theme='dark'] .image-preview-modal-mask > .image-preview-modal,
+:root[data-theme='dark'] .image-preview-modal-mask > .attachment-preview-modal {
+  background: rgba(20, 23, 29, 0.9) !important;
+  background-color: rgba(20, 23, 29, 0.9) !important;
+  background-image: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.glass-picker-menu.assistant-menu .assistant-picker-list {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) 28px !important;
+  gap: 6px !important;
+  align-items: center !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.glass-picker-menu.assistant-menu .assistant-picker-row {
+  display: contents !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.glass-picker-menu.assistant-menu .assistant-picker-option {
+  grid-column: 1 !important;
+  min-width: 0 !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
+.glass-picker-menu.assistant-menu .assistant-picker-option:hover,
+.glass-picker-menu.assistant-menu .assistant-picker-option:focus-visible,
+.glass-picker-menu.assistant-menu .assistant-picker-option.active {
+  background: rgba(255, 255, 255, 0.1) !important;
+  background-color: rgba(255, 255, 255, 0.1) !important;
+  background-image: none !important;
+}
+
+:root[data-theme='dark'] .glass-picker-menu.assistant-menu .assistant-picker-option:hover,
+:root[data-theme='dark'] .glass-picker-menu.assistant-menu .assistant-picker-option:focus-visible,
+:root[data-theme='dark'] .glass-picker-menu.assistant-menu .assistant-picker-option.active {
+  background: rgba(255, 255, 255, 0.055) !important;
+  background-color: rgba(255, 255, 255, 0.055) !important;
+  background-image: none !important;
+}
+
+.glass-picker-menu.assistant-menu .assistant-picker-row > .model-favorite,
+.glass-picker-menu.assistant-menu .assistant-picker-row > .model-favorite:hover,
+.glass-picker-menu.assistant-menu .assistant-picker-row > .model-favorite:focus-visible,
+.glass-picker-menu.assistant-menu .assistant-picker-row > .model-favorite.active {
+  grid-column: 2 !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+/* Popup parity: light and dark use the same surface model at 0.95 opacity. */
+:root {
+  --oneapi-popup-bg: rgba(246, 249, 254, 0.95);
+  --oneapi-popup-border: rgba(92, 112, 134, 0.22);
+  --oneapi-popup-shadow: 0 20px 52px rgba(24, 35, 52, 0.18);
+  --oneapi-popup-item-hover: rgba(42, 96, 150, 0.08);
+  --oneapi-popup-item-active: rgba(28, 112, 210, 0.11);
+  --oneapi-popup-input-bg: rgba(255, 255, 255, 0.42);
+}
+
+:root[data-theme='dark'] {
+  --oneapi-popup-bg: rgba(22, 26, 34, 0.95);
+  --oneapi-popup-border: rgba(152, 170, 196, 0.22);
+  --oneapi-popup-shadow: 0 24px 58px rgba(0, 0, 0, 0.42);
+  --oneapi-popup-item-hover: rgba(132, 168, 214, 0.08);
+  --oneapi-popup-item-active: rgba(132, 168, 214, 0.12);
+  --oneapi-popup-input-bg: rgba(9, 13, 19, 0.38);
+}
+
+.picker-menu,
+.assistant-menu,
+.image-style-menu,
+.image-config-menu,
+.model-menu,
+.cli-extension-menu,
+.glass-picker-menu,
+.session-context-menu,
+.chat-history-panel,
+.cli-history-panel,
+.cli-plan-floating-panel,
+.desktop-update-popover,
+.modal-card,
+.announcement-modal-card,
+.translation-modal-card,
+.markdown-code-action-menu,
+.cli-extension-floating-tooltip,
+.toast-bar,
+.image-preview-modal,
+.attachment-preview-modal {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border-color: var(--oneapi-popup-border) !important;
+  box-shadow: var(--oneapi-popup-shadow) !important;
+  filter: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.glass-picker-menu-bg,
+.picker-menu:not(.glass-picker-menu),
+.assistant-menu:not(.glass-picker-menu),
+.image-style-menu:not(.glass-picker-menu),
+.image-config-menu:not(.glass-picker-menu),
+.model-menu:not(.glass-picker-menu),
+.cli-extension-menu:not(.glass-picker-menu),
+.session-context-menu,
+.chat-history-panel,
+.cli-history-panel,
+.cli-plan-floating-panel,
+.desktop-update-popover,
+.modal-mask > .modal-card,
+.modal-mask > .announcement-modal-card,
+.modal-mask > .translation-modal-card,
+.markdown-code-action-menu,
+.cli-extension-floating-tooltip,
+.toast-bar,
+.image-preview-modal-mask > .image-preview-modal,
+.image-preview-modal-mask > .attachment-preview-modal {
+  background: var(--oneapi-popup-bg) !important;
+  background-color: var(--oneapi-popup-bg) !important;
+  background-image: none !important;
+  border: 1px solid var(--oneapi-popup-border) !important;
+  box-shadow: var(--oneapi-popup-shadow) !important;
+  filter: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.modal-mask,
+.image-preview-modal-mask {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  filter: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.picker-menu::before,
+.picker-menu::after,
+.assistant-menu::before,
+.assistant-menu::after,
+.image-style-menu::before,
+.image-style-menu::after,
+.image-config-menu::before,
+.image-config-menu::after,
+.model-menu::before,
+.model-menu::after,
+.cli-extension-menu::before,
+.cli-extension-menu::after,
+.glass-picker-menu::before,
+.glass-picker-menu::after,
+.session-context-menu::before,
+.session-context-menu::after,
+.chat-history-panel::before,
+.chat-history-panel::after,
+.cli-history-panel::before,
+.cli-history-panel::after,
+.cli-plan-floating-panel::before,
+.cli-plan-floating-panel::after,
+.desktop-update-popover::before,
+.desktop-update-popover::after,
+.modal-card::before,
+.modal-card::after,
+.announcement-modal-card::before,
+.announcement-modal-card::after,
+.translation-modal-card::before,
+.translation-modal-card::after,
+.markdown-code-action-menu::before,
+.markdown-code-action-menu::after,
+.cli-extension-floating-tooltip::before,
+.cli-extension-floating-tooltip::after,
+.toast-bar::before,
+.toast-bar::after,
+.image-preview-modal::before,
+.image-preview-modal::after,
+.attachment-preview-modal::before,
+.attachment-preview-modal::after {
+  display: none !important;
+  content: none !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+  background: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  filter: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.picker-menu .picker-menu-head,
+.picker-menu .picker-filter-row,
+.assistant-menu .assistant-menu-toolbar,
+.assistant-menu .assistant-menu-head,
+.image-style-menu .image-style-menu-head,
+.cli-extension-menu .cli-extension-menu-head,
+.cli-extension-menu .cli-extension-filter-row,
+.cli-extension-menu .cli-extension-toolbar,
+.picker-menu .picker-menu-list,
+.assistant-menu .assistant-picker-list,
+.cli-extension-menu .cli-extension-list {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  filter: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.picker-menu .picker-option,
+.assistant-menu .assistant-picker-option,
+.image-style-menu .image-style-picker-option,
+.cli-extension-menu .cli-extension-card,
+.session-context-menu .session-context-menu-item,
+.markdown-code-action-menu button {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border-color: rgba(128, 148, 172, 0.14) !important;
+  box-shadow: none !important;
+  filter: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.picker-menu .picker-option:hover,
+.picker-menu .picker-option:focus-visible,
+.assistant-menu .assistant-picker-option:hover,
+.assistant-menu .assistant-picker-option:focus-visible,
+.image-style-menu .image-style-picker-option:hover,
+.image-style-menu .image-style-picker-option:focus-visible,
+.cli-extension-menu .cli-extension-card:hover,
+.cli-extension-menu .cli-extension-card:focus-visible,
+.cli-extension-menu .cli-extension-card.selected,
+.session-context-menu .session-context-menu-item:hover,
+.session-context-menu .session-context-menu-item:focus-visible,
+.markdown-code-action-menu button:hover,
+.markdown-code-action-menu button:focus-visible {
+  background: var(--oneapi-popup-item-hover) !important;
+  background-color: var(--oneapi-popup-item-hover) !important;
+  background-image: none !important;
+  border-color: var(--oneapi-popup-border) !important;
+}
+
+.picker-menu .picker-option.active,
+.assistant-menu .assistant-picker-option.active,
+.image-style-menu .image-style-picker-option.active,
+.picker-menu .picker-filter-chip.active {
+  background: var(--oneapi-popup-item-active) !important;
+  background-color: var(--oneapi-popup-item-active) !important;
+  background-image: none !important;
+  border-color: var(--oneapi-popup-border) !important;
+}
+
+.picker-menu input:not([type='checkbox']):not([type='radio']):not([type='range']),
+.picker-menu textarea,
+.picker-menu select,
+.assistant-menu .assistant-search,
+.cli-extension-menu .cli-extension-search {
+  background: var(--oneapi-popup-input-bg) !important;
+  background-color: var(--oneapi-popup-input-bg) !important;
+  background-image: none !important;
+  border-color: var(--oneapi-popup-border) !important;
+  box-shadow: none !important;
+  filter: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
