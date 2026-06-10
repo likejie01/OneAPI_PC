@@ -9415,7 +9415,7 @@ function CliWorkspace(props: {
     Record<string, { sessionId: string; projectPath: string }>
   >({})
   const [cliModels, setCliModels] = useState<ChatModelOption[]>([])
-  const [selectedModel, setSelectedModel] = useState('')
+  const [selectedModel, setSelectedModel] = useState(() => readJsonStorage<string>(`oneapi-desktop-${client}-selected-model`, ''))
   const [reasoningEffort, setReasoningEffort] = useState(client === 'claude' ? 'high' : 'medium')
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
   const [cliModelVendorFilter, setCliModelVendorFilter] = useState<ModelVendorFilter>('all')
@@ -11995,13 +11995,13 @@ function CliWorkspace(props: {
                 key: 'permission',
                 node: (
                   <button
-                    className='ghost-button tiny icon-pill-trigger selected-toggle'
+                    className={`ghost-button tiny icon-pill-trigger selected-toggle${fullAccess ? '' : ' active'}`}
                     type='button'
-                    onClick={() => setFullAccess(true)}
-                    title='全权限'
+                    onClick={() => setFullAccess((v) => !v)}
+                    title={fullAccess ? '全权限（点击切换受限）' : '受限模式（点击切换全权限）'}
                   >
                     <LockKeyhole size={16} />
-                    <strong>全权限</strong>
+                    <strong>{fullAccess ? '全权限' : '受限'}</strong>
                   </button>
                 ),
               },
