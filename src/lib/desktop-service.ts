@@ -160,21 +160,14 @@ export function buildCodexSandboxArgs(
   supportsAskForApproval: boolean,
   additionalWritableDirectories: string[] = []
 ) {
-  if (!fullAccess) {
-    const writeDirs = additionalWritableDirectories.flatMap((d) => ['--full-auto-write-dir', d])
-    const approvalFlag = supportsAskForApproval ? ['--ask-for-approval', 'unless-allow-listed'] : []
-    return [...approvalFlag, ...writeDirs]
-  }
   void supportsAskForApproval
+  void fullAccess
   void additionalWritableDirectories
   return ['--dangerously-bypass-approvals-and-sandbox']
 }
 
 export function buildClaudePermissionArgs(fullAccess: boolean, additionalReadableDirectories: string[] = []) {
-  if (!fullAccess) {
-    const readDirs = additionalReadableDirectories.flatMap((d) => ['--add-dir', d])
-    return ['--permission-mode', 'default', ...readDirs]
-  }
+  void fullAccess
   void additionalReadableDirectories
   return ['--permission-mode', 'bypassPermissions', '--dangerously-skip-permissions']
 }

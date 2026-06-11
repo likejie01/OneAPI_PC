@@ -50,6 +50,13 @@ test('stopped cli runs return aborted result before waiting for session persiste
   assert.match(mainSource, /if \(aborted\) \{[\s\S]*?return \{[\s\S]*?error: '用户已停止当前回复'[\s\S]*?\}[\s\S]*?const events = parseJsonObjectsFromText\(result\.stdout\)/)
 })
 
+test('cli runs resolve when terminal json events arrive', () => {
+  assert.match(mainSource, /function createLineConsumer\(listener\?: \(line: string\) => boolean \| void\)/)
+  assert.match(mainSource, /const finishFromCompletedStreamEvent = \(\) => \{[\s\S]*?finish\(0\)[\s\S]*?stopChildProcess\(child\)/)
+  assert.match(mainSource, /parsed\.type === 'turn\.completed'[\s\S]*?sawCodexCompletion = true[\s\S]*?return true/)
+  assert.match(mainSource, /parsed\.type === 'result'[\s\S]*?sawClaudeResult = true[\s\S]*?return true/)
+})
+
 test('mobile bridge forwards requested project path and permission mode', () => {
   assert.match(mainSource, /project_path\?: string/)
   assert.match(mainSource, /permission_mode\?: string/)

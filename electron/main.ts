@@ -178,6 +178,7 @@ let mobileBridgeLastHeartbeatAt = 0
 let mobileBridgeLastSnapshotSignature = ''
 let mobileBridgeLastSessionsSnapshotSignature = ''
 let mobileBridgeLastSessionsSnapshotAt = 0
+let mobileBridgeLastModelSelectionErrorAt = 0
 const assistantHistoryWriteSignatures = new Map<string, string>()
 const FILE_PREVIEW_MAX_BYTES = 10 * 1024 * 1024
 const EXTERNAL_URL_PROTOCOL_ALLOWLIST = new Set(['http:', 'https:', 'mailto:'])
@@ -2068,6 +2069,21 @@ async function applyMobileBridgeModelSelections() {
   }
 }
 
+async function applyMobileBridgeModelSelectionsSafely() {
+  try {
+    await applyMobileBridgeModelSelections()
+  } catch (error) {
+    const now = Date.now()
+    if (now - mobileBridgeLastModelSelectionErrorAt < MOBILE_BRIDGE_HEARTBEAT_INTERVAL_MS) {
+      return
+    }
+    mobileBridgeLastModelSelectionErrorAt = now
+    const message = error instanceof Error ? error.message : String(error)
+    // Model selection sync is auxiliary; keep the bridge degraded note but never block job polling.
+    await heartbeatMobileBridgeDevice('degraded', `model selection sync failed: ${message}`).catch(() => undefined)
+  }
+}
+
 function safeMobileAttachmentName(value: string, fallback: string) {
   const clean = (value || '')
     .trim()
@@ -2525,7 +2541,7 @@ async function startMobileBridgeLoop() {
       await heartbeatMobileBridgeDevice()
       await syncMobileBridgeExtensionsSnapshot()
       await syncMobileBridgeAssistantsSnapshot()
-      await applyMobileBridgeModelSelections()
+      await applyMobileBridgeModelSelectionsSafely()
       await syncMobileBridgeSessionsSnapshot()
 
       const jobs = await requestMobileBridgeJson<MobileBridgeJob[]>({
@@ -2953,36 +2969,40 @@ function shouldUseWindowsCommandShim(command: string) {
   return shouldUseWindowsCommandShimForPath(command, process.platform)
 }
 
-function createLineConsumer(listener?: (line: string) => void) {
+function createLineConsumer(listener?: (line: string) => boolean | void) {
   let buffer = ''
 
   return {
     push(chunk: Buffer | string) {
       if (!listener) {
-        return
+        return false
       }
 
       buffer += chunk.toString()
       const lines = buffer.split(/\r?\n/)
       buffer = lines.pop() ?? ''
+      let shouldResolve = false
 
       for (const line of lines) {
         const trimmed = line.trim()
         if (trimmed) {
-          listener(trimmed)
+          shouldResolve = listener(trimmed) === true || shouldResolve
         }
       }
+      return shouldResolve
     },
     flush() {
       if (!listener) {
-        return
+        return false
       }
 
       const trimmed = buffer.trim()
+      let shouldResolve = false
       if (trimmed) {
-        listener(trimmed)
+        shouldResolve = listener(trimmed) === true
       }
       buffer = ''
+      return shouldResolve
     },
   }
 }
@@ -2994,8 +3014,8 @@ function spawnCommandWithHandlers(
     cwd?: string
     timeoutMs?: number
     env?: NodeJS.ProcessEnv
-    onStdoutLine?: (line: string) => void
-    onStderrLine?: (line: string) => void
+    onStdoutLine?: (line: string) => boolean | void
+    onStderrLine?: (line: string) => boolean | void
     onSpawn?: (child: ChildProcess) => void
     stdinData?: string
     keepStdinOpen?: boolean
@@ -3039,6 +3059,25 @@ function spawnCommandWithHandlers(
     const stdoutConsumer = createLineConsumer(options.onStdoutLine)
     const stderrConsumer = createLineConsumer(options.onStderrLine)
 
+    const finish = (exitCode: number) => {
+      if (settled) {
+        return
+      }
+      settled = true
+      clearTimeout(timer)
+      stdoutConsumer.flush()
+      stderrConsumer.flush()
+      resolve({
+        stdout,
+        stderr,
+        exitCode,
+      })
+    }
+    const finishFromCompletedStreamEvent = () => {
+      finish(0)
+      void stopChildProcess(child)
+    }
+
     const timer = setTimeout(() => {
       stderr += `\n命令执行超时（${timeoutMs}ms）`
       child.kill()
@@ -3059,43 +3098,32 @@ function spawnCommandWithHandlers(
     }
 
     child.stdout?.on('data', (chunk) => {
+      if (settled) {
+        return
+      }
       stdout += chunk.toString()
-      stdoutConsumer.push(chunk)
+      if (stdoutConsumer.push(chunk)) {
+        finishFromCompletedStreamEvent()
+      }
     })
 
     child.stderr?.on('data', (chunk) => {
+      if (settled) {
+        return
+      }
       stderr += chunk.toString()
-      stderrConsumer.push(chunk)
+      if (stderrConsumer.push(chunk)) {
+        finishFromCompletedStreamEvent()
+      }
     })
 
     child.on('error', (error) => {
-      if (settled) {
-        return
-      }
-      settled = true
-      clearTimeout(timer)
-      stdoutConsumer.flush()
-      stderrConsumer.flush()
-      resolve({
-        stdout,
-        stderr: `${stderr}\n${error.message}`.trim(),
-        exitCode: -1,
-      })
+      stderr = `${stderr}\n${error.message}`.trim()
+      finish(-1)
     })
 
     child.on('close', (code) => {
-      if (settled) {
-        return
-      }
-      settled = true
-      clearTimeout(timer)
-      stdoutConsumer.flush()
-      stderrConsumer.flush()
-      resolve({
-        stdout,
-        stderr,
-        exitCode: code ?? 0,
-      })
+      finish(code ?? 0)
     })
   })
 }
@@ -4240,7 +4268,7 @@ async function persistWindowsClaudeApiEnvironment(apiKey: string, baseUrl: strin
     'foreach ($item in $values.GetEnumerator()) {',
     '  [Environment]::SetEnvironmentVariable($item.Key, $item.Value, "User")',
     '}',
-  ].join('; ')
+  ].join('\n')
   const result = await spawnCommandWithHandlers('powershell.exe', [
     '-NoProfile',
     '-ExecutionPolicy',
@@ -7968,6 +7996,7 @@ async function runCodexPrompt(
       if (parsed.type === 'turn.completed') {
         sawCodexCompletion = true
         stopCodexAfterCompletion()
+        return true
       }
 
       const payload =
@@ -8638,6 +8667,7 @@ async function runClaudePrompt(
         finalResult = parsed
         sawClaudeResult = true
         stopClaudeAfterResult()
+        return true
       }
     },
     onStderrLine: (line) => {

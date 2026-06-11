@@ -14,7 +14,8 @@ test('classifyConfiguredService infers configured services from channel type and
   assert.equal(classifyConfiguredService({ id: 3, type: 24, name: 'gemini-2.5-pro' }), 'gemini')
   assert.equal(classifyConfiguredService({ id: 4, type: 43, base_url: 'https://api.deepseek.com' }), 'deepseek')
   assert.equal(classifyConfiguredService({ id: 5, type: 58, models: 'mimo-v2.5' }), 'mimo')
-  assert.equal(classifyConfiguredService({ id: 6, type: 1, models: 'gpt-4.1' }), null)
+  assert.equal(classifyConfiguredService({ id: 6, type: 1, name: 'OpenAI', models: 'gpt-5.5' }), 'openai')
+  assert.equal(classifyConfiguredService({ id: 8, type: 1, name: 'Image', models: 'gpt-image-2' }), 'image')
   assert.equal(
     classifyConfiguredService({ id: 7, type: 14, name: 'Anthropic', base_url: 'https://code.newcli.com/codex' }),
     'claude'
@@ -26,10 +27,14 @@ test('collectConfiguredServices groups configured channels by service', () => {
     { id: 1, type: 14, name: 'Claude' },
     { id: 2, type: 14, name: 'Claude 2' },
     { id: 3, type: 57, name: 'Codex' },
+    { id: 4, type: 1, name: 'OpenAI', models: 'gpt-5.5' },
+    { id: 5, type: 1, name: 'Image', models: 'gpt-image-2' },
   ])
 
   assert.equal(grouped.get('claude')?.length, 2)
   assert.equal(grouped.get('codex')?.length, 1)
+  assert.equal(grouped.get('openai')?.length, 1)
+  assert.equal(grouped.get('image')?.length, 1)
   assert.equal(grouped.has('gemini'), false)
 })
 
