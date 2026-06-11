@@ -11936,6 +11936,13 @@ article.panel.page-surface,
 }
 
 /* performance pass: remove costly glass/background effects. */
+*,
+*::before,
+*::after {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
 .workspace-aurora,
 .workspace-aurora::before,
 .workspace-aurora::after,
@@ -17248,4 +17255,246 @@ input:checked + .toggle-track {
   width: 100% !important;
   max-width: 100% !important;
   z-index: 10002 !important;
+}
+
+/* Execution log spacing polish: keep status dots and parsed blocks off the edge. */
+.cli-log-time-head {
+  padding-left: 10px !important;
+  padding-right: 10px !important;
+  box-sizing: border-box !important;
+}
+
+.cli-log-time-lines {
+  padding-left: 34px !important;
+  padding-right: 10px !important;
+  box-sizing: border-box !important;
+}
+
+.cli-log-event-row {
+  grid-template-columns: 14px minmax(0, 1fr) !important;
+  gap: 12px !important;
+  padding-left: calc(10px + var(--cli-log-indent-level, 0) * 18px) !important;
+  padding-right: 10px !important;
+  box-sizing: border-box !important;
+}
+
+.cli-log-time-dot,
+.cli-log-event-dot,
+.cli-log-child-dot,
+.timeline-dot {
+  justify-self: center !important;
+}
+
+.cli-log-output-card-body,
+.cli-log-diagnostic-body,
+.cli-log-event-details {
+  padding-left: 10px !important;
+  padding-right: 4px !important;
+  box-sizing: border-box !important;
+}
+
+.cli-log-output-inline {
+  margin-left: 0 !important;
+  padding-left: 10px !important;
+  box-sizing: border-box !important;
+}
+
+.cli-log-detail-window,
+.cli-log-detail-window.compact,
+.cli-log-event-diagnostic-text,
+.timeline-code,
+.timeline-detail,
+.timeline-detail-wrap .timeline-detail {
+  padding-left: 16px !important;
+  padding-right: 16px !important;
+  box-sizing: border-box !important;
+}
+
+.timeline-row {
+  grid-template-columns: 14px minmax(0, 1fr) !important;
+  gap: 12px !important;
+  padding: 12px 10px !important;
+  box-sizing: border-box !important;
+}
+
+.timeline-detail-wrap .timeline-detail {
+  padding-right: 44px !important;
+}
+
+/* Final UI polish: copyable render blocks, history glass, previews, and noisy headers. */
+.markdown-code-block {
+  position: relative !important;
+  display: block !important;
+  margin: 12px 0 !important;
+  padding: 14px 46px 14px 18px !important;
+  border: 1px solid color-mix(in srgb, var(--accent) 14%, var(--line)) !important;
+  border-radius: 10px !important;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent) 7%, transparent), color-mix(in srgb, var(--success) 5%, transparent)),
+    rgb(var(--surface-rgb) / 0.34) !important;
+  box-shadow: none !important;
+  overflow: auto !important;
+  box-sizing: border-box !important;
+}
+
+.markdown-code-block code,
+.markdown-code-block pre,
+.markdown-body pre .markdown-code-block > code,
+.markdown-body pre .markdown-code-block code,
+.markdown-code-block pre code {
+  display: block !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  min-width: max-content !important;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  white-space: pre !important;
+  color: inherit !important;
+}
+
+.markdown-body pre:has(.markdown-code-block),
+.markdown-code-block > pre,
+.markdown-code-block pre,
+.markdown-body pre .markdown-code-block > pre {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+.markdown-code-copy {
+  position: absolute !important;
+  top: 10px !important;
+  right: 10px !important;
+  width: 28px !important;
+  height: 28px !important;
+  min-width: 28px !important;
+  min-height: 28px !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: var(--text-secondary) !important;
+}
+
+.markdown-code-copy:hover,
+.markdown-code-copy:focus-visible {
+  background: color-mix(in srgb, var(--accent) 10%, transparent) !important;
+  color: var(--text-primary) !important;
+}
+
+.reasoning-card {
+  background: color-mix(in srgb, var(--accent) 5%, transparent) !important;
+  border-color: color-mix(in srgb, var(--accent) 12%, transparent) !important;
+  box-shadow: none !important;
+}
+
+.reasoning-card-body,
+:root[data-theme='dark'] .reasoning-card-body {
+  padding: 8px 0 0 !important;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.reasoning-card .markdown-body {
+  padding: 0 !important;
+  background: transparent !important;
+  border: 0 !important;
+}
+
+.list-block-header,
+.me-device-binding-card .list-block-header,
+.me-key-list-card .list-block-header,
+.me-key-create-card .list-block-header,
+.picker-menu-head,
+.assistant-menu .assistant-menu-head,
+.assistant-menu .assistant-menu-toolbar,
+.image-style-menu .image-style-menu-head,
+.cli-extension-menu .cli-extension-menu-head,
+.cli-extension-menu .cli-extension-toolbar,
+.cli-extension-menu .cli-extension-filter-row {
+  background: transparent !important;
+  background-color: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.chat-history-panel,
+.cli-history-panel {
+  background: rgb(var(--panel-rgb) / 0.52) !important;
+  backdrop-filter: blur(18px) saturate(1.05) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(1.05) !important;
+}
+
+.image-preview-modal-mask {
+  background: rgb(var(--bg-rgb) / 0.22) !important;
+  backdrop-filter: blur(18px) saturate(1.1) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(1.1) !important;
+}
+
+.image-preview-modal.image-only,
+.attachment-preview-modal.image-only,
+.image-preview-modal-mask > .image-preview-modal.image-only,
+.image-preview-modal-mask > .attachment-preview-modal.image-only {
+  width: min(92vw, 1280px) !important;
+  height: min(88vh, 860px) !important;
+  padding: 0 !important;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.image-preview-modal.image-only .image-preview-stage,
+.attachment-preview-modal.image-only .attachment-preview-stage {
+  position: relative !important;
+  width: 100% !important;
+  height: 100% !important;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.image-preview-full {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: contain !important;
+}
+
+.image-preview-overlay-actions {
+  top: 14px !important;
+  right: 14px !important;
+  gap: 8px !important;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.image-preview-icon-button,
+.image-preview-icon-button:hover,
+.image-preview-icon-button:focus-visible {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.usage-trend-card.pannable .usage-trend-svg {
+  cursor: grab;
+  touch-action: none;
+}
+
+.usage-trend-card.pannable .usage-trend-svg:active {
+  cursor: grabbing;
+}
+
+:root[data-theme='dark'] .markdown-code-block {
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent) 11%, transparent), color-mix(in srgb, var(--success) 7%, transparent)),
+    rgb(var(--surface-rgb) / 0.28) !important;
+  border-color: color-mix(in srgb, var(--accent) 18%, var(--line)) !important;
 }

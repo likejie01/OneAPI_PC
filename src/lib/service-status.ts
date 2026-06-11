@@ -1,4 +1,4 @@
-export type ConfiguredServiceKey = 'claude' | 'codex' | 'gemini' | 'deepseek' | 'mimo'
+export type ConfiguredServiceKey = 'claude' | 'codex' | 'gemini' | 'deepseek' | 'mimo' | 'openai' | 'image'
 
 export type ServiceHealthTone = 'up' | 'down' | 'maintenance' | 'unknown'
 
@@ -90,6 +90,8 @@ const SERVICE_LABELS: Record<ConfiguredServiceKey, string> = {
   gemini: 'Gemini',
   deepseek: 'DeepSeek',
   mimo: 'XiaomiMIMO',
+  openai: 'OpenAI',
+  image: 'Image',
 }
 
 function normalizeText(value?: string | null) {
@@ -141,6 +143,12 @@ export function classifyConfiguredService(channel: ConfiguredChannel): Configure
   if (channel.type === 14) {
     return 'claude'
   }
+  if (text.includes('image') || text.includes('gpt-image')) {
+    return 'image'
+  }
+  if (text.includes('openai') || /\bgpt[-\w.]*/i.test(text)) {
+    return 'openai'
+  }
   if (text.includes('codex')) {
     return 'codex'
   }
@@ -181,6 +189,12 @@ function classifyStatusPageService(groupName?: string, monitorName?: string): Co
   }
   if (text.includes('claude')) {
     return 'claude'
+  }
+  if (text.includes('image') || text.includes('gpt-image')) {
+    return 'image'
+  }
+  if (text.includes('openai') || /\bgpt[-\w.]*/i.test(text)) {
+    return 'openai'
   }
   return null
 }

@@ -2073,8 +2073,14 @@ const USAGE_CHART_COLORS = [
   '#cc8f2b',
   '#54708c',
 ]
+const USAGE_TREND_WINDOW_MS = 2 * 60 * 60 * 1000
+const USAGE_TREND_BUCKET_MS = 5 * 60 * 1000
 
 function clampChartCoordinate(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(value, max))
+}
+
+function clampValue(value: number, min: number, max: number) {
   return Math.max(min, Math.min(value, max))
 }
 
@@ -2106,38 +2112,41 @@ function buildSmoothLinePath(points: Array<{ x: number; y: number }>, minY?: num
   return path
 }
 
-function buildUsageSeriesFromTimeline(items: UsageData['items']) {
-  const buckets = new Map<number, Map<string, number>>()
+function resolveUsageTimelineBounds(items: UsageData['items']) {
   const timestamps = items
     .map((item) => resolveUsageTimestamp(item))
     .filter((value) => value > 0)
     .sort((left, right) => left - right)
-  const rangeMs = timestamps.length >= 2 ? timestamps[timestamps.length - 1] - timestamps[0] : 0
-  const hasMultiDayRange = rangeMs >= 24 * 60 * 60 * 1000
-  const targetBuckets = hasMultiDayRange ? 8 : 12
-  const bucketCandidatesMs = [
-    30 * 1000,
-    60 * 1000,
-    2 * 60 * 1000,
-    5 * 60 * 1000,
-    10 * 60 * 1000,
-    15 * 60 * 1000,
-    30 * 60 * 1000,
-    60 * 60 * 1000,
-    2 * 60 * 60 * 1000,
-    6 * 60 * 60 * 1000,
-    12 * 60 * 60 * 1000,
-    24 * 60 * 60 * 1000,
-  ]
-  const bucketSizeMs =
-    bucketCandidatesMs.find((candidate) => rangeMs <= 0 || Math.ceil(rangeMs / candidate) <= targetBuckets) ||
-    bucketCandidatesMs[bucketCandidatesMs.length - 1]
+  const latest = timestamps.at(-1) || Date.now()
+  const earliest = timestamps[0] || latest
+  const latestWindowStart = Math.max(0, latest - USAGE_TREND_WINDOW_MS)
+  const earliestWindowStart = Math.max(0, Math.min(earliest, latestWindowStart))
+  return {
+    earliest,
+    latest,
+    earliestWindowStart,
+    latestWindowStart,
+  }
+}
+
+function buildUsageSeriesFromTimeline(items: UsageData['items'], windowStart: number) {
+  const buckets = new Map<number, Map<string, number>>()
+  const windowEnd = windowStart + USAGE_TREND_WINDOW_MS
+  const firstBucket = Math.floor(windowStart / USAGE_TREND_BUCKET_MS) * USAGE_TREND_BUCKET_MS
+  const labels: number[] = []
+  for (let label = firstBucket; label <= windowEnd; label += USAGE_TREND_BUCKET_MS) {
+    labels.push(label)
+    buckets.set(label, new Map())
+  }
 
   for (const item of items) {
     const timestamp = resolveUsageTimestamp(item)
+    if (!timestamp || timestamp < windowStart || timestamp > windowEnd) {
+      continue
+    }
     const bucketKey = timestamp
-      ? Math.floor(timestamp / bucketSizeMs) * bucketSizeMs
-      : 0
+      ? Math.floor(timestamp / USAGE_TREND_BUCKET_MS) * USAGE_TREND_BUCKET_MS
+      : firstBucket
     const model = item.model_name || item.token_name || '未标注模型'
     if (!buckets.has(bucketKey)) {
       buckets.set(bucketKey, new Map())
@@ -2145,8 +2154,6 @@ function buildUsageSeriesFromTimeline(items: UsageData['items']) {
     const current = buckets.get(bucketKey)!
     current.set(model, (current.get(model) || 0) + Number(item.quota || 0))
   }
-
-  const labels = Array.from(buckets.keys()).sort((left, right) => left - right)
 
   const models = Array.from(new Set(items.map((item) => item.model_name || item.token_name || '未标注模型')))
 
@@ -2156,7 +2163,7 @@ function buildUsageSeriesFromTimeline(items: UsageData['items']) {
     buckets,
     formatLabel: (value: number) =>
       value
-        ? dayjs(value).format(hasMultiDayRange ? 'MM-DD HH:mm' : 'HH:mm')
+        ? dayjs(value).format('HH:mm')
         : '未知时间',
   }
 }
@@ -2165,7 +2172,14 @@ function UsageTrendChart(props: {
   items: UsageData['items']
 }) {
   const { items } = props
-  const chart = useMemo(() => buildUsageSeriesFromTimeline(items), [items])
+  const bounds = useMemo(() => resolveUsageTimelineBounds(items), [items])
+  const [viewStart, setViewStart] = useState(bounds.latestWindowStart)
+  const dragStateRef = useRef<{ x: number; start: number } | null>(null)
+  useEffect(() => {
+    setViewStart(bounds.latestWindowStart)
+  }, [bounds.latestWindowStart])
+  const effectiveViewStart = clampValue(viewStart, bounds.earliestWindowStart, bounds.latestWindowStart)
+  const chart = useMemo(() => buildUsageSeriesFromTimeline(items, effectiveViewStart), [items, effectiveViewStart])
   const [hoveredPoint, setHoveredPoint] = useState<{
     model: string
     label: string
@@ -2194,15 +2208,38 @@ function UsageTrendChart(props: {
   )
   const gridRows = 4
   const tickStep = Math.max(1, Math.ceil(chart.labels.length / 6))
+  const canPan = bounds.latestWindowStart > bounds.earliestWindowStart
 
   return (
-    <div className='usage-trend-card'>
+    <div className={`usage-trend-card ${canPan ? 'pannable' : ''}`.trim()}>
       <svg
         viewBox={`0 0 ${width} ${height}`}
         className='usage-trend-svg'
         role='img'
         aria-label='模型调用分析趋势图'
         onMouseLeave={() => setHoveredPoint(null)}
+        onPointerDown={(event) => {
+          if (!canPan || event.button !== 0) {
+            return
+          }
+          dragStateRef.current = { x: event.clientX, start: effectiveViewStart }
+          event.currentTarget.setPointerCapture(event.pointerId)
+        }}
+        onPointerMove={(event) => {
+          if (!dragStateRef.current) {
+            return
+          }
+          const deltaX = event.clientX - dragStateRef.current.x
+          const deltaMs = -(deltaX / chartWidth) * USAGE_TREND_WINDOW_MS
+          setViewStart(clampValue(dragStateRef.current.start + deltaMs, bounds.earliestWindowStart, bounds.latestWindowStart))
+        }}
+        onPointerUp={(event) => {
+          dragStateRef.current = null
+          event.currentTarget.releasePointerCapture(event.pointerId)
+        }}
+        onPointerCancel={() => {
+          dragStateRef.current = null
+        }}
       >
         <defs>
           <clipPath id='usage-trend-chart-clip'>
@@ -2669,7 +2706,10 @@ function AttachmentPreviewModal(props: {
                 </button>
               </>
             ) : null}
-            <button className='ghost-button icon-only tiny image-preview-icon-button' type='button' onClick={onClose} title='关闭' aria-label='关闭'>
+            <button className='ghost-button icon-only tiny image-preview-icon-button' type='button' onClick={() => {
+              onClose()
+              toast('图片预览已关闭。')
+            }} title='关闭' aria-label='关闭'>
               <X size={15} />
             </button>
           </div>
@@ -7937,7 +7977,7 @@ function DrawWorkspace(props: {
       {previewImage && (
         <div className='modal-mask image-preview-modal-mask' onClick={() => setPreviewImage(null)}>
           <div
-            className='image-preview-modal'
+            className='image-preview-modal image-only'
             onClick={(event) => event.stopPropagation()}
             onContextMenu={handlePreviewImageContextMenu}
           >
@@ -7949,7 +7989,10 @@ function DrawWorkspace(props: {
                 <button className='ghost-button icon-only tiny image-preview-icon-button' type='button' onClick={() => void handleDownloadImage(previewImage.src, previewImage.name)} title='下载图片' aria-label='下载图片'>
                   <Download size={15} />
                 </button>
-                <button className='ghost-button icon-only tiny image-preview-icon-button' type='button' onClick={() => setPreviewImage(null)} title='关闭' aria-label='关闭'>
+                <button className='ghost-button icon-only tiny image-preview-icon-button' type='button' onClick={() => {
+                  setPreviewImage(null)
+                  toast('图片预览已关闭。')
+                }} title='关闭' aria-label='关闭'>
                   <X size={15} />
                 </button>
               </div>
