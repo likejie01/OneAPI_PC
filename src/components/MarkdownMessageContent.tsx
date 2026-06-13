@@ -53,27 +53,6 @@ export function MarkdownMessageContent(props: MarkdownMessageContentProps) {
         onSelectionContextMenu(event, selectedText)
       }}
     >
-      {extractedContent.chips.length > 0 ? (
-        <div className='message-link-chip-strip'>
-          {extractedContent.chips.map((item) => (
-            <button
-              key={`${item.kind}:${item.url}`}
-              type='button'
-              className='message-link-chip'
-              title={item.url}
-              onClick={() => void onOpenExternal(item.url)}
-            >
-              <span className='message-link-chip-icon'>
-                {item.kind === 'github' ? <Link2 size={14} /> : <Globe size={14} />}
-              </span>
-              <span className='message-link-chip-copy'>
-                <strong>{item.label}</strong>
-                <small>{item.hostLabel}</small>
-              </span>
-            </button>
-          ))}
-        </div>
-      ) : null}
       {extractedContent.content ? (
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
@@ -161,6 +140,27 @@ export function MarkdownMessageContent(props: MarkdownMessageContentProps) {
         >
           {extractedContent.content}
         </ReactMarkdown>
+      ) : null}
+      {extractedContent.chips.length > 0 ? (
+        <div className='message-link-chip-strip' aria-label='相关链接'>
+          {extractedContent.chips.map((item) => (
+            <button
+              key={`${item.kind}:${item.url}`}
+              type='button'
+              className='message-link-chip'
+              title={item.url}
+              onClick={() => void onOpenExternal(item.url)}
+            >
+              <span className='message-link-chip-icon'>
+                {item.kind === 'github' ? <Link2 size={14} /> : <Globe size={14} />}
+              </span>
+              <span className='message-link-chip-copy'>
+                <strong>{item.label}</strong>
+                <small>{item.url}</small>
+              </span>
+            </button>
+          ))}
+        </div>
       ) : null}
     </div>
   )

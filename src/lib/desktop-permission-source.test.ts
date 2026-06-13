@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url'
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const appSource = readFileSync(resolve(projectRoot, 'src', 'App.tsx'), 'utf8')
 const mainSource = readFileSync(resolve(projectRoot, 'electron', 'main.ts'), 'utf8')
+const mobileBridgeSource = readFileSync(resolve(projectRoot, 'electron', 'mobile-bridge.ts'), 'utf8')
 
 test('desktop file preview keeps arbitrary path support with a 10MB safety cap', () => {
   assert.match(mainSource, /const FILE_PREVIEW_MAX_BYTES = 10 \* 1024 \* 1024/)
@@ -58,10 +59,10 @@ test('cli runs resolve when terminal json events arrive', () => {
 })
 
 test('mobile bridge forwards requested project path and permission mode', () => {
-  assert.match(mainSource, /project_path\?: string/)
-  assert.match(mainSource, /permission_mode\?: string/)
-  assert.match(mainSource, /projectPath: raw\.projectPath \|\| raw\.project_path \|\| ''/)
-  assert.match(mainSource, /permissionMode: raw\.permissionMode \|\| raw\.permission_mode \|\| ''/)
+  assert.match(mobileBridgeSource, /project_path\?: string/)
+  assert.match(mobileBridgeSource, /permission_mode\?: string/)
+  assert.match(mobileBridgeSource, /projectPath: raw\.projectPath \|\| raw\.project_path \|\| ''/)
+  assert.match(mobileBridgeSource, /permissionMode: raw\.permissionMode \|\| raw\.permission_mode \|\| ''/)
   assert.match(mainSource, /const projectPath = job\.projectPath\.trim\(\) \|\| \(await readBridgeClientProjectPath\(job\.client\)\)\.trim\(\) \|\| os\.homedir\(\)/)
   assert.match(mainSource, /const fullAccess = job\.permissionMode === 'full' \|\| job\.permissionMode === 'full_access'/)
   assert.match(mainSource, /buildFinalPrompt\(\{[\s\S]*?fullAccess,[\s\S]*?\}\)/)

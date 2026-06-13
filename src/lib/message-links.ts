@@ -6,7 +6,7 @@ export type MessageLinkChip = {
 }
 
 function normalizeStandaloneUrl(value: string) {
-  return value.replace(/^<|>$/g, '')
+  return value.replace(/^<|>$/g, '').replace(/[),.;，。；、]+$/g, '')
 }
 
 function buildLinkLabel(url: URL) {
@@ -29,32 +29,66 @@ function buildHostLabel(url: URL) {
   return url.hostname.toLowerCase() === 'github.com' ? 'GitHub' : url.hostname.replace(/^www\./i, '')
 }
 
+function isLinkLabelOnlyLine(value: string) {
+  return /^\s*[-*]?\s*[\p{L}\p{N}\s_-]{0,24}(?:地址|网址|链接|URL|url|官网|文档|GitHub|仓库|云服务)\s*[:：]?\s*$/u.test(value)
+}
+
 export function extractMessageLinkChips(content: string) {
   const lines = content.replace(/\r\n/g, '\n').split('\n')
   const chips: MessageLinkChip[] = []
   const visibleLines: string[] = []
+  const seenUrls = new Set<string>()
 
   for (const line of lines) {
     const trimmed = line.trim()
-    const markdownMatch = trimmed.match(/^\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)$/i)
-    const urlOnlyMatch = trimmed.match(/^<?(https?:\/\/[^\s>]+)>?$/i)
-    const resolvedUrl = markdownMatch?.[2] || urlOnlyMatch?.[1]
+    const lineMatches = Array.from(trimmed.matchAll(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|<?(https?:\/\/[^\s<>)]+)>?/gi))
 
-    if (!resolvedUrl) {
+    if (!lineMatches.length) {
       visibleLines.push(line)
       continue
     }
 
-    try {
-      const parsed = new URL(normalizeStandaloneUrl(resolvedUrl))
-      chips.push({
-        url: parsed.toString(),
-        label: markdownMatch?.[1]?.trim() || buildLinkLabel(parsed),
-        hostLabel: buildHostLabel(parsed),
-        kind: parsed.hostname.toLowerCase() === 'github.com' ? 'github' : 'website',
-      })
-    } catch {
-      visibleLines.push(line)
+    let visibleLine = line
+
+    for (const match of lineMatches) {
+      const markdownLabel = match[1]?.trim()
+      const resolvedUrl = match[2] || match[3]
+
+      if (!resolvedUrl) {
+        continue
+      }
+
+      const rawMatch = match[0]
+      const before = visibleLine.slice(0, Math.max(0, visibleLine.indexOf(rawMatch))).trim()
+      const shouldRemoveFromBody =
+        trimmed === rawMatch ||
+        isLinkLabelOnlyLine(before)
+
+      if (shouldRemoveFromBody) {
+        visibleLine = visibleLine.replace(rawMatch, '')
+      }
+
+      try {
+        const parsed = new URL(normalizeStandaloneUrl(resolvedUrl))
+        const normalizedUrl = parsed.toString()
+        if (seenUrls.has(normalizedUrl)) {
+          continue
+        }
+        seenUrls.add(normalizedUrl)
+        chips.push({
+          url: normalizedUrl,
+          label: markdownLabel || buildLinkLabel(parsed),
+          hostLabel: buildHostLabel(parsed),
+          kind: parsed.hostname.toLowerCase() === 'github.com' ? 'github' : 'website',
+        })
+      } catch {
+        /* keep the original line visible below */
+      }
+    }
+
+    const cleanedLine = visibleLine.replace(/[ \t]+$/g, '')
+    if (cleanedLine.trim() && !isLinkLabelOnlyLine(cleanedLine)) {
+      visibleLines.push(cleanedLine)
     }
   }
 
