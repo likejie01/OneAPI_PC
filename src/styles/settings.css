@@ -1,0 +1,2607 @@
+:root[data-theme='dark'] body:has(.picker-menu)::after,
+:root[data-theme='dark'] body:has(.assistant-menu)::after,
+:root[data-theme='dark'] body:has(.image-style-menu)::after,
+:root[data-theme='dark'] body:has(.image-config-menu)::after,
+:root[data-theme='dark'] body:has(.model-menu)::after,
+:root[data-theme='dark'] body:has(.cli-extension-menu)::after,
+:root[data-theme='dark'] body:has(.session-context-menu)::after,
+:root[data-theme='dark'] body:has(.chat-history-panel)::after,
+:root[data-theme='dark'] body:has(.cli-history-panel)::after,
+:root[data-theme='dark'] body:has(.cli-plan-floating-panel)::after,
+:root[data-theme='dark'] body:has(.modal-card)::after,
+:root[data-theme='dark'] body:has(.desktop-update-popover)::after,
+:root[data-theme='dark'] body:has(.announcement-modal-card)::after,
+:root[data-theme='dark'] body:has(.markdown-code-action-menu)::after,
+:root[data-theme='dark'] body:has(.translation-modal-card)::after,
+:root[data-theme='dark'] body:has(.cli-extension-floating-tooltip)::after {
+  background: rgba(8, 12, 18, 0.06) !important;
+  backdrop-filter: blur(30px) saturate(125%) !important;
+  -webkit-backdrop-filter: blur(30px) saturate(125%) !important;
+}
+
+.picker-menu,
+.assistant-menu,
+.image-style-menu,
+.image-config-menu,
+.model-menu,
+.cli-extension-menu,
+.session-context-menu,
+.chat-history-panel,
+.cli-history-panel,
+.cli-plan-floating-panel,
+.modal-card,
+.desktop-update-popover,
+.announcement-modal-card,
+.markdown-code-action-menu,
+.translation-modal-card,
+.cli-extension-floating-tooltip {
+  z-index: 220 !important;
+}
+
+.picker-menu-head,
+.assistant-menu-head,
+.image-style-menu-head,
+.assistant-menu-toolbar,
+.cli-extension-menu-head,
+.cli-extension-filter-row,
+.cli-extension-toolbar,
+.picker-filter-row,
+.picker-menu-list,
+.assistant-picker-list,
+.cli-extension-list,
+.picker-menu-head *,
+.assistant-menu-head *,
+.image-style-menu-head *,
+.assistant-menu-toolbar *,
+.cli-extension-menu-head *,
+.cli-extension-filter-row *,
+.cli-extension-toolbar *,
+.picker-filter-row * {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  text-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.assistant-menu-toolbar > button,
+.assistant-menu-toolbar > .secondary-button,
+.picker-menu .ghost-button,
+.picker-menu .secondary-button,
+.cli-extension-menu .ghost-button,
+.cli-extension-menu .secondary-button {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.assistant-menu-toolbar > button:hover,
+.assistant-menu-toolbar > button:focus-visible,
+.assistant-menu-toolbar > .secondary-button:hover,
+.assistant-menu-toolbar > .secondary-button:focus-visible,
+.picker-menu .ghost-button:hover,
+.picker-menu .ghost-button:focus-visible,
+.picker-menu .secondary-button:hover,
+.picker-menu .secondary-button:focus-visible,
+.cli-extension-menu .ghost-button:hover,
+.cli-extension-menu .ghost-button:focus-visible,
+.cli-extension-menu .secondary-button:hover,
+.cli-extension-menu .secondary-button:focus-visible {
+  background: rgba(255, 255, 255, 0.14) !important;
+  background-color: rgba(255, 255, 255, 0.14) !important;
+  border-color: rgba(208, 219, 236, 0.42) !important;
+}
+
+:root[data-theme='dark'] .assistant-menu-toolbar > button:hover,
+:root[data-theme='dark'] .assistant-menu-toolbar > button:focus-visible,
+:root[data-theme='dark'] .assistant-menu-toolbar > .secondary-button:hover,
+:root[data-theme='dark'] .assistant-menu-toolbar > .secondary-button:focus-visible,
+:root[data-theme='dark'] .picker-menu .ghost-button:hover,
+:root[data-theme='dark'] .picker-menu .ghost-button:focus-visible,
+:root[data-theme='dark'] .picker-menu .secondary-button:hover,
+:root[data-theme='dark'] .picker-menu .secondary-button:focus-visible,
+:root[data-theme='dark'] .cli-extension-menu .ghost-button:hover,
+:root[data-theme='dark'] .cli-extension-menu .ghost-button:focus-visible,
+:root[data-theme='dark'] .cli-extension-menu .secondary-button:hover,
+:root[data-theme='dark'] .cli-extension-menu .secondary-button:focus-visible {
+  background: rgba(255, 255, 255, 0.08) !important;
+  background-color: rgba(255, 255, 255, 0.08) !important;
+  border-color: rgba(158, 178, 208, 0.18) !important;
+}
+
+.composer-input-zone,
+.composer-input-zone:focus-within,
+.cli-page .composer-input-zone,
+.cli-page .composer-input-zone:focus-within {
+  background: rgba(255, 255, 255, 0.05) !important;
+  background-color: rgba(255, 255, 255, 0.05) !important;
+  background-image: none !important;
+}
+
+:root[data-theme='dark'] .composer-input-zone,
+:root[data-theme='dark'] .composer-input-zone:focus-within,
+:root[data-theme='dark'] .cli-page .composer-input-zone,
+:root[data-theme='dark'] .cli-page .composer-input-zone:focus-within {
+  background: rgba(18, 22, 28, 0.05) !important;
+  background-color: rgba(18, 22, 28, 0.05) !important;
+  background-image: none !important;
+}
+
+/* Popup blur fallback: blur the whole app behind floating menus. */
+body:has(.picker-menu)::before,
+body:has(.session-context-menu)::before,
+body:has(.chat-history-panel.open)::before,
+body:has(.cli-history-panel.open)::before,
+body:has(.cli-plan-floating-panel)::before,
+body:has(.modal-card)::before,
+body:has(.desktop-update-popover)::before,
+body:has(.announcement-modal-card)::before,
+body:has(.cli-extension-menu)::before,
+body:has(.assistant-menu)::before,
+body:has(.image-style-menu)::before,
+body:has(.image-config-menu)::before,
+body:has(.model-menu)::before,
+body:has(.markdown-code-action-menu)::before,
+body:has(.translation-modal-card)::before,
+body:has(.toast-bar)::before,
+body:has(.cli-extension-floating-tooltip)::before {
+  content: '' !important;
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 180 !important;
+  pointer-events: none !important;
+  background: rgba(12, 16, 22, 0.001) !important;
+  backdrop-filter: blur(22px) saturate(135%) !important;
+  -webkit-backdrop-filter: blur(22px) saturate(135%) !important;
+}
+
+.picker-menu,
+.session-context-menu,
+.chat-history-panel.open,
+.cli-history-panel.open,
+.cli-plan-floating-panel,
+.modal-card,
+.desktop-update-popover,
+.announcement-modal-card,
+.cli-extension-menu,
+.assistant-menu,
+.image-style-menu,
+.image-config-menu,
+.model-menu,
+.markdown-code-action-menu,
+.translation-modal-card,
+.toast-bar,
+.cli-extension-floating-tooltip {
+  z-index: 220 !important;
+}
+
+.toolbar-picker > .picker-menu,
+.toolbar-picker > .model-menu,
+.toolbar-picker > .assistant-menu,
+.toolbar-picker > .image-config-menu,
+.toolbar-picker > .image-style-menu,
+.composer-overlay-panel,
+.composer-overlay-panel .cli-extension-overlay-anchor {
+  z-index: 220 !important;
+}
+
+.assistant-menu-toolbar > .secondary-button,
+.cli-extension-toolbar > .ghost-button,
+.picker-menu .secondary-button,
+.picker-menu .ghost-button,
+.picker-menu .icon-picker-trigger {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.assistant-menu-toolbar > .secondary-button:hover,
+.assistant-menu-toolbar > .secondary-button:focus-visible,
+.cli-extension-toolbar > .ghost-button:hover,
+.cli-extension-toolbar > .ghost-button:focus-visible,
+.picker-menu .secondary-button:hover,
+.picker-menu .secondary-button:focus-visible,
+.picker-menu .ghost-button:hover,
+.picker-menu .ghost-button:focus-visible {
+  background: rgba(255, 255, 255, 0.08) !important;
+  background-color: rgba(255, 255, 255, 0.08) !important;
+  border-color: rgba(208, 219, 236, 0.26) !important;
+}
+
+:root[data-theme='dark'] .assistant-menu-toolbar > .secondary-button:hover,
+:root[data-theme='dark'] .assistant-menu-toolbar > .secondary-button:focus-visible,
+:root[data-theme='dark'] .cli-extension-toolbar > .ghost-button:hover,
+:root[data-theme='dark'] .cli-extension-toolbar > .ghost-button:focus-visible,
+:root[data-theme='dark'] .picker-menu .secondary-button:hover,
+:root[data-theme='dark'] .picker-menu .secondary-button:focus-visible,
+:root[data-theme='dark'] .picker-menu .ghost-button:hover,
+:root[data-theme='dark'] .picker-menu .ghost-button:focus-visible {
+  background: rgba(255, 255, 255, 0.06) !important;
+  background-color: rgba(255, 255, 255, 0.06) !important;
+  border-color: rgba(158, 178, 208, 0.18) !important;
+}
+
+.composer-input-zone,
+.cli-page .composer-input-zone {
+  background: rgba(255, 255, 255, 0.05) !important;
+  background-color: rgba(255, 255, 255, 0.05) !important;
+}
+
+:root[data-theme='dark'] .composer-input-zone,
+:root[data-theme='dark'] .cli-page .composer-input-zone {
+  background: rgba(18, 22, 28, 0.05) !important;
+  background-color: rgba(18, 22, 28, 0.05) !important;
+}
+
+/* Absolute final override: visible backdrop blur, no popup header strip, one composer surface. */
+:root {
+  --absolute-popup-bg: rgba(244, 248, 255, 0.68);
+  --absolute-popup-border: rgba(208, 219, 236, 0.68);
+  --absolute-popup-shadow: 0 18px 46px rgba(15, 23, 42, 0.18);
+  --absolute-composer-bg: rgba(255, 255, 255, 0.2);
+  --absolute-composer-border: rgba(210, 222, 238, 0.52);
+  --absolute-menu-field-bg: rgba(255, 255, 255, 0.18);
+}
+
+:root[data-theme='dark'] {
+  --absolute-popup-bg: rgba(25, 28, 34, 0.72);
+  --absolute-popup-border: rgba(158, 178, 208, 0.24);
+  --absolute-popup-shadow: 0 22px 58px rgba(0, 0, 0, 0.5);
+  --absolute-composer-bg: rgba(18, 22, 28, 0.2);
+  --absolute-composer-border: rgba(210, 222, 238, 0.16);
+  --absolute-menu-field-bg: rgba(16, 20, 26, 0.22);
+}
+
+.picker-menu,
+.session-context-menu,
+.chat-history-panel,
+.cli-history-panel,
+.cli-plan-floating-panel,
+.modal-card,
+.desktop-update-popover,
+.announcement-modal-card,
+.cli-extension-menu,
+.assistant-menu,
+.image-style-menu,
+.image-config-menu,
+.model-menu,
+.markdown-code-action-menu,
+.translation-modal-card,
+.toast-bar,
+.cli-extension-floating-tooltip,
+:root[data-theme='dark'] .picker-menu,
+:root[data-theme='dark'] .session-context-menu,
+:root[data-theme='dark'] .chat-history-panel,
+:root[data-theme='dark'] .cli-history-panel,
+:root[data-theme='dark'] .cli-plan-floating-panel,
+:root[data-theme='dark'] .modal-card,
+:root[data-theme='dark'] .desktop-update-popover,
+:root[data-theme='dark'] .announcement-modal-card,
+:root[data-theme='dark'] .cli-extension-menu,
+:root[data-theme='dark'] .assistant-menu,
+:root[data-theme='dark'] .image-style-menu,
+:root[data-theme='dark'] .image-config-menu,
+:root[data-theme='dark'] .model-menu,
+:root[data-theme='dark'] .markdown-code-action-menu,
+:root[data-theme='dark'] .translation-modal-card,
+:root[data-theme='dark'] .toast-bar,
+:root[data-theme='dark'] .cli-extension-floating-tooltip,
+:root[data-performance-mode='efficiency'] .picker-menu,
+:root[data-performance-mode='efficiency'] .session-context-menu,
+:root[data-performance-mode='efficiency'] .chat-history-panel,
+:root[data-performance-mode='efficiency'] .cli-history-panel,
+:root[data-performance-mode='efficiency'] .cli-plan-floating-panel,
+:root[data-performance-mode='efficiency'] .modal-card,
+:root[data-performance-mode='efficiency'] .desktop-update-popover,
+:root[data-performance-mode='efficiency'] .announcement-modal-card,
+:root[data-performance-mode='efficiency'] .cli-extension-menu,
+:root[data-performance-mode='efficiency'] .assistant-menu,
+:root[data-performance-mode='efficiency'] .image-style-menu,
+:root[data-performance-mode='efficiency'] .image-config-menu,
+:root[data-performance-mode='efficiency'] .model-menu,
+:root[data-performance-mode='efficiency'] .markdown-code-action-menu,
+:root[data-performance-mode='efficiency'] .translation-modal-card,
+:root[data-performance-mode='efficiency'] .toast-bar,
+:root[data-performance-mode='efficiency'] .cli-extension-floating-tooltip {
+  background: var(--absolute-popup-bg) !important;
+  background-color: var(--absolute-popup-bg) !important;
+  background-image: none !important;
+  border: 1px solid var(--absolute-popup-border) !important;
+  box-shadow: var(--absolute-popup-shadow) !important;
+  backdrop-filter: blur(72px) saturate(170%) contrast(0.96) !important;
+  -webkit-backdrop-filter: blur(72px) saturate(170%) contrast(0.96) !important;
+  transform: translateZ(0);
+}
+
+.picker-menu-head,
+.assistant-menu-head,
+.image-style-menu-head,
+.assistant-menu-toolbar,
+.cli-extension-menu-head,
+.cli-extension-filter-row,
+.cli-extension-toolbar,
+.picker-filter-row,
+.picker-menu-list,
+.assistant-picker-list,
+.cli-extension-list,
+.picker-menu > .picker-menu-head,
+.picker-menu > .assistant-menu-head,
+.picker-menu > .image-style-menu-head,
+.picker-menu > .assistant-menu-toolbar,
+.picker-menu > .cli-extension-menu-head,
+.picker-menu > .cli-extension-filter-row,
+.picker-menu > .cli-extension-toolbar,
+.picker-menu > .picker-filter-row,
+.picker-menu > .picker-menu-list,
+.picker-menu > .assistant-picker-list,
+.picker-menu > .cli-extension-list {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.assistant-search,
+.cli-extension-search,
+.picker-menu input:not([type='checkbox']):not([type='radio']):not([type='range']) {
+  background: var(--absolute-menu-field-bg) !important;
+  background-color: var(--absolute-menu-field-bg) !important;
+  background-image: none !important;
+  border: 1px solid var(--absolute-popup-border) !important;
+  box-shadow: none !important;
+}
+
+.shell-composer,
+.chat-composer,
+.cli-composer,
+.composer-input-shell,
+.composer-toolbar,
+:root[data-theme='dark'] .shell-composer,
+:root[data-theme='dark'] .chat-composer,
+:root[data-theme='dark'] .cli-composer,
+:root[data-theme='dark'] .composer-input-shell,
+:root[data-theme='dark'] .composer-toolbar {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.composer-input-zone,
+.cli-page .composer-input-zone,
+:root[data-theme='dark'] .composer-input-zone,
+:root[data-theme='dark'] .cli-page .composer-input-zone {
+  background: var(--absolute-composer-bg) !important;
+  background-color: var(--absolute-composer-bg) !important;
+  background-image: none !important;
+  border: 1px solid var(--absolute-composer-border) !important;
+  border-radius: 14px !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.composer-input-zone textarea,
+.shell-composer textarea,
+.chat-composer textarea,
+.cli-composer textarea,
+.cli-page .composer-input-zone textarea,
+.cli-page .shell-composer textarea,
+.cli-page .cli-composer textarea,
+:root[data-theme='dark'] .composer-input-zone textarea,
+:root[data-theme='dark'] .shell-composer textarea,
+:root[data-theme='dark'] .chat-composer textarea,
+:root[data-theme='dark'] .cli-composer textarea,
+:root[data-theme='dark'] .cli-page .composer-input-zone textarea,
+:root[data-theme='dark'] .cli-page .shell-composer textarea,
+:root[data-theme='dark'] .cli-page .cli-composer textarea {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* Web-header style glass: direct translucent surface + backdrop blur, no pseudo layer. */
+:root {
+  --direct-popup-glass-bg: rgba(255, 255, 255, 0.74);
+  --direct-popup-glass-border: rgba(202, 214, 232, 0.72);
+  --direct-popup-glass-shadow: 0 18px 46px rgba(15, 23, 42, 0.16);
+  --direct-composer-zone-bg: rgba(255, 255, 255, 0.34);
+  --direct-composer-zone-border: rgba(202, 214, 232, 0.58);
+  --direct-menu-field-bg: rgba(255, 255, 255, 0.16);
+}
+
+:root[data-theme='dark'] {
+  --direct-popup-glass-bg: rgba(24, 26, 30, 0.72);
+  --direct-popup-glass-border: rgba(146, 166, 196, 0.24);
+  --direct-popup-glass-shadow: 0 22px 58px rgba(0, 0, 0, 0.48);
+  --direct-composer-zone-bg: rgba(255, 255, 255, 0.1);
+  --direct-composer-zone-border: rgba(214, 224, 242, 0.16);
+  --direct-menu-field-bg: rgba(255, 255, 255, 0.08);
+}
+
+.picker-menu,
+.session-context-menu,
+.chat-history-panel,
+.cli-history-panel,
+.cli-plan-floating-panel,
+.modal-card,
+.desktop-update-popover,
+.announcement-modal-card,
+.cli-extension-menu,
+.assistant-menu,
+.image-style-menu,
+.image-config-menu,
+.model-menu,
+.markdown-code-action-menu,
+.translation-modal-card,
+.toast-bar,
+.cli-extension-floating-tooltip,
+:root[data-performance-mode='efficiency'] .picker-menu,
+:root[data-performance-mode='efficiency'] .session-context-menu,
+:root[data-performance-mode='efficiency'] .chat-history-panel,
+:root[data-performance-mode='efficiency'] .cli-history-panel,
+:root[data-performance-mode='efficiency'] .cli-plan-floating-panel,
+:root[data-performance-mode='efficiency'] .modal-card,
+:root[data-performance-mode='efficiency'] .desktop-update-popover,
+:root[data-performance-mode='efficiency'] .announcement-modal-card,
+:root[data-performance-mode='efficiency'] .cli-extension-menu,
+:root[data-performance-mode='efficiency'] .assistant-menu,
+:root[data-performance-mode='efficiency'] .image-style-menu,
+:root[data-performance-mode='efficiency'] .image-config-menu,
+:root[data-performance-mode='efficiency'] .model-menu,
+:root[data-performance-mode='efficiency'] .markdown-code-action-menu,
+:root[data-performance-mode='efficiency'] .translation-modal-card,
+:root[data-performance-mode='efficiency'] .toast-bar,
+:root[data-performance-mode='efficiency'] .cli-extension-floating-tooltip {
+  background: var(--direct-popup-glass-bg) !important;
+  background-color: var(--direct-popup-glass-bg) !important;
+  background-image: none !important;
+  border: 1px solid var(--direct-popup-glass-border) !important;
+  box-shadow: var(--direct-popup-glass-shadow) !important;
+  backdrop-filter: blur(26px) saturate(165%) !important;
+  -webkit-backdrop-filter: blur(26px) saturate(165%) !important;
+  isolation: auto !important;
+}
+
+.picker-menu::before,
+.picker-menu::after,
+.session-context-menu::before,
+.session-context-menu::after,
+.chat-history-panel::before,
+.chat-history-panel::after,
+.cli-history-panel::before,
+.cli-history-panel::after,
+.cli-plan-floating-panel::before,
+.cli-plan-floating-panel::after,
+.modal-card::before,
+.modal-card::after,
+.desktop-update-popover::before,
+.desktop-update-popover::after,
+.announcement-modal-card::before,
+.announcement-modal-card::after,
+.cli-extension-menu::before,
+.cli-extension-menu::after,
+.assistant-menu::before,
+.assistant-menu::after,
+.image-style-menu::before,
+.image-style-menu::after,
+.image-config-menu::before,
+.image-config-menu::after,
+.model-menu::before,
+.model-menu::after,
+.markdown-code-action-menu::before,
+.markdown-code-action-menu::after,
+.translation-modal-card::before,
+.translation-modal-card::after,
+.toast-bar::before,
+.toast-bar::after,
+.cli-extension-floating-tooltip::before,
+.cli-extension-floating-tooltip::after {
+  display: none !important;
+  content: none !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.picker-menu-head,
+.assistant-menu-head,
+.image-style-menu-head,
+.assistant-menu-toolbar,
+.cli-extension-menu-head,
+.cli-extension-filter-row,
+.cli-extension-toolbar,
+.picker-filter-row,
+.picker-menu > .picker-menu-head,
+.picker-menu > .assistant-menu-head,
+.picker-menu > .image-style-menu-head,
+.picker-menu > .assistant-menu-toolbar,
+.picker-menu > .cli-extension-menu-head,
+.picker-menu > .cli-extension-filter-row,
+.picker-menu > .cli-extension-toolbar {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.picker-menu-head *,
+.assistant-menu-head *,
+.image-style-menu-head *,
+.assistant-menu-toolbar *,
+.cli-extension-menu-head *,
+.cli-extension-filter-row *,
+.cli-extension-toolbar *,
+.picker-filter-row * {
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
+.assistant-search,
+.cli-extension-search,
+.picker-menu input:not([type='checkbox']):not([type='radio']):not([type='range']) {
+  background: var(--direct-menu-field-bg) !important;
+  background-color: var(--direct-menu-field-bg) !important;
+  background-image: none !important;
+  border: 1px solid var(--direct-popup-glass-border) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.shell-composer,
+.chat-composer,
+.cli-composer,
+.composer-input-shell,
+.composer-toolbar,
+:root[data-theme='dark'] .shell-composer,
+:root[data-theme='dark'] .chat-composer,
+:root[data-theme='dark'] .cli-composer,
+:root[data-theme='dark'] .composer-input-shell,
+:root[data-theme='dark'] .composer-toolbar {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.composer-input-zone,
+:root[data-theme='dark'] .composer-input-zone {
+  background: var(--direct-composer-zone-bg) !important;
+  background-color: var(--direct-composer-zone-bg) !important;
+  background-image: none !important;
+  border: 1px solid var(--direct-composer-zone-border) !important;
+  border-radius: 14px !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.composer-input-zone textarea,
+.shell-composer textarea,
+.chat-composer textarea,
+.cli-composer textarea,
+:root[data-theme='dark'] .composer-input-zone textarea,
+:root[data-theme='dark'] .shell-composer textarea,
+:root[data-theme='dark'] .chat-composer textarea,
+:root[data-theme='dark'] .cli-composer textarea {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.composer-input-zone:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 46%, var(--direct-composer-zone-border)) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    0 0 0 3px rgb(var(--accent-rgb) / 0.14) !important;
+}
+
+.desktop-window-shell,
+:root[data-performance-mode='efficiency'] .desktop-window-shell {
+  background:
+    linear-gradient(180deg, rgb(var(--bg-rgb) / 0.12), rgb(var(--bg-rgb) / 0.16)),
+    var(--client-bg-image) center / cover no-repeat !important;
+}
+
+:root[data-theme='dark'] .desktop-window-shell,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .desktop-window-shell {
+  background:
+    linear-gradient(180deg, rgb(var(--bg-rgb) / 0.18), rgb(var(--bg-rgb) / 0.24)),
+    var(--client-bg-image) center / cover no-repeat !important;
+}
+
+/* Final authority: restore CLI width, remove composer backplate, and make popup glass visible. */
+.cli-page .conversation-scroll-region {
+  width: 100% !important;
+  min-width: 0 !important;
+}
+
+.cli-page .cli-thread {
+  --conversation-ai-gutter: 0px !important;
+  --conversation-bubble-max-width: 100% !important;
+  width: 100% !important;
+  align-items: stretch !important;
+}
+
+.cli-page .cli-log-bubble,
+.cli-page .cli-thread .cli-log-bubble {
+  align-self: stretch !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  margin-right: 0 !important;
+}
+
+.cli-page .message-bubble.assistant,
+.cli-page .message-bubble.system {
+  align-self: stretch !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  margin-right: 0 !important;
+}
+
+.cli-page .message-bubble.user {
+  max-width: min(760px, 72%) !important;
+}
+
+.cli-page .shell-composer,
+.cli-page .cli-composer,
+.cli-page .composer,
+.cli-page .composer-input-shell,
+.cli-page .composer-input-zone,
+.cli-page .composer-toolbar,
+:root[data-theme='dark'] .cli-page .shell-composer,
+:root[data-theme='dark'] .cli-page .cli-composer,
+:root[data-theme='dark'] .cli-page .composer,
+:root[data-theme='dark'] .cli-page .composer-input-shell,
+:root[data-theme='dark'] .cli-page .composer-input-zone,
+:root[data-theme='dark'] .cli-page .composer-toolbar {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.cli-page .shell-composer textarea,
+.cli-page .cli-composer textarea,
+.cli-page .composer-input-zone textarea {
+  background: rgba(255, 255, 255, 0.22) !important;
+  background-color: rgba(255, 255, 255, 0.22) !important;
+  background-image: none !important;
+  border: 1px solid rgba(80, 96, 118, 0.22) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18) !important;
+  backdrop-filter: blur(18px) saturate(140%) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(140%) !important;
+}
+
+:root[data-theme='dark'] .cli-page .shell-composer textarea,
+:root[data-theme='dark'] .cli-page .cli-composer textarea,
+:root[data-theme='dark'] .cli-page .composer-input-zone textarea {
+  background: rgba(255, 255, 255, 0.055) !important;
+  background-color: rgba(255, 255, 255, 0.055) !important;
+  border-color: rgba(235, 238, 244, 0.16) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.065) !important;
+}
+
+.picker-menu,
+.session-context-menu,
+.chat-history-panel,
+.cli-history-panel,
+.cli-plan-floating-panel,
+.modal-card,
+.desktop-update-popover,
+.announcement-modal-card,
+.cli-extension-menu,
+.assistant-menu,
+.image-style-menu,
+.image-config-menu,
+.model-menu,
+.markdown-code-action-menu,
+.translation-modal-card,
+.toast-bar,
+.cli-extension-floating-tooltip {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0.045)),
+    rgba(248, 251, 255, 0.48) !important;
+  background-color: rgba(248, 251, 255, 0.48) !important;
+  border: 1px solid rgba(92, 112, 138, 0.26) !important;
+  box-shadow: 0 24px 64px rgba(26, 38, 55, 0.24) !important;
+  backdrop-filter: blur(46px) saturate(185%) contrast(0.96) !important;
+  -webkit-backdrop-filter: blur(46px) saturate(185%) contrast(0.96) !important;
+}
+
+:root[data-theme='dark'] .picker-menu,
+:root[data-theme='dark'] .session-context-menu,
+:root[data-theme='dark'] .chat-history-panel,
+:root[data-theme='dark'] .cli-history-panel,
+:root[data-theme='dark'] .cli-plan-floating-panel,
+:root[data-theme='dark'] .modal-card,
+:root[data-theme='dark'] .desktop-update-popover,
+:root[data-theme='dark'] .announcement-modal-card,
+:root[data-theme='dark'] .cli-extension-menu,
+:root[data-theme='dark'] .assistant-menu,
+:root[data-theme='dark'] .image-style-menu,
+:root[data-theme='dark'] .image-config-menu,
+:root[data-theme='dark'] .model-menu,
+:root[data-theme='dark'] .markdown-code-action-menu,
+:root[data-theme='dark'] .translation-modal-card,
+:root[data-theme='dark'] .toast-bar,
+:root[data-theme='dark'] .cli-extension-floating-tooltip {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.02)),
+    rgba(24, 26, 30, 0.44) !important;
+  background-color: rgba(24, 26, 30, 0.44) !important;
+  border-color: rgba(235, 238, 244, 0.18) !important;
+  box-shadow: 0 26px 72px rgba(0, 0, 0, 0.5) !important;
+  backdrop-filter: blur(52px) saturate(155%) contrast(0.92) !important;
+  -webkit-backdrop-filter: blur(52px) saturate(155%) contrast(0.92) !important;
+}
+
+.picker-menu .picker-menu-list,
+.picker-menu .assistant-picker-list,
+.picker-menu .cli-extension-list,
+.picker-menu .picker-filter-row,
+.picker-menu .assistant-menu-toolbar,
+.picker-menu .cli-extension-toolbar,
+.picker-menu .cli-extension-filter-row {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
+.picker-menu .picker-option,
+.picker-menu .assistant-picker-row,
+.picker-menu .assistant-picker-option,
+.picker-menu .model-option,
+.picker-menu .cli-extension-card {
+  background: rgba(255, 255, 255, 0.18) !important;
+  background-color: rgba(255, 255, 255, 0.18) !important;
+  border-color: rgba(92, 112, 138, 0.18) !important;
+}
+
+:root[data-theme='dark'] .picker-menu .picker-option,
+:root[data-theme='dark'] .picker-menu .assistant-picker-row,
+:root[data-theme='dark'] .picker-menu .assistant-picker-option,
+:root[data-theme='dark'] .picker-menu .model-option,
+:root[data-theme='dark'] .picker-menu .cli-extension-card {
+  background: rgba(255, 255, 255, 0.055) !important;
+  background-color: rgba(255, 255, 255, 0.055) !important;
+  border-color: rgba(235, 238, 244, 0.13) !important;
+}
+
+/* Bugfix authority: Codex/Claude layout, composer backplate, and popup glass. */
+.cli-page,
+.cli-page .cli-layout,
+.cli-page .cli-main-panel,
+.cli-page .cli-panel-surface,
+.cli-page article.panel.cli-main-panel,
+.cli-page article.panel.cli-main-panel.cli-panel-surface,
+.cli-page .conversation-scroll-region,
+.cli-page .cli-thread,
+:root[data-theme='dark'] .cli-page,
+:root[data-theme='dark'] .cli-page .cli-layout,
+:root[data-theme='dark'] .cli-page .cli-main-panel,
+:root[data-theme='dark'] .cli-page .cli-panel-surface,
+:root[data-theme='dark'] .cli-page article.panel.cli-main-panel,
+:root[data-theme='dark'] .cli-page article.panel.cli-main-panel.cli-panel-surface,
+:root[data-theme='dark'] .cli-page .conversation-scroll-region,
+:root[data-theme='dark'] .cli-page .cli-thread {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.cli-page .cli-layout:not(.history-open) {
+  grid-template-columns: minmax(0, 1fr) 0 !important;
+  gap: 0 !important;
+}
+
+.cli-page .cli-layout:not(.history-open) .cli-history-panel {
+  display: none !important;
+}
+
+.cli-page .conversation-scroll-region,
+.cli-page .cli-thread {
+  min-width: 0 !important;
+  width: 100% !important;
+}
+
+.cli-page .cli-thread {
+  --conversation-ai-gutter: 0px !important;
+  --conversation-bubble-max-width: 100% !important;
+  align-items: stretch !important;
+}
+
+.cli-page .cli-thread > .message-bubble,
+.cli-page .cli-log-bubble,
+.cli-page .cli-thread .cli-log-bubble {
+  width: 100% !important;
+  max-width: 100% !important;
+  margin-right: 0 !important;
+  align-self: stretch !important;
+}
+
+.cli-page .cli-thread > .message-bubble.user {
+  width: fit-content !important;
+  max-width: min(760px, 72%) !important;
+  margin-left: auto !important;
+  align-self: flex-end !important;
+}
+
+.cli-page .shell-composer,
+.cli-page .cli-composer,
+.cli-page .composer,
+.cli-page .composer-input-shell,
+.cli-page .composer-input-zone,
+.cli-page .composer-toolbar,
+:root[data-theme='dark'] .cli-page .shell-composer,
+:root[data-theme='dark'] .cli-page .cli-composer,
+:root[data-theme='dark'] .cli-page .composer,
+:root[data-theme='dark'] .cli-page .composer-input-shell,
+:root[data-theme='dark'] .cli-page .composer-input-zone,
+:root[data-theme='dark'] .cli-page .composer-toolbar {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.cli-page .composer-input-shell,
+.cli-page .composer-input-zone {
+  overflow: visible !important;
+}
+
+.composer-input-zone,
+.cli-page .composer-input-zone,
+:root[data-theme='dark'] .composer-input-zone,
+:root[data-theme='dark'] .cli-page .composer-input-zone {
+  background: rgba(255, 255, 255, 0.2) !important;
+  background-color: rgba(255, 255, 255, 0.2) !important;
+  background-image: none !important;
+  border: 1px solid rgba(210, 222, 238, 0.52) !important;
+  border-radius: 14px !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+:root[data-theme='dark'] .composer-input-zone,
+:root[data-theme='dark'] .cli-page .composer-input-zone {
+  background: rgba(18, 22, 28, 0.2) !important;
+  background-color: rgba(18, 22, 28, 0.2) !important;
+  border-color: rgba(210, 222, 238, 0.16) !important;
+}
+
+.cli-page .shell-composer textarea,
+.cli-page .cli-composer textarea,
+.cli-page .composer-input-zone textarea {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+:root[data-theme='dark'] .cli-page .shell-composer textarea,
+:root[data-theme='dark'] .cli-page .cli-composer textarea,
+:root[data-theme='dark'] .cli-page .composer-input-zone textarea {
+  background: transparent !important;
+  background-color: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.toolbar-picker {
+  position: relative !important;
+}
+
+.toolbar-picker > .picker-menu,
+.toolbar-picker > .model-menu,
+.toolbar-picker > .assistant-menu,
+.toolbar-picker > .image-config-menu,
+.toolbar-picker > .image-style-menu {
+  position: absolute !important;
+  left: 0 !important;
+  right: auto !important;
+  top: auto !important;
+  bottom: calc(100% + 8px) !important;
+  z-index: 120 !important;
+}
+
+.composer-overlay-panel {
+  position: absolute !important;
+  left: 0 !important;
+  right: auto !important;
+  top: auto !important;
+  bottom: calc(100% + 10px) !important;
+  z-index: 120 !important;
+  pointer-events: none !important;
+  overflow: visible !important;
+}
+
+.composer-overlay-panel > *,
+.composer-overlay-panel .cli-extension-overlay-anchor,
+.composer-overlay-panel .cli-extension-menu {
+  pointer-events: auto !important;
+}
+
+.composer-overlay-panel .cli-extension-overlay-anchor {
+  position: absolute !important;
+  left: 0 !important;
+  top: auto !important;
+  bottom: 0 !important;
+  z-index: 121 !important;
+}
+
+.composer-overlay-panel .cli-extension-menu {
+  position: relative !important;
+  left: auto !important;
+  right: auto !important;
+  top: auto !important;
+  bottom: auto !important;
+}
+
+.session-context-menu {
+  position: fixed !important;
+  right: auto !important;
+  bottom: auto !important;
+  z-index: 140 !important;
+}
+
+.cli-plan-floating-panel {
+  position: absolute !important;
+  top: 10px !important;
+  right: 10px !important;
+  bottom: auto !important;
+  left: auto !important;
+  z-index: 40 !important;
+}
+
+.picker-menu,
+.session-context-menu,
+.chat-history-panel,
+.cli-history-panel,
+.cli-plan-floating-panel,
+.modal-card,
+.desktop-update-popover,
+.announcement-modal-card,
+.cli-extension-menu,
+.assistant-menu,
+.image-style-menu,
+.image-config-menu,
+.model-menu,
+.markdown-code-action-menu,
+.translation-modal-card,
+.toast-bar,
+.cli-extension-floating-tooltip,
+:root[data-performance-mode='efficiency'] .picker-menu,
+:root[data-performance-mode='efficiency'] .session-context-menu,
+:root[data-performance-mode='efficiency'] .chat-history-panel,
+:root[data-performance-mode='efficiency'] .cli-history-panel,
+:root[data-performance-mode='efficiency'] .cli-plan-floating-panel,
+:root[data-performance-mode='efficiency'] .modal-card,
+:root[data-performance-mode='efficiency'] .desktop-update-popover,
+:root[data-performance-mode='efficiency'] .announcement-modal-card,
+:root[data-performance-mode='efficiency'] .cli-extension-menu,
+:root[data-performance-mode='efficiency'] .assistant-menu,
+:root[data-performance-mode='efficiency'] .image-style-menu,
+:root[data-performance-mode='efficiency'] .image-config-menu,
+:root[data-performance-mode='efficiency'] .model-menu,
+:root[data-performance-mode='efficiency'] .markdown-code-action-menu,
+:root[data-performance-mode='efficiency'] .translation-modal-card,
+:root[data-performance-mode='efficiency'] .toast-bar,
+:root[data-performance-mode='efficiency'] .cli-extension-floating-tooltip {
+  background: rgba(244, 248, 255, 0.68) !important;
+  background-color: rgba(244, 248, 255, 0.68) !important;
+  background-image: none !important;
+  border: 1px solid rgba(208, 219, 236, 0.68) !important;
+  box-shadow: 0 24px 64px rgba(26, 38, 55, 0.24) !important;
+  backdrop-filter: blur(72px) saturate(170%) contrast(0.96) !important;
+  -webkit-backdrop-filter: blur(72px) saturate(170%) contrast(0.96) !important;
+  isolation: isolate !important;
+  overflow: visible !important;
+  transform: translateZ(0);
+}
+
+:root[data-theme='dark'] .picker-menu,
+:root[data-theme='dark'] .session-context-menu,
+:root[data-theme='dark'] .chat-history-panel,
+:root[data-theme='dark'] .cli-history-panel,
+:root[data-theme='dark'] .cli-plan-floating-panel,
+:root[data-theme='dark'] .modal-card,
+:root[data-theme='dark'] .desktop-update-popover,
+:root[data-theme='dark'] .announcement-modal-card,
+:root[data-theme='dark'] .cli-extension-menu,
+:root[data-theme='dark'] .assistant-menu,
+:root[data-theme='dark'] .image-style-menu,
+:root[data-theme='dark'] .image-config-menu,
+:root[data-theme='dark'] .model-menu,
+:root[data-theme='dark'] .markdown-code-action-menu,
+:root[data-theme='dark'] .translation-modal-card,
+:root[data-theme='dark'] .toast-bar,
+:root[data-theme='dark'] .cli-extension-floating-tooltip,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .picker-menu,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .session-context-menu,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .chat-history-panel,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .cli-history-panel,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .cli-plan-floating-panel,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .modal-card,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .desktop-update-popover,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .announcement-modal-card,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .cli-extension-menu,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .assistant-menu,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .image-style-menu,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .image-config-menu,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .model-menu,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .markdown-code-action-menu,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .translation-modal-card,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .toast-bar,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .cli-extension-floating-tooltip {
+  background: rgba(25, 28, 34, 0.72) !important;
+  background-color: rgba(25, 28, 34, 0.72) !important;
+  background-image: none !important;
+  border-color: rgba(158, 178, 208, 0.24) !important;
+  box-shadow: 0 26px 72px rgba(0, 0, 0, 0.5) !important;
+  backdrop-filter: blur(72px) saturate(150%) contrast(0.92) !important;
+  -webkit-backdrop-filter: blur(72px) saturate(150%) contrast(0.92) !important;
+}
+
+.picker-menu-head,
+.assistant-menu-head,
+.image-style-menu-head,
+.assistant-menu-toolbar,
+.cli-extension-menu-head,
+.cli-extension-filter-row,
+.cli-extension-toolbar,
+.picker-filter-row,
+.picker-menu-list,
+.assistant-picker-list,
+.cli-extension-list,
+.picker-menu > .picker-menu-head,
+.picker-menu > .assistant-menu-head,
+.picker-menu > .image-style-menu-head,
+.picker-menu > .assistant-menu-toolbar,
+.picker-menu > .cli-extension-menu-head,
+.picker-menu > .cli-extension-filter-row,
+.picker-menu > .cli-extension-toolbar,
+.picker-menu > .picker-filter-row,
+.picker-menu > .picker-menu-list,
+.picker-menu > .assistant-picker-list,
+.picker-menu > .cli-extension-list {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.assistant-search,
+.cli-extension-search,
+.picker-menu input:not([type='checkbox']):not([type='radio']):not([type='range']) {
+  background: rgba(255, 255, 255, 0.18) !important;
+  background-color: rgba(255, 255, 255, 0.18) !important;
+  background-image: none !important;
+  border: 1px solid rgba(208, 219, 236, 0.68) !important;
+  box-shadow: none !important;
+}
+
+:root[data-theme='dark'] .assistant-search,
+:root[data-theme='dark'] .cli-extension-search,
+:root[data-theme='dark'] .picker-menu input:not([type='checkbox']):not([type='radio']):not([type='range']) {
+  background: rgba(16, 20, 26, 0.22) !important;
+  background-color: rgba(16, 20, 26, 0.22) !important;
+  border-color: rgba(158, 178, 208, 0.24) !important;
+}
+
+.picker-menu::before,
+.picker-menu::after,
+.session-context-menu::before,
+.session-context-menu::after,
+.chat-history-panel::before,
+.chat-history-panel::after,
+.cli-history-panel::before,
+.cli-history-panel::after,
+.cli-plan-floating-panel::before,
+.cli-plan-floating-panel::after,
+.modal-card::before,
+.modal-card::after,
+.desktop-update-popover::before,
+.desktop-update-popover::after,
+.announcement-modal-card::before,
+.announcement-modal-card::after,
+.cli-extension-menu::before,
+.cli-extension-menu::after,
+.assistant-menu::before,
+.assistant-menu::after,
+.image-style-menu::before,
+.image-style-menu::after,
+.image-config-menu::before,
+.image-config-menu::after,
+.model-menu::before,
+.model-menu::after,
+.markdown-code-action-menu::before,
+.markdown-code-action-menu::after,
+.translation-modal-card::before,
+.translation-modal-card::after,
+.toast-bar::before,
+.toast-bar::after,
+.cli-extension-floating-tooltip::before,
+.cli-extension-floating-tooltip::after {
+  display: none !important;
+  content: none !important;
+  background: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* EOF popup/composer authority: keep popup frost and transparent input as final cascade. */
+body:has(.picker-menu)::after,
+body:has(.assistant-menu)::after,
+body:has(.image-style-menu)::after,
+body:has(.image-config-menu)::after,
+body:has(.model-menu)::after,
+body:has(.cli-extension-menu)::after,
+body:has(.session-context-menu)::after,
+body:has(.chat-history-panel)::after,
+body:has(.cli-history-panel)::after,
+body:has(.cli-plan-floating-panel)::after,
+body:has(.modal-card)::after,
+body:has(.desktop-update-popover)::after,
+body:has(.announcement-modal-card)::after,
+body:has(.markdown-code-action-menu)::after,
+body:has(.translation-modal-card)::after,
+body:has(.cli-extension-floating-tooltip)::after {
+  content: '' !important;
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 180 !important;
+  pointer-events: none !important;
+  background: rgba(246, 250, 255, 0.035) !important;
+  backdrop-filter: blur(28px) saturate(145%) !important;
+  -webkit-backdrop-filter: blur(28px) saturate(145%) !important;
+}
+
+:root[data-theme='dark'] body:has(.picker-menu)::after,
+:root[data-theme='dark'] body:has(.assistant-menu)::after,
+:root[data-theme='dark'] body:has(.image-style-menu)::after,
+:root[data-theme='dark'] body:has(.image-config-menu)::after,
+:root[data-theme='dark'] body:has(.model-menu)::after,
+:root[data-theme='dark'] body:has(.cli-extension-menu)::after,
+:root[data-theme='dark'] body:has(.session-context-menu)::after,
+:root[data-theme='dark'] body:has(.chat-history-panel)::after,
+:root[data-theme='dark'] body:has(.cli-history-panel)::after,
+:root[data-theme='dark'] body:has(.cli-plan-floating-panel)::after,
+:root[data-theme='dark'] body:has(.modal-card)::after,
+:root[data-theme='dark'] body:has(.desktop-update-popover)::after,
+:root[data-theme='dark'] body:has(.announcement-modal-card)::after,
+:root[data-theme='dark'] body:has(.markdown-code-action-menu)::after,
+:root[data-theme='dark'] body:has(.translation-modal-card)::after,
+:root[data-theme='dark'] body:has(.cli-extension-floating-tooltip)::after {
+  background: rgba(8, 12, 18, 0.06) !important;
+  backdrop-filter: blur(30px) saturate(125%) !important;
+  -webkit-backdrop-filter: blur(30px) saturate(125%) !important;
+}
+
+.picker-menu,
+.assistant-menu,
+.image-style-menu,
+.image-config-menu,
+.model-menu,
+.cli-extension-menu,
+.session-context-menu,
+.chat-history-panel,
+.cli-history-panel,
+.cli-plan-floating-panel,
+.modal-card,
+.desktop-update-popover,
+.announcement-modal-card,
+.markdown-code-action-menu,
+.translation-modal-card,
+.cli-extension-floating-tooltip {
+  z-index: 220 !important;
+}
+
+.picker-menu-head,
+.assistant-menu-head,
+.image-style-menu-head,
+.assistant-menu-toolbar,
+.cli-extension-menu-head,
+.cli-extension-filter-row,
+.cli-extension-toolbar,
+.picker-filter-row,
+.picker-menu-list,
+.assistant-picker-list,
+.cli-extension-list,
+.picker-menu-head *,
+.assistant-menu-head *,
+.image-style-menu-head *,
+.assistant-menu-toolbar *,
+.cli-extension-menu-head *,
+.cli-extension-filter-row *,
+.cli-extension-toolbar *,
+.picker-filter-row * {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  text-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.assistant-menu-toolbar > button,
+.assistant-menu-toolbar > .secondary-button,
+.picker-menu .ghost-button,
+.picker-menu .secondary-button,
+.cli-extension-menu .ghost-button,
+.cli-extension-menu .secondary-button {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.assistant-menu-toolbar > button:hover,
+.assistant-menu-toolbar > button:focus-visible,
+.assistant-menu-toolbar > .secondary-button:hover,
+.assistant-menu-toolbar > .secondary-button:focus-visible,
+.picker-menu .ghost-button:hover,
+.picker-menu .ghost-button:focus-visible,
+.picker-menu .secondary-button:hover,
+.picker-menu .secondary-button:focus-visible,
+.cli-extension-menu .ghost-button:hover,
+.cli-extension-menu .ghost-button:focus-visible,
+.cli-extension-menu .secondary-button:hover,
+.cli-extension-menu .secondary-button:focus-visible {
+  background: rgba(255, 255, 255, 0.14) !important;
+  background-color: rgba(255, 255, 255, 0.14) !important;
+  border-color: rgba(208, 219, 236, 0.42) !important;
+}
+
+:root[data-theme='dark'] .assistant-menu-toolbar > button:hover,
+:root[data-theme='dark'] .assistant-menu-toolbar > button:focus-visible,
+:root[data-theme='dark'] .assistant-menu-toolbar > .secondary-button:hover,
+:root[data-theme='dark'] .assistant-menu-toolbar > .secondary-button:focus-visible,
+:root[data-theme='dark'] .picker-menu .ghost-button:hover,
+:root[data-theme='dark'] .picker-menu .ghost-button:focus-visible,
+:root[data-theme='dark'] .picker-menu .secondary-button:hover,
+:root[data-theme='dark'] .picker-menu .secondary-button:focus-visible,
+:root[data-theme='dark'] .cli-extension-menu .ghost-button:hover,
+:root[data-theme='dark'] .cli-extension-menu .ghost-button:focus-visible,
+:root[data-theme='dark'] .cli-extension-menu .secondary-button:hover,
+:root[data-theme='dark'] .cli-extension-menu .secondary-button:focus-visible {
+  background: rgba(255, 255, 255, 0.08) !important;
+  background-color: rgba(255, 255, 255, 0.08) !important;
+  border-color: rgba(158, 178, 208, 0.18) !important;
+}
+
+.composer-input-zone,
+.composer-input-zone:focus-within,
+.cli-page .composer-input-zone,
+.cli-page .composer-input-zone:focus-within {
+  background: rgba(255, 255, 255, 0.05) !important;
+  background-color: rgba(255, 255, 255, 0.05) !important;
+  background-image: none !important;
+}
+
+:root[data-theme='dark'] .composer-input-zone,
+:root[data-theme='dark'] .composer-input-zone:focus-within,
+:root[data-theme='dark'] .cli-page .composer-input-zone,
+:root[data-theme='dark'] .cli-page .composer-input-zone:focus-within {
+  background: rgba(18, 22, 28, 0.05) !important;
+  background-color: rgba(18, 22, 28, 0.05) !important;
+  background-image: none !important;
+}
+
+/* True final frost layer: place blur inside the app stacking context, above pages and below popups. */
+#root {
+  position: relative;
+}
+
+#root:has(.picker-menu)::after,
+#root:has(.assistant-menu)::after,
+#root:has(.image-style-menu)::after,
+#root:has(.image-config-menu)::after,
+#root:has(.model-menu)::after,
+#root:has(.cli-extension-menu)::after,
+#root:has(.session-context-menu)::after,
+#root:has(.chat-history-panel)::after,
+#root:has(.cli-history-panel)::after,
+#root:has(.cli-plan-floating-panel)::after,
+#root:has(.modal-card)::after,
+#root:has(.desktop-update-popover)::after,
+#root:has(.announcement-modal-card)::after,
+#root:has(.markdown-code-action-menu)::after,
+#root:has(.translation-modal-card)::after,
+#root:has(.cli-extension-floating-tooltip)::after {
+  content: '' !important;
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 9000 !important;
+  pointer-events: none !important;
+  background: rgba(246, 250, 255, 0.16) !important;
+  backdrop-filter: blur(48px) saturate(150%) !important;
+  -webkit-backdrop-filter: blur(48px) saturate(150%) !important;
+}
+
+:root[data-theme='dark'] #root:has(.picker-menu)::after,
+:root[data-theme='dark'] #root:has(.assistant-menu)::after,
+:root[data-theme='dark'] #root:has(.image-style-menu)::after,
+:root[data-theme='dark'] #root:has(.image-config-menu)::after,
+:root[data-theme='dark'] #root:has(.model-menu)::after,
+:root[data-theme='dark'] #root:has(.cli-extension-menu)::after,
+:root[data-theme='dark'] #root:has(.session-context-menu)::after,
+:root[data-theme='dark'] #root:has(.chat-history-panel)::after,
+:root[data-theme='dark'] #root:has(.cli-history-panel)::after,
+:root[data-theme='dark'] #root:has(.cli-plan-floating-panel)::after,
+:root[data-theme='dark'] #root:has(.modal-card)::after,
+:root[data-theme='dark'] #root:has(.desktop-update-popover)::after,
+:root[data-theme='dark'] #root:has(.announcement-modal-card)::after,
+:root[data-theme='dark'] #root:has(.markdown-code-action-menu)::after,
+:root[data-theme='dark'] #root:has(.translation-modal-card)::after,
+:root[data-theme='dark'] #root:has(.cli-extension-floating-tooltip)::after {
+  background: rgba(10, 14, 20, 0.22) !important;
+  backdrop-filter: blur(52px) saturate(128%) !important;
+  -webkit-backdrop-filter: blur(52px) saturate(128%) !important;
+}
+
+.toolbar-picker,
+.composer-overlay-panel,
+.composer-overlay-panel .cli-extension-overlay-anchor {
+  position: relative !important;
+  z-index: 10001 !important;
+}
+
+.picker-menu,
+.assistant-menu,
+.image-style-menu,
+.image-config-menu,
+.model-menu,
+.cli-extension-menu,
+.session-context-menu,
+.chat-history-panel,
+.cli-history-panel,
+.cli-plan-floating-panel,
+.modal-card,
+.desktop-update-popover,
+.announcement-modal-card,
+.markdown-code-action-menu,
+.translation-modal-card,
+.cli-extension-floating-tooltip {
+  z-index: 10002 !important;
+  background: rgba(244, 248, 255, 0.72) !important;
+  background-color: rgba(244, 248, 255, 0.72) !important;
+  background-image: none !important;
+  backdrop-filter: blur(72px) saturate(170%) contrast(0.96) !important;
+  -webkit-backdrop-filter: blur(72px) saturate(170%) contrast(0.96) !important;
+}
+
+:root[data-theme='dark'] .picker-menu,
+:root[data-theme='dark'] .assistant-menu,
+:root[data-theme='dark'] .image-style-menu,
+:root[data-theme='dark'] .image-config-menu,
+:root[data-theme='dark'] .model-menu,
+:root[data-theme='dark'] .cli-extension-menu,
+:root[data-theme='dark'] .session-context-menu,
+:root[data-theme='dark'] .chat-history-panel,
+:root[data-theme='dark'] .cli-history-panel,
+:root[data-theme='dark'] .cli-plan-floating-panel,
+:root[data-theme='dark'] .modal-card,
+:root[data-theme='dark'] .desktop-update-popover,
+:root[data-theme='dark'] .announcement-modal-card,
+:root[data-theme='dark'] .markdown-code-action-menu,
+:root[data-theme='dark'] .translation-modal-card,
+:root[data-theme='dark'] .cli-extension-floating-tooltip {
+  background: rgba(22, 26, 32, 0.78) !important;
+  background-color: rgba(22, 26, 32, 0.78) !important;
+  background-image: none !important;
+  backdrop-filter: blur(76px) saturate(135%) contrast(0.92) !important;
+  -webkit-backdrop-filter: blur(76px) saturate(135%) contrast(0.92) !important;
+}
+
+/* Keep existing composer popup geometry; only raise it above the frost layer. */
+.toolbar-picker {
+  position: relative !important;
+  z-index: 10001 !important;
+}
+
+.composer-overlay-panel {
+  position: absolute !important;
+  z-index: 10001 !important;
+}
+
+.composer-overlay-panel .cli-extension-overlay-anchor,
+.composer-overlay-panel .picker-menu,
+.composer-overlay-panel .cli-extension-menu {
+  z-index: 10002 !important;
+}
+
+/* Popup frost final fix: blur the popup region itself, and remove header-strip backplates. */
+body:has(.picker-menu)::before,
+body:has(.picker-menu)::after,
+body:has(.assistant-menu)::before,
+body:has(.assistant-menu)::after,
+body:has(.image-style-menu)::before,
+body:has(.image-style-menu)::after,
+body:has(.image-config-menu)::before,
+body:has(.image-config-menu)::after,
+body:has(.model-menu)::before,
+body:has(.model-menu)::after,
+body:has(.cli-extension-menu)::before,
+body:has(.cli-extension-menu)::after,
+#root:has(.picker-menu)::before,
+#root:has(.picker-menu)::after,
+#root:has(.assistant-menu)::before,
+#root:has(.assistant-menu)::after,
+#root:has(.image-style-menu)::before,
+#root:has(.image-style-menu)::after,
+#root:has(.image-config-menu)::before,
+#root:has(.image-config-menu)::after,
+#root:has(.model-menu)::before,
+#root:has(.model-menu)::after,
+#root:has(.cli-extension-menu)::before,
+#root:has(.cli-extension-menu)::after {
+  display: none !important;
+  content: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.picker-menu,
+.assistant-menu,
+.image-style-menu,
+.image-config-menu,
+.model-menu,
+.cli-extension-menu,
+.session-context-menu,
+.chat-history-panel,
+.cli-history-panel,
+.cli-plan-floating-panel,
+.modal-card,
+.desktop-update-popover,
+.announcement-modal-card,
+.markdown-code-action-menu,
+.translation-modal-card,
+.cli-extension-floating-tooltip {
+  isolation: isolate !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  overflow: visible !important;
+}
+
+.picker-menu::before,
+.assistant-menu::before,
+.image-style-menu::before,
+.image-config-menu::before,
+.model-menu::before,
+.cli-extension-menu::before,
+.session-context-menu::before,
+.chat-history-panel::before,
+.cli-history-panel::before,
+.cli-plan-floating-panel::before,
+.modal-card::before,
+.desktop-update-popover::before,
+.announcement-modal-card::before,
+.markdown-code-action-menu::before,
+.translation-modal-card::before,
+.cli-extension-floating-tooltip::before {
+  content: '' !important;
+  display: block !important;
+  position: absolute !important;
+  inset: 0 !important;
+  z-index: 0 !important;
+  pointer-events: none !important;
+  border-radius: inherit !important;
+  background: rgba(244, 248, 255, 0.86) !important;
+  border: 1px solid rgba(208, 219, 236, 0.72) !important;
+  box-shadow: 0 24px 64px rgba(26, 38, 55, 0.24) !important;
+  backdrop-filter: blur(80px) saturate(170%) contrast(0.96) !important;
+  -webkit-backdrop-filter: blur(80px) saturate(170%) contrast(0.96) !important;
+}
+
+:root[data-theme='dark'] .picker-menu::before,
+:root[data-theme='dark'] .assistant-menu::before,
+:root[data-theme='dark'] .image-style-menu::before,
+:root[data-theme='dark'] .image-config-menu::before,
+:root[data-theme='dark'] .model-menu::before,
+:root[data-theme='dark'] .cli-extension-menu::before,
+:root[data-theme='dark'] .session-context-menu::before,
+:root[data-theme='dark'] .chat-history-panel::before,
+:root[data-theme='dark'] .cli-history-panel::before,
+:root[data-theme='dark'] .cli-plan-floating-panel::before,
+:root[data-theme='dark'] .modal-card::before,
+:root[data-theme='dark'] .desktop-update-popover::before,
+:root[data-theme='dark'] .announcement-modal-card::before,
+:root[data-theme='dark'] .markdown-code-action-menu::before,
+:root[data-theme='dark'] .translation-modal-card::before,
+:root[data-theme='dark'] .cli-extension-floating-tooltip::before {
+  background: rgba(22, 26, 32, 0.88) !important;
+  border-color: rgba(158, 178, 208, 0.24) !important;
+  box-shadow: 0 26px 72px rgba(0, 0, 0, 0.52) !important;
+  backdrop-filter: blur(86px) saturate(135%) contrast(0.92) !important;
+  -webkit-backdrop-filter: blur(86px) saturate(135%) contrast(0.92) !important;
+}
+
+.picker-menu > *,
+.assistant-menu > *,
+.image-style-menu > *,
+.image-config-menu > *,
+.model-menu > *,
+.cli-extension-menu > *,
+.session-context-menu > *,
+.chat-history-panel > *,
+.cli-history-panel > *,
+.cli-plan-floating-panel > *,
+.modal-card > *,
+.desktop-update-popover > *,
+.announcement-modal-card > *,
+.markdown-code-action-menu > *,
+.translation-modal-card > *,
+.cli-extension-floating-tooltip > * {
+  position: relative !important;
+  z-index: 1 !important;
+}
+
+.picker-menu-head,
+.assistant-menu-head,
+.image-style-menu-head,
+.assistant-menu-toolbar,
+.cli-extension-menu-head,
+.cli-extension-filter-row,
+.cli-extension-toolbar,
+.picker-filter-row,
+.picker-menu-list,
+.assistant-picker-list,
+.cli-extension-list,
+.picker-menu-head *,
+.assistant-menu-head *,
+.image-style-menu-head *,
+.assistant-menu-toolbar *,
+.cli-extension-menu-head *,
+.cli-extension-filter-row *,
+.cli-extension-toolbar *,
+.picker-filter-row * {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.picker-menu-head::before,
+.picker-menu-head::after,
+.assistant-menu-head::before,
+.assistant-menu-head::after,
+.image-style-menu-head::before,
+.image-style-menu-head::after,
+.assistant-menu-toolbar::before,
+.assistant-menu-toolbar::after,
+.cli-extension-menu-head::before,
+.cli-extension-menu-head::after,
+.cli-extension-filter-row::before,
+.cli-extension-filter-row::after,
+.cli-extension-toolbar::before,
+.cli-extension-toolbar::after,
+.picker-filter-row::before,
+.picker-filter-row::after,
+.picker-menu-list::before,
+.picker-menu-list::after,
+.assistant-picker-list::before,
+.assistant-picker-list::after,
+.cli-extension-list::before,
+.cli-extension-list::after {
+  display: none !important;
+  content: none !important;
+  background: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+/* Final strip cleanup: popup content must not paint dark horizontal bars. */
+body:has(.picker-menu)::before,
+body:has(.picker-menu)::after,
+body:has(.assistant-menu)::before,
+body:has(.assistant-menu)::after,
+body:has(.model-menu)::before,
+body:has(.model-menu)::after,
+#root:has(.picker-menu)::before,
+#root:has(.picker-menu)::after,
+#root:has(.assistant-menu)::before,
+#root:has(.assistant-menu)::after,
+#root:has(.model-menu)::before,
+#root:has(.model-menu)::after {
+  display: none !important;
+  content: none !important;
+  opacity: 0 !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.picker-menu,
+.assistant-menu,
+.model-menu,
+.image-style-menu,
+.image-config-menu,
+.cli-extension-menu {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.assistant-menu-toolbar,
+.picker-filter-row,
+.cli-extension-filter-row,
+.cli-extension-toolbar,
+.picker-menu-list,
+.assistant-picker-list,
+.cli-extension-list,
+.assistant-picker-row,
+.model-option-head {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.picker-option,
+.assistant-picker-option,
+.image-style-picker-option,
+.picker-filter-chip,
+.assistant-menu-toolbar > button,
+.assistant-menu-toolbar > .secondary-button,
+.cli-extension-toolbar > button,
+.cli-extension-toolbar > .ghost-button {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border: 1px solid rgba(208, 219, 236, 0.2) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+:root[data-theme='dark'] .picker-option,
+:root[data-theme='dark'] .assistant-picker-option,
+:root[data-theme='dark'] .image-style-picker-option,
+:root[data-theme='dark'] .picker-filter-chip,
+:root[data-theme='dark'] .assistant-menu-toolbar > button,
+:root[data-theme='dark'] .assistant-menu-toolbar > .secondary-button,
+:root[data-theme='dark'] .cli-extension-toolbar > button,
+:root[data-theme='dark'] .cli-extension-toolbar > .ghost-button {
+  background: transparent !important;
+  background-color: transparent !important;
+  border-color: rgba(158, 178, 208, 0.16) !important;
+}
+
+.picker-option:hover,
+.picker-option:focus-visible,
+.assistant-picker-option:hover,
+.assistant-picker-option:focus-visible,
+.image-style-picker-option:hover,
+.image-style-picker-option:focus-visible,
+.picker-filter-chip:hover,
+.picker-filter-chip:focus-visible,
+.assistant-menu-toolbar > button:hover,
+.assistant-menu-toolbar > button:focus-visible,
+.assistant-menu-toolbar > .secondary-button:hover,
+.assistant-menu-toolbar > .secondary-button:focus-visible {
+  background: rgba(255, 255, 255, 0.1) !important;
+  background-color: rgba(255, 255, 255, 0.1) !important;
+  border-color: rgba(208, 219, 236, 0.34) !important;
+  box-shadow: none !important;
+}
+
+:root[data-theme='dark'] .picker-option:hover,
+:root[data-theme='dark'] .picker-option:focus-visible,
+:root[data-theme='dark'] .assistant-picker-option:hover,
+:root[data-theme='dark'] .assistant-picker-option:focus-visible,
+:root[data-theme='dark'] .image-style-picker-option:hover,
+:root[data-theme='dark'] .image-style-picker-option:focus-visible,
+:root[data-theme='dark'] .picker-filter-chip:hover,
+:root[data-theme='dark'] .picker-filter-chip:focus-visible,
+:root[data-theme='dark'] .assistant-menu-toolbar > button:hover,
+:root[data-theme='dark'] .assistant-menu-toolbar > button:focus-visible,
+:root[data-theme='dark'] .assistant-menu-toolbar > .secondary-button:hover,
+:root[data-theme='dark'] .assistant-menu-toolbar > .secondary-button:focus-visible {
+  background: rgba(255, 255, 255, 0.055) !important;
+  background-color: rgba(255, 255, 255, 0.055) !important;
+  border-color: rgba(158, 178, 208, 0.22) !important;
+}
+
+.picker-option.active,
+.assistant-picker-option.active,
+.image-style-picker-option.active,
+.picker-filter-chip.active {
+  background: rgba(255, 255, 255, 0.12) !important;
+  background-color: rgba(255, 255, 255, 0.12) !important;
+  border-color: rgba(208, 219, 236, 0.42) !important;
+  box-shadow: none !important;
+}
+
+:root[data-theme='dark'] .picker-option.active,
+:root[data-theme='dark'] .assistant-picker-option.active,
+:root[data-theme='dark'] .image-style-picker-option.active,
+:root[data-theme='dark'] .picker-filter-chip.active {
+  background: rgba(255, 255, 255, 0.07) !important;
+  background-color: rgba(255, 255, 255, 0.07) !important;
+  border-color: rgba(158, 178, 208, 0.28) !important;
+}
+
+.assistant-search,
+.cli-extension-search,
+.picker-menu input:not([type='checkbox']):not([type='radio']):not([type='range']) {
+  background: rgba(255, 255, 255, 0.08) !important;
+  background-color: rgba(255, 255, 255, 0.08) !important;
+  background-image: none !important;
+  border: 1px solid rgba(208, 219, 236, 0.28) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+:root[data-theme='dark'] .assistant-search,
+:root[data-theme='dark'] .cli-extension-search,
+:root[data-theme='dark'] .picker-menu input:not([type='checkbox']):not([type='radio']):not([type='range']) {
+  background: rgba(255, 255, 255, 0.045) !important;
+  background-color: rgba(255, 255, 255, 0.045) !important;
+  border-color: rgba(158, 178, 208, 0.18) !important;
+}
+
+/* Popup authority: glass is local to the popup surface, never a full-screen layer. */
+body:has(.picker-menu)::before,
+body:has(.picker-menu)::after,
+body:has(.assistant-menu)::before,
+body:has(.assistant-menu)::after,
+body:has(.image-style-menu)::before,
+body:has(.image-style-menu)::after,
+body:has(.image-config-menu)::before,
+body:has(.image-config-menu)::after,
+body:has(.model-menu)::before,
+body:has(.model-menu)::after,
+body:has(.cli-extension-menu)::before,
+body:has(.cli-extension-menu)::after,
+#root:has(.picker-menu)::before,
+#root:has(.picker-menu)::after,
+#root:has(.assistant-menu)::before,
+#root:has(.assistant-menu)::after,
+#root:has(.image-style-menu)::before,
+#root:has(.image-style-menu)::after,
+#root:has(.image-config-menu)::before,
+#root:has(.image-config-menu)::after,
+#root:has(.model-menu)::before,
+#root:has(.model-menu)::after,
+#root:has(.cli-extension-menu)::before,
+#root:has(.cli-extension-menu)::after {
+  display: none !important;
+  content: none !important;
+  opacity: 0 !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.glass-picker-menu,
+.picker-menu.glass-picker-menu,
+.assistant-menu.glass-picker-menu,
+.model-menu.glass-picker-menu,
+.image-style-menu.glass-picker-menu,
+.image-config-menu.glass-picker-menu,
+.cli-extension-menu.glass-picker-menu {
+  position: absolute;
+  isolation: isolate !important;
+  overflow: visible !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.glass-picker-menu::before,
+.glass-picker-menu::after {
+  display: none !important;
+  content: none !important;
+  background: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.glass-picker-menu-bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border: 1px solid rgba(218, 226, 238, 0.74);
+  border-radius: inherit;
+  pointer-events: none;
+  background: rgba(244, 248, 255, 0.78);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.62),
+    0 22px 58px rgba(24, 35, 52, 0.22);
+  backdrop-filter: blur(34px) saturate(155%) contrast(0.98);
+  -webkit-backdrop-filter: blur(34px) saturate(155%) contrast(0.98);
+}
+
+:root[data-theme='dark'] .glass-picker-menu-bg {
+  border-color: rgba(142, 160, 188, 0.26);
+  background: rgba(20, 24, 31, 0.74);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 26px 70px rgba(0, 0, 0, 0.48);
+  backdrop-filter: blur(38px) saturate(122%) contrast(0.92);
+  -webkit-backdrop-filter: blur(38px) saturate(122%) contrast(0.92);
+}
+
+.glass-picker-menu-content {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+}
+
+.glass-picker-menu .assistant-menu-toolbar,
+.glass-picker-menu .assistant-menu-head,
+.glass-picker-menu .image-style-menu-head,
+.glass-picker-menu .picker-menu-head,
+.glass-picker-menu .picker-filter-row,
+.glass-picker-menu .cli-extension-filter-row,
+.glass-picker-menu .cli-extension-toolbar,
+.glass-picker-menu .cli-extension-menu-head,
+.glass-picker-menu .picker-menu-list,
+.glass-picker-menu .assistant-picker-list,
+.glass-picker-menu .cli-extension-list,
+.glass-picker-menu .assistant-picker-row,
+.glass-picker-menu .model-option-head,
+.glass-picker-menu .assistant-editor-head {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  text-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.glass-picker-menu .assistant-menu-toolbar::before,
+.glass-picker-menu .assistant-menu-toolbar::after,
+.glass-picker-menu .picker-menu-head::before,
+.glass-picker-menu .picker-menu-head::after,
+.glass-picker-menu .picker-filter-row::before,
+.glass-picker-menu .picker-filter-row::after,
+.glass-picker-menu .picker-menu-list::before,
+.glass-picker-menu .picker-menu-list::after,
+.glass-picker-menu .assistant-picker-list::before,
+.glass-picker-menu .assistant-picker-list::after,
+.glass-picker-menu .assistant-picker-row::before,
+.glass-picker-menu .assistant-picker-row::after,
+.glass-picker-menu .cli-extension-filter-row::before,
+.glass-picker-menu .cli-extension-filter-row::after,
+.glass-picker-menu .cli-extension-toolbar::before,
+.glass-picker-menu .cli-extension-toolbar::after,
+.glass-picker-menu .cli-extension-list::before,
+.glass-picker-menu .cli-extension-list::after,
+.glass-picker-menu .assistant-editor-head::before,
+.glass-picker-menu .assistant-editor-head::after {
+  display: none !important;
+  content: none !important;
+  background: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.glass-picker-menu.fixed-width-menu .picker-menu-list,
+.glass-picker-menu.fixed-width-menu .assistant-picker-list,
+.glass-picker-menu.fixed-width-menu .cli-extension-list {
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: var(--picker-menu-list-max-height, min(420px, calc(100vh - 240px))) !important;
+}
+
+.glass-picker-menu .picker-option,
+.glass-picker-menu .assistant-picker-option,
+.glass-picker-menu .image-style-picker-option,
+.glass-picker-menu .cli-extension-card {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border-color: rgba(212, 222, 236, 0.18) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+:root[data-theme='dark'] .glass-picker-menu .picker-option,
+:root[data-theme='dark'] .glass-picker-menu .assistant-picker-option,
+:root[data-theme='dark'] .glass-picker-menu .image-style-picker-option,
+:root[data-theme='dark'] .glass-picker-menu .cli-extension-card {
+  border-color: rgba(142, 160, 188, 0.14) !important;
+}
+
+.glass-picker-menu .picker-option:hover,
+.glass-picker-menu .picker-option:focus-visible,
+.glass-picker-menu .assistant-picker-option:hover,
+.glass-picker-menu .assistant-picker-option:focus-visible,
+.glass-picker-menu .image-style-picker-option:hover,
+.glass-picker-menu .image-style-picker-option:focus-visible,
+.glass-picker-menu .cli-extension-card:hover,
+.glass-picker-menu .cli-extension-card:focus-visible,
+.glass-picker-menu .cli-extension-card.selected {
+  background: rgba(255, 255, 255, 0.18) !important;
+  background-color: rgba(255, 255, 255, 0.18) !important;
+  border-color: rgba(212, 222, 236, 0.36) !important;
+}
+
+:root[data-theme='dark'] .glass-picker-menu .picker-option:hover,
+:root[data-theme='dark'] .glass-picker-menu .picker-option:focus-visible,
+:root[data-theme='dark'] .glass-picker-menu .assistant-picker-option:hover,
+:root[data-theme='dark'] .glass-picker-menu .assistant-picker-option:focus-visible,
+:root[data-theme='dark'] .glass-picker-menu .image-style-picker-option:hover,
+:root[data-theme='dark'] .glass-picker-menu .image-style-picker-option:focus-visible,
+:root[data-theme='dark'] .glass-picker-menu .cli-extension-card:hover,
+:root[data-theme='dark'] .glass-picker-menu .cli-extension-card:focus-visible,
+:root[data-theme='dark'] .glass-picker-menu .cli-extension-card.selected {
+  background: rgba(255, 255, 255, 0.07) !important;
+  background-color: rgba(255, 255, 255, 0.07) !important;
+  border-color: rgba(142, 160, 188, 0.24) !important;
+}
+
+.glass-picker-menu .picker-option.active,
+.glass-picker-menu .assistant-picker-option.active,
+.glass-picker-menu .image-style-picker-option.active,
+.glass-picker-menu .picker-filter-chip.active {
+  background: rgba(255, 255, 255, 0.2) !important;
+  background-color: rgba(255, 255, 255, 0.2) !important;
+  border-color: rgba(74, 126, 190, 0.36) !important;
+}
+
+:root[data-theme='dark'] .glass-picker-menu .picker-option.active,
+:root[data-theme='dark'] .glass-picker-menu .assistant-picker-option.active,
+:root[data-theme='dark'] .glass-picker-menu .image-style-picker-option.active,
+:root[data-theme='dark'] .glass-picker-menu .picker-filter-chip.active {
+  background: rgba(96, 140, 190, 0.16) !important;
+  background-color: rgba(96, 140, 190, 0.16) !important;
+  border-color: rgba(118, 158, 210, 0.32) !important;
+}
+
+.glass-picker-menu .assistant-search,
+.glass-picker-menu .cli-extension-search,
+.glass-picker-menu input:not([type='checkbox']):not([type='radio']):not([type='range']),
+.glass-picker-menu textarea,
+.glass-picker-menu select {
+  background: rgba(255, 255, 255, 0.16) !important;
+  background-color: rgba(255, 255, 255, 0.16) !important;
+  background-image: none !important;
+  border: 1px solid rgba(212, 222, 236, 0.42) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+:root[data-theme='dark'] .glass-picker-menu .assistant-search,
+:root[data-theme='dark'] .glass-picker-menu .cli-extension-search,
+:root[data-theme='dark'] .glass-picker-menu input:not([type='checkbox']):not([type='radio']):not([type='range']),
+:root[data-theme='dark'] .glass-picker-menu textarea,
+:root[data-theme='dark'] .glass-picker-menu select {
+  background: rgba(8, 12, 18, 0.18) !important;
+  background-color: rgba(8, 12, 18, 0.18) !important;
+  border-color: rgba(142, 160, 188, 0.24) !important;
+  color: var(--text-primary) !important;
+}
+
+/* Popup final correction: no app-wide brightening and no assistant toolbar backplate. */
+html:has(.picker-menu)::before,
+html:has(.picker-menu)::after,
+html:has(.assistant-menu)::before,
+html:has(.assistant-menu)::after,
+html:has(.image-style-menu)::before,
+html:has(.image-style-menu)::after,
+html:has(.image-config-menu)::before,
+html:has(.image-config-menu)::after,
+html:has(.model-menu)::before,
+html:has(.model-menu)::after,
+html:has(.cli-extension-menu)::before,
+html:has(.cli-extension-menu)::after,
+body:has(.picker-menu)::before,
+body:has(.picker-menu)::after,
+body:has(.assistant-menu)::before,
+body:has(.assistant-menu)::after,
+body:has(.image-style-menu)::before,
+body:has(.image-style-menu)::after,
+body:has(.image-config-menu)::before,
+body:has(.image-config-menu)::after,
+body:has(.model-menu)::before,
+body:has(.model-menu)::after,
+body:has(.cli-extension-menu)::before,
+body:has(.cli-extension-menu)::after,
+#root:has(.picker-menu)::before,
+#root:has(.picker-menu)::after,
+#root:has(.assistant-menu)::before,
+#root:has(.assistant-menu)::after,
+#root:has(.image-style-menu)::before,
+#root:has(.image-style-menu)::after,
+#root:has(.image-config-menu)::before,
+#root:has(.image-config-menu)::after,
+#root:has(.model-menu)::before,
+#root:has(.model-menu)::after,
+#root:has(.cli-extension-menu)::before,
+#root:has(.cli-extension-menu)::after,
+.desktop-window-shell:has(.picker-menu)::before,
+.desktop-window-shell:has(.picker-menu)::after,
+.desktop-window-shell:has(.assistant-menu)::before,
+.desktop-window-shell:has(.assistant-menu)::after,
+.desktop-window-content:has(.picker-menu)::before,
+.desktop-window-content:has(.picker-menu)::after,
+.desktop-window-content:has(.assistant-menu)::before,
+.desktop-window-content:has(.assistant-menu)::after,
+.workspace-page:has(.picker-menu)::before,
+.workspace-page:has(.picker-menu)::after,
+.workspace-page:has(.assistant-menu)::before,
+.workspace-page:has(.assistant-menu)::after,
+.workspace-shell:has(.picker-menu)::before,
+.workspace-shell:has(.picker-menu)::after,
+.workspace-shell:has(.assistant-menu)::before,
+.workspace-shell:has(.assistant-menu)::after,
+.main-panel:has(.picker-menu)::before,
+.main-panel:has(.picker-menu)::after,
+.main-panel:has(.assistant-menu)::before,
+.main-panel:has(.assistant-menu)::after {
+  display: none !important;
+  content: none !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  filter: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  box-shadow: none !important;
+}
+
+.glass-picker-menu-bg {
+  background: rgba(244, 248, 255, 0.85) !important;
+}
+
+:root[data-theme='dark'] .glass-picker-menu-bg {
+  background: rgba(20, 24, 31, 0.85) !important;
+}
+
+.glass-picker-menu.assistant-menu .glass-picker-menu-content {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.glass-picker-menu.assistant-menu .assistant-menu-toolbar {
+  display: contents !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.glass-picker-menu.assistant-menu .assistant-menu-toolbar > .assistant-search {
+  grid-column: 1;
+  width: 100% !important;
+  justify-self: stretch !important;
+}
+
+.glass-picker-menu.assistant-menu .assistant-menu-toolbar > button {
+  grid-column: 2;
+  justify-self: end;
+  white-space: nowrap;
+}
+
+.glass-picker-menu.assistant-menu .assistant-picker-list,
+.glass-picker-menu.assistant-menu .assistant-editor {
+  grid-column: 1 / -1;
+}
+
+.glass-picker-menu.assistant-menu .assistant-menu-toolbar > *,
+.glass-picker-menu.assistant-menu .assistant-menu-toolbar > *::before,
+.glass-picker-menu.assistant-menu .assistant-menu-toolbar > *::after {
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
+/* Popup residue cleanup: remove assistant top highlight, favorite-column backplates and remaining global open/close effects. */
+:root {
+  --layer-sidebar-bg: rgba(247, 250, 255, 0.81) !important;
+}
+
+:root[data-theme='dark'] {
+  --layer-sidebar-bg: rgba(18, 18, 20, 0.54) !important;
+}
+
+.glass-picker-menu.assistant-menu .glass-picker-menu-bg {
+  border: 0 !important;
+  border-color: transparent !important;
+  box-shadow: 0 22px 58px rgba(24, 35, 52, 0.22) !important;
+}
+
+:root[data-theme='dark'] .glass-picker-menu.assistant-menu .glass-picker-menu-bg {
+  box-shadow: 0 26px 70px rgba(0, 0, 0, 0.48) !important;
+}
+
+.glass-picker-menu.assistant-menu .assistant-picker-row {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) 28px !important;
+  align-items: center !important;
+  gap: 6px !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  outline: 0 !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.glass-picker-menu.assistant-menu .assistant-picker-row::before,
+.glass-picker-menu.assistant-menu .assistant-picker-row::after {
+  display: none !important;
+  content: none !important;
+  background: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.glass-picker-menu.assistant-menu .assistant-picker-row > .model-favorite,
+.glass-picker-menu.assistant-menu .assistant-picker-row > .model-favorite:hover,
+.glass-picker-menu.assistant-menu .assistant-picker-row > .model-favorite:focus-visible,
+.glass-picker-menu.assistant-menu .assistant-picker-row > .model-favorite.active {
+  justify-self: center !important;
+  width: 24px !important;
+  height: 24px !important;
+  min-width: 24px !important;
+  padding: 0 !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  outline: 0 !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.glass-picker-menu.assistant-menu .assistant-picker-row > .model-favorite::before,
+.glass-picker-menu.assistant-menu .assistant-picker-row > .model-favorite::after {
+  display: none !important;
+  content: none !important;
+  background: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.shell:has(.picker-menu)::before,
+.shell:has(.picker-menu)::after,
+.shell:has(.assistant-menu)::before,
+.shell:has(.assistant-menu)::after,
+.chat-layout:has(.picker-menu)::before,
+.chat-layout:has(.picker-menu)::after,
+.chat-layout:has(.assistant-menu)::before,
+.chat-layout:has(.assistant-menu)::after,
+.conversation-panel:has(.picker-menu)::before,
+.conversation-panel:has(.picker-menu)::after,
+.conversation-panel:has(.assistant-menu)::before,
+.conversation-panel:has(.assistant-menu)::after,
+.chat-main-panel:has(.picker-menu)::before,
+.chat-main-panel:has(.picker-menu)::after,
+.chat-main-panel:has(.assistant-menu)::before,
+.chat-main-panel:has(.assistant-menu)::after,
+.panel:has(.picker-menu)::before,
+.panel:has(.picker-menu)::after,
+.panel:has(.assistant-menu)::before,
+.panel:has(.assistant-menu)::after,
+.composer:has(.picker-menu)::before,
+.composer:has(.picker-menu)::after,
+.composer:has(.assistant-menu)::before,
+.composer:has(.assistant-menu)::after,
+.composer-input-shell:has(.picker-menu)::before,
+.composer-input-shell:has(.picker-menu)::after,
+.composer-input-shell:has(.assistant-menu)::before,
+.composer-input-shell:has(.assistant-menu)::after,
+.toolbar-picker:has(.picker-menu)::before,
+.toolbar-picker:has(.picker-menu)::after,
+.toolbar-picker:has(.assistant-menu)::before,
+.toolbar-picker:has(.assistant-menu)::after {
+  display: none !important;
+  content: none !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  filter: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  box-shadow: none !important;
+}
+
+/* Popup no-glass authority: opaque local surfaces, no full-screen visual effects. */
+html:has(.picker-menu)::before,
+html:has(.picker-menu)::after,
+html:has(.assistant-menu)::before,
+html:has(.assistant-menu)::after,
+html:has(.image-style-menu)::before,
+html:has(.image-style-menu)::after,
+html:has(.image-config-menu)::before,
+html:has(.image-config-menu)::after,
+html:has(.model-menu)::before,
+html:has(.model-menu)::after,
+html:has(.cli-extension-menu)::before,
+html:has(.cli-extension-menu)::after,
+html:has(.session-context-menu)::before,
+html:has(.session-context-menu)::after,
+html:has(.chat-history-panel)::before,
+html:has(.chat-history-panel)::after,
+html:has(.cli-history-panel)::before,
+html:has(.cli-history-panel)::after,
+html:has(.cli-plan-floating-panel)::before,
+html:has(.cli-plan-floating-panel)::after,
+html:has(.modal-card)::before,
+html:has(.modal-card)::after,
+html:has(.desktop-update-popover)::before,
+html:has(.desktop-update-popover)::after,
+html:has(.announcement-modal-card)::before,
+html:has(.announcement-modal-card)::after,
+html:has(.translation-modal-card)::before,
+html:has(.translation-modal-card)::after,
+html:has(.markdown-code-action-menu)::before,
+html:has(.markdown-code-action-menu)::after,
+html:has(.cli-extension-floating-tooltip)::before,
+html:has(.cli-extension-floating-tooltip)::after,
+body:has(.picker-menu)::before,
+body:has(.picker-menu)::after,
+body:has(.assistant-menu)::before,
+body:has(.assistant-menu)::after,
+body:has(.image-style-menu)::before,
+body:has(.image-style-menu)::after,
+body:has(.image-config-menu)::before,
+body:has(.image-config-menu)::after,
+body:has(.model-menu)::before,
+body:has(.model-menu)::after,
+body:has(.cli-extension-menu)::before,
+body:has(.cli-extension-menu)::after,
+body:has(.session-context-menu)::before,
+body:has(.session-context-menu)::after,
+body:has(.chat-history-panel)::before,
+body:has(.chat-history-panel)::after,
+body:has(.cli-history-panel)::before,
+body:has(.cli-history-panel)::after,
+body:has(.cli-plan-floating-panel)::before,
+body:has(.cli-plan-floating-panel)::after,
+body:has(.modal-card)::before,
+body:has(.modal-card)::after,
+body:has(.desktop-update-popover)::before,
+body:has(.desktop-update-popover)::after,
+body:has(.announcement-modal-card)::before,
+body:has(.announcement-modal-card)::after,
+body:has(.translation-modal-card)::before,
+body:has(.translation-modal-card)::after,
+body:has(.markdown-code-action-menu)::before,
+body:has(.markdown-code-action-menu)::after,
+body:has(.cli-extension-floating-tooltip)::before,
+body:has(.cli-extension-floating-tooltip)::after,
+#root:has(.picker-menu)::before,
+#root:has(.picker-menu)::after,
+#root:has(.assistant-menu)::before,
+#root:has(.assistant-menu)::after,
+#root:has(.image-style-menu)::before,
+#root:has(.image-style-menu)::after,
+#root:has(.image-config-menu)::before,
+#root:has(.image-config-menu)::after,
+#root:has(.model-menu)::before,
+#root:has(.model-menu)::after,
+#root:has(.cli-extension-menu)::before,
+#root:has(.cli-extension-menu)::after,
+#root:has(.session-context-menu)::before,
+#root:has(.session-context-menu)::after,
+#root:has(.chat-history-panel)::before,
+#root:has(.chat-history-panel)::after,
+#root:has(.cli-history-panel)::before,
+#root:has(.cli-history-panel)::after,
+#root:has(.cli-plan-floating-panel)::before,
+#root:has(.cli-plan-floating-panel)::after,
+#root:has(.modal-card)::before,
+#root:has(.modal-card)::after,
+#root:has(.desktop-update-popover)::before,
+#root:has(.desktop-update-popover)::after,
+#root:has(.announcement-modal-card)::before,
+#root:has(.announcement-modal-card)::after,
+#root:has(.translation-modal-card)::before,
+#root:has(.translation-modal-card)::after,
+#root:has(.markdown-code-action-menu)::before,
+#root:has(.markdown-code-action-menu)::after,
+#root:has(.cli-extension-floating-tooltip)::before,
+#root:has(.cli-extension-floating-tooltip)::after,
+.desktop-window-shell:has(.picker-menu)::before,
+.desktop-window-shell:has(.picker-menu)::after,
+.desktop-window-content:has(.picker-menu)::before,
+.desktop-window-content:has(.picker-menu)::after,
+.shell:has(.picker-menu)::before,
+.shell:has(.picker-menu)::after,
+.workspace-page:has(.picker-menu)::before,
+.workspace-page:has(.picker-menu)::after,
+.workspace-shell:has(.picker-menu)::before,
+.workspace-shell:has(.picker-menu)::after,
+.main-panel:has(.picker-menu)::before,
+.main-panel:has(.picker-menu)::after,
+.panel:has(.picker-menu)::before,
+.panel:has(.picker-menu)::after,
+.composer:has(.picker-menu)::before,
+.composer:has(.picker-menu)::after,
+.composer-input-shell:has(.picker-menu)::before,
+.composer-input-shell:has(.picker-menu)::after,
+.toolbar-picker:has(.picker-menu)::before,
+.toolbar-picker:has(.picker-menu)::after {
+  display: none !important;
+  content: none !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  filter: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.modal-mask,
+.image-preview-modal-mask {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  filter: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.picker-menu,
+.glass-picker-menu,
+.session-context-menu,
+.chat-history-panel,
+.cli-history-panel,
+.cli-plan-floating-panel,
+.desktop-update-popover,
+.modal-card,
+.announcement-modal-card,
+.translation-modal-card,
+.markdown-code-action-menu,
+.cli-extension-floating-tooltip,
+.toast-bar,
+.image-preview-modal,
+.attachment-preview-modal {
+  background-image: none !important;
+  filter: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.picker-menu::before,
+.picker-menu::after,
+.glass-picker-menu::before,
+.glass-picker-menu::after,
+.session-context-menu::before,
+.session-context-menu::after,
+.chat-history-panel::before,
+.chat-history-panel::after,
+.cli-history-panel::before,
+.cli-history-panel::after,
+.cli-plan-floating-panel::before,
+.cli-plan-floating-panel::after,
+.desktop-update-popover::before,
+.desktop-update-popover::after,
+.modal-card::before,
+.modal-card::after,
+.announcement-modal-card::before,
+.announcement-modal-card::after,
+.translation-modal-card::before,
+.translation-modal-card::after,
+.markdown-code-action-menu::before,
+.markdown-code-action-menu::after,
+.cli-extension-floating-tooltip::before,
+.cli-extension-floating-tooltip::after,
+.toast-bar::before,
+.toast-bar::after,
+.image-preview-modal::before,
+.image-preview-modal::after,
+.attachment-preview-modal::before,
+.attachment-preview-modal::after {
+  display: none !important;
+  content: none !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  filter: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.glass-picker-menu-bg,
+.picker-menu:not(.glass-picker-menu),
+.session-context-menu,
+.chat-history-panel,
+.cli-history-panel,
+.cli-plan-floating-panel,
+.desktop-update-popover,
+.modal-mask > .modal-card,
+.modal-mask > .announcement-modal-card,
+.modal-mask > .translation-modal-card,
+.markdown-code-action-menu,
+.cli-extension-floating-tooltip,
+.toast-bar,
+.image-preview-modal-mask > .image-preview-modal,
+.image-preview-modal-mask > .attachment-preview-modal {
+  background: rgba(246, 249, 254, 0.9) !important;
+  background-color: rgba(246, 249, 254, 0.9) !important;
+  background-image: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+:root[data-theme='dark'] .glass-picker-menu-bg,
+:root[data-theme='dark'] .picker-menu:not(.glass-picker-menu),
+:root[data-theme='dark'] .session-context-menu,
+:root[data-theme='dark'] .chat-history-panel,
+:root[data-theme='dark'] .cli-history-panel,
+:root[data-theme='dark'] .cli-plan-floating-panel,
+:root[data-theme='dark'] .desktop-update-popover,
+:root[data-theme='dark'] .modal-mask > .modal-card,
+:root[data-theme='dark'] .modal-mask > .announcement-modal-card,
+:root[data-theme='dark'] .modal-mask > .translation-modal-card,
+:root[data-theme='dark'] .markdown-code-action-menu,
+:root[data-theme='dark'] .cli-extension-floating-tooltip,
+:root[data-theme='dark'] .toast-bar,
+:root[data-theme='dark'] .image-preview-modal-mask > .image-preview-modal,
+:root[data-theme='dark'] .image-preview-modal-mask > .attachment-preview-modal {
+  background: rgba(20, 23, 29, 0.9) !important;
+  background-color: rgba(20, 23, 29, 0.9) !important;
+  background-image: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.glass-picker-menu.assistant-menu .assistant-picker-list {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) 28px !important;
+  gap: 6px !important;
+  align-items: center !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.glass-picker-menu.assistant-menu .assistant-picker-row {
+  display: contents !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.glass-picker-menu.assistant-menu .assistant-picker-option {
+  grid-column: 1 !important;
+  min-width: 0 !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
+.glass-picker-menu.assistant-menu .assistant-picker-option:hover,
+.glass-picker-menu.assistant-menu .assistant-picker-option:focus-visible,
+.glass-picker-menu.assistant-menu .assistant-picker-option.active {
+  background: rgba(255, 255, 255, 0.1) !important;
+  background-color: rgba(255, 255, 255, 0.1) !important;
+  background-image: none !important;
+}
+
+:root[data-theme='dark'] .glass-picker-menu.assistant-menu .assistant-picker-option:hover,
+:root[data-theme='dark'] .glass-picker-menu.assistant-menu .assistant-picker-option:focus-visible,
+:root[data-theme='dark'] .glass-picker-menu.assistant-menu .assistant-picker-option.active {
+  background: rgba(255, 255, 255, 0.055) !important;
+  background-color: rgba(255, 255, 255, 0.055) !important;
+  background-image: none !important;
+}
+
+.glass-picker-menu.assistant-menu .assistant-picker-row > .model-favorite,
+.glass-picker-menu.assistant-menu .assistant-picker-row > .model-favorite:hover,
+.glass-picker-menu.assistant-menu .assistant-picker-row > .model-favorite:focus-visible,
+.glass-picker-menu.assistant-menu .assistant-picker-row > .model-favorite.active {
+  grid-column: 2 !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+

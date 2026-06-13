@@ -239,6 +239,28 @@ import { buildFinalPrompt } from './process/prompt-assembler/build-final-prompt'
 import { buildImageEditRequest } from './process/image-editing/build-edit-request'
 import { mapImageEditError } from './process/image-editing/map-edit-error'
 import { buildExecutionCycleEvents } from './process/execution-orchestrator/run-request.ts'
+import { useAutoFollowScroll } from './hooks/use-auto-follow-scroll'
+import {
+  AUTO_TEXTAREA_MIN_ROWS,
+  syncTextareaHeight,
+  useAutosizeTextarea,
+} from './hooks/use-autosize-textarea'
+import {
+  buildChatAttachmentContent,
+  buildPersistedChatRequestContent,
+  fileToBase64,
+  isEmbeddedPreviewableFile,
+  isImagePreviewableFile,
+  isInlinePreviewableFile,
+  isMarkdownPreviewableFile,
+  rehydrateCliComposerAttachments,
+  resolveChatMessageRequestContent,
+  toMessageAttachments,
+  toRenderableFileUrl,
+  useComposerAttachments,
+  type ComposerAttachment,
+} from './hooks/use-composer-attachments'
+import { useDebouncedJsonStorage } from './hooks/use-debounced-json-storage'
 import {
   commitPromptHistoryEntry,
   createPromptHistoryState,
@@ -264,7 +286,6 @@ import type {
   AssistantRecord,
   AuthStatus,
   BillingHistoryData,
-  ChatContentPart,
   ChatMessage,
   ChatModelOption,
   ImageGenerationResponse,
@@ -290,6 +311,8 @@ import type {
   CliSessionMessage,
   CliStatus,
   DesktopAppMeta,
+  DesktopAttachmentSaveRequest,
+  DesktopAttachmentSaveResult,
   DesktopUpdateState,
   DeployProgressPayload,
 } from './shared/desktop'
@@ -326,17 +349,6 @@ const CHAT_PROMPT_HISTORY_STORAGE_KEY = 'oneapi-desktop-chat-prompt-history'
 const DRAW_PROMPT_HISTORY_STORAGE_KEY = 'oneapi-desktop-draw-prompt-history'
 const DESKTOP_UPDATE_AUTO_CHECK_DAY_KEY = 'oneapi-desktop-update-auto-check-day'
 const DESKTOP_ANNOUNCEMENT_READ_IDS_KEY = 'oneapi-desktop-announcement-read-ids'
-
-type ComposerAttachment = {
-  id: string
-  name: string
-  filePath: string
-  size: number
-  kind: 'image' | 'file'
-  mimeType?: string
-  dataBase64: string
-  previewUrl?: string
-}
 
 function getCliPromptHistoryStorageKey(client: CliClient) {
   return `oneapi-desktop-${client}-prompt-history`
@@ -384,6 +396,10 @@ function getDesktopBridge() {
     throw new Error('桌面桥接未初始化')
   }
   return window.desktopBridge
+}
+
+function saveDesktopAttachment(input: DesktopAttachmentSaveRequest): Promise<DesktopAttachmentSaveResult> {
+  return getDesktopBridge().saveAttachment(input)
 }
 
 function readServiceStatusCache() {
@@ -472,158 +488,6 @@ function useToastState() {
   return { message, setMessage }
 }
 
-function fileToBase64(file: File) {
-  return file.arrayBuffer().then((buffer) => {
-    let binary = ''
-    const bytes = new Uint8Array(buffer)
-    const chunkSize = 0x8000
-
-    for (let index = 0; index < bytes.length; index += chunkSize) {
-      const chunk = bytes.subarray(index, index + chunkSize)
-      binary += String.fromCharCode(...chunk)
-    }
-
-    return window.btoa(binary)
-  })
-}
-
-function guessAttachmentKind(file: File, filePath: string) {
-  if (file.type.startsWith('image/')) {
-    return 'image' as const
-  }
-
-  return /\.(png|jpe?g|gif|bmp|webp|svg)$/i.test(filePath) ? 'image' as const : 'file' as const
-}
-
-function normalizeAttachmentMimeType(attachment: ComposerAttachment) {
-  if (attachment.mimeType?.trim()) {
-    return attachment.mimeType.trim()
-  }
-  return attachment.kind === 'image' ? 'image/png' : 'application/octet-stream'
-}
-
-function buildAttachmentDataUrl(attachment: ComposerAttachment) {
-  return `data:${normalizeAttachmentMimeType(attachment)};base64,${attachment.dataBase64}`
-}
-
-function decodeAttachmentText(attachment: ComposerAttachment) {
-  const mimeType = normalizeAttachmentMimeType(attachment).toLowerCase()
-  const textLike =
-    mimeType.startsWith('text/') ||
-    /(?:json|xml|csv|yaml|yml|markdown|javascript|typescript|x-sh|x-python)/i.test(mimeType) ||
-    /\.(txt|md|markdown|json|csv|tsv|xml|yml|yaml|js|jsx|ts|tsx|css|html|py|java|go|rs|c|cpp|h|hpp|cs|php|rb|sh|ps1|sql|log)$/i.test(attachment.name)
-  if (!textLike || !attachment.dataBase64) {
-    return ''
-  }
-
-  try {
-    const binary = window.atob(attachment.dataBase64)
-    const bytes = new Uint8Array(binary.length)
-    for (let index = 0; index < binary.length; index += 1) {
-      bytes[index] = binary.charCodeAt(index)
-    }
-    return new TextDecoder('utf-8', { fatal: false }).decode(bytes).slice(0, 80_000)
-  } catch {
-    return ''
-  }
-}
-
-function buildFileAttachmentText(attachment: ComposerAttachment) {
-  const decodedText = decodeAttachmentText(attachment).trim()
-  const header = [
-    `[附件] ${attachment.name}`,
-    attachment.filePath ? `路径：${attachment.filePath}` : '',
-    `类型：${normalizeAttachmentMimeType(attachment)}`,
-  ].filter(Boolean).join('\n')
-
-  if (!decodedText) {
-    return `${header}\n内容：当前接口不支持直接上传普通文件，客户端已改为文本引用；如需分析文件内容，请粘贴文本或使用可读取的文本文件。`
-  }
-
-  return `${header}\n内容：\n${decodedText}`
-}
-
-function buildChatAttachmentContent(
-  text: string,
-  attachments: ComposerAttachment[]
-): string | ChatContentPart[] {
-  if (!attachments.length) {
-    return text
-  }
-
-  const parts: ChatContentPart[] = [
-    {
-      type: 'text',
-      text,
-    },
-  ]
-
-  for (const attachment of attachments) {
-    if (!attachment.dataBase64) {
-      continue
-    }
-
-    if (attachment.kind === 'image') {
-      parts.push({
-        type: 'image_url',
-        image_url: {
-          url: buildAttachmentDataUrl(attachment),
-        },
-      })
-      continue
-    }
-
-    parts.push({
-      type: 'text',
-      text: buildFileAttachmentText(attachment),
-    })
-  }
-
-  return parts.length === 1 ? text : parts
-}
-
-function buildPersistedChatRequestContent(
-  text: string,
-  attachments: ComposerAttachment[]
-): string | ChatContentPart[] | undefined {
-  const fileAttachments = attachments.filter((item) => item.kind === 'file')
-  if (!fileAttachments.length) {
-    return undefined
-  }
-  const content = buildChatAttachmentContent(text, fileAttachments)
-  return content === text ? undefined : content
-}
-
-function resolveChatMessageRequestContent(message: ChatMessage) {
-  return message.requestContent ?? message.content
-}
-
-function toMessageAttachments(attachments: ComposerAttachment[]) {
-  return attachments.map((item) => ({
-    id: item.id,
-    name: item.name,
-    filePath: item.filePath,
-    kind: item.kind,
-  }))
-}
-
-function toRenderableFileUrl(filePath: string) {
-  if (!filePath.trim()) {
-    return ''
-  }
-  const normalized = filePath.replace(/\\/g, '/')
-  if (/^file:\/\//i.test(normalized)) {
-    return normalized
-  }
-  if (/^[A-Za-z]:\//.test(normalized)) {
-    return encodeURI(`file:///${normalized}`)
-  }
-  if (normalized.startsWith('/')) {
-    return encodeURI(`file://${normalized}`)
-  }
-  return encodeURI(normalized)
-}
-
 async function openDesktopTarget(targetPath: string) {
   if (!targetPath.trim()) {
     return
@@ -651,197 +515,6 @@ async function openDesktopFolder(targetPath: string, treatAsFile = false) {
     : normalized
 
   await window.desktopBridge?.openPath(resolvedPath)
-}
-
-function rehydrateCliComposerAttachments(
-  attachments: Array<{
-    id: string
-    name: string
-    filePath: string
-    kind: 'image' | 'file'
-  }> = []
-): ComposerAttachment[] {
-  return attachments.map((item) => ({
-    id: item.id || globalThis.crypto.randomUUID(),
-    name: item.name,
-    filePath: item.filePath,
-    size: 0,
-    kind: item.kind,
-    dataBase64: '',
-    previewUrl: item.kind === 'image' ? toRenderableFileUrl(item.filePath) : undefined,
-  }))
-}
-
-function isInlinePreviewableFile(targetPath: string) {
-  const normalized = targetPath.trim().toLowerCase()
-  const fileName = normalized.split(/[\\/]/).filter(Boolean).at(-1) || normalized
-  if (fileName === 'dockerfile' || fileName === '.env' || fileName.endsWith('.env')) {
-    return true
-  }
-
-  return /\.(txt|md|markdown|json|ya?ml|toml|ini|conf|cfg|log|csv|ts|tsx|js|jsx|mjs|cjs|css|scss|less|html|htm|xml|vue|py|java|kt|kts|go|rs|rb|php|swift|sh|bash|zsh|ps1|sql|c|cc|cpp|h|hpp)$/i.test(normalized)
-}
-
-function isImagePreviewableFile(targetPath: string) {
-  return /\.(png|jpe?g|gif|webp|bmp|svg|ico)$/i.test(targetPath.trim().toLowerCase())
-}
-
-function isMarkdownPreviewableFile(targetPath: string) {
-  return /\.(md|markdown)$/i.test(targetPath.trim().toLowerCase())
-}
-
-function isEmbeddedPreviewableFile(targetPath: string) {
-  return /\.(pdf)$/i.test(targetPath.trim().toLowerCase())
-}
-
-function useComposerAttachments(toast: (message: string) => void) {
-  const [attachments, setAttachments] = useState<ComposerAttachment[]>([])
-  const inputRef = useRef<HTMLInputElement | null>(null)
-
-  useEffect(() => {
-    return () => {
-      setAttachments((current) => {
-        current.forEach((item) => {
-          if (item.previewUrl) {
-            URL.revokeObjectURL(item.previewUrl)
-          }
-        })
-        return current
-      })
-    }
-  }, [])
-
-  const clearAttachments = useCallback(() => {
-    setAttachments((current) => {
-      current.forEach((item) => {
-        if (item.previewUrl) {
-          URL.revokeObjectURL(item.previewUrl)
-        }
-      })
-      return []
-    })
-    if (inputRef.current) {
-      inputRef.current.value = ''
-    }
-  }, [])
-
-  const removeAttachment = useCallback((attachmentId: string) => {
-    setAttachments((current) =>
-      current.filter((item) => {
-        if (item.id === attachmentId && item.previewUrl) {
-          URL.revokeObjectURL(item.previewUrl)
-        }
-        return item.id !== attachmentId
-      })
-    )
-  }, [])
-
-  const replaceAttachments = useCallback((nextAttachments: ComposerAttachment[]) => {
-    setAttachments((current) => {
-      current.forEach((item) => {
-        if (item.previewUrl?.startsWith('blob:')) {
-          URL.revokeObjectURL(item.previewUrl)
-        }
-      })
-      return nextAttachments
-    })
-    if (inputRef.current) {
-      inputRef.current.value = ''
-    }
-  }, [])
-
-  const appendFiles = useCallback(async (incomingFiles: File[]) => {
-    if (!incomingFiles.length) {
-      return
-    }
-
-    try {
-      const nextAttachments = await Promise.all(
-        incomingFiles.map(async (file) => {
-          const fileWithPath = file as File & { path?: string }
-          const dataBase64 = await fileToBase64(file)
-          const filePath =
-            fileWithPath.path?.trim() ||
-            (
-              await getDesktopBridge().saveAttachment({
-                name: file.name || 'clipboard-file',
-                mimeType: file.type,
-                dataBase64,
-              })
-            ).path
-
-          return {
-            id: globalThis.crypto.randomUUID(),
-            name: file.name || filePath.split(/[\\/]/).filter(Boolean).at(-1) || '未命名附件',
-            filePath,
-            size: file.size,
-            kind: guessAttachmentKind(file, filePath),
-            mimeType: file.type || undefined,
-            dataBase64,
-            previewUrl: file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined,
-          } satisfies ComposerAttachment
-        })
-      )
-
-      setAttachments((current) => {
-        const seen = new Set(current.map((item) => `${item.name}:${item.filePath}:${item.size}`))
-        return [
-          ...current,
-          ...nextAttachments.filter((item) => {
-            const key = `${item.name}:${item.filePath}:${item.size}`
-            if (seen.has(key)) {
-              if (item.previewUrl) {
-                URL.revokeObjectURL(item.previewUrl)
-              }
-              return false
-            }
-            seen.add(key)
-            return true
-          }),
-        ]
-      })
-    } catch (error) {
-      toast(error instanceof Error ? error.message : '附件处理失败')
-    }
-  }, [toast])
-
-  const handleInputChange = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.target.files || [])
-    await appendFiles(files)
-    event.target.value = ''
-  }, [appendFiles])
-
-  const handlePaste = useCallback(async (event: ClipboardEvent<HTMLTextAreaElement>) => {
-    const files = Array.from(event.clipboardData.files || [])
-    if (!files.length) {
-      return
-    }
-
-    event.preventDefault()
-    await appendFiles(files)
-  }, [appendFiles])
-
-  const handleDrop = useCallback(async (event: DragEvent<HTMLDivElement | HTMLTextAreaElement>) => {
-    const files = Array.from(event.dataTransfer.files || [])
-    if (!files.length) {
-      return
-    }
-
-    event.preventDefault()
-    await appendFiles(files)
-  }, [appendFiles])
-
-  return {
-    attachments,
-    inputRef,
-    clearAttachments,
-    removeAttachment,
-    replaceAttachments,
-    handleInputChange,
-    handlePaste,
-    handleDrop,
-    openPicker: () => inputRef.current?.click(),
-  }
 }
 
 function loadInitialAssistantsState() {
@@ -875,41 +548,6 @@ function maskSecretText(value?: string) {
 
     return `${token.slice(0, 6)}****${token.slice(-4)}`
   })
-}
-
-const AUTO_TEXTAREA_MAX_HEIGHT = 260
-const AUTO_TEXTAREA_MIN_ROWS = 3
-const AUTO_TEXTAREA_MAX_ROWS = 8
-
-function syncTextareaHeight(node: HTMLTextAreaElement | null) {
-  if (!node) {
-    return
-  }
-
-  node.style.height = 'auto'
-  const computed = window.getComputedStyle(node)
-  const lineHeight = Number.parseFloat(computed.lineHeight) || 24
-  const paddingTop = Number.parseFloat(computed.paddingTop) || 0
-  const paddingBottom = Number.parseFloat(computed.paddingBottom) || 0
-  const minHeight = lineHeight * AUTO_TEXTAREA_MIN_ROWS + paddingTop + paddingBottom
-  const maxHeight = lineHeight * AUTO_TEXTAREA_MAX_ROWS + paddingTop + paddingBottom
-  const nextHeight = Math.min(Math.max(node.scrollHeight, minHeight), Math.min(maxHeight, AUTO_TEXTAREA_MAX_HEIGHT))
-  node.style.height = `${nextHeight}px`
-  node.style.overflowY = node.scrollHeight > maxHeight ? 'auto' : 'hidden'
-}
-
-function useAutosizeTextarea(value: string) {
-  const ref = useRef<HTMLTextAreaElement | null>(null)
-
-  const resize = useCallback(() => {
-    syncTextareaHeight(ref.current)
-  }, [])
-
-  useLayoutEffect(() => {
-    resize()
-  }, [resize, value])
-
-  return { ref, resize }
 }
 
 type ChatBubbleMessage = ChatMessage & {
@@ -1170,87 +808,6 @@ function focusTextareaToEnd(textarea: HTMLTextAreaElement | null, value: string)
 
   textarea.focus()
   textarea.setSelectionRange(value.length, value.length)
-}
-
-function useDebouncedJsonStorage<T>(key: string, value: T, delayMs = 350) {
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      writeJsonStorage(key, value)
-    }, delayMs)
-    return () => window.clearTimeout(timer)
-  }, [delayMs, key, value])
-}
-
-function useAutoFollowScroll(
-  containerRef: React.RefObject<HTMLDivElement | null>,
-  dependencies: readonly unknown[]
-) {
-  const shouldFollowRef = useRef(true)
-
-  const scrollToLatest = useCallback(() => {
-    const node = containerRef.current
-    if (!node) {
-      return
-    }
-    shouldFollowRef.current = true
-    window.requestAnimationFrame(() => {
-      node.scrollTop = node.scrollHeight
-    })
-  }, [containerRef])
-
-  useEffect(() => {
-    const node = containerRef.current
-    if (!node) {
-      return
-    }
-
-    let followFrame = 0
-    const handleScroll = () => {
-      const remaining = node.scrollHeight - node.scrollTop - node.clientHeight
-      shouldFollowRef.current = remaining <= 48
-    }
-    const scheduleFollowToLatest = () => {
-      if (!shouldFollowRef.current || followFrame) {
-        return
-      }
-      followFrame = window.requestAnimationFrame(() => {
-        followFrame = 0
-        if (shouldFollowRef.current) {
-          node.scrollTop = node.scrollHeight
-        }
-      })
-    }
-
-    handleScroll()
-    node.addEventListener('scroll', handleScroll, { passive: true })
-    const resizeObserver =
-      typeof ResizeObserver === 'undefined'
-        ? null
-        : new ResizeObserver(scheduleFollowToLatest)
-
-    resizeObserver?.observe(node)
-    if (node.firstElementChild) {
-      resizeObserver?.observe(node.firstElementChild)
-    }
-
-    return () => {
-      node.removeEventListener('scroll', handleScroll)
-      if (followFrame) {
-        window.cancelAnimationFrame(followFrame)
-      }
-      resizeObserver?.disconnect()
-    }
-  }, [containerRef])
-
-  useLayoutEffect(() => {
-    const node = containerRef.current
-    if (!node || !shouldFollowRef.current) {
-      return
-    }
-    node.scrollTop = node.scrollHeight
-  }, [containerRef, ...dependencies])
-
-  return scrollToLatest
 }
 
 function findClosestConversationBubble(
@@ -4799,7 +4356,7 @@ function AssistantsChatWorkspace(props: {
     handleInputChange: handleAttachmentInputChange,
     handlePaste: handleAttachmentPaste,
     handleDrop: handleAttachmentDrop,
-  } = useComposerAttachments(toast)
+  } = useComposerAttachments(toast, saveDesktopAttachment)
   const { preview: attachmentPreview, setPreview: setAttachmentPreview, openPreview: openAttachmentPreview } = useAttachmentPreview(toast)
   const { ref: draftRef, resize: resizeDraft } = useAutosizeTextarea(draft)
   const assistantMenuRef = useRef<HTMLDivElement | null>(null)
@@ -6599,7 +6156,7 @@ function DrawWorkspace(props: {
     handleInputChange: handleAttachmentInputChange,
     handlePaste: handleAttachmentPaste,
     handleDrop: handleAttachmentDrop,
-  } = useComposerAttachments(toast)
+  } = useComposerAttachments(toast, saveDesktopAttachment)
   const { preview: attachmentPreview, setPreview: setAttachmentPreview, openPreview: openAttachmentPreview } = useAttachmentPreview(toast)
   const { ref: draftRef, resize: resizeDraft } = useAutosizeTextarea(draft)
   const retryingPendingDrawRef = useRef(false)
@@ -9490,7 +9047,7 @@ function CliWorkspace(props: {
     handleInputChange: handleAttachmentInputChange,
     handlePaste: handleAttachmentPaste,
     handleDrop: handleAttachmentDrop,
-  } = useComposerAttachments(toast)
+  } = useComposerAttachments(toast, saveDesktopAttachment)
   const { preview: attachmentPreview, setPreview: setAttachmentPreview, openPreview: openAttachmentPreview } = useAttachmentPreview(toast)
   const { ref: promptRef, resize: resizePrompt } = useAutosizeTextarea(prompt)
   const modelMenuRef = useRef<HTMLDivElement | null>(null)

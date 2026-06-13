@@ -1,0 +1,2601 @@
+/* macOS refinement pass 9: restore popup geometry after visual overrides. */
+.conversation-scroll-region {
+  position: relative !important;
+}
+
+.cli-plan-floating-panel {
+  position: absolute !important;
+  top: 10px !important;
+  right: 10px !important;
+  bottom: auto !important;
+  left: auto !important;
+  z-index: 30 !important;
+  width: min(260px, calc(100% - 24px)) !important;
+  max-height: calc(50% - 20px) !important;
+  overflow: hidden !important;
+}
+
+.session-context-menu {
+  position: fixed !important;
+  right: auto !important;
+  bottom: auto !important;
+  z-index: 90 !important;
+}
+
+.desktop-update-popover {
+  position: absolute !important;
+  left: 0 !important;
+  right: 0 !important;
+  top: auto !important;
+  bottom: calc(100% + 10px) !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  z-index: 40 !important;
+}
+
+.markdown-code-action-menu {
+  position: absolute !important;
+  top: calc(100% + 6px) !important;
+  right: 0 !important;
+  bottom: auto !important;
+  left: auto !important;
+  z-index: 50 !important;
+}
+
+.composer-input-shell {
+  overflow: visible !important;
+}
+
+.composer-overlay-panel {
+  overflow: visible !important;
+}
+
+.composer-overlay-panel .cli-extension-overlay-anchor {
+  position: absolute !important;
+  top: auto !important;
+  bottom: 0 !important;
+  right: auto !important;
+  z-index: 82 !important;
+}
+
+.composer-overlay-panel .cli-extension-overlay-anchor.anchored-to-composer {
+  left: 0 !important;
+  width: 100% !important;
+}
+
+.composer-overlay-panel .cli-extension-overlay-anchor.anchored-to-button {
+  right: auto !important;
+}
+
+.composer-overlay-panel .cli-extension-menu {
+  position: relative !important;
+  left: auto !important;
+  right: auto !important;
+  top: auto !important;
+  bottom: auto !important;
+  width: 100% !important;
+  max-width: min(360px, calc(100vw - 40px)) !important;
+}
+
+/* macOS refinement pass 10: targeted interaction and visual fixes. */
+:root {
+  --client-bg-image: url('/light.jpg');
+  --dialog-glass-bg: rgb(var(--panel-strong-rgb));
+}
+
+:root[data-theme='dark'] {
+  --client-bg-image: url('/dark.jpg');
+  --dialog-glass-bg: rgb(var(--panel-strong-rgb));
+}
+
+html,
+body,
+#root {
+  background: transparent !important;
+}
+
+.desktop-window-shell {
+  background:
+    linear-gradient(180deg, rgb(var(--bg-rgb) / 0.08), rgb(var(--bg-rgb) / 0.1)),
+    var(--client-bg-image) center / cover no-repeat !important;
+}
+
+:root[data-theme='dark'] .desktop-window-shell {
+  background:
+    linear-gradient(180deg, rgb(var(--bg-rgb) / 0.1), rgb(var(--bg-rgb) / 0.12)),
+    var(--client-bg-image) center / cover no-repeat !important;
+}
+
+.desktop-window-content,
+.shell,
+.main-panel,
+.workspace-host,
+.workspace-content-layer,
+.workspace-page,
+.full-bleed-page,
+.chat-layout,
+.cli-layout,
+.conversation-panel,
+.chat-main-panel,
+.cli-main-panel,
+.chat-panel-surface,
+.cli-panel-surface,
+.page-surface,
+.panel.scroll-panel.page-surface,
+.scroll-panel.page-surface,
+article.panel.page-surface,
+.panel-scroll,
+.conversation-scroll-region,
+.message-stream,
+.cli-thread,
+.shell-composer,
+.chat-composer,
+.cli-composer,
+.composer,
+.composer-input-shell,
+.composer-input-zone,
+.composer-toolbar {
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+:root[data-theme='dark'] .main-panel,
+:root[data-theme='dark'] .workspace-page,
+:root[data-theme='dark'] .full-bleed-page,
+:root[data-theme='dark'] .page-surface,
+:root[data-theme='dark'] .panel.scroll-panel.page-surface,
+:root[data-theme='dark'] .chat-main-panel,
+:root[data-theme='dark'] .cli-main-panel,
+:root[data-theme='dark'] .conversation-panel {
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.modal-card,
+.image-preview-modal,
+.attachment-preview-modal,
+.announcement-modal-card,
+.translation-modal-card,
+.picker-menu,
+.session-context-menu,
+.chat-history-panel,
+.cli-history-panel,
+.cli-plan-floating-panel,
+.desktop-update-popover,
+.cli-extension-menu,
+.assistant-menu,
+.image-style-menu,
+.cli-extension-floating-tooltip,
+.markdown-code-action-menu,
+.toast-bar {
+  background: rgb(var(--panel-strong-rgb)) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.modal-mask > .modal-card,
+.modal-mask > .announcement-modal-card,
+.modal-mask > .translation-modal-card,
+.image-preview-modal-mask > .image-preview-modal,
+.image-preview-modal-mask > .attachment-preview-modal {
+  background: rgb(var(--panel-strong-rgb)) !important;
+}
+
+.composer-toolbar .ghost-button,
+.composer-toolbar .secondary-button,
+.composer-toolbar .primary-button,
+.composer-toolbar .picker-trigger,
+.send-button,
+.send-button.stop-button,
+.assistant-topbar-actions .assistant-history-button.ghost-button,
+.collapse-button,
+.model-favorite,
+.cli-extension-inline-action.model-favorite {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.composer-toolbar .ghost-button:hover,
+.composer-toolbar .ghost-button:focus-visible,
+.composer-toolbar .secondary-button:hover,
+.composer-toolbar .secondary-button:focus-visible,
+.composer-toolbar .primary-button:hover,
+.composer-toolbar .primary-button:focus-visible,
+.send-button:hover,
+.send-button:focus-visible,
+.send-button.stop-button:hover,
+.send-button.stop-button:focus-visible,
+.assistant-topbar-actions .assistant-history-button.ghost-button:hover,
+.assistant-topbar-actions .assistant-history-button.ghost-button:focus-visible,
+.collapse-button:hover,
+.collapse-button:focus-visible,
+.model-favorite:hover,
+.model-favorite:focus-visible,
+.cli-extension-inline-action.model-favorite:hover,
+.cli-extension-inline-action.model-favorite:focus-visible {
+  background: var(--surface-strong) !important;
+  border-color: var(--line) !important;
+}
+
+.send-button.stop-button {
+  color: var(--danger) !important;
+}
+
+.model-favorite.active {
+  color: var(--warning) !important;
+}
+
+.model-favorite.active svg,
+.cli-extension-inline-action.model-favorite.active svg {
+  fill: currentColor;
+  stroke: currentColor;
+}
+
+.message-role {
+  color: var(--text) !important;
+  font-weight: 760 !important;
+}
+
+.message-meta-main {
+  gap: 6px !important;
+}
+
+.picker-menu:not(.cli-extension-menu):not(.assistant-menu):not(.image-style-menu) {
+  width: fit-content !important;
+  min-width: 180px !important;
+  max-width: min(360px, 80vw) !important;
+}
+
+.picker-menu:not(.cli-extension-menu):not(.assistant-menu):not(.image-style-menu) .picker-menu-list {
+  width: max-content;
+  min-width: 100%;
+  max-width: 100%;
+}
+
+.picker-menu:not(.cli-extension-menu):not(.assistant-menu):not(.image-style-menu) .picker-option {
+  justify-content: center !important;
+  text-align: center !important;
+  padding-inline: 16px !important;
+}
+
+.picker-menu-head::before,
+.modal-card .panel-header::before,
+.announcement-modal-head::before,
+.translation-modal-card .panel-header::before {
+  display: none !important;
+  content: none !important;
+}
+
+.cli-extension-menu {
+  overflow: visible !important;
+  width: min(420px, calc(100vw - 40px)) !important;
+  max-width: min(420px, calc(100vw - 40px)) !important;
+}
+
+.cli-extension-menu-head {
+  grid-template-columns: minmax(0, 1fr) minmax(150px, 178px) !important;
+}
+
+.cli-extension-menu-head > strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.cli-extension-title-count {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.cli-extension-filter-row {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 10px !important;
+  flex-wrap: nowrap !important;
+}
+
+.cli-extension-filter-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.cli-extension-toolbar {
+  margin-top: 0 !important;
+  margin-left: auto !important;
+  flex: 0 0 auto;
+}
+
+.cli-extension-auto-toggle {
+  margin-left: 2px !important;
+  white-space: nowrap;
+}
+
+.cli-extension-list {
+  position: relative;
+  z-index: 1;
+}
+
+.cli-extension-floating-tooltip {
+  z-index: 300 !important;
+  width: min(280px, calc(100vw - 48px)) !important;
+  max-height: min(320px, 54vh) !important;
+  overflow: auto !important;
+  pointer-events: auto !important;
+}
+
+.image-preview-modal {
+  position: relative !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+}
+
+.image-preview-stage {
+  position: relative !important;
+  width: 100%;
+  height: 100%;
+}
+
+.image-preview-overlay-actions {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 8;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.image-preview-icon-button {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  color: var(--text) !important;
+}
+
+.image-preview-icon-button:hover,
+.image-preview-icon-button:focus-visible {
+  background: var(--surface-strong) !important;
+  border-color: var(--line) !important;
+}
+
+.wallet-overview-head {
+  border-bottom: 0 !important;
+  padding-bottom: 0 !important;
+}
+
+.usage-bars {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.usage-bar-row {
+  gap: 8px !important;
+}
+
+.usage-bar-head span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.usage-bar-head span b {
+  color: var(--line-strong);
+  font-weight: 600;
+}
+
+.usage-bar-row > small {
+  display: none !important;
+}
+
+.subscription-plan-actions {
+  justify-content: flex-end !important;
+}
+
+/* macOS refinement pass 11: popup geometry, chart bounds, and dark CLI color repair. */
+:root[data-theme='dark'] {
+  --bg: #0b141d;
+  --bg-rgb: 11 20 29;
+  --panel-rgb: 19 29 39;
+  --panel-strong-rgb: 23 34 45;
+  --surface-rgb: 25 37 49;
+  --surface-strong-rgb: 30 43 56;
+  --panel: rgb(var(--panel-rgb));
+  --panel-strong: rgb(var(--panel-strong-rgb));
+  --surface: rgb(var(--surface-rgb));
+  --surface-strong: rgb(var(--surface-strong-rgb));
+  --card-bg: rgb(var(--panel-rgb));
+  --card-bg-strong: rgb(var(--panel-strong-rgb));
+  --popover-bg: rgb(var(--panel-strong-rgb));
+  --window-bg: rgb(var(--bg-rgb));
+  --window-bg-rgb: 11 20 29;
+  --accent: #7fb7f0;
+  --accent-rgb: 127 183 240;
+  --accent-soft: rgba(127, 183, 240, 0.16);
+  --bubble-user: rgb(var(--surface-strong-rgb));
+  --bubble-ai: rgb(var(--panel-rgb));
+  --bubble-log: rgb(var(--surface-rgb));
+}
+
+:root[data-theme='dark'] .desktop-window-shell {
+  background:
+    linear-gradient(180deg, rgb(9 20 31 / 0.2), rgb(7 16 26 / 0.18)),
+    var(--client-bg-image) center / cover no-repeat !important;
+}
+
+.toolbar-picker > .cli-extension-menu {
+  position: absolute !important;
+  left: 0 !important;
+  right: auto !important;
+  top: auto !important;
+  bottom: calc(100% + 8px) !important;
+  z-index: 90 !important;
+}
+
+.composer-overlay-panel .cli-extension-menu {
+  position: relative !important;
+}
+
+.cli-extension-floating-tooltip {
+  position: fixed !important;
+  transform: translateY(-100%);
+  z-index: 1200 !important;
+}
+
+.cli-extension-toolbar > .ghost-button {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.cli-extension-toolbar > .ghost-button:hover,
+.cli-extension-toolbar > .ghost-button:focus-visible {
+  background: var(--surface-strong) !important;
+  border-color: var(--line) !important;
+}
+
+.toolbar-picker > .picker-menu .picker-menu-head,
+.composer-overlay-panel .picker-menu .picker-menu-head,
+.toolbar-picker > .cli-extension-menu .picker-menu-head,
+.composer-overlay-panel .cli-extension-menu .picker-menu-head {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.usage-bars {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  align-items: stretch;
+}
+
+.usage-bar-row {
+  min-width: 0;
+}
+
+.usage-bar-head {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+}
+
+.usage-bar-head strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.usage-bar-head span {
+  justify-content: flex-end;
+  text-align: right;
+}
+
+.wallet-overview-grid {
+  gap: 10px !important;
+}
+
+.content-grid.wallet-grid {
+  gap: 18px !important;
+}
+
+.usage-trend-svg {
+  overflow: visible;
+}
+
+.service-status-history-dot {
+  cursor: pointer;
+}
+
+.service-status-history-dot:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 58%, transparent);
+  outline-offset: 3px;
+}
+
+.service-status-point-tooltip {
+  position: fixed;
+  z-index: 1300;
+  max-width: min(320px, calc(100vw - 32px));
+  transform: translate(12px, 12px);
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: rgb(var(--panel-strong-rgb)) !important;
+  color: var(--text);
+  box-shadow: 0 14px 34px rgb(0 0 0 / 0.18);
+  font-size: 12px;
+  line-height: 1.45;
+  pointer-events: none;
+}
+
+.markdown-code-block {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.markdown-body pre:has(.markdown-code-block) {
+  position: relative;
+}
+
+.markdown-body pre .markdown-code-block > code {
+  display: block;
+  padding: 0 !important;
+  background: transparent !important;
+  border-radius: 0 !important;
+}
+
+.markdown-code-block > pre,
+.markdown-body pre {
+  background: var(--bubble-log) !important;
+}
+
+.image-preview-modal.image-only,
+.attachment-preview-modal.image-only,
+.image-preview-modal-mask > .image-preview-modal.image-only,
+.image-preview-modal-mask > .attachment-preview-modal.image-only {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.image-preview-modal.image-only .image-preview-stage,
+.attachment-preview-modal.image-only .attachment-preview-stage {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+:root[data-theme='dark'] .cli-log-bubble,
+:root[data-theme='dark'] .cli-log-bubble.error,
+:root[data-theme='dark'] .cli-log-phase-section,
+:root[data-theme='dark'] .cli-log-output-card,
+:root[data-theme='dark'] .cli-log-diagnostic-group,
+:root[data-theme='dark'] .cli-log-diagnostic-group.stdout-group,
+:root[data-theme='dark'] .timeline-code,
+:root[data-theme='dark'] .timeline-detail,
+:root[data-theme='dark'] .markdown-body pre,
+:root[data-theme='dark'] .markdown-code-block,
+:root[data-theme='dark'] .result-block {
+  background: rgb(var(--surface-rgb)) !important;
+  border-color: rgba(168, 197, 220, 0.14) !important;
+  color: var(--text) !important;
+  box-shadow: none !important;
+}
+
+:root[data-theme='dark'] .cli-log-output-card,
+:root[data-theme='dark'] .cli-log-diagnostic-group,
+:root[data-theme='dark'] .cli-log-diagnostic-group.stdout-group {
+  background: rgb(var(--panel-rgb)) !important;
+}
+
+:root[data-theme='dark'] .cli-log-phase-section.plain-status {
+  background: transparent !important;
+  border-color: transparent !important;
+}
+
+:root[data-theme='dark'] .cli-log-overview-strip span,
+:root[data-theme='dark'] .message-extension-chip,
+:root[data-theme='dark'] .composer-token-chip {
+  background: rgb(var(--surface-strong-rgb)) !important;
+  border-color: rgba(168, 197, 220, 0.13) !important;
+}
+
+@media (max-width: 920px) {
+  .usage-bars {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* macOS refinement pass 12: stable popovers, compact code blocks, and CLI log hierarchy. */
+.cli-extension-menu,
+.toolbar-picker > .cli-extension-menu {
+  background: rgb(var(--panel-strong-rgb)) !important;
+}
+
+.cli-extension-menu-head,
+.cli-extension-filter-row,
+.cli-extension-menu .picker-menu-head,
+.toolbar-picker > .cli-extension-menu .picker-menu-head,
+.composer-overlay-panel .cli-extension-menu .picker-menu-head {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.cli-extension-search {
+  background: rgb(var(--surface-rgb)) !important;
+  box-shadow: none !important;
+}
+
+.cli-extension-search:focus {
+  background: rgb(var(--surface-rgb)) !important;
+  box-shadow: 0 0 0 2px rgb(var(--accent-rgb) / 0.18) !important;
+}
+
+.cli-extension-tooltip-action,
+.cli-extension-tooltip-action:hover,
+.cli-extension-tooltip-action:focus-visible {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.usage-bars {
+  grid-template-columns: 1fr !important;
+}
+
+.usage-distribution-pager {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.usage-distribution-pager span {
+  min-width: 48px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.send-button {
+  color: var(--accent) !important;
+}
+
+.send-button.stop-button {
+  color: var(--danger) !important;
+}
+
+.send-button svg,
+.send-button.stop-button svg {
+  stroke: currentColor !important;
+}
+
+.toolbar-picker > .model-menu,
+.model-menu {
+  width: min(380px, calc(100vw - 48px)) !important;
+  min-width: min(380px, calc(100vw - 48px)) !important;
+}
+
+.picker-menu-list {
+  width: 100%;
+}
+
+.markdown-body pre {
+  padding: 8px 42px 8px 10px !important;
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+}
+
+.markdown-code-copy {
+  top: 6px !important;
+  right: 8px !important;
+}
+
+.markdown-body pre .markdown-code-block > code {
+  min-height: 20px;
+}
+
+.cli-log-time-line-copy strong,
+.cli-log-output-stack-title strong,
+.cli-log-output-card-head strong,
+.cli-log-event-copy strong {
+  font-weight: 500 !important;
+}
+
+.cli-log-time-line-copy .cli-log-block-label,
+.cli-log-time-line-copy .cli-log-inline-fold-indicator {
+  font-weight: 500 !important;
+}
+
+/* macOS refinement pass 13: popup headers, stable filtered menus, icon buttons, and compact page typography. */
+.picker-menu .picker-menu-head,
+.toolbar-picker > .picker-menu .picker-menu-head,
+.composer-overlay-panel .picker-menu .picker-menu-head,
+.assistant-menu .assistant-menu-toolbar,
+.cli-extension-menu .cli-extension-menu-head,
+.cli-extension-menu .cli-extension-filter-row,
+.cli-extension-floating-tooltip .cli-extension-tooltip-head {
+  background: transparent !important;
+  background-image: none !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.picker-menu .picker-menu-head > span,
+.picker-menu .picker-menu-head span,
+.assistant-menu .assistant-menu-toolbar,
+.assistant-menu .assistant-menu-toolbar > span,
+.cli-extension-title-count,
+.cli-extension-tooltip-head > strong + span,
+.modal-copy,
+.helper-copy {
+  background: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+}
+
+.picker-menu:has(.picker-filter-row),
+.toolbar-picker > .picker-menu:has(.picker-filter-row),
+.composer-overlay-panel .picker-menu:has(.picker-filter-row),
+.toolbar-picker > .model-menu,
+.model-menu {
+  width: min(360px, calc(100vw - 48px)) !important;
+  min-width: min(360px, calc(100vw - 48px)) !important;
+  max-width: min(360px, calc(100vw - 48px)) !important;
+  inline-size: min(360px, calc(100vw - 48px)) !important;
+  flex: 0 0 min(360px, calc(100vw - 48px)) !important;
+}
+
+.picker-menu:has(.picker-filter-row) .picker-filter-row,
+.model-menu .picker-filter-row {
+  width: 100% !important;
+  min-width: 0 !important;
+}
+
+.picker-menu:has(.picker-filter-row) .picker-menu-list,
+.model-menu .picker-menu-list {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+}
+
+.picker-menu:has(.picker-filter-row) .picker-option,
+.model-menu .picker-option {
+  width: 100% !important;
+  min-width: 0 !important;
+}
+
+.send-button,
+.send-button.stop-button,
+.composer-toolbar .send-button,
+.composer-toolbar .send-button.stop-button {
+  background: transparent !important;
+  background-image: none !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.send-button svg,
+.send-button.stop-button svg {
+  fill: currentColor !important;
+  stroke: currentColor !important;
+  stroke-width: 2.4 !important;
+}
+
+:root[data-theme='dark'] .send-button,
+:root[data-theme='dark'] .composer-toolbar .send-button {
+  color: var(--text-primary) !important;
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+:root[data-theme='dark'] .send-button.stop-button,
+:root[data-theme='dark'] .composer-toolbar .send-button.stop-button {
+  color: var(--danger) !important;
+}
+
+:root[data-theme='dark'] .send-button:hover,
+:root[data-theme='dark'] .send-button:focus-visible,
+:root[data-theme='dark'] .composer-toolbar .send-button:hover,
+:root[data-theme='dark'] .composer-toolbar .send-button:focus-visible {
+  background: rgba(99, 130, 158, 0.16) !important;
+  border-color: rgba(153, 183, 211, 0.12) !important;
+}
+
+:root[data-theme='dark'] .send-button.stop-button:hover,
+:root[data-theme='dark'] .send-button.stop-button:focus-visible,
+:root[data-theme='dark'] .composer-toolbar .send-button.stop-button:hover,
+:root[data-theme='dark'] .composer-toolbar .send-button.stop-button:focus-visible {
+  background: rgba(132, 70, 64, 0.2) !important;
+  border-color: rgba(255, 143, 127, 0.14) !important;
+}
+
+.cli-log-bubble,
+.cli-log-bubble * {
+  font-weight: 400 !important;
+}
+
+.cli-log-bubble strong,
+.cli-log-bubble b,
+.cli-log-bubble .cli-log-time-copy strong,
+.cli-log-bubble .cli-log-output-stack-title strong,
+.cli-log-bubble .cli-log-output-card-head strong,
+.cli-log-bubble .cli-log-event-copy strong,
+.cli-log-bubble .cli-log-event-toggle,
+.cli-log-bubble .cli-log-event-toggle strong,
+.cli-log-bubble .cli-log-block-label,
+.cli-log-bubble .cli-log-inline-fold-indicator {
+  font-weight: 500 !important;
+}
+
+.cli-log-bubble > .cli-log-card-head > strong,
+.cli-log-bubble .cli-log-phase-headline > strong {
+  font-weight: 650 !important;
+}
+
+.workspace-page:not(.chat-page),
+.workspace-page:not(.chat-page) button,
+.workspace-page:not(.chat-page) input,
+.workspace-page:not(.chat-page) select,
+.workspace-page:not(.chat-page) textarea {
+  font-size: 13px;
+}
+
+.workspace-page:not(.chat-page) .panel-header h2,
+.workspace-page:not(.chat-page) .panel-header.compact h2 {
+  font-size: 20px !important;
+  line-height: 1.24;
+}
+
+.workspace-page:not(.chat-page) .panel-header p,
+.workspace-page:not(.chat-page) .helper-copy,
+.workspace-page:not(.chat-page) .modal-copy,
+.workspace-page:not(.chat-page) .record-row span,
+.workspace-page:not(.chat-page) .status-card span,
+.workspace-page:not(.chat-page) .pricing-card span,
+.workspace-page:not(.chat-page) .pricing-card small,
+.workspace-page:not(.chat-page) .usage-bar-row small {
+  font-size: 12px !important;
+}
+
+.workspace-page:not(.chat-page) .pricing-card b,
+.workspace-page:not(.chat-page) .wallet-overview-head h3,
+.workspace-page:not(.chat-page) .service-status-card-head strong,
+.workspace-page:not(.chat-page) .billing-card strong,
+.workspace-page:not(.chat-page) .record-row strong {
+  font-size: 14px !important;
+}
+
+.workspace-page:not(.chat-page) .subscription-plan-price {
+  font-size: 20px !important;
+}
+
+/* macOS refinement pass 14: remove popup title backplates and lock per-button popup width. */
+.picker-menu::before,
+.picker-menu::after,
+.assistant-menu::before,
+.assistant-menu::after,
+.image-style-menu::before,
+.image-style-menu::after,
+.model-menu::before,
+.model-menu::after,
+.image-config-menu::before,
+.image-config-menu::after {
+  display: none !important;
+  content: none !important;
+  background: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.picker-menu .picker-menu-head,
+.picker-menu .assistant-menu-head,
+.picker-menu .image-style-menu-head,
+.assistant-menu .picker-menu-head,
+.assistant-menu .assistant-menu-head,
+.image-style-menu .picker-menu-head,
+.image-style-menu .image-style-menu-head,
+.model-menu .picker-menu-head,
+.image-config-menu .picker-menu-head {
+  background: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  outline: 0 !important;
+  padding: 0 !important;
+  margin: 0 0 8px !important;
+  border-radius: 0 !important;
+}
+
+.picker-menu .picker-menu-head::before,
+.picker-menu .picker-menu-head::after,
+.picker-menu .assistant-menu-head::before,
+.picker-menu .assistant-menu-head::after,
+.picker-menu .image-style-menu-head::before,
+.picker-menu .image-style-menu-head::after,
+.assistant-menu .picker-menu-head::before,
+.assistant-menu .picker-menu-head::after,
+.assistant-menu .assistant-menu-head::before,
+.assistant-menu .assistant-menu-head::after,
+.image-style-menu .picker-menu-head::before,
+.image-style-menu .picker-menu-head::after,
+.image-style-menu .image-style-menu-head::before,
+.image-style-menu .image-style-menu-head::after,
+.model-menu .picker-menu-head::before,
+.model-menu .picker-menu-head::after,
+.image-config-menu .picker-menu-head::before,
+.image-config-menu .picker-menu-head::after {
+  display: none !important;
+  content: none !important;
+  background: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.picker-menu .picker-menu-head > strong,
+.picker-menu .picker-menu-head > span,
+.picker-menu .picker-menu-head strong,
+.picker-menu .picker-menu-head span,
+.assistant-menu .assistant-menu-toolbar,
+.assistant-menu .assistant-menu-toolbar > span,
+.image-style-menu .assistant-menu-toolbar,
+.image-style-menu .assistant-menu-toolbar > span {
+  background: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+}
+
+.toolbar-picker > .assistant-menu,
+.assistant-menu,
+.toolbar-picker > .image-style-menu,
+.image-style-menu {
+  width: min(360px, calc(100vw - 48px)) !important;
+  min-width: min(360px, calc(100vw - 48px)) !important;
+  max-width: min(360px, calc(100vw - 48px)) !important;
+  inline-size: min(360px, calc(100vw - 48px)) !important;
+  flex-basis: min(360px, calc(100vw - 48px)) !important;
+}
+
+.toolbar-picker > .model-menu,
+.model-menu,
+.toolbar-picker > .picker-menu:has(.picker-filter-row),
+.picker-menu:has(.picker-filter-row) {
+  width: min(380px, calc(100vw - 48px)) !important;
+  min-width: min(380px, calc(100vw - 48px)) !important;
+  max-width: min(380px, calc(100vw - 48px)) !important;
+  inline-size: min(380px, calc(100vw - 48px)) !important;
+  flex-basis: min(380px, calc(100vw - 48px)) !important;
+}
+
+.toolbar-picker > .image-config-menu,
+.image-config-menu,
+.toolbar-picker > .picker-menu:not(.assistant-menu):not(.image-style-menu):not(.model-menu):not(.cli-extension-menu):not(:has(.picker-filter-row)) {
+  width: max-content !important;
+  min-width: 168px !important;
+  max-width: min(360px, calc(100vw - 48px)) !important;
+  inline-size: max-content !important;
+}
+
+.picker-menu .picker-menu-list,
+.assistant-menu .picker-menu-list,
+.image-style-menu .picker-menu-list,
+.model-menu .picker-menu-list,
+.image-config-menu .picker-menu-list {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+}
+
+.picker-menu .picker-option,
+.assistant-menu .assistant-picker-row,
+.image-style-menu .assistant-picker-row,
+.model-menu .picker-option,
+.image-config-menu .picker-option {
+  min-width: 0 !important;
+  max-width: 100% !important;
+}
+
+/* macOS refinement pass 15: popup title cleanup and stable per-trigger widths. */
+:root {
+  --client-bg-image: url('/light.jpg') !important;
+}
+
+:root[data-theme='dark'] {
+  --client-bg-image: url('/dark.jpg') !important;
+}
+
+.picker-menu[style*='--picker-menu-width'],
+.toolbar-picker > .picker-menu[style*='--picker-menu-width'],
+.composer-overlay-panel .picker-menu[style*='--picker-menu-width'],
+.cli-extension-overlay-anchor .picker-menu[style*='--picker-menu-width'] {
+  width: var(--picker-menu-width) !important;
+  min-width: var(--picker-menu-width) !important;
+  max-width: min(var(--picker-menu-width), calc(100vw - 48px)) !important;
+  inline-size: var(--picker-menu-width) !important;
+  flex: 0 0 var(--picker-menu-width) !important;
+}
+
+.picker-menu[style*='--picker-menu-width'] .picker-menu-list,
+.picker-menu[style*='--picker-menu-width'] .assistant-picker-list {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+}
+
+.picker-menu[style*='--picker-menu-width'] .picker-option,
+.picker-menu[style*='--picker-menu-width'] .assistant-picker-row,
+.picker-menu[style*='--picker-menu-width'] .assistant-picker-option,
+.picker-menu[style*='--picker-menu-width'] .model-option {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+}
+
+.picker-menu-head,
+.assistant-menu-head,
+.image-style-menu-head,
+.assistant-menu-toolbar,
+.cli-extension-menu-head,
+.cli-extension-filter-row,
+.cli-extension-toolbar,
+.picker-filter-row {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  outline: 0 !important;
+}
+
+.picker-menu-head::before,
+.picker-menu-head::after,
+.assistant-menu-head::before,
+.assistant-menu-head::after,
+.image-style-menu-head::before,
+.image-style-menu-head::after,
+.assistant-menu-toolbar::before,
+.assistant-menu-toolbar::after,
+.cli-extension-menu-head::before,
+.cli-extension-menu-head::after,
+.cli-extension-filter-row::before,
+.cli-extension-filter-row::after,
+.cli-extension-toolbar::before,
+.cli-extension-toolbar::after,
+.picker-filter-row::before,
+.picker-filter-row::after,
+.picker-menu-head > *::before,
+.picker-menu-head > *::after,
+.assistant-menu-toolbar > *::before,
+.assistant-menu-toolbar > *::after,
+.cli-extension-menu-head > *::before,
+.cli-extension-menu-head > *::after {
+  display: none !important;
+  content: none !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.picker-menu-head > strong,
+.picker-menu-head > span,
+.picker-menu-head strong,
+.picker-menu-head span,
+.assistant-menu-toolbar > span,
+.assistant-menu-toolbar > strong,
+.assistant-menu-toolbar span,
+.cli-extension-menu-head > strong,
+.cli-extension-menu-head > strong > span,
+.cli-extension-title-count,
+.cli-extension-toolbar > span,
+.picker-filter-row > span {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+}
+
+.assistant-menu-toolbar > .secondary-button,
+.cli-extension-toolbar > .ghost-button {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.assistant-menu-toolbar > .secondary-button:hover,
+.assistant-menu-toolbar > .secondary-button:focus-visible,
+.cli-extension-toolbar > .ghost-button:hover,
+.cli-extension-toolbar > .ghost-button:focus-visible {
+  background: var(--surface-strong) !important;
+  border-color: var(--line) !important;
+}
+
+/* macOS refinement pass 16: remove popup header backplates at the source. */
+.modal-card,
+.image-preview-modal,
+.attachment-preview-modal,
+.announcement-modal-card,
+.translation-modal-card,
+.picker-menu,
+.session-context-menu,
+.chat-history-panel,
+.cli-history-panel,
+.cli-plan-floating-panel,
+.desktop-update-popover,
+.cli-extension-menu,
+.assistant-menu,
+.image-style-menu,
+.model-menu,
+.image-config-menu,
+.cli-extension-floating-tooltip,
+.markdown-code-action-menu,
+.toast-bar,
+.modal-mask > .modal-card,
+.modal-mask > .announcement-modal-card,
+.modal-mask > .translation-modal-card,
+.image-preview-modal-mask > .image-preview-modal,
+.image-preview-modal-mask > .attachment-preview-modal {
+  background: rgb(var(--panel-strong-rgb)) !important;
+  background-color: rgb(var(--panel-strong-rgb)) !important;
+  background-image: none !important;
+}
+
+.modal-card::before,
+.modal-card::after,
+.image-preview-modal::before,
+.image-preview-modal::after,
+.attachment-preview-modal::before,
+.attachment-preview-modal::after,
+.announcement-modal-card::before,
+.announcement-modal-card::after,
+.translation-modal-card::before,
+.translation-modal-card::after,
+.picker-menu::before,
+.picker-menu::after,
+.session-context-menu::before,
+.session-context-menu::after,
+.chat-history-panel::before,
+.chat-history-panel::after,
+.cli-history-panel::before,
+.cli-history-panel::after,
+.cli-plan-floating-panel::before,
+.cli-plan-floating-panel::after,
+.desktop-update-popover::before,
+.desktop-update-popover::after,
+.cli-extension-menu::before,
+.cli-extension-menu::after,
+.assistant-menu::before,
+.assistant-menu::after,
+.image-style-menu::before,
+.image-style-menu::after,
+.model-menu::before,
+.model-menu::after,
+.image-config-menu::before,
+.image-config-menu::after,
+.cli-extension-floating-tooltip::before,
+.cli-extension-floating-tooltip::after,
+.markdown-code-action-menu::before,
+.markdown-code-action-menu::after,
+.toast-bar::before,
+.toast-bar::after {
+  display: none !important;
+  content: none !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.picker-menu[style*='--picker-menu-width'],
+.toolbar-picker > .picker-menu[style*='--picker-menu-width'],
+.composer-overlay-panel .picker-menu[style*='--picker-menu-width'],
+.cli-extension-overlay-anchor .picker-menu[style*='--picker-menu-width'] {
+  width: min(var(--picker-menu-width), calc(100vw - 48px)) !important;
+  min-width: min(var(--picker-menu-width), calc(100vw - 48px)) !important;
+  max-width: min(var(--picker-menu-width), calc(100vw - 48px)) !important;
+  inline-size: min(var(--picker-menu-width), calc(100vw - 48px)) !important;
+  flex: 0 0 min(var(--picker-menu-width), calc(100vw - 48px)) !important;
+}
+
+/* macOS refinement pass 17: authoritative per-trigger popup widths and header backplate removal. */
+.picker-menu.fixed-width-menu,
+.toolbar-picker > .picker-menu.fixed-width-menu,
+.composer-overlay-panel .picker-menu.fixed-width-menu,
+.cli-extension-overlay-anchor .picker-menu.fixed-width-menu,
+.picker-menu.fixed-width-menu:has(.picker-filter-row),
+.toolbar-picker > .picker-menu.fixed-width-menu:has(.picker-filter-row),
+.composer-overlay-panel .picker-menu.fixed-width-menu:has(.picker-filter-row),
+.toolbar-picker > .model-menu.fixed-width-menu,
+.model-menu.fixed-width-menu,
+.assistant-menu.fixed-width-menu,
+.image-style-menu.fixed-width-menu,
+.image-config-menu.fixed-width-menu,
+.cli-extension-menu.fixed-width-menu {
+  width: var(--picker-menu-safe-width, min(var(--picker-menu-width, 312px), calc(100vw - 48px))) !important;
+  min-width: var(--picker-menu-safe-width, min(var(--picker-menu-width, 312px), calc(100vw - 48px))) !important;
+  max-width: var(--picker-menu-safe-width, min(var(--picker-menu-width, 312px), calc(100vw - 48px))) !important;
+  inline-size: var(--picker-menu-safe-width, min(var(--picker-menu-width, 312px), calc(100vw - 48px))) !important;
+  flex: 0 0 var(--picker-menu-safe-width, min(var(--picker-menu-width, 312px), calc(100vw - 48px))) !important;
+}
+
+.picker-menu.fixed-width-menu .picker-menu-list,
+.picker-menu.fixed-width-menu .assistant-picker-list,
+.picker-menu.fixed-width-menu .cli-extension-list {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: var(--picker-menu-list-max-height, 240px) !important;
+  overflow: auto !important;
+}
+
+.picker-menu.fixed-width-menu .picker-option,
+.picker-menu.fixed-width-menu .assistant-picker-row,
+.picker-menu.fixed-width-menu .assistant-picker-option,
+.picker-menu.fixed-width-menu .model-option,
+.picker-menu.fixed-width-menu .cli-extension-card {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+}
+
+.picker-menu.fixed-width-menu > .picker-menu-head,
+.picker-menu.fixed-width-menu > .assistant-menu-head,
+.picker-menu.fixed-width-menu > .image-style-menu-head,
+.picker-menu.fixed-width-menu > .assistant-menu-toolbar,
+.picker-menu.fixed-width-menu > .picker-filter-row,
+.picker-menu.fixed-width-menu > .cli-extension-menu-head,
+.picker-menu.fixed-width-menu > .cli-extension-filter-row,
+.picker-menu.fixed-width-menu > .cli-extension-toolbar,
+.picker-menu.fixed-width-menu .cli-extension-tooltip-head,
+.picker-menu.fixed-width-menu .modal-copy,
+.picker-menu.fixed-width-menu .helper-copy {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  outline: 0 !important;
+  border-radius: 0 !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.picker-menu.fixed-width-menu > .picker-menu-head::before,
+.picker-menu.fixed-width-menu > .picker-menu-head::after,
+.picker-menu.fixed-width-menu > .assistant-menu-head::before,
+.picker-menu.fixed-width-menu > .assistant-menu-head::after,
+.picker-menu.fixed-width-menu > .image-style-menu-head::before,
+.picker-menu.fixed-width-menu > .image-style-menu-head::after,
+.picker-menu.fixed-width-menu > .assistant-menu-toolbar::before,
+.picker-menu.fixed-width-menu > .assistant-menu-toolbar::after,
+.picker-menu.fixed-width-menu > .picker-filter-row::before,
+.picker-menu.fixed-width-menu > .picker-filter-row::after,
+.picker-menu.fixed-width-menu > .cli-extension-menu-head::before,
+.picker-menu.fixed-width-menu > .cli-extension-menu-head::after,
+.picker-menu.fixed-width-menu > .cli-extension-filter-row::before,
+.picker-menu.fixed-width-menu > .cli-extension-filter-row::after,
+.picker-menu.fixed-width-menu > .cli-extension-toolbar::before,
+.picker-menu.fixed-width-menu > .cli-extension-toolbar::after,
+.picker-menu.fixed-width-menu > .picker-menu-head > *::before,
+.picker-menu.fixed-width-menu > .picker-menu-head > *::after,
+.picker-menu.fixed-width-menu > .assistant-menu-head > *::before,
+.picker-menu.fixed-width-menu > .assistant-menu-head > *::after,
+.picker-menu.fixed-width-menu > .assistant-menu-toolbar > *::before,
+.picker-menu.fixed-width-menu > .assistant-menu-toolbar > *::after,
+.picker-menu.fixed-width-menu > .cli-extension-menu-head > *::before,
+.picker-menu.fixed-width-menu > .cli-extension-menu-head > *::after {
+  display: none !important;
+  content: none !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.picker-menu.fixed-width-menu > .picker-menu-head strong,
+.picker-menu.fixed-width-menu > .picker-menu-head span,
+.picker-menu.fixed-width-menu > .assistant-menu-head strong,
+.picker-menu.fixed-width-menu > .assistant-menu-head span,
+.picker-menu.fixed-width-menu > .image-style-menu-head strong,
+.picker-menu.fixed-width-menu > .image-style-menu-head span,
+.picker-menu.fixed-width-menu > .assistant-menu-toolbar span,
+.picker-menu.fixed-width-menu > .assistant-menu-toolbar strong,
+.picker-menu.fixed-width-menu > .cli-extension-menu-head strong,
+.picker-menu.fixed-width-menu > .cli-extension-menu-head span,
+.picker-menu.fixed-width-menu > .cli-extension-filter-row > span,
+.picker-menu.fixed-width-menu .cli-extension-title-count {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+}
+
+/* performance pass: remove costly glass/background effects. */
+*,
+*::before,
+*::after {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.workspace-aurora,
+.workspace-aurora::before,
+.workspace-aurora::after,
+.workspace-aurora-veil,
+.workspace-aurora-blob,
+.app-aurora-shell,
+.app-aurora-shell::before,
+.app-aurora-shell::after {
+  display: none !important;
+  opacity: 0 !important;
+  animation: none !important;
+  filter: none !important;
+  mix-blend-mode: normal !important;
+  background: transparent !important;
+  background-image: none !important;
+  will-change: auto !important;
+  transform: none !important;
+}
+
+.desktop-window-shell,
+.desktop-window-shell::before,
+.desktop-window-shell::after,
+.window-chrome,
+.sidebar,
+.main-panel,
+.workspace-page,
+.full-bleed-page,
+.page-surface,
+.chat-main-panel,
+.cli-main-panel,
+.conversation-panel,
+.modal-mask,
+.image-preview-modal-mask {
+  animation: none !important;
+  filter: none !important;
+  will-change: auto !important;
+}
+
+.desktop-window-shell::before,
+.desktop-window-shell::after {
+  background: transparent !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
+.desktop-window-shell {
+  background:
+    linear-gradient(180deg, rgb(var(--bg-rgb) / 0.18), rgb(var(--bg-rgb) / 0.22)),
+    var(--client-bg-image) center / cover no-repeat !important;
+}
+
+:root[data-theme='dark'] .desktop-window-shell {
+  background:
+    linear-gradient(180deg, rgb(var(--bg-rgb) / 0.32), rgb(var(--bg-rgb) / 0.38)),
+    var(--client-bg-image) center / cover no-repeat !important;
+}
+
+/* popup header removal pass: button popovers should start with controls, not title blocks. */
+.picker-menu.fixed-width-menu > .picker-menu-head {
+  display: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  min-height: 0 !important;
+}
+
+.cli-extension-menu .cli-extension-filter-row {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+}
+
+.cli-extension-menu .cli-extension-filter-tabs {
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+}
+
+.cli-extension-menu .cli-extension-toolbar {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+  gap: 8px !important;
+  flex: 0 1 auto !important;
+  min-width: 0 !important;
+}
+
+.cli-extension-menu .cli-extension-search {
+  width: clamp(128px, 34vw, 190px) !important;
+  min-width: 112px !important;
+  flex: 0 1 190px !important;
+}
+
+.assistant-menu .assistant-menu-toolbar {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 10px !important;
+}
+
+.assistant-menu .assistant-search {
+  flex: 1 1 auto !important;
+  min-width: 140px !important;
+  width: auto !important;
+}
+
+/* dark neutral surface pass: module backgrounds keep brightness levels only. */
+:root[data-theme='dark'] {
+  --bg: #101011;
+  --bg-rgb: 16 16 17;
+  --window-bg: rgb(var(--bg-rgb));
+  --window-bg-rgb: 16 16 17;
+  --panel-rgb: 23 23 24;
+  --panel-strong-rgb: 30 30 31;
+  --surface-rgb: 27 27 28;
+  --surface-strong-rgb: 36 36 37;
+  --panel: rgb(var(--panel-rgb));
+  --panel-strong: rgb(var(--panel-strong-rgb));
+  --surface: rgb(var(--surface-rgb));
+  --surface-strong: rgb(var(--surface-strong-rgb));
+  --card-bg: rgb(var(--panel-rgb));
+  --card-bg-strong: rgb(var(--panel-strong-rgb));
+  --popover-bg: rgb(var(--panel-strong-rgb));
+  --dialog-glass-bg: rgb(var(--panel-strong-rgb));
+  --sidebar-bg: rgba(20, 20, 21, 0.86);
+  --app-glass-tint: rgba(16, 16, 17, 0.08);
+  --app-glass-line: rgba(255, 255, 255, 0.06);
+  --bubble-user: rgb(var(--surface-strong-rgb));
+  --bubble-ai: rgb(var(--panel-rgb));
+  --bubble-log: rgb(var(--surface-rgb));
+  --line: rgba(230, 230, 232, 0.1);
+  --line-strong: rgba(235, 235, 237, 0.16);
+  --glass-border: rgba(255, 255, 255, 0.08);
+}
+
+:root[data-theme='dark'] .desktop-window-shell {
+  background:
+    linear-gradient(180deg, rgb(var(--bg-rgb) / 0.34), rgb(var(--bg-rgb) / 0.4)),
+    var(--client-bg-image) center / cover no-repeat !important;
+}
+
+:root[data-theme='dark'] .window-chrome,
+:root[data-theme='dark'] .sidebar,
+:root[data-theme='dark'] .main-panel,
+:root[data-theme='dark'] .workspace-page,
+:root[data-theme='dark'] .full-bleed-page,
+:root[data-theme='dark'] .chat-main-panel,
+:root[data-theme='dark'] .cli-main-panel,
+:root[data-theme='dark'] .conversation-panel {
+  background-color: transparent !important;
+  background-image: none !important;
+}
+
+:root[data-theme='dark'] .page-surface,
+:root[data-theme='dark'] .panel.scroll-panel.page-surface,
+:root[data-theme='dark'] .scroll-panel.page-surface,
+:root[data-theme='dark'] article.panel.page-surface,
+:root[data-theme='dark'] .workspace-page > .panel.page-surface,
+:root[data-theme='dark'] .page-surface.panel,
+:root[data-theme='dark'] .chat-panel-surface,
+:root[data-theme='dark'] .cli-panel-surface,
+:root[data-theme='dark'] .panel,
+:root[data-theme='dark'] .card,
+:root[data-theme='dark'] .metric-card,
+:root[data-theme='dark'] .status-card,
+:root[data-theme='dark'] .service-status-card,
+:root[data-theme='dark'] .subscription-plan-card,
+:root[data-theme='dark'] .wallet-card,
+:root[data-theme='dark'] .billing-card,
+:root[data-theme='dark'] .panel-block,
+:root[data-theme='dark'] .list-block,
+:root[data-theme='dark'] .subform,
+:root[data-theme='dark'] .message-bubble,
+:root[data-theme='dark'] .shell-composer,
+:root[data-theme='dark'] .chat-composer,
+:root[data-theme='dark'] .cli-composer {
+  background: var(--surface) !important;
+  border-color: var(--line) !important;
+}
+
+:root[data-theme='dark'] .modal-card,
+:root[data-theme='dark'] .image-preview-modal,
+:root[data-theme='dark'] .attachment-preview-modal,
+:root[data-theme='dark'] .announcement-modal-card,
+:root[data-theme='dark'] .translation-modal-card,
+:root[data-theme='dark'] .picker-menu,
+:root[data-theme='dark'] .session-context-menu,
+:root[data-theme='dark'] .chat-history-panel,
+:root[data-theme='dark'] .cli-history-panel,
+:root[data-theme='dark'] .cli-plan-floating-panel,
+:root[data-theme='dark'] .desktop-update-popover,
+:root[data-theme='dark'] .cli-extension-menu,
+:root[data-theme='dark'] .assistant-menu,
+:root[data-theme='dark'] .image-style-menu,
+:root[data-theme='dark'] .cli-extension-floating-tooltip,
+:root[data-theme='dark'] .markdown-code-action-menu,
+:root[data-theme='dark'] .toast-bar {
+  background: var(--panel-strong) !important;
+  border-color: var(--line-strong) !important;
+}
+
+:root[data-theme='dark'] .shell-composer textarea,
+:root[data-theme='dark'] .chat-composer textarea,
+:root[data-theme='dark'] .cli-composer textarea,
+:root[data-theme='dark'] input,
+:root[data-theme='dark'] select,
+:root[data-theme='dark'] textarea {
+  background: var(--panel) !important;
+  border-color: var(--line) !important;
+}
+
+/* keep page-level containers transparent; only real modules own surfaces. */
+:root[data-theme='dark'] .workspace-page.full-bleed-page > .panel.scroll-panel.page-surface,
+:root[data-theme='dark'] .workspace-page.full-bleed-page > article.panel.page-surface,
+:root[data-theme='dark'] .workspace-page > .panel.page-surface,
+:root[data-theme='dark'] .workspace-page > article.panel.page-surface {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+:root[data-theme='dark'] .workspace-page.full-bleed-page > .panel.scroll-panel.page-surface:hover,
+:root[data-theme='dark'] .workspace-page.full-bleed-page > article.panel.page-surface:hover,
+:root[data-theme='dark'] .workspace-page > .panel.page-surface:hover,
+:root[data-theme='dark'] .workspace-page > article.panel.page-surface:hover {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+:root[data-theme='dark'] .workspace-page.full-bleed-page > .panel.scroll-panel.page-surface::before,
+:root[data-theme='dark'] .workspace-page.full-bleed-page > .panel.scroll-panel.page-surface::after,
+:root[data-theme='dark'] .workspace-page.full-bleed-page > article.panel.page-surface::before,
+:root[data-theme='dark'] .workspace-page.full-bleed-page > article.panel.page-surface::after,
+:root[data-theme='dark'] .workspace-page > .panel.page-surface::before,
+:root[data-theme='dark'] .workspace-page > .panel.page-surface::after,
+:root[data-theme='dark'] .workspace-page > article.panel.page-surface::before,
+:root[data-theme='dark'] .workspace-page > article.panel.page-surface::after {
+  background: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  content: none !important;
+}
+
+/* Aichat/Image/Codex/Claude outer panels must not paint a page-sized block. */
+:root[data-theme='dark'] .chat-page .chat-layout,
+:root[data-theme='dark'] .chat-page .chat-panel-surface,
+:root[data-theme='dark'] .chat-page .chat-main-panel,
+:root[data-theme='dark'] .chat-page .conversation-panel,
+:root[data-theme='dark'] .workspace-page > .chat-main-panel,
+:root[data-theme='dark'] .workspace-page > .conversation-panel,
+:root[data-theme='dark'] .workspace-page > .cli-panel-surface {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+:root[data-theme='dark'] .chat-page .chat-panel-surface:hover,
+:root[data-theme='dark'] .chat-page .chat-main-panel:hover,
+:root[data-theme='dark'] .chat-page .conversation-panel:hover,
+:root[data-theme='dark'] .workspace-page > .chat-main-panel:hover,
+:root[data-theme='dark'] .workspace-page > .conversation-panel:hover,
+:root[data-theme='dark'] .workspace-page > .cli-panel-surface:hover {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+:root[data-theme='dark'] .chat-page .chat-panel-surface::before,
+:root[data-theme='dark'] .chat-page .chat-panel-surface::after,
+:root[data-theme='dark'] .chat-page .chat-main-panel::before,
+:root[data-theme='dark'] .chat-page .chat-main-panel::after,
+:root[data-theme='dark'] .chat-page .conversation-panel::before,
+:root[data-theme='dark'] .chat-page .conversation-panel::after,
+:root[data-theme='dark'] .workspace-page > .chat-main-panel::before,
+:root[data-theme='dark'] .workspace-page > .chat-main-panel::after,
+:root[data-theme='dark'] .workspace-page > .conversation-panel::before,
+:root[data-theme='dark'] .workspace-page > .conversation-panel::after,
+:root[data-theme='dark'] .workspace-page > .cli-panel-surface::before,
+:root[data-theme='dark'] .workspace-page > .cli-panel-surface::after {
+  background: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  content: none !important;
+}
+
+/* translucent layer system: background texture remains visible through real modules. */
+:root {
+  --client-bg-image: url('/light.jpg') !important;
+  --layer-sidebar-bg: rgba(247, 250, 255, 0.9);
+  --layer-module-bg: rgba(255, 255, 255, 0.66);
+  --layer-card-bg: rgba(255, 255, 255, 0.76);
+  --layer-control-bg: rgba(255, 255, 255, 0.7);
+  --layer-popover-bg: rgba(255, 255, 255, 0.9);
+  --layer-border: rgba(62, 74, 92, 0.14);
+  --layer-border-strong: rgba(62, 74, 92, 0.22);
+  --layer-shadow: 0 18px 44px rgba(32, 43, 56, 0.08);
+  --layer-shadow-strong: 0 24px 64px rgba(32, 43, 56, 0.14);
+}
+
+:root[data-theme='dark'] {
+  --client-bg-image: url('/dark.jpg') !important;
+  --layer-sidebar-bg: rgba(18, 18, 20, 0.6);
+  --layer-module-bg: rgba(23, 23, 25, 0.3);
+  --layer-card-bg: rgba(30, 30, 32, 0.4);
+  --layer-control-bg: rgba(38, 38, 40, 0.5);
+  --layer-popover-bg: rgba(31, 31, 33, 0.6);
+  --layer-border: rgba(235, 235, 237, 0.1);
+  --layer-border-strong: rgba(235, 235, 237, 0.17);
+  --layer-shadow: 0 18px 44px rgba(0, 0, 0, 0.22);
+  --layer-shadow-strong: 0 24px 64px rgba(0, 0, 0, 0.32);
+}
+
+.desktop-window-shell {
+  background:
+    linear-gradient(180deg, rgb(var(--bg-rgb) / 0.12), rgb(var(--bg-rgb) / 0.16)),
+    var(--client-bg-image) center / cover no-repeat !important;
+}
+
+:root[data-theme='dark'] .desktop-window-shell {
+  background:
+    linear-gradient(180deg, rgb(var(--bg-rgb) / 0.18), rgb(var(--bg-rgb) / 0.24)),
+    var(--client-bg-image) center / cover no-repeat !important;
+}
+
+.sidebar,
+:root[data-theme='dark'] .sidebar {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.018)),
+    var(--layer-sidebar-bg) !important;
+  border-color: var(--layer-border) !important;
+  box-shadow: var(--layer-shadow) !important;
+}
+
+.panel-block,
+.list-block,
+.subform,
+.me-user-card,
+.me-device-binding-card,
+.me-key-list-card,
+.me-key-create-card,
+.me-claude-card,
+.me-codex-card,
+.wallet-overview-card,
+.usage-trend-card,
+.pricing-card,
+.subscription-plan-card,
+.service-status-card,
+.status-card,
+.metric-card,
+.billing-card,
+.cli-log-bubble,
+.cli-log-phase-section,
+.timeline-detail,
+.result-block,
+.markdown-code-block,
+.markdown-body pre {
+  background: var(--layer-module-bg) !important;
+  border-color: var(--layer-border) !important;
+  box-shadow: var(--layer-shadow) !important;
+}
+
+.record-row,
+.action-row,
+.inline-settings-card,
+.status-button,
+.wallet-overview-metric,
+.usage-bar-row,
+.message-bubble,
+.shell-composer,
+.chat-composer,
+.cli-composer,
+.deploy-timeline-list,
+.empty-card,
+.key-reveal,
+.desktop-update-inline-row {
+  background: var(--layer-card-bg) !important;
+  border-color: var(--layer-border) !important;
+}
+
+input,
+select,
+textarea,
+.secondary-button,
+.status-grid-slim .status-button,
+.model-select-trigger,
+.assistant-mode-button,
+.composer-token-chip,
+.message-extension-chip,
+.usage-bar-track {
+  background: var(--layer-control-bg) !important;
+  border-color: var(--layer-border) !important;
+}
+
+.modal-card,
+.image-preview-modal,
+.attachment-preview-modal,
+.announcement-modal-card,
+.translation-modal-card,
+.picker-menu,
+.session-context-menu,
+.chat-history-panel,
+.cli-history-panel,
+.cli-plan-floating-panel,
+.desktop-update-popover,
+.cli-extension-menu,
+.assistant-menu,
+.image-style-menu,
+.cli-extension-floating-tooltip,
+.markdown-code-action-menu,
+.toast-bar {
+  background: var(--layer-popover-bg) !important;
+  border-color: var(--layer-border-strong) !important;
+  box-shadow: var(--layer-shadow-strong) !important;
+}
+
+.assistant-topbar-tabs,
+.assistant-topbar-tabs:hover,
+.assistant-topbar-tabs:focus-within {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.assistant-topbar-tabs .assistant-mode-button,
+.assistant-topbar-tabs .assistant-mode-button:hover,
+.assistant-topbar-tabs .assistant-mode-button:focus-visible,
+.assistant-topbar-tabs .assistant-mode-button.active {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+:root[data-theme='dark'] .desktop-window-content {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+}
+
+:root[data-theme='dark'] .panel-block,
+:root[data-theme='dark'] .list-block,
+:root[data-theme='dark'] .subform,
+:root[data-theme='dark'] .me-user-card,
+:root[data-theme='dark'] .me-device-binding-card,
+:root[data-theme='dark'] .me-key-list-card,
+:root[data-theme='dark'] .me-key-create-card,
+:root[data-theme='dark'] .me-claude-card,
+:root[data-theme='dark'] .me-codex-card,
+:root[data-theme='dark'] .wallet-overview-card,
+:root[data-theme='dark'] .usage-trend-card,
+:root[data-theme='dark'] .pricing-card,
+:root[data-theme='dark'] .subscription-plan-card,
+:root[data-theme='dark'] .service-status-card,
+:root[data-theme='dark'] .status-card,
+:root[data-theme='dark'] .metric-card,
+:root[data-theme='dark'] .billing-card,
+:root[data-theme='dark'] .cli-log-bubble,
+:root[data-theme='dark'] .cli-log-phase-section,
+:root[data-theme='dark'] .timeline-detail,
+:root[data-theme='dark'] .result-block,
+:root[data-theme='dark'] .markdown-code-block,
+:root[data-theme='dark'] .markdown-body pre {
+  background: var(--layer-module-bg) !important;
+  background-color: var(--layer-module-bg) !important;
+  background-image: none !important;
+}
+
+:root[data-theme='dark'] .record-row,
+:root[data-theme='dark'] .action-row,
+:root[data-theme='dark'] .inline-settings-card,
+:root[data-theme='dark'] .status-button,
+:root[data-theme='dark'] .wallet-overview-metric,
+:root[data-theme='dark'] .usage-bar-row,
+:root[data-theme='dark'] .message-bubble,
+:root[data-theme='dark'] .shell-composer,
+:root[data-theme='dark'] .chat-composer,
+:root[data-theme='dark'] .cli-composer,
+:root[data-theme='dark'] .deploy-timeline-list,
+:root[data-theme='dark'] .empty-card,
+:root[data-theme='dark'] .key-reveal,
+:root[data-theme='dark'] .desktop-update-inline-row {
+  background: var(--layer-card-bg) !important;
+  background-color: var(--layer-card-bg) !important;
+  background-image: none !important;
+}
+
+:root[data-theme='dark'] input,
+:root[data-theme='dark'] select,
+:root[data-theme='dark'] textarea,
+:root[data-theme='dark'] .secondary-button,
+:root[data-theme='dark'] .status-grid-slim .status-button,
+:root[data-theme='dark'] .model-select-trigger,
+:root[data-theme='dark'] .composer-token-chip,
+:root[data-theme='dark'] .message-extension-chip,
+:root[data-theme='dark'] .usage-bar-track {
+  background: var(--layer-control-bg) !important;
+  background-color: var(--layer-control-bg) !important;
+  background-image: none !important;
+}
+
+:root[data-theme='dark'] .modal-card,
+:root[data-theme='dark'] .image-preview-modal,
+:root[data-theme='dark'] .attachment-preview-modal,
+:root[data-theme='dark'] .announcement-modal-card,
+:root[data-theme='dark'] .translation-modal-card,
+:root[data-theme='dark'] .picker-menu,
+:root[data-theme='dark'] .session-context-menu,
+:root[data-theme='dark'] .chat-history-panel,
+:root[data-theme='dark'] .cli-history-panel,
+:root[data-theme='dark'] .cli-plan-floating-panel,
+:root[data-theme='dark'] .desktop-update-popover,
+:root[data-theme='dark'] .cli-extension-menu,
+:root[data-theme='dark'] .assistant-menu,
+:root[data-theme='dark'] .image-style-menu,
+:root[data-theme='dark'] .cli-extension-floating-tooltip,
+:root[data-theme='dark'] .markdown-code-action-menu,
+:root[data-theme='dark'] .toast-bar {
+  background: var(--layer-popover-bg) !important;
+  background-color: var(--layer-popover-bg) !important;
+  background-image: none !important;
+}
+
+.workspace-page .conversation-scroll-region,
+.workspace-page .message-stream,
+:root[data-theme='dark'] .workspace-page .conversation-scroll-region,
+:root[data-theme='dark'] .workspace-page .message-stream {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
+.shell-composer,
+.chat-composer,
+.cli-composer,
+:root[data-theme='dark'] .shell-composer,
+:root[data-theme='dark'] .chat-composer,
+:root[data-theme='dark'] .cli-composer {
+  background: var(--layer-module-bg) !important;
+  background-color: var(--layer-module-bg) !important;
+  background-image: none !important;
+  border-color: var(--layer-border) !important;
+}
+
+/* Final popup glass layer: blur is scoped to the floating surface itself. */
+:root {
+  --popup-glass-bg: rgba(248, 251, 255, 0.78);
+  --popup-glass-highlight: rgba(255, 255, 255, 0.34);
+  --popup-glass-border: rgba(63, 78, 100, 0.22);
+  --popup-glass-shadow: 0 18px 48px rgba(28, 38, 54, 0.18);
+}
+
+:root[data-theme='dark'] {
+  --popup-glass-bg: rgba(28, 29, 32, 0.76);
+  --popup-glass-highlight: rgba(255, 255, 255, 0.08);
+  --popup-glass-border: rgba(235, 238, 244, 0.16);
+  --popup-glass-shadow: 0 22px 58px rgba(0, 0, 0, 0.42);
+}
+
+.picker-menu,
+.session-context-menu,
+.chat-history-panel,
+.cli-history-panel,
+.cli-plan-floating-panel,
+.modal-card,
+.desktop-update-popover,
+.announcement-modal-card,
+.cli-extension-menu,
+.assistant-menu,
+.image-style-menu,
+.image-config-menu,
+.model-menu,
+.markdown-code-action-menu,
+.translation-modal-card,
+.toast-bar,
+.cli-extension-floating-tooltip,
+:root[data-performance-mode='efficiency'] .picker-menu,
+:root[data-performance-mode='efficiency'] .session-context-menu,
+:root[data-performance-mode='efficiency'] .chat-history-panel,
+:root[data-performance-mode='efficiency'] .cli-history-panel,
+:root[data-performance-mode='efficiency'] .cli-plan-floating-panel,
+:root[data-performance-mode='efficiency'] .modal-card,
+:root[data-performance-mode='efficiency'] .desktop-update-popover,
+:root[data-performance-mode='efficiency'] .announcement-modal-card,
+:root[data-performance-mode='efficiency'] .cli-extension-menu,
+:root[data-performance-mode='efficiency'] .assistant-menu,
+:root[data-performance-mode='efficiency'] .image-style-menu,
+:root[data-performance-mode='efficiency'] .image-config-menu,
+:root[data-performance-mode='efficiency'] .model-menu,
+:root[data-performance-mode='efficiency'] .markdown-code-action-menu,
+:root[data-performance-mode='efficiency'] .translation-modal-card,
+:root[data-performance-mode='efficiency'] .toast-bar,
+:root[data-performance-mode='efficiency'] .cli-extension-floating-tooltip {
+  background:
+    linear-gradient(180deg, var(--popup-glass-highlight), rgba(255, 255, 255, 0.025)),
+    var(--popup-glass-bg) !important;
+  background-color: var(--popup-glass-bg) !important;
+  background-clip: padding-box !important;
+  border-color: var(--popup-glass-border) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    var(--popup-glass-shadow) !important;
+  backdrop-filter: blur(34px) saturate(168%) contrast(0.96) !important;
+  -webkit-backdrop-filter: blur(34px) saturate(168%) contrast(0.96) !important;
+  isolation: isolate;
+}
+
+:root[data-theme='dark'] .picker-menu,
+:root[data-theme='dark'] .session-context-menu,
+:root[data-theme='dark'] .chat-history-panel,
+:root[data-theme='dark'] .cli-history-panel,
+:root[data-theme='dark'] .cli-plan-floating-panel,
+:root[data-theme='dark'] .modal-card,
+:root[data-theme='dark'] .desktop-update-popover,
+:root[data-theme='dark'] .announcement-modal-card,
+:root[data-theme='dark'] .cli-extension-menu,
+:root[data-theme='dark'] .assistant-menu,
+:root[data-theme='dark'] .image-style-menu,
+:root[data-theme='dark'] .image-config-menu,
+:root[data-theme='dark'] .model-menu,
+:root[data-theme='dark'] .markdown-code-action-menu,
+:root[data-theme='dark'] .translation-modal-card,
+:root[data-theme='dark'] .toast-bar,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .picker-menu,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .session-context-menu,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .chat-history-panel,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .cli-history-panel,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .cli-plan-floating-panel,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .modal-card,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .desktop-update-popover,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .announcement-modal-card,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .cli-extension-menu,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .assistant-menu,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .image-style-menu,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .image-config-menu,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .model-menu,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .markdown-code-action-menu,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .translation-modal-card,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .toast-bar {
+  background:
+    linear-gradient(180deg, var(--popup-glass-highlight), rgba(255, 255, 255, 0.018)),
+    var(--popup-glass-bg) !important;
+  background-color: var(--popup-glass-bg) !important;
+  backdrop-filter: blur(36px) saturate(132%) contrast(0.92) !important;
+  -webkit-backdrop-filter: blur(36px) saturate(132%) contrast(0.92) !important;
+}
+
+/* Final visual repair: remove page backplates, keep composer/input surfaces light, and restore regional popup glass. */
+:root {
+  --final-popup-bg: rgba(248, 251, 255, 0.64);
+  --final-popup-highlight: rgba(255, 255, 255, 0.34);
+  --final-popup-border: rgba(62, 76, 96, 0.22);
+  --final-popup-shadow: 0 22px 58px rgba(27, 38, 55, 0.2);
+  --final-input-bg: rgba(255, 255, 255, 0.56);
+  --final-code-bg: rgba(255, 255, 255, 0.58);
+}
+
+:root[data-theme='dark'] {
+  --final-popup-bg: rgba(25, 26, 28, 0.62);
+  --final-popup-highlight: rgba(255, 255, 255, 0.075);
+  --final-popup-border: rgba(235, 238, 244, 0.16);
+  --final-popup-shadow: 0 24px 64px rgba(0, 0, 0, 0.42);
+  --final-input-bg: rgba(28, 28, 30, 0.34);
+  --final-code-bg: rgba(24, 24, 26, 0.34);
+}
+
+.assistant-host,
+.assistant-host .workspace-shell,
+.assistant-host .workspace-shell.active,
+.workspace-page.chat-page,
+.workspace-page.cli-page,
+.workspace-page.cli-page.full-bleed-page,
+.chat-page .chat-layout,
+.cli-page .cli-layout,
+.chat-page .chat-main-panel,
+.chat-page .conversation-panel,
+.cli-page .cli-main-panel,
+.cli-page .cli-main-panel.panel,
+.cli-page .cli-panel-surface,
+.cli-page article.panel.cli-main-panel,
+.cli-page article.panel.cli-main-panel.cli-panel-surface,
+.chat-page .chat-panel-surface,
+.chat-page .conversation-scroll-region,
+.cli-page .conversation-scroll-region,
+.chat-page .message-stream,
+.cli-page .cli-thread,
+:root[data-theme='dark'] .assistant-host,
+:root[data-theme='dark'] .assistant-host .workspace-shell,
+:root[data-theme='dark'] .assistant-host .workspace-shell.active,
+:root[data-theme='dark'] .workspace-page.chat-page,
+:root[data-theme='dark'] .workspace-page.cli-page,
+:root[data-theme='dark'] .workspace-page.cli-page.full-bleed-page,
+:root[data-theme='dark'] .chat-page .chat-layout,
+:root[data-theme='dark'] .cli-page .cli-layout,
+:root[data-theme='dark'] .chat-page .chat-main-panel,
+:root[data-theme='dark'] .chat-page .conversation-panel,
+:root[data-theme='dark'] .cli-page .cli-main-panel,
+:root[data-theme='dark'] .cli-page .cli-main-panel.panel,
+:root[data-theme='dark'] .cli-page .cli-panel-surface,
+:root[data-theme='dark'] .cli-page article.panel.cli-main-panel,
+:root[data-theme='dark'] .cli-page article.panel.cli-main-panel.cli-panel-surface,
+:root[data-theme='dark'] .chat-page .chat-panel-surface,
+:root[data-theme='dark'] .chat-page .conversation-scroll-region,
+:root[data-theme='dark'] .cli-page .conversation-scroll-region,
+:root[data-theme='dark'] .chat-page .message-stream,
+:root[data-theme='dark'] .cli-page .cli-thread {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  filter: none !important;
+}
+
+.cli-page .cli-main-panel::before,
+.cli-page .cli-main-panel::after,
+.cli-page .cli-panel-surface::before,
+.cli-page .cli-panel-surface::after,
+.chat-page .chat-panel-surface::before,
+.chat-page .chat-panel-surface::after,
+.chat-page .conversation-panel::before,
+.chat-page .conversation-panel::after,
+.chat-page .chat-main-panel::before,
+.chat-page .chat-main-panel::after {
+  content: none !important;
+  display: none !important;
+  background: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.shell-composer,
+.chat-composer,
+.cli-composer,
+.composer-input-shell,
+.composer-toolbar,
+:root[data-theme='dark'] .shell-composer,
+:root[data-theme='dark'] .chat-composer,
+:root[data-theme='dark'] .cli-composer,
+:root[data-theme='dark'] .composer-input-shell,
+:root[data-theme='dark'] .composer-toolbar {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.composer-input-zone,
+:root[data-theme='dark'] .composer-input-zone {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.shell-composer textarea,
+.chat-composer textarea,
+.cli-composer textarea,
+.composer-input-zone textarea,
+:root[data-theme='dark'] .shell-composer textarea,
+:root[data-theme='dark'] .chat-composer textarea,
+:root[data-theme='dark'] .cli-composer textarea,
+:root[data-theme='dark'] .composer-input-zone textarea {
+  background: var(--final-input-bg) !important;
+  background-color: var(--final-input-bg) !important;
+  background-image: none !important;
+  border: 1px solid var(--layer-border) !important;
+  border-radius: 14px !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+}
+
+.picker-menu,
+.session-context-menu,
+.chat-history-panel,
+.cli-history-panel,
+.cli-plan-floating-panel,
+.modal-card,
+.desktop-update-popover,
+.announcement-modal-card,
+.cli-extension-menu,
+.assistant-menu,
+.image-style-menu,
+.image-config-menu,
+.model-menu,
+.markdown-code-action-menu,
+.translation-modal-card,
+.toast-bar,
+.cli-extension-floating-tooltip,
+:root[data-performance-mode='efficiency'] .picker-menu,
+:root[data-performance-mode='efficiency'] .session-context-menu,
+:root[data-performance-mode='efficiency'] .chat-history-panel,
+:root[data-performance-mode='efficiency'] .cli-history-panel,
+:root[data-performance-mode='efficiency'] .cli-plan-floating-panel,
+:root[data-performance-mode='efficiency'] .modal-card,
+:root[data-performance-mode='efficiency'] .desktop-update-popover,
+:root[data-performance-mode='efficiency'] .announcement-modal-card,
+:root[data-performance-mode='efficiency'] .cli-extension-menu,
+:root[data-performance-mode='efficiency'] .assistant-menu,
+:root[data-performance-mode='efficiency'] .image-style-menu,
+:root[data-performance-mode='efficiency'] .image-config-menu,
+:root[data-performance-mode='efficiency'] .model-menu,
+:root[data-performance-mode='efficiency'] .markdown-code-action-menu,
+:root[data-performance-mode='efficiency'] .translation-modal-card,
+:root[data-performance-mode='efficiency'] .toast-bar,
+:root[data-performance-mode='efficiency'] .cli-extension-floating-tooltip {
+  position: relative !important;
+  isolation: isolate !important;
+  overflow: visible !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border: 1px solid var(--final-popup-border) !important;
+  box-shadow: var(--final-popup-shadow) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.picker-menu::before,
+.session-context-menu::before,
+.chat-history-panel::before,
+.cli-history-panel::before,
+.cli-plan-floating-panel::before,
+.modal-card::before,
+.desktop-update-popover::before,
+.announcement-modal-card::before,
+.cli-extension-menu::before,
+.assistant-menu::before,
+.image-style-menu::before,
+.image-config-menu::before,
+.model-menu::before,
+.markdown-code-action-menu::before,
+.translation-modal-card::before,
+.toast-bar::before,
+.cli-extension-floating-tooltip::before,
+:root[data-performance-mode='efficiency'] .picker-menu::before,
+:root[data-performance-mode='efficiency'] .session-context-menu::before,
+:root[data-performance-mode='efficiency'] .chat-history-panel::before,
+:root[data-performance-mode='efficiency'] .cli-history-panel::before,
+:root[data-performance-mode='efficiency'] .cli-plan-floating-panel::before,
+:root[data-performance-mode='efficiency'] .modal-card::before,
+:root[data-performance-mode='efficiency'] .desktop-update-popover::before,
+:root[data-performance-mode='efficiency'] .announcement-modal-card::before,
+:root[data-performance-mode='efficiency'] .cli-extension-menu::before,
+:root[data-performance-mode='efficiency'] .assistant-menu::before,
+:root[data-performance-mode='efficiency'] .image-style-menu::before,
+:root[data-performance-mode='efficiency'] .image-config-menu::before,
+:root[data-performance-mode='efficiency'] .model-menu::before,
+:root[data-performance-mode='efficiency'] .markdown-code-action-menu::before,
+:root[data-performance-mode='efficiency'] .translation-modal-card::before,
+:root[data-performance-mode='efficiency'] .toast-bar::before,
+:root[data-performance-mode='efficiency'] .cli-extension-floating-tooltip::before {
+  content: '' !important;
+  position: absolute !important;
+  inset: 0 !important;
+  z-index: 0 !important;
+  pointer-events: none !important;
+  border-radius: inherit !important;
+  background:
+    linear-gradient(180deg, var(--final-popup-highlight), rgba(255, 255, 255, 0.02)),
+    var(--final-popup-bg) !important;
+  backdrop-filter: blur(38px) saturate(170%) contrast(0.96) !important;
+  -webkit-backdrop-filter: blur(38px) saturate(170%) contrast(0.96) !important;
+}
+
+:root[data-theme='dark'] .picker-menu::before,
+:root[data-theme='dark'] .session-context-menu::before,
+:root[data-theme='dark'] .chat-history-panel::before,
+:root[data-theme='dark'] .cli-history-panel::before,
+:root[data-theme='dark'] .cli-plan-floating-panel::before,
+:root[data-theme='dark'] .modal-card::before,
+:root[data-theme='dark'] .desktop-update-popover::before,
+:root[data-theme='dark'] .announcement-modal-card::before,
+:root[data-theme='dark'] .cli-extension-menu::before,
+:root[data-theme='dark'] .assistant-menu::before,
+:root[data-theme='dark'] .image-style-menu::before,
+:root[data-theme='dark'] .image-config-menu::before,
+:root[data-theme='dark'] .model-menu::before,
+:root[data-theme='dark'] .markdown-code-action-menu::before,
+:root[data-theme='dark'] .translation-modal-card::before,
+:root[data-theme='dark'] .toast-bar::before {
+  background:
+    linear-gradient(180deg, var(--final-popup-highlight), rgba(255, 255, 255, 0.012)),
+    var(--final-popup-bg) !important;
+  backdrop-filter: blur(40px) saturate(140%) contrast(0.92) !important;
+  -webkit-backdrop-filter: blur(40px) saturate(140%) contrast(0.92) !important;
+}
+
+.picker-menu > *,
+.session-context-menu > *,
+.chat-history-panel > *,
+.cli-history-panel > *,
+.cli-plan-floating-panel > *,
+.modal-card > *,
+.desktop-update-popover > *,
+.announcement-modal-card > *,
+.cli-extension-menu > *,
+.assistant-menu > *,
+.image-style-menu > *,
+.image-config-menu > *,
+.model-menu > *,
+.markdown-code-action-menu > *,
+.translation-modal-card > *,
+.toast-bar > *,
+.cli-extension-floating-tooltip > * {
+  position: relative;
+  z-index: 1;
+}
+
+.modal-mask,
+.image-preview-modal-mask,
+:root[data-theme='dark'] .modal-mask,
+:root[data-theme='dark'] .image-preview-modal-mask {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.modal-card .panel-header,
+.modal-card .panel-header.compact,
+.modal-card .panel-header > div,
+.announcement-modal-head,
+.translation-modal-card > div:first-child,
+.picker-menu > .picker-menu-head,
+.picker-menu > .assistant-menu-head,
+.picker-menu > .image-style-menu-head,
+.picker-menu > .assistant-menu-toolbar,
+.picker-menu > .cli-extension-menu-head,
+.picker-menu > .cli-extension-filter-row,
+.picker-menu > .cli-extension-toolbar {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.markdown-code-block {
+  background: var(--final-code-bg) !important;
+  background-color: var(--final-code-bg) !important;
+  background-image: none !important;
+  border: 1px solid var(--layer-border) !important;
+  box-shadow: var(--layer-shadow) !important;
+}
+
+.markdown-body pre:has(.markdown-code-block),
+.markdown-code-block > pre,
+.markdown-code-block pre,
+.markdown-body pre .markdown-code-block > pre {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.markdown-code-block code,
+.markdown-code-block pre code,
+.markdown-body pre .markdown-code-block code {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+}
+
+/* Final effective layer: the dark backplate is the app content shell, not the chat thread. */
+.desktop-window-content,
+.main-panel,
+.workspace-host,
+.workspace-content-layer,
+.assistant-host,
+.assistant-host .workspace-shell,
+.assistant-host .workspace-shell.active,
+.workspace-page,
+.workspace-page.chat-page,
+.workspace-page.cli-page,
+.workspace-page.assistant-page,
+.chat-page,
+.cli-page,
+.chat-layout,
+.cli-layout,
+.chat-page .conversation-panel,
+.chat-page .chat-main-panel,
+.chat-page .chat-panel-surface,
+.cli-page .cli-main-panel,
+.cli-page .cli-panel-surface,
+.cli-page article.panel.cli-main-panel,
+.cli-page article.panel.cli-main-panel.cli-panel-surface,
+.chat-page .conversation-scroll-region,
+.cli-page .conversation-scroll-region,
+.chat-page .message-stream,
+.cli-page .cli-thread,
+:root[data-theme='dark'] .desktop-window-content,
+:root[data-theme='dark'] .main-panel,
+:root[data-theme='dark'] .workspace-host,
+:root[data-theme='dark'] .workspace-content-layer,
+:root[data-theme='dark'] .assistant-host,
+:root[data-theme='dark'] .assistant-host .workspace-shell,
+:root[data-theme='dark'] .assistant-host .workspace-shell.active,
+:root[data-theme='dark'] .workspace-page,
+:root[data-theme='dark'] .workspace-page.chat-page,
+:root[data-theme='dark'] .workspace-page.cli-page,
+:root[data-theme='dark'] .workspace-page.assistant-page,
+:root[data-theme='dark'] .chat-page,
+:root[data-theme='dark'] .cli-page,
+:root[data-theme='dark'] .chat-layout,
+:root[data-theme='dark'] .cli-layout,
+:root[data-theme='dark'] .chat-page .conversation-panel,
+:root[data-theme='dark'] .chat-page .chat-main-panel,
+:root[data-theme='dark'] .chat-page .chat-panel-surface,
+:root[data-theme='dark'] .cli-page .cli-main-panel,
+:root[data-theme='dark'] .cli-page .cli-panel-surface,
+:root[data-theme='dark'] .cli-page article.panel.cli-main-panel,
+:root[data-theme='dark'] .cli-page article.panel.cli-main-panel.cli-panel-surface,
+:root[data-theme='dark'] .chat-page .conversation-scroll-region,
+:root[data-theme='dark'] .cli-page .conversation-scroll-region,
+:root[data-theme='dark'] .chat-page .message-stream,
+:root[data-theme='dark'] .cli-page .cli-thread,
+:root[data-performance-mode='efficiency'] .desktop-window-content,
+:root[data-performance-mode='efficiency'] .main-panel,
+:root[data-performance-mode='efficiency'] .workspace-host,
+:root[data-performance-mode='efficiency'] .workspace-content-layer,
+:root[data-performance-mode='efficiency'] .assistant-host,
+:root[data-performance-mode='efficiency'] .assistant-host .workspace-shell,
+:root[data-performance-mode='efficiency'] .workspace-page,
+:root[data-performance-mode='efficiency'] .chat-page,
+:root[data-performance-mode='efficiency'] .cli-page,
+:root[data-performance-mode='efficiency'] .chat-layout,
+:root[data-performance-mode='efficiency'] .cli-layout,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .desktop-window-content,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .main-panel,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .workspace-host,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .workspace-content-layer,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .assistant-host,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .assistant-host .workspace-shell,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .workspace-page,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .chat-page,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .cli-page,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .chat-layout,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .cli-layout {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.desktop-window-content::before,
+.desktop-window-content::after,
+.main-panel::before,
+.main-panel::after,
+.workspace-host::before,
+.workspace-host::after,
+.workspace-page::before,
+.workspace-page::after,
+.chat-page .chat-main-panel::before,
+.chat-page .chat-main-panel::after,
+.chat-page .conversation-panel::before,
+.chat-page .conversation-panel::after,
+.cli-page .cli-main-panel::before,
+.cli-page .cli-main-panel::after {
+  display: none !important;
+  content: none !important;
+  background: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+/* Final effective layer: real popup glass must live on the popup surface itself. */
+.picker-menu,
+.session-context-menu,
+.chat-history-panel,
+.cli-history-panel,
+.cli-plan-floating-panel,
+.modal-card,
+.desktop-update-popover,
+.announcement-modal-card,
+.cli-extension-menu,
+.assistant-menu,
+.image-style-menu,
+.image-config-menu,
+.model-menu,
+.markdown-code-action-menu,
+.translation-modal-card,
+.toast-bar,
+.cli-extension-floating-tooltip,
+:root[data-performance-mode='efficiency'] .picker-menu,
+:root[data-performance-mode='efficiency'] .session-context-menu,
+:root[data-performance-mode='efficiency'] .chat-history-panel,
+:root[data-performance-mode='efficiency'] .cli-history-panel,
+:root[data-performance-mode='efficiency'] .cli-plan-floating-panel,
+:root[data-performance-mode='efficiency'] .modal-card,
+:root[data-performance-mode='efficiency'] .desktop-update-popover,
+:root[data-performance-mode='efficiency'] .announcement-modal-card,
+:root[data-performance-mode='efficiency'] .cli-extension-menu,
+:root[data-performance-mode='efficiency'] .assistant-menu,
+:root[data-performance-mode='efficiency'] .image-style-menu,
+:root[data-performance-mode='efficiency'] .image-config-menu,
+:root[data-performance-mode='efficiency'] .model-menu,
+:root[data-performance-mode='efficiency'] .markdown-code-action-menu,
+:root[data-performance-mode='efficiency'] .translation-modal-card,
+:root[data-performance-mode='efficiency'] .toast-bar,
+:root[data-performance-mode='efficiency'] .cli-extension-floating-tooltip {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.3), rgba(255, 255, 255, 0.035)),
+    rgba(248, 251, 255, 0.62) !important;
+  background-color: rgba(248, 251, 255, 0.62) !important;
+  border: 1px solid rgba(62, 76, 96, 0.22) !important;
+  box-shadow: 0 24px 62px rgba(27, 38, 55, 0.22) !important;
+  backdrop-filter: blur(42px) saturate(180%) contrast(0.96) !important;
+  -webkit-backdrop-filter: blur(42px) saturate(180%) contrast(0.96) !important;
+  isolation: auto !important;
+}
+
+:root[data-theme='dark'] .picker-menu,
+:root[data-theme='dark'] .session-context-menu,
+:root[data-theme='dark'] .chat-history-panel,
+:root[data-theme='dark'] .cli-history-panel,
+:root[data-theme='dark'] .cli-plan-floating-panel,
+:root[data-theme='dark'] .modal-card,
+:root[data-theme='dark'] .desktop-update-popover,
+:root[data-theme='dark'] .announcement-modal-card,
+:root[data-theme='dark'] .cli-extension-menu,
+:root[data-theme='dark'] .assistant-menu,
+:root[data-theme='dark'] .image-style-menu,
+:root[data-theme='dark'] .image-config-menu,
+:root[data-theme='dark'] .model-menu,
+:root[data-theme='dark'] .markdown-code-action-menu,
+:root[data-theme='dark'] .translation-modal-card,
+:root[data-theme='dark'] .toast-bar,
+:root[data-theme='dark'] .cli-extension-floating-tooltip,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .picker-menu,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .session-context-menu,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .chat-history-panel,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .cli-history-panel,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .cli-plan-floating-panel,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .modal-card,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .desktop-update-popover,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .announcement-modal-card,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .cli-extension-menu,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .assistant-menu,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .image-style-menu,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .image-config-menu,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .model-menu,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .markdown-code-action-menu,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .translation-modal-card,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .toast-bar,
+:root[data-theme='dark'][data-performance-mode='efficiency'] .cli-extension-floating-tooltip {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.018)),
+    rgba(25, 26, 28, 0.58) !important;
+  background-color: rgba(25, 26, 28, 0.58) !important;
+  border-color: rgba(235, 238, 244, 0.16) !important;
+  box-shadow: 0 26px 68px rgba(0, 0, 0, 0.46) !important;
+  backdrop-filter: blur(46px) saturate(145%) contrast(0.92) !important;
+  -webkit-backdrop-filter: blur(46px) saturate(145%) contrast(0.92) !important;
+}
+
+.picker-menu::before,
+.picker-menu::after,
+.session-context-menu::before,
+.session-context-menu::after,
+.chat-history-panel::before,
+.chat-history-panel::after,
+.cli-history-panel::before,
+.cli-history-panel::after,
+.cli-plan-floating-panel::before,
+.cli-plan-floating-panel::after,
+.modal-card::before,
+.modal-card::after,
+.desktop-update-popover::before,
+.desktop-update-popover::after,
+.announcement-modal-card::before,
+.announcement-modal-card::after,
+.cli-extension-menu::before,
+.cli-extension-menu::after,
+.assistant-menu::before,
+.assistant-menu::after,
+.image-style-menu::before,
+.image-style-menu::after,
+.image-config-menu::before,
+.image-config-menu::after,
+.model-menu::before,
+.model-menu::after,
+.markdown-code-action-menu::before,
+.markdown-code-action-menu::after,
+.translation-modal-card::before,
+.translation-modal-card::after,
+.toast-bar::before,
+.toast-bar::after,
+.cli-extension-floating-tooltip::before,
+.cli-extension-floating-tooltip::after {
+  display: none !important;
+  content: none !important;
+  background: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* Absolute popup/composer authority: fullscreen frost fallback, no header strips. */
+body:has(.picker-menu)::after,
+body:has(.assistant-menu)::after,
+body:has(.image-style-menu)::after,
+body:has(.image-config-menu)::after,
+body:has(.model-menu)::after,
+body:has(.cli-extension-menu)::after,
+body:has(.session-context-menu)::after,
+body:has(.chat-history-panel)::after,
+body:has(.cli-history-panel)::after,
+body:has(.cli-plan-floating-panel)::after,
+body:has(.modal-card)::after,
+body:has(.desktop-update-popover)::after,
+body:has(.announcement-modal-card)::after,
+body:has(.markdown-code-action-menu)::after,
+body:has(.translation-modal-card)::after,
+body:has(.cli-extension-floating-tooltip)::after {
+  content: '' !important;
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 180 !important;
+  pointer-events: none !important;
+  background: rgba(246, 250, 255, 0.035) !important;
+  backdrop-filter: blur(28px) saturate(145%) !important;
+  -webkit-backdrop-filter: blur(28px) saturate(145%) !important;
+}
+
