@@ -15,3 +15,15 @@ test('assistant history sync skips unchanged session writes', () => {
   assert.match(mainSource, /assistantHistoryWriteSignatures\.set\(signatureKey, signature\)/)
   assert.match(mainSource, /assistantHistoryWriteSignatures\.delete\(`\$\{scope\}:\$\{item\.name\}`\)/)
 })
+
+test('codex session hydration keeps assistant messages without a final_answer phase', () => {
+  assert.match(
+    mainSource,
+    /role === 'assistant' && typeof parsed\.payload\.phase === 'string' && parsed\.payload\.phase !== 'final_answer'/
+  )
+})
+
+test('codex history list is corrected from hydrated session metadata', () => {
+  assert.match(mainSource, /const previous = grouped\.get\(sessionId\)/)
+  assert.match(mainSource, /details\?\.updatedAt \|\| Math\.floor\(metadata\.mtimeMs \/ 1000\) \|\| previous\?\.updatedAt/)
+})

@@ -6327,7 +6327,7 @@ async function buildCodexSessionMap() {
     .sort((left, right) => right.stat.mtimeMs - left.stat.mtimeMs)
     .slice(0, 40)
 
-  const sessionMap = new Map<string, string>()
+  const sessionMap = new Map<string, { projectPath: string; filePath: string; mtimeMs: number }>()
 
   for (const file of latestFiles) {
     const lines = await readJsonLines(file.filePath)
@@ -6340,7 +6340,11 @@ async function buildCodexSessionMap() {
         payload?: { id?: string; cwd?: string }
       }
       if (parsed.payload?.id && parsed.payload.cwd) {
-        sessionMap.set(parsed.payload.id, parsed.payload.cwd)
+        sessionMap.set(parsed.payload.id, {
+          projectPath: parsed.payload.cwd,
+          filePath: file.filePath,
+          mtimeMs: file.stat.mtimeMs,
+        })
       }
     } catch {
       continue
@@ -6435,7 +6439,7 @@ function parseCodexSession(lines: string[]): {
         if (role !== 'user' && role !== 'assistant') {
           continue
         }
-        if (role === 'assistant' && parsed.payload.phase !== 'final_answer') {
+        if (role === 'assistant' && typeof parsed.payload.phase === 'string' && parsed.payload.phase !== 'final_answer') {
           continue
         }
         if (role === 'user' && typeof parsed.payload.phase === 'string' && parsed.payload.phase !== 'input') {
@@ -6491,15 +6495,15 @@ async function listCodexHistory(limit = 0): Promise<CliHistoryEntry[]> {
       if (!previous || previous.updatedAt < parsed.ts) {
         grouped.set(parsed.session_id, {
           id: parsed.session_id,
-          title: sessionMap.get(parsed.session_id)
-            ? path.basename(sessionMap.get(parsed.session_id) ?? '')
+          title: sessionMap.get(parsed.session_id)?.projectPath
+            ? path.basename(sessionMap.get(parsed.session_id)?.projectPath ?? '')
             : `Codex 会话 ${parsed.session_id.slice(0, 8)}`,
           preview: normalizeWhitespace(sanitizeCliUserPrompt(parsed.text)),
           updatedAt: parsed.ts,
-          projectName: sessionMap.get(parsed.session_id)
-            ? path.basename(sessionMap.get(parsed.session_id) ?? '')
+          projectName: sessionMap.get(parsed.session_id)?.projectPath
+            ? path.basename(sessionMap.get(parsed.session_id)?.projectPath ?? '')
             : '未命名项目',
-          projectPath: sessionMap.get(parsed.session_id),
+          projectPath: sessionMap.get(parsed.session_id)?.projectPath,
         })
       }
     } catch {
@@ -6507,25 +6511,22 @@ async function listCodexHistory(limit = 0): Promise<CliHistoryEntry[]> {
     }
   }
 
-  for (const [sessionId, projectPath] of sessionMap.entries()) {
-    if (grouped.has(sessionId)) {
-      continue
-    }
-
+  for (const [sessionId, metadata] of sessionMap.entries()) {
     const details = await getCodexSession(sessionId)
-    if (!details?.messages.length) {
+    if (!details?.messages.length && grouped.has(sessionId)) {
       continue
     }
 
-    const lastUser = [...details.messages].reverse().find((item) => item.role === 'user')
-    const preview = normalizeWhitespace(lastUser?.content || details.preview || '')
+    const previous = grouped.get(sessionId)
+    const lastUser = [...(details?.messages || [])].reverse().find((item) => item.role === 'user')
+    const preview = normalizeWhitespace(lastUser?.content || details?.preview || previous?.preview || '')
     grouped.set(sessionId, {
       id: sessionId,
-      title: path.basename(projectPath || '') || `Codex 会话 ${sessionId.slice(0, 8)}`,
+      title: path.basename(metadata.projectPath || '') || previous?.title || `Codex 会话 ${sessionId.slice(0, 8)}`,
       preview,
-      updatedAt: details.updatedAt,
-      projectName: path.basename(projectPath || '') || details.projectName || '未命名项目',
-      projectPath: projectPath || details.projectPath,
+      updatedAt: details?.updatedAt || Math.floor(metadata.mtimeMs / 1000) || previous?.updatedAt || 0,
+      projectName: path.basename(metadata.projectPath || '') || details?.projectName || previous?.projectName || '未命名项目',
+      projectPath: metadata.projectPath || details?.projectPath || previous?.projectPath,
     })
   }
 

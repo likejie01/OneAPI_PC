@@ -6,6 +6,10 @@ export type AssistantSwitchChatSessionLike = {
   messages: Array<unknown>
 }
 
+export type ChatAssistantIdentity = {
+  id: string
+}
+
 export function shouldCreateAssistantSwitchChatSession(
   currentSession: AssistantSwitchChatSessionLike | null,
   nextAssistantId: string
@@ -35,4 +39,23 @@ export function applyAssistantSelectionToEmptyChatSession<T extends AssistantSwi
     group: nextGroup,
     updatedAt: Math.max(now, session.updatedAt),
   }
+}
+
+export function resolveChatSessionAssistant<T extends ChatAssistantIdentity>(
+  assistants: T[],
+  currentSession: { assistantId?: string | null } | null,
+  fallbackAssistantId?: string | null
+) {
+  const sessionAssistant = currentSession?.assistantId
+    ? assistants.find((item) => item.id === currentSession.assistantId)
+    : null
+  if (sessionAssistant) {
+    return sessionAssistant
+  }
+
+  return (
+    (fallbackAssistantId ? assistants.find((item) => item.id === fallbackAssistantId) : null) ??
+    assistants[0] ??
+    null
+  )
 }

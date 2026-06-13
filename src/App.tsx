@@ -178,6 +178,7 @@ import {
 import { deriveDesktopChatDisplayState, normalizeStoredDesktopChatMessage } from './lib/chat-reasoning'
 import {
   applyAssistantSelectionToEmptyChatSession,
+  resolveChatSessionAssistant,
   shouldCreateAssistantSwitchChatSession,
 } from './lib/chat-session'
 import {
@@ -4818,9 +4819,17 @@ function AssistantsChatWorkspace(props: {
     setSessionContextMenu(null)
   }, [])
 
+  const resolvedActiveSessionId =
+    activeSessionId && chatSessions.some((item) => item.id === activeSessionId)
+      ? activeSessionId
+      : chatSessions[0]?.id || ''
+  const activeSession = useMemo(
+    () => chatSessions.find((item) => item.id === resolvedActiveSessionId) ?? null,
+    [chatSessions, resolvedActiveSessionId]
+  )
   const activeAssistant = useMemo(
-    () => assistants.find((item) => item.id === activeAssistantId) ?? assistants[0] ?? null,
-    [assistants, activeAssistantId]
+    () => resolveChatSessionAssistant(assistants, activeSession, activeAssistantId),
+    [activeAssistantId, activeSession, assistants]
   )
   const assistantMenuItems = useMemo(
     () => decorateAssistants(assistants, assistantFavorites, assistantSearch),
@@ -4856,14 +4865,6 @@ function AssistantsChatWorkspace(props: {
     }
   }, [assistants])
 
-  const resolvedActiveSessionId =
-    activeSessionId && chatSessions.some((item) => item.id === activeSessionId)
-      ? activeSessionId
-      : chatSessions[0]?.id || ''
-  const activeSession = useMemo(
-    () => chatSessions.find((item) => item.id === resolvedActiveSessionId) ?? null,
-    [chatSessions, resolvedActiveSessionId]
-  )
   const messages = activeSession?.messages || []
   const compatibleChatModels = useMemo(
     () => prioritizeFavoriteModels(filterAssistantModels('chat', withFavoriteFlag(models, favoriteModels))),

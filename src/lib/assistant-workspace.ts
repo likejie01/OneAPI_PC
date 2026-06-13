@@ -674,10 +674,15 @@ function resolvePreview(messages: CliSessionMessage[]) {
 }
 
 function resolveUpdatedAt(messages: CliSessionMessage[], logs: CliLogEntryLike[]) {
-  return Math.max(
-    toTimelineTimestamp(messages.at(-1)?.createdAt || 0),
-    toTimelineTimestamp(logs.at(-1)?.createdAt || 0)
+  const messageUpdatedAt = messages.reduce(
+    (latest, item) => Math.max(latest, toTimelineTimestamp(item.createdAt)),
+    0
   )
+  const logUpdatedAt = logs.reduce(
+    (latest, item) => Math.max(latest, toTimelineTimestamp(item.createdAt)),
+    0
+  )
+  return Math.max(messageUpdatedAt, logUpdatedAt)
 }
 
 export function buildCliRecentSessions(input: {
@@ -720,7 +725,9 @@ export function buildCliRecentSessions(input: {
     })
   }
 
-  return [...merged.values()].sort((left, right) => right.updatedAt - left.updatedAt)
+  return [...merged.values()].sort(
+    (left, right) => toTimelineTimestamp(right.updatedAt) - toTimelineTimestamp(left.updatedAt)
+  )
 }
 
 export function applyCliHistoryTitleOverrides(

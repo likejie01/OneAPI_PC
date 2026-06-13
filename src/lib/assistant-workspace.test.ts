@@ -260,6 +260,7 @@ test('buildCliTimeline groups adjacent logs from same request', () => {
         detail: undefined,
         command: undefined,
         exitCode: undefined,
+        done: undefined,
         files: [],
       },
       {
@@ -274,6 +275,7 @@ test('buildCliTimeline groups adjacent logs from same request', () => {
         detail: undefined,
         command: undefined,
         exitCode: undefined,
+        done: undefined,
         files: [],
       },
       {
@@ -288,6 +290,7 @@ test('buildCliTimeline groups adjacent logs from same request', () => {
         detail: undefined,
         command: undefined,
         exitCode: undefined,
+        done: undefined,
         files: [],
       },
     ],
@@ -491,6 +494,42 @@ test('buildCliRecentSessions prefers live session snapshots', () => {
   assert.equal(items[0]?.id, 'session-1')
   assert.equal(items[0]?.preview, '新消息')
   assert.equal(items[0]?.projectName, 'NewAPI')
+})
+
+test('buildCliRecentSessions sorts by hydrated session messages over stale history timestamps', () => {
+  const items = buildCliRecentSessions({
+    history: [
+      {
+        id: 'stale-history',
+        title: '错误时间',
+        preview: '旧内容',
+        updatedAt: 1_779_999_999,
+        projectName: 'Old',
+        projectPath: 'D:/Old',
+      },
+      {
+        id: 'real-latest',
+        title: '真实最新',
+        preview: '旧内容',
+        updatedAt: 1_700_000_000,
+        projectName: 'New',
+        projectPath: 'D:/New',
+      },
+    ],
+    sessionMessagesMap: {
+      'stale-history': [
+        { id: 'user-old', role: 'user', content: '旧消息', createdAt: 1_700_000_000_000 },
+      ],
+      'real-latest': [
+        { id: 'user-new', role: 'user', content: '新消息', createdAt: 1_800_000_000_000 },
+      ],
+    },
+    sessionLogsMap: {},
+    sessionProjectPathMap: {},
+  })
+
+  assert.equal(items[0]?.id, 'real-latest')
+  assert.equal(items[0]?.preview, '新消息')
 })
 
 test('applyCliHistoryTitleOverrides only overrides title and keeps preview intact', () => {

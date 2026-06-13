@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   applyAssistantSelectionToEmptyChatSession,
+  resolveChatSessionAssistant,
   shouldCreateAssistantSwitchChatSession,
 } from './chat-session.ts'
 
@@ -46,4 +47,30 @@ test('applyAssistantSelectionToEmptyChatSession updates assistant binding withou
     updatedAt: 20,
     messages: [],
   })
+})
+
+test('resolveChatSessionAssistant prefers the assistant bound to the active session', () => {
+  const assistants = [
+    { id: 'assistant-global', name: 'global' },
+    { id: 'assistant-session', name: 'session' },
+  ]
+
+  assert.equal(
+    resolveChatSessionAssistant(
+      assistants,
+      { assistantId: 'assistant-session' },
+      'assistant-global'
+    )?.id,
+    'assistant-session'
+  )
+})
+
+test('resolveChatSessionAssistant falls back to global assistant and first assistant', () => {
+  const assistants = [
+    { id: 'assistant-first', name: 'first' },
+    { id: 'assistant-global', name: 'global' },
+  ]
+
+  assert.equal(resolveChatSessionAssistant(assistants, null, 'assistant-global')?.id, 'assistant-global')
+  assert.equal(resolveChatSessionAssistant(assistants, { assistantId: 'missing' }, 'missing')?.id, 'assistant-first')
 })
