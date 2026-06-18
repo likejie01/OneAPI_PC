@@ -2649,6 +2649,56 @@ textarea:focus {
   border-radius: 10px;
 }
 
+:root[data-theme='dark'] .settings-card,
+:root[data-theme='dark'] .settings-intro-card,
+:root[data-theme='dark'] .pricing-card,
+:root[data-theme='dark'] .subscription-plan-card,
+:root[data-theme='dark'] .status-card,
+:root[data-theme='dark'] .empty-card,
+:root[data-theme='dark'] .key-reveal,
+:root[data-theme='dark'] .wallet-overview-card,
+:root[data-theme='dark'] .billing-card,
+:root[data-theme='dark'] .service-status-card,
+:root[data-theme='dark'] .me-user-card,
+:root[data-theme='dark'] .me-device-binding-card,
+:root[data-theme='dark'] .me-key-list-card,
+:root[data-theme='dark'] .me-key-create-card,
+:root[data-theme='dark'] .me-claude-card,
+:root[data-theme='dark'] .me-codex-card,
+:root[data-theme='dark'] .inline-settings-card,
+:root[data-theme='dark'] .me-key-record,
+:root[data-theme='dark'] .record-row,
+:root[data-theme='dark'] .subrecords,
+:root[data-theme='dark'] .subform,
+:root[data-theme='dark'] .status-button,
+:root[data-theme='dark'] .deploy-timeline-list,
+:root[data-theme='dark'] .inline-notice {
+  border-color: rgba(151, 164, 172, 0.055);
+}
+
+:root[data-theme='dark'] .me-user-card .record-row.highlighted,
+:root[data-theme='dark'] .record-row.highlighted,
+:root[data-theme='dark'] .status-button.active,
+:root[data-theme='dark'] .status-button:focus-visible {
+  border-color: rgba(86, 139, 190, 0.38);
+  box-shadow: 0 0 0 1px rgba(86, 139, 190, 0.08);
+}
+
+:root[data-theme='dark'] .status-grid-slim .status-button,
+:root[data-theme='dark'] .ghost-button,
+:root[data-theme='dark'] .secondary-button,
+:root[data-theme='dark'] .theme-toggle-button,
+:root[data-theme='dark'] .me-key-record button {
+  border-color: rgba(151, 164, 172, 0.07);
+}
+
+:root[data-theme='dark'] .deploy-progress-body,
+:root[data-theme='dark'] .deploy-timeline-item,
+:root[data-theme='dark'] .cli-log-bubble,
+:root[data-theme='dark'] .cli-log-card {
+  border-color: rgba(151, 164, 172, 0.05);
+}
+
 .record-row {
   padding: 12px 13px;
 }
