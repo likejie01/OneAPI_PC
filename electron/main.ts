@@ -614,6 +614,7 @@ interface CliProgressPayload {
 interface CliDeployRequest {
   client: CliClient
   apiKey: string
+  apiKeySource?: 'oneapi' | 'custom'
   model?: string
   baseUrl?: string
 }
@@ -3950,6 +3951,17 @@ function mergeCodexConfig(raw: string, apiKey: string, model: string, baseUrl: s
 
 function resolveDesktopCliKeyRecord(apiKey: string) {
   return apiKey.startsWith('sk-') ? apiKey : `sk-${apiKey}`
+}
+
+function resolveDeployCliApiKey(request: Pick<CliDeployRequest, 'apiKey' | 'apiKeySource'>) {
+  if (request.apiKeySource === 'custom') {
+    const trimmed = request.apiKey.trim()
+    if (!trimmed) {
+      throw new Error('请先填写自定义 API Key。')
+    }
+    return resolveDesktopCliKeyRecord(trimmed)
+  }
+  return normalizeDesktopCliApiKey(request.apiKey)
 }
 
 function maskSensitiveText(value?: string) {
@@ -8802,7 +8814,7 @@ async function runClaudePrompt(
 
 async function writeCodexConfig(request: CliDeployRequest) {
   const targetPath = cliConfig.codex.configPath
-  const resolvedApiKey = normalizeDesktopCliApiKey(request.apiKey)
+  const resolvedApiKey = resolveDeployCliApiKey(request)
   await fs.mkdir(cliConfig.codex.dataPath, { recursive: true })
   const raw = (await pathExists(targetPath)) ? await fs.readFile(targetPath, 'utf8') : ''
   if (raw) {
@@ -8864,7 +8876,7 @@ async function writeClaudeConfig(request: CliDeployRequest) {
     ? current.env
     : {}) as Record<string, string>
 
-  const resolvedApiKey = normalizeDesktopCliApiKey(request.apiKey)
+  const resolvedApiKey = resolveDeployCliApiKey(request)
   const resolvedBaseUrl = normalizeClaudeBaseUrl(request.baseUrl)
   const resolvedModel = request.model?.trim() || DEFAULT_CLAUDE_MODEL
 
@@ -9325,7 +9337,7 @@ async function diagnoseCodexEnvironment(
   request: CliDeployRequest
 ) {
   const resolvedBaseUrl = normalizeCodexBaseUrl(request.baseUrl)
-  const resolvedKey = resolveDesktopCliKeyRecord(request.apiKey)
+  const resolvedKey = resolveDeployCliApiKey(request)
 
   logger.info('diagnose', 'running', '开始检查 Codex 配置文件与数据目录')
 
@@ -9465,7 +9477,7 @@ async function diagnoseClaudeEnvironment(
   request: CliDeployRequest
 ) {
   const resolvedBaseUrl = normalizeClaudeBaseUrl(request.baseUrl)
-  const resolvedKey = resolveDesktopCliKeyRecord(request.apiKey)
+  const resolvedKey = resolveDeployCliApiKey(request)
 
   logger.info('diagnose', 'running', '开始检查 Claude 配置文件与数据目录')
 
@@ -9523,7 +9535,7 @@ function buildClaudeMessagesApiUrl(baseUrl: string) {
 async function probeClaudeMessagesApi(request: CliDeployRequest) {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 20000)
-  const resolvedKey = resolveDesktopCliKeyRecord(request.apiKey)
+  const resolvedKey = resolveDeployCliApiKey(request)
   const resolvedBaseUrl = normalizeClaudeBaseUrl(request.baseUrl)
   const resolvedModel = request.model?.trim() || DEFAULT_CLAUDE_MODEL
   try {
@@ -9943,7 +9955,7 @@ async function deployCli(webContents: WebContents, request: CliDeployRequest, jo
   let normalizedApiKey: string
 
   try {
-    normalizedApiKey = normalizeDesktopCliApiKey(request.apiKey)
+    normalizedApiKey = resolveDeployCliApiKey(request)
   } catch (error) {
     logger.info(
       'config',

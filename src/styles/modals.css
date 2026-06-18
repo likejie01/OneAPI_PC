@@ -2665,3 +2665,689 @@ body:has(.cli-extension-floating-tooltip)::after {
   }
 }
 
+/* Final PC UX fixes */
+.toast-bar {
+  left: auto !important;
+  right: 20px !important;
+  bottom: 72px !important;
+  max-width: min(420px, calc(100vw - 340px)) !important;
+  transform: none !important;
+  overflow: visible !important;
+  z-index: 2400 !important;
+}
+
+.composer-input-shell:focus-within {
+  box-shadow: none !important;
+  border-color: transparent !important;
+}
+
+.composer-input-zone:focus-within {
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.composer-input-zone textarea:focus {
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--line)) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 10%, transparent) !important;
+}
+
+.composer-token-strip {
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.icon-picker-trigger.invalid-channel {
+  color: var(--danger) !important;
+  border-color: color-mix(in srgb, var(--danger) 24%, var(--line)) !important;
+}
+
+.message-link-text-strip {
+  display: grid !important;
+  gap: 4px !important;
+  margin: 6px 0 0 !important;
+}
+
+.message-link-text {
+  display: block !important;
+  max-width: 100% !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: var(--accent-strong) !important;
+  font-size: 12px !important;
+  line-height: 1.45 !important;
+  overflow-wrap: anywhere !important;
+  text-decoration: underline !important;
+  text-underline-offset: 3px !important;
+}
+
+.primary-button {
+  background: #111827 !important;
+  border-color: #111827 !important;
+  color: #fff !important;
+  box-shadow: 0 10px 22px rgb(17 24 39 / 0.18) !important;
+}
+
+:root[data-theme='dark'] .primary-button {
+  background: #f8fafc !important;
+  border-color: #f8fafc !important;
+  color: #111827 !important;
+  box-shadow: 0 10px 22px rgb(255 255 255 / 0.08) !important;
+}
+
+:root[data-theme='dark'] .cli-page .message-bubble.assistant,
+:root[data-theme='dark'] .cli-page .message-bubble.system,
+:root[data-theme='dark'] .cli-log-entry,
+:root[data-theme='dark'] .cli-log-entry.error {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+:root[data-theme='dark'] .cli-page .message-bubble.assistant,
+:root[data-theme='dark'] .cli-page .message-bubble.system {
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+}
+
+.cli-log-entry {
+  padding-top: 10px !important;
+  padding-bottom: 8px !important;
+}
+
+.cli-log-event-list,
+.cli-log-phase-section,
+.cli-log-time-group,
+.cli-log-time-lines,
+.cli-log-output-stack {
+  gap: 4px !important;
+}
+
+.cli-log-phase-section,
+.cli-log-output-stack,
+.cli-log-event-details,
+.cli-log-detail-block {
+  margin-bottom: 0 !important;
+}
+
+.cli-page .cli-log-entry,
+.cli-page .cli-log-entry.error,
+.cli-page .cli-log-phase-section,
+.cli-page .cli-log-output-card,
+.cli-page .cli-log-diagnostic-group,
+.cli-page .cli-log-output-inline {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.cli-page .cli-log-entry {
+  padding-left: 4px !important;
+  padding-right: 4px !important;
+}
+
+.cli-page .cli-log-status-bar {
+  margin-top: 4px !important;
+  padding-top: 4px !important;
+}
+
+.cli-page .message-bubble.user {
+  background: var(--bubble-user) !important;
+  border-color: color-mix(in srgb, var(--line) 82%, transparent) !important;
+  box-shadow: var(--shadow-soft) !important;
+}
+
+:root[data-theme='dark'] .chat-page .message-bubble.assistant,
+:root[data-theme='dark'] .chat-page .message-bubble.system {
+  background: var(--bubble-ai) !important;
+  border-color: color-mix(in srgb, var(--line) 82%, transparent) !important;
+  box-shadow: var(--shadow-soft) !important;
+}
+
+.send-button {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  color: #111827 !important;
+}
+
+.send-button svg {
+  fill: currentColor !important;
+  stroke: currentColor !important;
+}
+
+:root[data-theme='dark'] .send-button {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  color: #f8fafc !important;
+}
+
+.cli-log-phase-head,
+.cli-log-time-head {
+  justify-content: flex-start !important;
+  gap: 6px !important;
+}
+
+.cli-log-head-toggle-icon {
+  order: 2 !important;
+  margin-left: 0 !important;
+}
+
+.cli-log-phase-head small {
+  order: 3 !important;
+}
+
+.cli-log-event-toggle {
+  justify-content: flex-start !important;
+  gap: 6px !important;
+}
+
+.login-modal-card {
+  width: min(960px, calc(100vw - 56px)) !important;
+  max-height: calc(100vh - 56px) !important;
+  border-radius: 20px !important;
+  overflow: hidden !important;
+  background: rgb(var(--panel-strong-rgb)) !important;
+  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent) !important;
+  box-shadow: 0 28px 68px rgb(15 23 42 / 0.24) !important;
+}
+
+.login-modal-card .login-shell,
+.login-modal-card .login-hero,
+.login-modal-card .login-card {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.login-modal-card .login-hero {
+  border-radius: 20px !important;
+  overflow: hidden !important;
+}
+
+.login-modal-card .login-card {
+  padding: 28px !important;
+}
+
+.login-modal-close {
+  top: 18px !important;
+  right: 18px !important;
+  padding: 8px !important;
+  background: transparent !important;
+  border-color: transparent !important;
+}
+
+.login-card-head .inline-actions {
+  gap: 6px !important;
+  align-self: flex-start !important;
+}
+
+.login-card-head .inline-actions .ghost-button:not(.selected-toggle) {
+  background: transparent !important;
+}
+
+.anonymous-mode-note {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+:root[data-theme='dark'] .sidebar-account,
+:root[data-theme='dark'] .sidebar-user-row.anonymous {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.sidebar-user-row.anonymous {
+  cursor: default !important;
+}
+
+.aichat-provider-card .record-row:has(.secondary-button) .secondary-button {
+  display: inline-flex !important;
+}
+
+.aichat-provider-card .record-row:has(.secondary-button) span {
+  color: var(--muted) !important;
+}
+
+.anonymous-cli-column {
+  gap: 18px !important;
+}
+
+.anonymous-cli-column .cli-setup-grid {
+  display: grid !important;
+  gap: 18px !important;
+}
+
+.pending-image-card {
+  width: min(100%, 360px) !important;
+}
+
+.pending-image-shimmer {
+  position: relative !important;
+  overflow: hidden !important;
+  border-radius: 18px !important;
+  background:
+    linear-gradient(135deg, rgb(var(--surface-rgb) / 0.86), rgb(var(--surface-strong-rgb) / 0.96)),
+    radial-gradient(circle at 30% 25%, color-mix(in srgb, var(--accent) 18%, transparent), transparent 38%) !important;
+  background-size: 100% 100%, 140% 140% !important;
+  animation: pending-image-pulse 1.8s ease-in-out infinite !important;
+}
+
+.pending-image-shimmer::before,
+.pending-image-shimmer::after {
+  content: '' !important;
+  position: absolute !important;
+  inset: 0 !important;
+  pointer-events: none !important;
+}
+
+.pending-image-shimmer::before {
+  background:
+    linear-gradient(90deg, transparent, rgb(255 255 255 / 0.42), transparent),
+    repeating-linear-gradient(135deg, transparent 0 16px, rgb(255 255 255 / 0.12) 16px 18px) !important;
+  transform: translateX(-120%) !important;
+  animation: shimmer 1.35s linear infinite !important;
+}
+
+.pending-image-shimmer::after {
+  inset: 18% !important;
+  border-radius: 50% !important;
+  background: color-mix(in srgb, var(--accent) 14%, transparent) !important;
+  filter: blur(22px) !important;
+  transform: scale(0.9) !important;
+  animation: pending-image-orbit 2.2s ease-in-out infinite alternate !important;
+}
+
+@keyframes pending-image-pulse {
+  0%,
+  100% {
+    filter: saturate(0.95) brightness(1);
+  }
+  50% {
+    filter: saturate(1.08) brightness(1.035);
+  }
+}
+
+@keyframes pending-image-orbit {
+  from {
+    transform: translate(-10%, -8%) scale(0.86);
+  }
+  to {
+    transform: translate(12%, 10%) scale(1.05);
+  }
+}
+
+/* Final restrained radius and interaction corrections */
+:root {
+  --radius-window: 14px !important;
+  --radius-card: 10px !important;
+  --radius-control: 8px !important;
+  --radius-chip: 6px !important;
+  --radius-oneapi: 8px;
+}
+
+.brand-home-link {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+}
+
+.brand-home-link:hover .brand-name {
+  color: var(--accent-strong);
+}
+
+.panel,
+.panel-block,
+.page-surface,
+.pricing-card,
+.subscription-plan-card,
+.record-row,
+.mini-stat,
+.modal-card,
+.login-modal-card,
+.login-modal-card .login-hero,
+.message-bubble,
+.composer-input-shell,
+.composer-input-zone,
+.composer-input-zone textarea,
+.toolbar-picker .picker-trigger,
+.ghost-button,
+.secondary-button,
+.primary-button,
+.status-button,
+.picker-menu,
+.desktop-update-popover,
+.chat-history-panel,
+.cli-history-panel,
+.assistant-menu,
+.image-style-menu,
+.cli-extension-menu,
+.session-context-menu,
+.pending-image-shimmer,
+.generated-image,
+.generated-image-button {
+  border-radius: var(--radius-oneapi) !important;
+}
+
+.user-pill,
+.metric-pill,
+.subscription-plan-badge,
+.cli-log-status-pill,
+.status-dot,
+.timeline-dot,
+.cli-log-time-dot,
+.cli-log-event-dot,
+.cli-log-child-dot {
+  border-radius: 999px !important;
+}
+
+.composer-input-shell,
+.composer-input-shell:focus,
+.composer-input-shell:focus-within,
+.composer-input-zone,
+.composer-input-zone:focus,
+.composer-input-zone:focus-within,
+.composer-input-zone:has(textarea:focus),
+.shell-composer:focus-within,
+.composer:focus-within {
+  border-color: transparent !important;
+  box-shadow: none !important;
+  outline: 0 !important;
+}
+
+.composer-input-zone textarea,
+.composer-input-zone textarea:focus,
+.shell-composer textarea:focus,
+.chat-composer textarea:focus,
+.cli-composer textarea:focus {
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--line)) !important;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 13%, transparent) !important;
+  outline: 0 !important;
+}
+
+.primary-button.icon-only.send-button,
+.composer-toolbar .primary-button.icon-only.send-button,
+.send-button,
+.composer-toolbar .send-button {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  color: #111827 !important;
+  width: 34px !important;
+  height: 34px !important;
+}
+
+.primary-button.icon-only.send-button svg,
+.composer-toolbar .primary-button.icon-only.send-button svg,
+.send-button svg {
+  fill: #111827 !important;
+  stroke: #111827 !important;
+  color: #111827 !important;
+}
+
+:root[data-theme='dark'] .primary-button.icon-only.send-button,
+:root[data-theme='dark'] .composer-toolbar .primary-button.icon-only.send-button,
+:root[data-theme='dark'] .send-button,
+:root[data-theme='dark'] .composer-toolbar .send-button {
+  color: #f8fafc !important;
+}
+
+:root[data-theme='dark'] .primary-button.icon-only.send-button svg,
+:root[data-theme='dark'] .composer-toolbar .primary-button.icon-only.send-button svg,
+:root[data-theme='dark'] .send-button svg {
+  fill: #f8fafc !important;
+  stroke: #f8fafc !important;
+  color: #f8fafc !important;
+}
+
+.cli-page .message-bubble.user {
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface) 92%) !important;
+  border-color: color-mix(in srgb, var(--accent) 12%, var(--line)) !important;
+  box-shadow: none !important;
+}
+
+:root[data-theme='dark'] .cli-page .message-bubble.user {
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface) 90%) !important;
+  border-color: color-mix(in srgb, var(--accent) 14%, var(--line)) !important;
+}
+
+.cli-page .message-link-text-strip,
+.cli-page .message-link-chip-strip {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.cli-page .message-link-text,
+.cli-page .message-link-chip {
+  background: transparent !important;
+  background-color: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+}
+
+.inline-settings-card .inline-notice {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+}
+
+.provider-model-refresh {
+  display: inline-flex !important;
+}
+
+.cli-page .cli-log-entry,
+:root[data-theme='dark'] .cli-page .cli-log-entry,
+.cli-page .cli-log-entry.error,
+:root[data-theme='dark'] .cli-page .cli-log-entry.error {
+  align-self: stretch !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  margin: 0 !important;
+  padding: 0 4px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.cli-page .cli-log-entry > .bubble-meta {
+  margin-top: 4px !important;
+  padding-top: 0 !important;
+}
+
+.cli-page .cli-log-detail-window,
+.cli-page .cli-log-detail-window.compact,
+.cli-page .timeline-code,
+.cli-page .timeline-detail,
+.cli-page .inline-file-preview,
+.cli-page .inline-file-preview-content {
+  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent) !important;
+  background: color-mix(in srgb, var(--surface) 84%, var(--accent) 4%) !important;
+  box-shadow: none !important;
+}
+
+/* Final Codex/Claude execution log layout authority. */
+.cli-page .cli-log-entry,
+:root[data-theme='dark'] .cli-page .cli-log-entry,
+.cli-page .cli-log-entry.error,
+:root[data-theme='dark'] .cli-page .cli-log-entry.error {
+  align-self: stretch !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  margin: 0 !important;
+  padding: 0 4px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.cli-page .cli-log-entry + .message-bubble.assistant,
+.cli-page .cli-log-entry + .message-bubble.system {
+  margin-top: 0 !important;
+}
+
+.cli-page .cli-log-card-head {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  gap: 10px !important;
+  margin-bottom: 8px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+}
+
+.cli-page .cli-log-card-title {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  min-width: 0 !important;
+}
+
+.cli-page .cli-log-header-tools {
+  display: inline-flex !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  gap: 6px !important;
+  min-width: 0 !important;
+}
+
+.cli-page .cli-log-status-bar {
+  align-self: stretch !important;
+  width: 100% !important;
+  margin: 0 !important;
+  padding: 8px 4px 0 !important;
+  border-top: 1px solid color-mix(in srgb, var(--line) 82%, transparent) !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.cli-page .cli-log-status-bar + .message-bubble.assistant,
+.cli-page .cli-log-status-bar + .message-bubble.system {
+  margin-top: 0 !important;
+}
+
+.cli-page .message-bubble.user {
+  background: var(--bubble-user) !important;
+  border-color: color-mix(in srgb, var(--line) 82%, transparent) !important;
+  box-shadow: var(--shadow-soft) !important;
+}
+
+:root[data-theme='dark'] .cli-page .message-bubble.user {
+  background: var(--bubble-user) !important;
+  border-color: color-mix(in srgb, var(--line) 82%, transparent) !important;
+  box-shadow: var(--shadow-soft) !important;
+}
+
+.composer-input-zone .message-extension-strip,
+.cli-page .composer-input-zone .message-extension-strip,
+.composer-input-shell .message-extension-strip,
+.cli-page .composer-input-shell .message-extension-strip {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  margin: 0 0 6px !important;
+}
+
+.chat-page .message-stream,
+.cli-page .cli-thread {
+  padding-right: 0 !important;
+  scrollbar-gutter: stable !important;
+}
+
+.message-stream::-webkit-scrollbar,
+.cli-thread::-webkit-scrollbar {
+  width: 8px !important;
+}
+
+.session-context-menu,
+.markdown-code-action-menu {
+  border-radius: 8px !important;
+}
+
+.session-context-menu .session-context-menu-item,
+.markdown-code-action-menu button {
+  border-radius: 6px !important;
+}
+
+.side-nav-item.active,
+.sidebar.collapsed .side-nav-item.active {
+  border-radius: 8px !important;
+}
+
+.toast-bar {
+  position: fixed !important;
+  left: auto !important;
+  right: 20px !important;
+  bottom: 72px !important;
+  transform: none !important;
+  max-width: min(420px, calc(100vw - 340px)) !important;
+  border-radius: 8px !important;
+  z-index: 160 !important;
+}
+
+.subscription-progress-inline {
+  width: 50% !important;
+  min-width: 180px !important;
+  flex: 0 0 50% !important;
+}
+
+@media (max-width: 880px) {
+  .toast-bar {
+    right: 12px !important;
+    bottom: 78px !important;
+    max-width: calc(100vw - 24px) !important;
+  }
+
+  .subscription-progress-inline {
+    width: 100% !important;
+    min-width: 0 !important;
+    flex: 0 0 auto !important;
+  }
+}
+
+.cli-page .timeline-code {
+  background: color-mix(in srgb, var(--surface) 82%, var(--success) 5%) !important;
+}
+
+:root[data-theme='dark'] .cli-page .cli-log-detail-window,
+:root[data-theme='dark'] .cli-page .cli-log-detail-window.compact,
+:root[data-theme='dark'] .cli-page .timeline-code,
+:root[data-theme='dark'] .cli-page .timeline-detail,
+:root[data-theme='dark'] .cli-page .inline-file-preview,
+:root[data-theme='dark'] .cli-page .inline-file-preview-content {
+  border-color: color-mix(in srgb, var(--line) 70%, transparent) !important;
+  background: color-mix(in srgb, var(--surface) 72%, white 4%) !important;
+}
+
