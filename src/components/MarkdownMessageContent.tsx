@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Copy, Globe, Link2 } from 'lucide-react'
+import { Copy } from 'lucide-react'
 import {
   isMermaidMarkdownCodeBlock,
   normalizeMarkdownCodeBlockContent,
@@ -142,23 +142,21 @@ export function MarkdownMessageContent(props: MarkdownMessageContentProps) {
         </ReactMarkdown>
       ) : null}
       {extractedContent.chips.length > 0 ? (
-        <div className='message-link-chip-strip' aria-label='相关链接'>
+        <div className='message-link-chip-strip message-link-text-strip' aria-label='相关链接'>
           {extractedContent.chips.map((item) => (
-            <button
+            <a
               key={`${item.kind}:${item.url}`}
-              type='button'
-              className='message-link-chip'
-              title={item.url}
-              onClick={() => void onOpenExternal(item.url)}
+              className='message-link-chip message-link-text'
+              href={item.url}
+              target='_blank'
+              rel='noreferrer'
+              onClick={(event) => {
+                event.preventDefault()
+                void onOpenExternal(item.url)
+              }}
             >
-              <span className='message-link-chip-icon'>
-                {item.kind === 'github' ? <Link2 size={14} /> : <Globe size={14} />}
-              </span>
-              <span className='message-link-chip-copy'>
-                <strong>{item.label}</strong>
-                <small>{item.url}</small>
-              </span>
-            </button>
+              {item.url}
+            </a>
           ))}
         </div>
       ) : null}

@@ -6,7 +6,7 @@ export type MessageLinkChip = {
 }
 
 function normalizeStandaloneUrl(value: string) {
-  return value.replace(/^<|>$/g, '').replace(/[),.;，。；、]+$/g, '')
+  return value.replace(/^<|>$/g, '').replace(/[`'"\]),.;，。；、]+$/g, '')
 }
 
 function buildLinkLabel(url: URL) {
@@ -41,7 +41,7 @@ export function extractMessageLinkChips(content: string) {
 
   for (const line of lines) {
     const trimmed = line.trim()
-    const lineMatches = Array.from(trimmed.matchAll(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|<?(https?:\/\/[^\s<>)]+)>?/gi))
+    const lineMatches = Array.from(trimmed.matchAll(/\[([^\]]+)\]\((https?:\/\/[^\s)`]+)\)|<?(https?:\/\/[^\s<>`)]+)>?/gi))
 
     if (!lineMatches.length) {
       visibleLines.push(line)

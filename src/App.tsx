@@ -1,4 +1,4 @@
-import { createContext, forwardRef, lazy, memo, startTransition, Suspense, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createContext, forwardRef, Fragment, lazy, memo, startTransition, Suspense, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { CSSProperties, ChangeEvent, ClipboardEvent, Dispatch, DragEvent, HTMLAttributes, KeyboardEvent as ReactKeyboardEvent, MouseEvent, PointerEvent as ReactPointerEvent, ReactNode, SetStateAction } from 'react'
 import {
@@ -123,7 +123,7 @@ import {
   syncMobileDesktopAssistantsSnapshot,
   type MobileDesktopDevice,
 } from './domains/mobile-bridge'
-import { generateAccessToken, getSelfProfile, requireSuccess, verifyCurrentPassword } from './domains/profile'
+import { getSelfProfile, requireSuccess, verifyCurrentPassword } from './domains/profile'
 import {
   getPublicPlans,
   getSelfSubscriptions,
@@ -187,13 +187,11 @@ import {
 } from './lib/chat-session'
 import {
   applyCliMessageOverlays,
-  buildCliExtensionDedupeKey,
   buildCliExtensionDisplayName,
   buildCliExtensionInsertText,
   canUseCliExtension,
   collectCliToolNames,
   decorateCliExtensions,
-  recommendCliExtensionsForPrompt,
   resolveCliSlashTriggerState,
   translateCliExtensionDescription,
   type CliExtensionViewItem,
@@ -430,6 +428,13 @@ function writeServiceStatusCache(value: ServiceStatusCacheStore) {
 
 function countPlanPurchases(records: SubscriptionSelfData['all_subscriptions'], planId: number) {
   return records.filter((item) => item.subscription.plan_id === planId).length
+}
+
+function isTrialSubscriptionPlan(plan: PlanRecord['plan']) {
+  const title = `${plan.title || ''} ${plan.subtitle || ''}`.toLowerCase()
+  const purchaseLimit = Number(plan.max_purchase_per_user || 0)
+  const priceAmount = Number(plan.price_amount || 0)
+  return title.includes('尝鲜') || title.includes('trial') || (purchaseLimit === 1 && priceAmount <= 1)
 }
 
 function isAssistantHistoryTriggerTarget(target: EventTarget | null) {
@@ -1089,8 +1094,18 @@ const SERVICE_STATUS_CACHE_KEY = 'oneapi-desktop-service-status'
 const SERVICE_STATUS_REFRESH_INTERVAL_MS = 5 * 60 * 1000
 const CHAT_PENDING_MESSAGE_LABEL = 'Thinking...'
 const CLI_PENDING_MESSAGE_LABEL = 'Coding...'
-const DRAW_PENDING_MESSAGE_LABEL = 'Thinking...'
+const DRAW_PENDING_MESSAGE_LABEL = 'Drawing...'
 const DRAW_PENDING_IMAGE_URL = '__oneapi_draw_pending__'
+
+function hasKnownImageModelForProvider(providerState: AiChatProviderState) {
+  if (providerState.mode !== 'custom') {
+    return true
+  }
+  return (
+    providerState.models.length === 0 ||
+    providerState.models.some((item) => item.trim().toLowerCase() === DEFAULT_DRAW_MODEL)
+  )
+}
 const MODEL_VENDOR_FILTER_OPTIONS: Array<{ value: ModelVendorFilter; label: string }> = [
   { value: 'all', label: '全部' },
   { value: 'openai', label: 'OpenAI' },
@@ -2414,8 +2429,6 @@ function CliExtensionPalette(props: {
   getCachedTranslatedDetail: (item: CliExtensionViewItem) => string
   onTranslateDetail: (item: CliExtensionViewItem) => Promise<string>
   onContextMenu: (event: MouseEvent, item: CliExtensionViewItem) => void
-  autoInvokeEnabled: boolean
-  onAutoInvokeChange: (enabled: boolean) => void
   menuHostRef?: React.RefObject<HTMLDivElement | null>
 }) {
   const {
@@ -2441,8 +2454,6 @@ function CliExtensionPalette(props: {
     getCachedTranslatedDetail,
     onTranslateDetail,
     onContextMenu,
-    autoInvokeEnabled,
-    onAutoInvokeChange,
     menuHostRef,
   } = props
   const menuRef = useRef<HTMLDivElement | null>(null)
@@ -2549,14 +2560,6 @@ function CliExtensionPalette(props: {
           >
             {loading ? <LoaderCircle className='spin' size={14} /> : searchActive ? <Search size={14} /> : <RotateCcw size={14} />}
           </button>
-          <label className='cli-extension-auto-toggle'>
-            <span>自动调用</span>
-            <input
-              type='checkbox'
-              checked={autoInvokeEnabled}
-              onChange={(event) => onAutoInvokeChange(event.target.checked)}
-            />
-          </label>
         </div>
       </div>
       {hoveredTooltip ? createPortal(
@@ -3086,7 +3089,6 @@ function CliLogBubble(props: {
   onDelete: () => void
   onRespondInteraction: (requestId: string, interactionId: string, action: CliInteractionAction) => void
   respondingInteractionIds: string[]
-  requestedExtensions?: CliExtensionEntry[]
   previewFile?: {
     ownerId: string
     path: string
@@ -3104,13 +3106,17 @@ function CliLogBubble(props: {
     onDelete,
     onRespondInteraction,
     respondingInteractionIds,
-    requestedExtensions = [],
     previewFile,
   } = props
   const uniqueFiles = Array.from(new Map(item.files.map((file) => [file.path, file])).values())
   const executedToolNames = collectCliToolNames(item.events.map((eventItem) => eventItem.sourceKind))
   const logStatus = resolveCliLogGroupStatus(item.events)
   const commandCount = item.events.filter((eventItem) => eventItem.kind === 'command').length
+  const statusSummary = [
+    commandCount > 0 ? `命令 ${commandCount}` : '',
+    `步骤 ${item.events.length}`,
+    `最后更新 ${formatCliLogTime(item.createdAt)}`,
+  ].filter(Boolean).join(' · ')
   const visibleEvents = expanded ? item.events : item.events.slice(0, 1)
   const visualBlocks = buildCliVisualLogBlocks(visibleEvents)
   const [collapsedSectionIds, setCollapsedSectionIds] = useState<string[]>([])
@@ -3303,16 +3309,14 @@ function CliLogBubble(props: {
   }
 
   return (
-    <div className={`message-bubble system cli-log-bubble ${logStatus.tone === 'error' ? 'error' : ''}`}>
+    <div className={`cli-log-entry ${logStatus.tone === 'error' ? 'error' : ''}`}>
       <div className='cli-log-card-head'>
-        <span className='message-role'>{logStatus.tone === 'error' ? '运行异常' : '运行日志'}</span>
-        <strong>{`已执行 ${item.events.length} 步`}</strong>
-      </div>
-      <MessageCliExtensionChips items={requestedExtensions} label='本轮指定扩展' />
-      {executedToolNames.length > 0 ? (
-        <div className='message-extension-strip compact'>
-          <span className='message-extension-strip-label'>实际工具调用</span>
-          <div className='message-extension-strip-chips'>
+        <div className='cli-log-card-title'>
+          <span className='message-role'>{logStatus.tone === 'error' ? '运行异常' : '运行日志'}</span>
+          <strong>{`已执行 ${item.events.length} 步`}</strong>
+        </div>
+        {executedToolNames.length > 0 ? (
+          <div className='cli-log-header-tools'>
             {executedToolNames.map((itemName) => (
               <div key={itemName} className='message-extension-chip subtle'>
                 <span className='message-extension-kind'>工具</span>
@@ -3320,8 +3324,8 @@ function CliLogBubble(props: {
               </div>
             ))}
           </div>
-        </div>
-      ) : null}
+        ) : null}
+      </div>
       {item.events.length >= 40 ? (
         <div className='cli-log-overview-strip'>
           <span>{`意图 ${eventTotals.intentCount}`}</span>
@@ -3539,19 +3543,7 @@ function CliLogBubble(props: {
           )
         })}
       </div>
-      <div className='cli-log-status-bar'>
-        <span className={`cli-log-status-pill ${logStatus.tone}`}>
-          {logStatus.tone === 'running' ? <LoaderCircle className='spin' size={13} /> : null}
-          {logStatus.label}
-        </span>
-        <small>
-          {[
-            commandCount > 0 ? `命令 ${commandCount}` : '',
-            `步骤 ${item.events.length}`,
-            `最后更新 ${formatCliLogTime(item.createdAt)}`,
-          ].filter(Boolean).join(' · ')}
-        </small>
-      </div>
+      {!expanded ? <CliLogStatusFooter logStatus={logStatus} summary={statusSummary} /> : null}
       {uniqueFiles.length > 0 && !expanded ? (
         <div className='cli-log-files'>
           {uniqueFiles.slice(0, 4).map((fileItem) => (
@@ -3588,6 +3580,36 @@ function CliLogBubble(props: {
       />
     </div>
   )
+}
+
+function CliLogStatusFooter(props: {
+  logStatus: ReturnType<typeof resolveCliLogGroupStatus>
+  summary: string
+}) {
+  const { logStatus, summary } = props
+  return (
+    <div className='cli-log-status-bar'>
+      <span className={`cli-log-status-pill ${logStatus.tone}`}>
+        {logStatus.tone === 'running' ? <LoaderCircle className='spin' size={13} /> : null}
+        {logStatus.label}
+      </span>
+      <small>{summary}</small>
+    </div>
+  )
+}
+
+function CliLogCompletionFooter(props: {
+  item: Extract<CliTimelineEntry, { kind: 'log' }>
+}) {
+  const { item } = props
+  const logStatus = resolveCliLogGroupStatus(item.events)
+  const commandCount = item.events.filter((eventItem) => eventItem.kind === 'command').length
+  const summary = [
+    commandCount > 0 ? `命令 ${commandCount}` : '',
+    `步骤 ${item.events.length}`,
+    `最后更新 ${formatCliLogTime(item.createdAt)}`,
+  ].filter(Boolean).join(' · ')
+  return <CliLogStatusFooter logStatus={logStatus} summary={summary} />
 }
 
 function ConversationFindBar(props: {
@@ -6270,6 +6292,11 @@ function DrawWorkspace(props: {
   const drawQualityLabel =
     DRAW_QUALITY_OPTIONS.find((item) => item.value === drawQuality)?.label || drawQuality
   const drawRandomSeedLabel = drawRandomSeed ? '随机' : '固定'
+  const effectiveDrawModel = DEFAULT_DRAW_MODEL
+  const drawModelButtonLabel =
+    providerState.mode === 'unavailable' || !hasKnownImageModelForProvider(providerState)
+      ? '渠道无效'
+      : effectiveDrawModel
   const imageStyleMenuItems = useMemo(
     () => decorateImageStylePresets(imageStylePresets, imageStyleFavorites, imageStyleSearch),
     [imageStyleFavorites, imageStylePresets, imageStyleSearch]
@@ -7117,11 +7144,17 @@ function DrawWorkspace(props: {
     const nextSessionId = ensureDrawSession()
     const imageAttachment = attachments.find((item) => item.kind === 'image')
     const now = getCurrentTimestamp()
+    const displayPrompt = draft.trim() || selectedImageStylePreset?.title || selectedImageStylePreset?.prompt.trim() || ''
+    if (providerState.mode === 'custom' && !hasKnownImageModelForProvider(providerState)) {
+      toast('当前自定义通道没有检测到 Image 生图模型，请在默认模型中填写可用的图片模型。')
+      return
+    }
+
     const nextPrompt = buildImageStyleAugmentedPrompt(draft, selectedImageStylePreset || { prompt: '' })
     const userMessage: ChatBubbleMessage = {
       id: `draw-user-${now}`,
       role: 'user',
-      content: nextPrompt,
+      content: displayPrompt,
       createdAt: now,
       imageStylePresetId: selectedImageStylePreset?.id,
       imageStylePresetTitle: selectedImageStylePreset?.title,
@@ -7134,7 +7167,7 @@ function DrawWorkspace(props: {
       createdAt: now + 1,
       pending: true,
       imageUrl: DRAW_PENDING_IMAGE_URL,
-      modelLabel: DEFAULT_DRAW_MODEL,
+      modelLabel: effectiveDrawModel,
     }
 
     updateDrawSession(nextSessionId, (session) => ({
@@ -7156,7 +7189,7 @@ function DrawWorkspace(props: {
 
     try {
       const request = buildPendingDrawRetryRequest({
-        model: DEFAULT_DRAW_MODEL,
+        model: effectiveDrawModel,
         prompt: nextPrompt,
         group: selectedGroup || '',
         size: drawSize,
@@ -7177,7 +7210,7 @@ function DrawWorkspace(props: {
         setPendingRetry({
           sessionId: nextSessionId,
           request: buildPendingDrawRetryRequest({
-            model: DEFAULT_DRAW_MODEL,
+            model: effectiveDrawModel,
             prompt: nextPrompt,
             group: selectedGroup || '',
             size: drawSize,
@@ -7199,7 +7232,7 @@ function DrawWorkspace(props: {
           '图片生成失败'
         ),
         createdAt: failedAt,
-        modelLabel: DEFAULT_DRAW_MODEL,
+        modelLabel: effectiveDrawModel,
       })
       setPendingRetry(null)
       toast(error instanceof Error ? error.message : '图片生成失败')
@@ -7383,9 +7416,13 @@ function DrawWorkspace(props: {
                 key: 'group',
                 node: (
                   <div className='toolbar-picker'>
-                    <button className='ghost-button tiny picker-trigger icon-picker-trigger' type='button' title='当前模型'>
+                    <button
+                      className={`ghost-button tiny picker-trigger icon-picker-trigger ${providerState.mode === 'unavailable' ? 'invalid-channel' : ''}`}
+                      type='button'
+                      title={providerState.mode === 'unavailable' ? providerState.reason || '渠道无效' : '当前模型'}
+                    >
                       <Sparkles size={16} />
-                      <strong>{DEFAULT_DRAW_MODEL}</strong>
+                      <strong>{drawModelButtonLabel}</strong>
                     </button>
                   </div>
                 ),
@@ -7698,8 +7735,10 @@ function DrawWorkspace(props: {
 
 function SubscriptionsWorkspace(props: {
   toast: (message: string) => void
+  user: UserProfile | null
+  onRequestLogin: () => void
 }) {
-  const { toast } = props
+  const { toast, user, onRequestLogin } = props
   const [plans, setPlans] = useState<PlanRecord[]>([])
   const [subscriptionSelf, setSubscriptionSelf] = useState<SubscriptionSelfData | null>(null)
   const [paymentInfo, setPaymentInfo] = useState<SubscriptionPaymentInfo | null>(null)
@@ -7717,6 +7756,16 @@ function SubscriptionsWorkspace(props: {
   const planTitleMap = useMemo(
     () => new Map(plans.map((item) => [item.plan.id, item.plan.title])),
     [plans]
+  )
+  const visiblePlans = useMemo(
+    () =>
+      plans.filter((item) => {
+        if (isTrialSubscriptionPlan(item.plan) && countPlanPurchases(allSubscriptions, item.plan.id) > 0) {
+          return false
+        }
+        return true
+      }),
+    [allSubscriptions, plans]
   )
   const paymentOptions = useMemo(() => {
     const next: Array<{ key: string; label: string; variant: 'primary' | 'secondary' }> = []
@@ -7744,14 +7793,14 @@ function SubscriptionsWorkspace(props: {
   }
 
   const refreshSubscriptions = useCallback(async () => {
-    const [nextPlans, nextSelf, nextPaymentInfo, nextStatus] = await Promise.all([
-      getPublicPlans(),
-      getSelfSubscriptions(),
-      getSubscriptionPaymentInfo(),
+    const nextPlans = await getPublicPlans()
+    const [nextSelf, nextPaymentInfo, nextStatus] = await Promise.all([
+      user ? getSelfSubscriptions().catch(() => null) : Promise.resolve(null),
+      user ? getSubscriptionPaymentInfo().catch(() => null) : Promise.resolve(null),
       unwrapEnvelope(getAuthStatus()).catch(() => null),
     ])
     setPlans(nextPlans.filter((item) => item.plan.enabled))
-    setSubscriptionSelf(nextSelf)
+    setSubscriptionSelf(nextSelf ?? null)
     setPaymentInfo(nextPaymentInfo ?? null)
     const resolvedQuotaPerUnit = Number(nextStatus?.quota_per_unit || 0)
     if (resolvedQuotaPerUnit > 0) {
@@ -7764,10 +7813,10 @@ function SubscriptionsWorkspace(props: {
 
     void (async () => {
       try {
-        const [nextPlans, nextSelf, nextPaymentInfo, nextStatus] = await Promise.all([
-          getPublicPlans(),
-          getSelfSubscriptions(),
-          getSubscriptionPaymentInfo(),
+        const nextPlans = await getPublicPlans()
+        const [nextSelf, nextPaymentInfo, nextStatus] = await Promise.all([
+          user ? getSelfSubscriptions().catch(() => null) : Promise.resolve(null),
+          user ? getSubscriptionPaymentInfo().catch(() => null) : Promise.resolve(null),
           unwrapEnvelope(getAuthStatus()).catch(() => null),
         ])
 
@@ -7776,7 +7825,7 @@ function SubscriptionsWorkspace(props: {
         }
 
         setPlans(nextPlans.filter((item) => item.plan.enabled))
-        setSubscriptionSelf(nextSelf)
+        setSubscriptionSelf(nextSelf ?? null)
         setPaymentInfo(nextPaymentInfo ?? null)
         const resolvedQuotaPerUnit = Number(nextStatus?.quota_per_unit || 0)
         if (resolvedQuotaPerUnit > 0) {
@@ -7792,9 +7841,14 @@ function SubscriptionsWorkspace(props: {
     return () => {
       disposed = true
     }
-  }, [toast])
+  }, [toast, user])
 
   async function handleBuyPlan(planId: number, paymentMethod: string) {
+    if (!user) {
+      onRequestLogin()
+      toast('请先登录 OneAPI 后购买套餐。')
+      return
+    }
     setBuyingPlanId(planId)
     try {
       const result = await paySubscription(planId, paymentMethod)
@@ -7842,15 +7896,16 @@ function SubscriptionsWorkspace(props: {
 
           <div className='content-grid subscription-layout'>
             <div className='subscription-grid wide-grid'>
-              {plans.length === 0 ? (
+              {visiblePlans.length === 0 ? (
                 <EmptyState title='当前没有可购买套餐' description='请稍后刷新或检查服务端套餐配置。' />
               ) : (
-                plans.map((item) => {
+                visiblePlans.map((item) => {
                   const purchaseLimit = Number(item.plan.max_purchase_per_user || 0)
                   const purchaseCount = countPlanPurchases(allSubscriptions, item.plan.id)
                   const limitReached = purchaseLimit > 0 && purchaseCount >= purchaseLimit
                   const buying = buyingPlanId === item.plan.id
-                  const isRecommended = item.plan.id === recommendedPlanId
+                  const isTrialPlan = isTrialSubscriptionPlan(item.plan)
+                  const isRecommended = item.plan.id === recommendedPlanId || isTrialPlan
                   const quotaUsd = Number(item.plan.total_amount || 0) > 0 ? formatQuotaAsUsd(item.plan.total_amount, quotaPerUnit) : '不限额度'
                   const quotaMillion = Number(item.plan.total_amount || 0) > 0 ? formatQuotaAsMillions(item.plan.total_amount) : 'unlimited'
                   const resetRule = formatSubscriptionResetPeriod(item.plan)
@@ -7910,7 +7965,18 @@ function SubscriptionsWorkspace(props: {
                       </div>
 
                       <div className='pricing-actions subscription-plan-actions'>
-                        {paymentOptions.length > 0 ? (
+                        {!user ? (
+                          <button
+                            className='primary-button tiny'
+                            type='button'
+                            onClick={() => {
+                              onRequestLogin()
+                              toast('请先登录 OneAPI 后购买套餐。')
+                            }}
+                          >
+                            登录购买
+                          </button>
+                        ) : paymentOptions.length > 0 ? (
                           paymentOptions.map((option) => (
                             <button
                               key={`${item.plan.id}-${option.key}`}
@@ -8647,29 +8713,14 @@ function AiChatProviderSettingsCard(props: {
               </button>
             </div>
           </label>
-          <label>
-            <span>默认模型</span>
-            <input
-              value={config.customDefaultModel}
-              onChange={(event) => onChange((current) => ({ ...current, customDefaultModel: event.target.value }))}
-              placeholder='gpt-4.1-mini'
-              list='aichat-provider-models'
-            />
-            <datalist id='aichat-provider-models'>
-              {config.customModels.map((model) => (
-                <option key={model} value={model} />
-              ))}
-            </datalist>
-          </label>
         </div>
-        <div className='record-row'>
+        <div className='record-row provider-model-row'>
           <div>
             <strong>模型列表</strong>
-            <span>{config.customModels.length ? config.customModels.join(' · ') : '点击测试连接后会尝试自动读取。'}</span>
+            <span>{config.customModels.length ? config.customModels.join(' · ') : '点击刷新后会尝试自动读取。'}</span>
           </div>
-          <button className='secondary-button tiny' type='button' disabled={testing} onClick={() => void handleTestCustomProvider()}>
+          <button className='ghost-button icon-only tiny provider-model-refresh' type='button' disabled={testing} onClick={() => void handleTestCustomProvider()} title={testing ? '刷新中' : '刷新模型'} aria-label={testing ? '刷新中' : '刷新模型'}>
             {testing ? <LoaderCircle className='spin' size={14} /> : <RotateCcw size={14} />}
-            <span>{testing ? '检测中' : '测试连接'}</span>
           </button>
         </div>
       </div>
@@ -8685,9 +8736,8 @@ function MeAnonymousWorkspace(props: {
   providerConfig: AiChatProviderConfig
   providerState: AiChatProviderState
   onProviderConfigChange: (updater: (current: AiChatProviderConfig) => AiChatProviderConfig) => void
-  onRequestLogin: () => void
 }) {
-  const { toast, themeMode, onToggleTheme, visible, providerConfig, providerState, onProviderConfigChange, onRequestLogin } = props
+  const { toast, themeMode, onToggleTheme, visible, providerConfig, providerState, onProviderConfigChange } = props
   return (
     <section className={`workspace-page full-bleed-page ${visible ? '' : 'workspace-hidden'}`}>
       <article className='panel scroll-panel page-surface'>
@@ -8696,10 +8746,6 @@ function MeAnonymousWorkspace(props: {
             <h2>环境部署</h2>
           </div>
           <div className='inline-actions'>
-            <button className='secondary-button tiny' type='button' onClick={onRequestLogin}>
-              <LockKeyhole size={14} />
-              <span>登录 OneAPI</span>
-            </button>
             <button
               className='ghost-button tiny theme-toggle-button'
               type='button'
@@ -8715,14 +8761,13 @@ function MeAnonymousWorkspace(props: {
         <div className='panel-scroll'>
           <div className='content-grid me-layout page-blocks'>
             <div className='me-column me-column-left'>
-              <div className='panel-block'>
+              <div className='panel-block anonymous-mode-note'>
                 <div className='subrecords'>
                   <div className='record-row highlighted'>
                     <div>
                       <strong>未登录模式</strong>
-                      <span>可以配置自己的 OpenAI 兼容 API 使用 AIChat 与 Image；套餐、账单、App 互联和一键部署需要登录 OneAPI。</span>
+                      <span>可以配置自己的 OpenAI 兼容 API 使用 AIChat 与 Image；套餐购买、账单、App 互联需要登录 OneAPI。</span>
                     </div>
-                    <button className='secondary-button tiny' type='button' onClick={onRequestLogin}>登录</button>
                   </div>
                 </div>
               </div>
@@ -8732,6 +8777,28 @@ function MeAnonymousWorkspace(props: {
                 toast={toast}
                 onChange={onProviderConfigChange}
               />
+            </div>
+            <div className='me-column me-column-right anonymous-cli-column'>
+              <div className='cli-setup-grid'>
+                <CliSetupCard
+                  client='claude'
+                  user={null}
+                  providerState={providerState}
+                  toast={toast}
+                  className='me-claude-card'
+                  activeDeployClient={null}
+                  setActiveDeployClient={() => undefined}
+                />
+                <CliSetupCard
+                  client='codex'
+                  user={null}
+                  providerState={providerState}
+                  toast={toast}
+                  className='me-codex-card'
+                  activeDeployClient={null}
+                  setActiveDeployClient={() => undefined}
+                />
+              </div>
             </div>
           </div>
         </div>
@@ -8751,7 +8818,7 @@ function MeWorkspace(props: {
   onProviderConfigChange: (updater: (current: AiChatProviderConfig) => AiChatProviderConfig) => void
   onRequestLogin: () => void
 }) {
-  const { user, toast, themeMode, onToggleTheme, visible, providerConfig, providerState, onProviderConfigChange, onRequestLogin } = props
+  const { user, toast, themeMode, onToggleTheme, visible, providerConfig, providerState, onProviderConfigChange } = props
   if (!user) {
     return (
       <MeAnonymousWorkspace
@@ -8762,7 +8829,6 @@ function MeWorkspace(props: {
         providerConfig={providerConfig}
         providerState={providerState}
         onProviderConfigChange={onProviderConfigChange}
-        onRequestLogin={onRequestLogin}
       />
     )
   }
@@ -8802,12 +8868,10 @@ function MeAuthenticatedWorkspace(props: {
     }>
   >([])
   const [passwordGateOpen, setPasswordGateOpen] = useState(false)
-  const [passwordGatePurpose, setPasswordGatePurpose] = useState<'view-key' | 'create-key' | 'view-token'>('view-key')
+  const [passwordGatePurpose, setPasswordGatePurpose] = useState<'view-key' | 'create-key'>('view-key')
   const [passwordInput, setPasswordInput] = useState('')
   const [pendingKeyId, setPendingKeyId] = useState<number | null>(null)
   const [revealedKey, setRevealedKey] = useState('')
-  const [accessToken, setAccessToken] = useState('')
-  const [accessTokenVisible, setAccessTokenVisible] = useState(false)
   const [activeDeployClient, setActiveDeployClient] = useState<CliClient | null>(null)
   const [mobileBridgeDevice, setMobileBridgeDevice] = useState<MobileDesktopDevice | null>(null)
   const [mobileBridgeLoading, setMobileBridgeLoading] = useState(false)
@@ -8891,7 +8955,7 @@ function MeAuthenticatedWorkspace(props: {
   }
 
   async function continueAfterVerification(
-    purpose: 'view-key' | 'create-key' | 'view-token',
+    purpose: 'view-key' | 'create-key',
     keyId?: number
   ) {
     if (purpose === 'view-key' && keyId) {
@@ -8918,25 +8982,6 @@ function MeAuthenticatedWorkspace(props: {
         toast(error instanceof Error ? error.message : '创建 Key 失败')
       }
     }
-
-    if (purpose === 'view-token') {
-      const nextAccessToken = await requireSuccess(generateAccessToken())
-      setAccessToken(nextAccessToken ?? '')
-      setAccessTokenVisible(true)
-      toast('已生成新的系统访问令牌。')
-    }
-  }
-
-  async function handleRevealAccessToken() {
-    if (isVerificationStillValid(user.id)) {
-      setAccessTokenVisible(true)
-      return
-    }
-
-    setPasswordGatePurpose('view-token')
-    setPendingKeyId(null)
-    setPasswordInput('')
-    setPasswordGateOpen(true)
   }
 
   async function handlePasswordVerify() {
@@ -9019,53 +9064,6 @@ function MeAuthenticatedWorkspace(props: {
           <div className='panel-scroll'>
             <div className='content-grid me-layout page-blocks'>
               <div className='me-column me-column-left'>
-                <div className='panel-block me-user-card'>
-                  <div className='subrecords'>
-                    <div className='record-row highlighted'>
-                      <div>
-                        <strong>{user.display_name || user.username}</strong>
-                        <span>{user.username} · {user.email || '未绑定邮箱'}</span>
-                      </div>
-                      <small>组 {user.group}</small>
-                    </div>
-                    <div className='record-row'>
-                      <div>
-                        <strong>系统访问令牌</strong>
-                        <span>
-                          {accessTokenVisible
-                            ? accessToken || '当前没有可显示的系统访问令牌。'
-                            : '默认隐藏。验证密码后会生成新的系统访问令牌，并使旧令牌失效。'}
-                        </span>
-                      </div>
-                      <div className='record-actions'>
-                        <small>高敏感</small>
-                        <button className='ghost-button' type='button' onClick={() => void handleRevealAccessToken()}>
-                          {accessTokenVisible ? '已显示' : '查看'}
-                        </button>
-                        {accessTokenVisible && (
-                          <button
-                            className='ghost-button'
-                            type='button'
-                            onClick={() => {
-                              void navigator.clipboard.writeText(accessToken)
-                              toast('系统访问令牌已复制。')
-                            }}
-                          >
-                            复制
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                    <div className='record-row'>
-                      <div>
-                        <strong>账户额度</strong>
-                        <span>剩余额度 {formatQuota(user.quota)} · 已用 {formatQuota(user.used_quota)}</span>
-                      </div>
-                      <small>请求数 {user.request_count}</small>
-                    </div>
-                  </div>
-                </div>
-
                 <AiChatProviderSettingsCard
                   config={providerConfig}
                   providerState={providerState}
@@ -9183,6 +9181,7 @@ function MeAuthenticatedWorkspace(props: {
                 <CliSetupCard
                   client='claude'
                   user={user}
+                  providerState={providerState}
                   toast={toast}
                   className='me-claude-card'
                   activeDeployClient={activeDeployClient}
@@ -9191,6 +9190,7 @@ function MeAuthenticatedWorkspace(props: {
                 <CliSetupCard
                   client='codex'
                   user={user}
+                  providerState={providerState}
                   toast={toast}
                   className='me-codex-card'
                   activeDeployClient={activeDeployClient}
@@ -9442,7 +9442,6 @@ function CliWorkspace(props: {
   const effectiveRequestId = activeRequestIdRef.current || runningState.requestId
   const activeExtensionPreferenceBucket =
     cliExtensionPreferences[currentExtensionPreferenceKey] || createEmptyCliExtensionPreferenceBucket()
-  const autoInvokeExtensions = activeExtensionPreferenceBucket.autoInvokeEnabled !== false
   const reasoningOptions = client === 'claude' ? CLAUDE_REASONING_OPTIONS : CLI_REASONING_OPTIONS
   const preferredCliModel = client === 'codex' ? DEFAULT_CODEX_MODEL : DEFAULT_CLAUDE_MODEL
   const compatibleCliModels = useMemo(
@@ -9668,16 +9667,6 @@ function CliWorkspace(props: {
   const effectiveHighlightedExtensionIndex = paletteItems.length
     ? Math.min(highlightedExtensionIndex, paletteItems.length - 1)
     : 0
-  const requestExtensionMap = useMemo(
-    () =>
-      activeMessages.reduce<Record<string, CliExtensionEntry[]>>((map, item) => {
-        if (item.requestId && item.selectedExtensions?.length) {
-          map[item.requestId] = item.selectedExtensions
-        }
-        return map
-      }, {}),
-    [activeMessages]
-  )
   const recentSessions = useMemo(
     () => {
       const mergedHistory = buildCliRecentSessions({
@@ -9842,13 +9831,6 @@ function CliWorkspace(props: {
           : entry
       )
     )
-  }, [currentExtensionPreferenceKey, updateCliExtensionPreferenceBucket])
-
-  const setCliExtensionAutoInvokeEnabled = useCallback((enabled: boolean) => {
-    updateCliExtensionPreferenceBucket(currentExtensionPreferenceKey, (bucket) => ({
-      ...bucket,
-      autoInvokeEnabled: enabled,
-    }))
   }, [currentExtensionPreferenceKey, updateCliExtensionPreferenceBucket])
 
   const moveCliSessionOverlay = useCallback((fromSessionId: string, toSessionId: string) => {
@@ -11309,25 +11291,7 @@ function CliWorkspace(props: {
     const planMode = matchedBuiltinCommand?.id === 'plan'
     const visiblePrompt = planMode ? stripCliPlanCommandPrompt(cleanedPrompt) : cleanedPrompt
     const directCommand = options.directCommand || (isDirectCliCommandPrompt(cleanedPrompt) && !planMode)
-    const manualExtensions = selectedExtensions.map((item) => ({ ...item }))
-    const autoRecommendedExtensions = autoInvokeExtensions
-      ? directCommand
-        ? []
-        : recommendCliExtensionsForPrompt(cleanedPrompt, cliExtensions)
-      : []
-    const requestExtensions = [...manualExtensions]
-    const requestExtensionKeys = new Set(requestExtensions.map((item) => buildCliExtensionDedupeKey(item)))
-    for (const item of autoRecommendedExtensions) {
-      const dedupeKey = buildCliExtensionDedupeKey(item)
-      if (requestExtensionKeys.has(dedupeKey)) {
-        continue
-      }
-      requestExtensions.push({ ...item })
-      requestExtensionKeys.add(dedupeKey)
-      if (requestExtensions.length >= 3) {
-        break
-      }
-    }
+    const requestExtensions = directCommand ? [] : selectedExtensions.map((item) => ({ ...item }))
     const promptWithAttachments = buildFinalPrompt({
       prompt: planMode ? visiblePrompt : cleanedPrompt,
       client,
@@ -11374,7 +11338,7 @@ function CliWorkspace(props: {
       createdAt: Date.now(),
       requestId,
       attachments: toMessageAttachments(targetAttachments),
-      selectedExtensions: directCommand ? [] : requestExtensions,
+      selectedExtensions: requestExtensions,
     }
 
     setProjectSessionMap((current) => ({
@@ -11409,7 +11373,7 @@ function CliWorkspace(props: {
         finalPrompt: promptWithAttachments,
         commandTitle: directCommand ? '直接命令准备' : '任务准备',
         command: directCommand ? cleanedPrompt : '',
-        extensions: selectedExtensions.map((item) => ({
+        extensions: requestExtensions.map((item) => ({
           kind: item.kind,
           name: item.name,
         })),
@@ -11572,7 +11536,6 @@ function CliWorkspace(props: {
   }, [
     activeSessionId,
     attachments,
-    autoInvokeExtensions,
     clearAttachments,
     client,
     compatibleCliModels,
@@ -11699,8 +11662,6 @@ function CliWorkspace(props: {
       onToggleFavorite={toggleFavoriteCliExtension}
       getCachedTranslatedDetail={getCachedCliExtensionTranslation}
       onTranslateDetail={translateCliExtensionDetail}
-      autoInvokeEnabled={autoInvokeExtensions}
-      onAutoInvokeChange={setCliExtensionAutoInvokeEnabled}
       menuHostRef={extensionsPaletteRef}
       onContextMenu={(event, item) => {
         event.preventDefault()
@@ -11781,7 +11742,7 @@ function CliWorkspace(props: {
               <ConversationFindBar
                 active={active}
                 containerRef={threadRef}
-                itemSelector='.message-bubble, .cli-log-bubble'
+                itemSelector='.message-bubble, .cli-log-entry'
               />
             </div>
             <CliPlanFloatingPanel plan={activePlan} client={client} />
@@ -11794,9 +11755,18 @@ function CliWorkspace(props: {
                 />
               ) : activeTimeline.map((item) => {
                 if (item.kind === 'log') {
+                  const hasFollowingAssistantReply =
+                    !!item.requestId &&
+                    activeTimeline
+                      .slice(activeTimeline.indexOf(item) + 1)
+                      .some((timelineItem) =>
+                        timelineItem.kind === 'message' &&
+                        timelineItem.role === 'assistant' &&
+                        timelineItem.requestId === item.requestId
+                      )
                   return (
+                    <Fragment key={item.id}>
                     <CliLogBubble
-                      key={item.id}
                       item={item}
                       expanded={true}
                       expandedEventIds={expandedLogEventMap[item.id] || []}
@@ -11806,15 +11776,25 @@ function CliWorkspace(props: {
                       onDelete={() => handleDeleteCliLogGroup(item)}
                       onRespondInteraction={handleRespondCliInteraction}
                       respondingInteractionIds={respondingInteractionIds}
-                      requestedExtensions={item.requestId ? requestExtensionMap[item.requestId] : undefined}
                       previewFile={previewFile}
                     />
+                    {!hasFollowingAssistantReply ? <CliLogCompletionFooter item={item} /> : null}
+                    </Fragment>
                   )
                 }
 
+                const precedingLog =
+                  item.kind === 'message' && item.role === 'assistant' && item.requestId
+                    ? [...activeTimeline.slice(0, activeTimeline.indexOf(item))]
+                        .reverse()
+                        .find((timelineItem): timelineItem is Extract<CliTimelineEntry, { kind: 'log' }> =>
+                          timelineItem.kind === 'log' && timelineItem.requestId === item.requestId
+                        )
+                    : null
+
                 return (
+                  <Fragment key={item.id}>
                   <div
-                    key={item.id}
                     className={`message-bubble ${item.role} ${item.kind === 'partial' ? 'streaming-bubble' : ''}`}
                   >
                     <span className='message-role'>
@@ -11880,13 +11860,15 @@ function CliWorkspace(props: {
                       ]}
                     />
                   </div>
+                  {precedingLog ? <CliLogCompletionFooter item={precedingLog} /> : null}
+                  </Fragment>
                 )
               })}
             </div>
             <ConversationScrollDock
               active={active}
               containerRef={threadRef}
-              itemSelector='.message-bubble, .cli-log-bubble'
+              itemSelector='.message-bubble, .cli-log-entry'
             />
           </div>
 
@@ -12014,7 +11996,7 @@ function CliWorkspace(props: {
                           </div>
                         ) : null}
                         <div className='picker-menu-list'>
-                          {aiChatProviderMode === 'custom' ? (
+                          {aiChatProviderMode === 'custom' && effectiveCliModelVendorFilter !== 'all' ? (
                             <div className='picker-service-notice'>OneAPI专用桥接服务</div>
                           ) : null}
                           {visibleCliModels.length ? (
@@ -12298,13 +12280,14 @@ function CliWorkspace(props: {
 
 function CliSetupCard(props: {
   client: CliClient
-  user: UserProfile
+  user: UserProfile | null
+  providerState: AiChatProviderState
   toast: (message: string) => void
   className?: string
   activeDeployClient: CliClient | null
   setActiveDeployClient: Dispatch<SetStateAction<CliClient | null>>
 }) {
-  const { client, user, toast, className, activeDeployClient, setActiveDeployClient } = props
+  const { client, user, providerState, toast, className, activeDeployClient, setActiveDeployClient } = props
   const [status, setStatus] = useState<CliStatus>(buildEmptyCliStatus(client))
   const [deploying, setDeploying] = useState(false)
   const [deployLog, setDeployLog] = useState<DeployProgressPayload[]>([])
@@ -12402,28 +12385,50 @@ function CliSetupCard(props: {
       setDeploying(true)
       setActiveDeployClient(client)
       setDeployLog([])
-      const generated = await ensureDesktopServiceKey({
-        name: 'OneAPI Desktop Internal Key',
-        group: user.group || '',
-        preferredNames: [
-          `OneAPI Desktop ${client.toUpperCase()} Key`,
-          'OneAPI Desktop CODEX Key',
-          'OneAPI Desktop CLAUDE Key',
-          'OneAPI Desktop Internal Key',
-          '桌面端专用 Key',
-          'CODEX 桌面安装 Key',
-          'CLAUDE 桌面安装 Key',
-        ],
-      })
-      const resolvedDeploySettings = resolveCliDeploySettings({
-        preset,
-        generatedApiKey: generated.key,
-        defaultBaseUrl: client === 'codex' ? DEFAULT_CODEX_BASE_URL : DEFAULT_CLAUDE_BASE_URL,
-        defaultModel: client === 'codex' ? DEFAULT_CODEX_MODEL : DEFAULT_CLAUDE_MODEL,
-      })
+      const useCustomProvider = providerState.mode === 'custom'
+      if (!useCustomProvider && !user) {
+        throw new Error('请先登录 OneAPI，或在 AIChat 服务通道中配置自定义 API。')
+      }
+      const generated = useCustomProvider
+        ? null
+        : await ensureDesktopServiceKey({
+            name: 'OneAPI Desktop Internal Key',
+            group: user?.group || '',
+            preferredNames: [
+              `OneAPI Desktop ${client.toUpperCase()} Key`,
+              'OneAPI Desktop CODEX Key',
+              'OneAPI Desktop CLAUDE Key',
+              'OneAPI Desktop Internal Key',
+              '桌面端专用 Key',
+              'CODEX 桌面安装 Key',
+              'CLAUDE 桌面安装 Key',
+            ],
+          })
+      if (generated) {
+        toast(generated.reused ? '已复用服务器现有有效 API Key。' : '未找到可用 API Key，已自动创建新的桌面端 Key。')
+      }
+      const resolvedDeploySettings = useCustomProvider
+        ? {
+            apiKey: providerState.apiKey,
+            baseUrl: client === 'codex'
+              ? normalizeOpenAICompatibleBaseUrl(providerState.baseUrl)
+              : providerState.baseUrl.replace(/\/v1$/i, ''),
+            model: providerState.defaultModel || (client === 'codex' ? DEFAULT_CODEX_MODEL : DEFAULT_CLAUDE_MODEL),
+            apiKeySource: 'custom' as const,
+          }
+        : {
+            ...resolveCliDeploySettings({
+              preset,
+              generatedApiKey: generated?.key || '',
+              defaultBaseUrl: client === 'codex' ? DEFAULT_CODEX_BASE_URL : DEFAULT_CLAUDE_BASE_URL,
+              defaultModel: client === 'codex' ? DEFAULT_CODEX_MODEL : DEFAULT_CLAUDE_MODEL,
+            }),
+            apiKeySource: 'oneapi' as const,
+          }
       await deployCli({
         client,
         apiKey: resolvedDeploySettings.apiKey,
+        apiKeySource: resolvedDeploySettings.apiKeySource,
         baseUrl: resolvedDeploySettings.baseUrl,
         model: resolvedDeploySettings.model,
       })
@@ -12861,22 +12866,24 @@ function LoginScreen(props: {
             </div>
             {!require2fa && (
               <div className='inline-actions'>
-                <button
-                  className={`ghost-button tiny ${mode === 'login' ? 'selected-toggle' : ''}`}
-                  type='button'
-                  onClick={() => setMode('login')}
-                >
-                  登录
-                </button>
-                {registerEnabled && (
+                {mode === 'login' && registerEnabled ? (
                   <button
-                    className={`ghost-button tiny ${mode === 'register' ? 'selected-toggle' : ''}`}
+                    className='ghost-button tiny'
                     type='button'
                     onClick={() => setMode('register')}
                   >
                     注册
                   </button>
-                )}
+                ) : null}
+                {mode === 'register' ? (
+                  <button
+                    className='ghost-button tiny'
+                    type='button'
+                    onClick={() => setMode('login')}
+                  >
+                    登录
+                  </button>
+                ) : null}
               </div>
             )}
           </div>
@@ -13399,6 +13406,9 @@ export function App() {
       if (event.code === 'ControlRight') {
         setRightCtrlHeld(true)
       }
+      if (event.key === 'Escape' && loginDialogOpen) {
+        setLoginDialogOpen(false)
+      }
     }
 
     function handleKeyUp(event: KeyboardEvent) {
@@ -13414,7 +13424,7 @@ export function App() {
       window.removeEventListener('keydown', handleKeyDown)
       window.removeEventListener('keyup', handleKeyUp)
     }
-  }, [])
+  }, [loginDialogOpen])
 
   useEffect(() => {
     function handlePointerDown(event: PointerEvent) {
@@ -13668,10 +13678,15 @@ export function App() {
                   </button>
                 ) : null}
                 {!collapsed && (
-                  <div className='brand-text'>
+                  <button
+                    className='brand-text brand-home-link'
+                    type='button'
+                    onClick={() => void getDesktopBridge().openExternal(DEFAULT_SERVER_BASE_URL)}
+                    title='打开 OneAPI 官网'
+                  >
                     <div className='brand-name'>OneAPI Center</div>
                     <div className='brand-sub'>Windows 客户端</div>
-                  </div>
+                  </button>
                 )}
               </div>
 
@@ -13698,9 +13713,9 @@ export function App() {
                     type='button'
                     className={`side-nav-item ${active ? 'active' : ''}`}
                     onClick={() => {
-                      if (!auth.user && (item.key === 'subscriptions' || item.key === 'wallet')) {
+                      if (!auth.user && item.key === 'wallet') {
                         setLoginDialogOpen(true)
-                        setMessage('请先登录 OneAPI 后使用套餐订阅和用量账单。')
+                        setMessage('请先登录 OneAPI 后使用用量账单。')
                         return
                       }
                       setSideTab(item.key)
@@ -13723,7 +13738,7 @@ export function App() {
               <div className='sidebar-account'>
                 {!collapsed && (
                   <div className='sidebar-user-stack' ref={updatePopoverRef}>
-                    <div className='sidebar-user-row' onClick={handleSidebarUserRowClick}>
+                    <div className={`sidebar-user-row ${auth.user ? '' : 'anonymous'}`} onClick={auth.user ? handleSidebarUserRowClick : undefined}>
                       <span className={`user-pill ${showUpdateDot ? 'has-update-dot' : ''}`}>
                         {auth.user?.username || '登录'}
                         {auth.user && showAnnouncementCount ? (
@@ -13755,7 +13770,7 @@ export function App() {
                             setLoginDialogOpen(true)
                           }}
                         >
-                          登录
+                          登录OneAPI
                         </button>
                       )}
                     </div>
@@ -13860,7 +13875,13 @@ export function App() {
                 serverBaseUrl={serverBaseUrl}
                 providerState={aiChatProviderState}
               />
-              {sideTab === 'subscriptions' && auth.user ? <SubscriptionsWorkspace toast={setMessage} /> : null}
+              {sideTab === 'subscriptions' ? (
+                <SubscriptionsWorkspace
+                  toast={setMessage}
+                  user={auth.user}
+                  onRequestLogin={() => setLoginDialogOpen(true)}
+                />
+              ) : null}
               {sideTab === 'wallet' && auth.user ? <WalletWorkspace user={auth.user} toast={setMessage} /> : null}
               {sideTab === 'service-status' && <ServiceStatusWorkspace toast={setMessage} />}
               <MeWorkspace

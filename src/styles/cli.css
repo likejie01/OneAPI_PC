@@ -2686,7 +2686,8 @@ textarea {
   -webkit-backdrop-filter: var(--glass-blur-strong);
 }
 
-.cli-page .cli-thread > .message-bubble,
+.cli-page .cli-thread > .message-bubble.assistant,
+.cli-page .cli-thread > .message-bubble.system,
 .cli-page .cli-log-bubble,
 .cli-page .cli-log-bubble.error,
 .cli-page .cli-log-phase-section,
@@ -2701,7 +2702,8 @@ textarea {
   -webkit-backdrop-filter: none !important;
 }
 
-.cli-page .cli-thread > .message-bubble,
+.cli-page .cli-thread > .message-bubble.assistant,
+.cli-page .cli-thread > .message-bubble.system,
 .cli-page .cli-log-bubble {
   padding-inline: 4px !important;
 }

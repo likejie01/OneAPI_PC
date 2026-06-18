@@ -341,6 +341,7 @@ export interface CliProgressPayload {
 export interface CliDeployRequest {
   client: CliClient
   apiKey: string
+  apiKeySource?: 'oneapi' | 'custom'
   model?: string
   baseUrl?: string
 }
