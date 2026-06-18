@@ -22,6 +22,10 @@ import type {
   DesktopAttachmentSaveResult,
   DesktopChatStreamPayload,
   DesktopChatStreamRequest,
+  DesktopCustomChatCompletionRequest,
+  DesktopCustomChatStreamRequest,
+  DesktopCustomImageGenerationRequest,
+  DesktopCustomModelListRequest,
   DesktopCopyImageRequest,
   DesktopDeleteCliMessageRequest,
   DesktopDeleteCliSessionsRequest,
@@ -37,7 +41,7 @@ import type {
   DesktopUpdateState,
   DesktopMobileBridgeDevice,
 } from './shared/desktop'
-import type { ImageGenerationResponse } from './shared/contracts'
+import type { ChatCompletionResponse, ImageGenerationResponse } from './shared/contracts'
 
 type Unsubscribe = () => void
 
@@ -68,6 +72,10 @@ declare global {
       resetServerBaseUrl: () => Promise<{ serverBaseUrl: string }>
       request: (input: DesktopApiRequest) => Promise<DesktopApiResponse>
       streamChatCompletion: (input: DesktopChatStreamRequest) => Promise<void>
+      streamCustomChatCompletion: (input: DesktopCustomChatStreamRequest) => Promise<void>
+      sendCustomChatCompletion: (input: DesktopCustomChatCompletionRequest) => Promise<ChatCompletionResponse>
+      sendCustomImageGeneration: (input: DesktopCustomImageGenerationRequest) => Promise<ImageGenerationResponse>
+      listCustomProviderModels: (input: DesktopCustomModelListRequest) => Promise<string[]>
       stopRequest: (requestId: string) => Promise<void>
       openExternal: (url: string) => Promise<void>
       openPath: (targetPath: string) => Promise<void>

@@ -2599,3 +2599,69 @@ body:has(.cli-extension-floating-tooltip)::after {
   -webkit-backdrop-filter: blur(28px) saturate(145%) !important;
 }
 
+.login-modal-card {
+  position: relative;
+  width: min(960px, calc(100vw - 48px));
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  border-radius: 18px;
+  background: transparent;
+}
+
+.login-modal-card .login-shell {
+  min-height: auto;
+}
+
+.login-modal-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 3;
+}
+
+.aichat-provider-card .provider-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.aichat-provider-card .provider-form-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.aichat-provider-card .provider-form-grid label:first-child {
+  grid-column: 1 / -1;
+}
+
+.aichat-provider-card .inline-fields {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.aichat-provider-card .inline-fields input {
+  min-width: 0;
+  flex: 1;
+}
+
+.provider-toggle-row {
+  cursor: pointer;
+}
+
+.provider-toggle-row input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+}
+
+@media (max-width: 760px) {
+  .aichat-provider-card .provider-form-grid {
+    grid-template-columns: 1fr;
+  }
+}
+

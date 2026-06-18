@@ -25,7 +25,7 @@ import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { fileURLToPath } from 'node:url'
 import process from 'node:process'
-import type { ChatCompletionResponse } from '../src/shared/contracts'
+import type { ChatCompletionResponse, ImageGenerationResponse } from '../src/shared/contracts'
 import type {
   CliExtensionEntry,
   CliExtensionInstallRequest,
@@ -36,6 +36,10 @@ import type {
   DesktopAppMeta,
   DesktopChatStreamPayload,
   DesktopChatStreamRequest,
+  DesktopCustomChatCompletionRequest,
+  DesktopCustomChatStreamRequest,
+  DesktopCustomImageGenerationRequest,
+  DesktopCustomModelListRequest,
   DesktopDeleteCliMessageRequest,
   DesktopDeleteCliSessionsRequest,
   DesktopReleaseManifest,
@@ -1372,6 +1376,16 @@ function buildUrl(requestPath: string, query?: DesktopApiRequest['query']) {
   return url.toString()
 }
 
+function buildOpenAICompatibleUrl(baseUrl: string, requestPath: string) {
+  const normalizedBase = (baseUrl || '').trim().replace(/\/+$/, '')
+  if (!/^https?:\/\//i.test(normalizedBase)) {
+    throw new Error('自定义 API Base URL 必须以 http:// 或 https:// 开头。')
+  }
+  const baseWithVersion = /\/v1$/i.test(normalizedBase) ? normalizedBase : `${normalizedBase}/v1`
+  const normalizedPath = requestPath.startsWith('/') ? requestPath : `/${requestPath}`
+  return new URL(`${baseWithVersion}${normalizedPath}`).toString()
+}
+
 function normalizeCodexBaseUrl(value?: string) {
   const normalized = (value || '').trim()
   if (!normalized) {
@@ -1596,6 +1610,200 @@ async function requestChatStream(sender: WebContents, input: DesktopChatStreamRe
     activeApiRequests.delete(input.requestId)
     stopApiPowerSaveBlocker(input.requestId)
   }
+}
+
+async function requestCustomChatCompletion(input: DesktopCustomChatCompletionRequest) {
+  const controller = input.requestId ? new AbortController() : null
+  if (input.requestId && controller) {
+    activeApiRequests.set(input.requestId, controller)
+    startApiPowerSaveBlocker(input.requestId)
+  }
+  try {
+    const response = await getDesktopSession().fetch(buildOpenAICompatibleUrl(input.baseUrl, '/chat/completions'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${input.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: input.model,
+        messages: input.messages,
+        temperature: input.temperature,
+        stream: false,
+      }),
+      signal: controller?.signal,
+    })
+    const data = await parseResponse(response)
+    if (!response.ok) {
+      throw new Error(getResponseErrorMessage(data, response.status, '自定义 API 聊天请求失败'))
+    }
+    return data as ChatCompletionResponse
+  } finally {
+    if (input.requestId) {
+      activeApiRequests.delete(input.requestId)
+      stopApiPowerSaveBlocker(input.requestId)
+    }
+  }
+}
+
+async function requestCustomChatStream(sender: WebContents, input: DesktopCustomChatStreamRequest) {
+  const controller = new AbortController()
+  activeApiRequests.set(input.requestId, controller)
+  startApiPowerSaveBlocker(input.requestId)
+
+  try {
+    const response = await getDesktopSession().fetch(buildOpenAICompatibleUrl(input.baseUrl, '/chat/completions'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${input.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: input.model,
+        messages: input.messages,
+        temperature: input.temperature,
+        stream: true,
+      }),
+      signal: controller.signal,
+    })
+
+    if (!response.ok) {
+      const data = await parseResponse(response)
+      emitChatStream(sender, {
+        requestId: input.requestId,
+        type: 'error',
+        status: response.status,
+        message: getResponseErrorMessage(data, response.status, '自定义 API 聊天请求失败'),
+      })
+      return
+    }
+
+    const reader = response.body?.getReader()
+    if (!reader) {
+      emitChatStream(sender, {
+        requestId: input.requestId,
+        type: 'error',
+        message: '当前自定义 API 不支持流式响应。',
+      })
+      return
+    }
+
+    const decoder = new TextDecoder('utf-8')
+    let buffer = ''
+    let usage: ChatCompletionResponse['usage'] | undefined
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) {
+        break
+      }
+
+      buffer += decoder.decode(value, { stream: true })
+      const events = buffer.split('\n\n')
+      buffer = events.pop() || ''
+
+      for (const rawEvent of events) {
+        for (const parsedLine of parseDesktopChatStreamEventBlock(rawEvent)) {
+          const emitted = emitParsedChatStreamLine(sender, input.requestId, parsedLine, usage)
+          usage = emitted.usage
+          if (emitted.done) {
+            return
+          }
+        }
+      }
+    }
+
+    if (buffer.trim()) {
+      for (const parsedLine of parseDesktopChatStreamEventBlock(buffer)) {
+        const emitted = emitParsedChatStreamLine(sender, input.requestId, parsedLine, usage)
+        usage = emitted.usage
+        if (emitted.done) {
+          return
+        }
+      }
+    }
+
+    emitChatStream(sender, {
+      requestId: input.requestId,
+      type: 'done',
+      usage,
+    })
+  } catch (error) {
+    emitChatStream(sender, {
+      requestId: input.requestId,
+      type: 'error',
+      status: controller.signal.aborted ? 499 : 500,
+      message: controller.signal.aborted
+        ? '请求已取消'
+        : error instanceof Error
+          ? error.message
+          : '自定义 API 聊天请求失败',
+    })
+  } finally {
+    activeApiRequests.delete(input.requestId)
+    stopApiPowerSaveBlocker(input.requestId)
+  }
+}
+
+async function requestCustomImageGeneration(input: DesktopCustomImageGenerationRequest) {
+  const controller = input.requestId ? new AbortController() : null
+  const timeoutMs = resolveDesktopRequestTimeoutMs('/v1/images/generations')
+  const timer = controller && timeoutMs > 0 ? setTimeout(() => controller.abort(), timeoutMs) : null
+  if (input.requestId && controller) {
+    activeApiRequests.set(input.requestId, controller)
+    startApiPowerSaveBlocker(input.requestId)
+  }
+  try {
+    const response = await getDesktopSession().fetch(buildOpenAICompatibleUrl(input.baseUrl, '/images/generations'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${input.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: input.model,
+        prompt: input.prompt,
+        n: input.n,
+        size: input.size,
+        quality: input.quality,
+        response_format: input.response_format,
+      }),
+      signal: controller?.signal,
+    })
+    const data = await parseResponse(response)
+    if (!response.ok) {
+      throw new Error(getResponseErrorMessage(data, response.status, '自定义 API 图片生成失败'))
+    }
+    return data as ImageGenerationResponse
+  } finally {
+    if (timer) {
+      clearTimeout(timer)
+    }
+    if (input.requestId) {
+      activeApiRequests.delete(input.requestId)
+      stopApiPowerSaveBlocker(input.requestId)
+    }
+  }
+}
+
+async function requestCustomProviderModels(input: DesktopCustomModelListRequest) {
+  const response = await getDesktopSession().fetch(buildOpenAICompatibleUrl(input.baseUrl, '/models'), {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${input.apiKey}`,
+    },
+  })
+  const data = await parseResponse(response)
+  if (!response.ok) {
+    throw new Error(getResponseErrorMessage(data, response.status, '读取自定义 API 模型列表失败'))
+  }
+  const records =
+    data && typeof data === 'object' && Array.isArray((data as { data?: unknown }).data)
+      ? (data as { data: Array<{ id?: unknown }> }).data
+      : []
+  return records
+    .map((item) => (typeof item.id === 'string' ? item.id.trim() : ''))
+    .filter(Boolean)
 }
 
 interface MobileBridgeSessionSnapshot {
@@ -10077,6 +10285,18 @@ ipcMain.handle('desktop:api-request', async (_event, request: DesktopApiRequest)
 )
 ipcMain.handle('desktop:chat-stream', async (event, request: DesktopChatStreamRequest) => {
   await requestChatStream(event.sender, request)
+})
+ipcMain.handle('desktop:custom-chat-stream', async (event, request: DesktopCustomChatStreamRequest) => {
+  await requestCustomChatStream(event.sender, request)
+})
+ipcMain.handle('desktop:custom-chat-completion', async (_event, request: DesktopCustomChatCompletionRequest) => {
+  return requestCustomChatCompletion(request)
+})
+ipcMain.handle('desktop:custom-image-generation', async (_event, request: DesktopCustomImageGenerationRequest) => {
+  return requestCustomImageGeneration(request)
+})
+ipcMain.handle('desktop:custom-provider-models', async (_event, request: DesktopCustomModelListRequest) => {
+  return requestCustomProviderModels(request)
 })
 ipcMain.handle('desktop:stop-api-request', async (_event, requestId: string) => {
   activeApiRequests.get(requestId)?.abort()

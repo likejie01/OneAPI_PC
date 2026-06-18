@@ -55,6 +55,40 @@ export interface DesktopChatStreamRequest {
   temperature?: number
 }
 
+export interface DesktopCustomChatStreamRequest extends DesktopChatStreamRequest {
+  baseUrl: string
+  apiKey: string
+}
+
+export interface DesktopCustomChatCompletionRequest {
+  requestId?: string
+  baseUrl: string
+  apiKey: string
+  model: string
+  messages: Array<{
+    role: 'system' | 'user' | 'assistant'
+    content: string | ChatContentPart[]
+  }>
+  temperature?: number
+}
+
+export interface DesktopCustomImageGenerationRequest {
+  requestId?: string
+  baseUrl: string
+  apiKey: string
+  model: string
+  prompt: string
+  n?: number
+  size?: string
+  quality?: string
+  response_format?: 'url' | 'b64_json'
+}
+
+export interface DesktopCustomModelListRequest {
+  baseUrl: string
+  apiKey: string
+}
+
 export interface DesktopChatStreamPayload {
   requestId: string
   type: 'delta' | 'reasoning' | 'done' | 'error'

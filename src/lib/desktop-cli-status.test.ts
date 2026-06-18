@@ -66,7 +66,7 @@ test('isCliStatusReadyForWorkspace rejects historical Codex configs that still p
         hasConfig: true,
         hasDataDirectory: true,
         hasApiKey: true,
-        baseUrl: 'http://192.168.30.241:3001/v1',
+        baseUrl: 'https://example.test/v1',
       },
       'https://ai.oneapi.center'
     ),
