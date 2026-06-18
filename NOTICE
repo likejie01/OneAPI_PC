@@ -1,0 +1,21 @@
+OneAPI PC
+Copyright 2026 OneAPI contributors
+
+This product includes software developed for the OneAPI desktop client.
+
+Source Attribution
+------------------
+If you modify, fork, redistribute, or build derivative works from this
+project, you must retain the original copyright notices, this NOTICE file,
+the Apache License 2.0 text, and a clear statement that your work is based on
+the OneAPI PC project. Modified versions should clearly describe their
+changes and must not imply official endorsement unless separately authorized.
+
+Brand and Service Rights
+------------------------
+The names "OneAPI", "OneAPI PC", "OneAPI MAC", project logos, product
+identity, hosted services, server infrastructure, subscription products, and
+related commercial rights are not licensed under the Apache License 2.0.
+The source license grants rights to the code only. Use of OneAPI branding,
+official service endpoints, paid services, update channels, or distribution
+channels may require separate permission from the OneAPI rights holder.
