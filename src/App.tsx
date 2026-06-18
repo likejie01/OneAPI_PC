@@ -75,10 +75,14 @@ import {
   sendChatCompletion,
   sendDirectImageGeneration,
   sendImageEdit,
-  sendImageGeneration,
-  streamChatCompletion,
   stopChatCompletion,
 } from './domains/chat'
+import {
+  listCustomAiChatProviderModels,
+  sendAiChatCompletion,
+  sendAiImageGeneration,
+  streamAiChatCompletion,
+} from './domains/aichat-provider'
 import {
   deleteCliMessage,
   deleteCliSessions,
@@ -276,6 +280,16 @@ import {
   type ExportCliLogGroup,
 } from './lib/session-history'
 import { readJsonStorage, writeJsonStorage } from './lib/storage'
+import {
+  AI_CHAT_PROVIDER_STORAGE_KEY,
+  DEFAULT_AI_CHAT_PROVIDER_CONFIG,
+  normalizeAiChatProviderConfig,
+  normalizeOpenAICompatibleBaseUrl,
+  resolveAiChatProviderState,
+  shouldDisableCliModelForProvider,
+  type AiChatProviderConfig,
+  type AiChatProviderState,
+} from './lib/aichat-provider'
 import { resolveSubscriptionPlanBadge } from './lib/subscription-plan'
 import {
   type ServiceStatusCacheStore,
@@ -4294,8 +4308,9 @@ function EmptyState(props: { title: string; description: string; icon?: typeof B
 function AssistantsChatWorkspace(props: {
   toast: (message: string) => void
   active: boolean
+  providerState: AiChatProviderState
 }) {
-  const { toast, active } = props
+  const { toast, active, providerState } = props
   const performanceMode = useAppPerformanceMode()
   const [models, setModels] = useState<ChatModelOption[]>([])
   const [favoriteModels, setFavoriteModels] = useState<string[]>(() => loadFavoriteModels('oneapi-desktop-chat-favorites'))
@@ -4423,9 +4438,21 @@ function AssistantsChatWorkspace(props: {
   }, [assistants])
 
   const messages = activeSession?.messages || []
+  const customProviderModels = useMemo<ChatModelOption[]>(
+    () =>
+      providerState.mode === 'custom'
+        ? Array.from(new Set([providerState.defaultModel, ...providerState.models].map((item) => item.trim()).filter(Boolean)))
+            .map((item) => ({
+              label: item,
+              value: item,
+            }))
+        : [],
+    [providerState.defaultModel, providerState.mode, providerState.models]
+  )
+  const availableChatModels = providerState.mode === 'custom' ? customProviderModels : models
   const compatibleChatModels = useMemo(
-    () => prioritizeFavoriteModels(filterAssistantModels('chat', withFavoriteFlag(models, favoriteModels))),
-    [favoriteModels, models]
+    () => prioritizeFavoriteModels(filterAssistantModels('chat', withFavoriteFlag(availableChatModels, favoriteModels))),
+    [availableChatModels, favoriteModels]
   )
   const chatModeModels = compatibleChatModels
   const chatModelVendorFilterOptions = useMemo(
@@ -4520,11 +4547,11 @@ function AssistantsChatWorkspace(props: {
     return [
       createDefaultChatSession(
         resolveExistingAssistantId(assistants, activeAssistantId),
-        selectedModel || resolvePreferredModel(models, DEFAULT_CHAT_MODEL, activeAssistant?.model),
+        selectedModel || resolvePreferredModel(availableChatModels, providerState.defaultModel || DEFAULT_CHAT_MODEL, activeAssistant?.model),
         selectedGroup
       ),
     ]
-  }, [activeAssistant?.model, activeAssistantId, assistants, models, selectedGroup, selectedModel])
+  }, [activeAssistant?.model, activeAssistantId, assistants, availableChatModels, providerState.defaultModel, selectedGroup, selectedModel])
 
   const removeChatSessions = useCallback((sessionIds: string[]) => {
     const removeSet = new Set(sessionIds)
@@ -4574,12 +4601,13 @@ function AssistantsChatWorkspace(props: {
     })
 
     try {
-      const resolvedModel = selectedModel || resolvePreferredModel(models, DEFAULT_CHAT_MODEL, activeAssistant?.model)
+      const resolvedModel =
+        selectedModel || resolvePreferredModel(availableChatModels, providerState.defaultModel || DEFAULT_CHAT_MODEL, activeAssistant?.model)
       if (!resolvedModel) {
         throw new Error('当前没有可用于翻译的模型。')
       }
 
-      const response = await sendChatCompletion({
+      const response = await sendAiChatCompletion(providerState, {
         model: resolvedModel,
         group: selectedGroup || undefined,
         messages: [
@@ -4609,7 +4637,7 @@ function AssistantsChatWorkspace(props: {
       })
       toast(error instanceof Error ? error.message : '翻译失败')
     }
-  }, [activeAssistant, models, selectedGroup, selectedModel, toast])
+  }, [activeAssistant, availableChatModels, providerState, selectedGroup, selectedModel, toast])
 
   useEffect(() => {
     if (!active) {
@@ -4626,6 +4654,52 @@ function AssistantsChatWorkspace(props: {
 
     void (async () => {
       try {
+        if (providerState.mode === 'custom') {
+          const customModels = Array.from(new Set([
+            providerState.defaultModel,
+            ...providerState.models,
+          ].map((item) => item.trim()).filter(Boolean))).map((item) => ({
+            label: item,
+            value: item,
+          }))
+          if (disposed) {
+            return
+          }
+          setModels(customModels)
+          setSelectedModel((current) => current || customModels[0]?.value || '')
+          setSelectedGroup('')
+          setChatSessions((current) => {
+            if (current.length > 0) {
+              return current
+            }
+            return [
+              createDefaultChatSession(
+                activeAssistant?.id || initialAssistantsState.assistants[0]?.id || '',
+                customModels[0]?.value || providerState.defaultModel || DEFAULT_CHAT_MODEL,
+                ''
+              ),
+            ]
+          })
+          return
+        }
+
+        if (providerState.mode !== 'oneapi') {
+          if (!disposed) {
+            setModels([])
+            setSelectedGroup('')
+            setChatSessions((current) => current.length > 0
+              ? current
+              : [
+                  createDefaultChatSession(
+                    activeAssistant?.id || initialAssistantsState.assistants[0]?.id || '',
+                    '',
+                    ''
+                  ),
+                ])
+          }
+          return
+        }
+
         const [nextModels, nextGroups] = await Promise.all([
           getUserModels(),
           getUserGroups(),
@@ -4664,7 +4738,15 @@ function AssistantsChatWorkspace(props: {
     return () => {
       disposed = true
     }
-  }, [activeAssistant?.id, activeAssistant?.model, initialAssistantsState.assistants, toast])
+  }, [
+    activeAssistant?.id,
+    activeAssistant?.model,
+    initialAssistantsState.assistants,
+    providerState.defaultModel,
+    providerState.mode,
+    providerState.models,
+    toast,
+  ])
 
   useEffect(() => {
     function handlePointerDown(event: PointerEvent) {
@@ -4992,7 +5074,13 @@ function AssistantsChatWorkspace(props: {
       return
     }
 
-    const preferredModel = selectedModel || resolvePreferredModel(models, DEFAULT_CHAT_MODEL, activeAssistant?.model)
+    if (providerState.mode === 'unavailable') {
+      toast(providerState.reason || '请先登录 OneAPI 或配置自定义 API 通道。')
+      return
+    }
+
+    const preferredModel =
+      selectedModel || resolvePreferredModel(availableChatModels, providerState.defaultModel || DEFAULT_CHAT_MODEL, activeAssistant?.model)
     const resolvedModel = resolveChatModelForAttachments(selectedModel, preferredModel, chatModeModels, attachments)
     if (!resolvedModel) {
       toast('当前没有可用模型。')
@@ -5080,10 +5168,11 @@ function AssistantsChatWorkspace(props: {
 
     try {
       if (isImageGenerationModel(resolvedModel)) {
-        const response = await sendImageGeneration(
+        const response = await sendAiImageGeneration(
+          providerState,
           {
             model: resolvedModel,
-            group: selectedGroup || undefined,
+            group: providerState.mode === 'oneapi' ? selectedGroup || undefined : undefined,
             prompt: normalizedDraft,
             n: 1,
             response_format: 'b64_json',
@@ -5119,12 +5208,12 @@ function AssistantsChatWorkspace(props: {
         const requestHasAttachments = attachments.some((item) => item.dataBase64)
         const chatRequestPayload = {
           model: resolvedModel,
-          group: selectedGroup || undefined,
-          promptCacheKey: shouldAttachPromptCacheKey(resolvedModel) && !requestHasAttachments
+          group: providerState.mode === 'oneapi' ? selectedGroup || undefined : undefined,
+          promptCacheKey: providerState.mode === 'oneapi' && shouldAttachPromptCacheKey(resolvedModel) && !requestHasAttachments
             ? resolvedActiveSessionId
             : undefined,
           temperature: activeAssistant?.temperature ?? 0.7,
-          reasoningEffort,
+          reasoningEffort: providerState.mode === 'oneapi' ? reasoningEffort : undefined,
           messages: [
             ...(systemMessage ? [systemMessage] : []),
             ...requestHistory.map((item) => ({
@@ -5139,7 +5228,8 @@ function AssistantsChatWorkspace(props: {
         const abortController = new AbortController()
         pendingStreamAbortRef.current = abortController
 
-        await streamChatCompletion(
+        await streamAiChatCompletion(
+          providerState,
           chatRequestPayload,
           {
             requestId,
@@ -5169,7 +5259,7 @@ function AssistantsChatWorkspace(props: {
 
         if (!hasFinalVisibleContent && !stoppingRef.current) {
           try {
-            const retryResponse = await sendChatCompletion(chatRequestPayload, { requestId: `${requestId}-fallback` })
+            const retryResponse = await sendAiChatCompletion(providerState, chatRequestPayload, { requestId: `${requestId}-fallback` })
             const retryDisplayState = deriveDesktopChatDisplayState(
               retryResponse.choices[0]?.message?.content || '',
               ''
@@ -6095,8 +6185,9 @@ function AssistantsChatWorkspace(props: {
 function DrawWorkspace(props: {
   toast: (message: string) => void
   active: boolean
+  providerState: AiChatProviderState
 }) {
-  const { toast, active } = props
+  const { toast, active, providerState } = props
   const performanceMode = useAppPerformanceMode()
   const [drawSessions, setDrawSessions] = useState<DrawSessionRecord[]>(() => {
     const storedSessions = loadStoredDrawSessions()
@@ -6871,6 +6962,9 @@ function DrawWorkspace(props: {
 
   async function executeDrawRequest(request: PendingDrawRetryRequest) {
     if (request.kind === 'edit') {
+      if (providerState.mode !== 'oneapi') {
+        throw new Error('图片编辑需要登录并使用 OneAPI 服务，自定义 API 通道当前仅支持文本生图。')
+      }
       const serviceKey = await ensureDesktopServiceKey({
         name: 'OneAPI Desktop Internal Key',
         group: resolvePendingDrawRequestGroup(request, selectedGroup || ''),
@@ -6894,6 +6988,20 @@ function DrawWorkspace(props: {
       } catch (error) {
         throw new Error(mapImageEditError(error), { cause: error })
       }
+    }
+
+    if (providerState.mode === 'custom') {
+      return sendAiImageGeneration(providerState, {
+        model: request.model,
+        prompt: request.prompt,
+        size: request.size,
+        quality: request.quality,
+        response_format: request.response_format,
+      })
+    }
+
+    if (providerState.mode !== 'oneapi') {
+      throw new Error(providerState.reason || '请先登录 OneAPI 或配置自定义 API 通道。')
     }
 
     const serviceKey = await ensureDesktopServiceKey({
@@ -8446,14 +8554,243 @@ function resolveNextClientKeyName(keys: Array<{ name?: string }>) {
   return `ClientKey_${index}`
 }
 
+function AiChatProviderSettingsCard(props: {
+  config: AiChatProviderConfig
+  providerState: AiChatProviderState
+  toast: (message: string) => void
+  onChange: (updater: (current: AiChatProviderConfig) => AiChatProviderConfig) => void
+}) {
+  const { config, providerState, toast, onChange } = props
+  const [testing, setTesting] = useState(false)
+  const [apiKeyVisible, setApiKeyVisible] = useState(false)
+  const providerStatus =
+    providerState.mode === 'custom'
+      ? '当前 AIChat 与 Image 使用自定义 API 通道'
+      : providerState.mode === 'oneapi'
+        ? '当前 AIChat 与 Image 使用 OneAPI 服务'
+        : '请登录 OneAPI 或配置自定义 API 通道'
+
+  async function handleTestCustomProvider() {
+    try {
+      setTesting(true)
+      const baseUrl = normalizeOpenAICompatibleBaseUrl(config.customBaseUrl)
+      const apiKey = config.customApiKey.trim()
+      if (!baseUrl || !apiKey) {
+        throw new Error('请先填写 Base URL 和 API Key。')
+      }
+      const models = await listCustomAiChatProviderModels({
+        mode: 'custom',
+        baseUrl,
+        apiKey,
+        defaultModel: config.customDefaultModel,
+        models: config.customModels,
+      })
+      onChange((current) => ({
+        ...current,
+        customBaseUrl: baseUrl,
+        customApiKey: apiKey,
+        customModels: models,
+        customDefaultModel: current.customDefaultModel || models[0] || '',
+      }))
+      toast(models.length ? `连接成功，已读取 ${models.length} 个模型。` : '连接成功，但服务未返回模型列表。')
+    } catch (error) {
+      toast(error instanceof Error ? error.message : '自定义 API 连接失败')
+    } finally {
+      setTesting(false)
+    }
+  }
+
+  return (
+    <div className='panel-block aichat-provider-card'>
+      <div className='list-block-header'>
+        <strong>AIChat 服务通道</strong>
+        <small>{providerStatus}</small>
+      </div>
+      <div className='subrecords'>
+        <label className='record-row provider-toggle-row'>
+          <div>
+            <strong>使用自定义 API 中转</strong>
+            <span>兼容 OpenAI `/v1/chat/completions`、`/v1/images/generations` 和 `/v1/models`。</span>
+          </div>
+          <input
+            type='checkbox'
+            checked={config.customEnabled}
+            onChange={(event) => onChange((current) => ({ ...current, customEnabled: event.target.checked }))}
+          />
+        </label>
+        <div className='provider-form-grid'>
+          <label>
+            <span>Base URL</span>
+            <input
+              value={config.customBaseUrl}
+              onChange={(event) => onChange((current) => ({ ...current, customBaseUrl: event.target.value }))}
+              placeholder='https://api.example.com/v1'
+            />
+          </label>
+          <label>
+            <span>API Key</span>
+            <div className='inline-fields'>
+              <input
+                type={apiKeyVisible ? 'text' : 'password'}
+                value={config.customApiKey}
+                onChange={(event) => onChange((current) => ({ ...current, customApiKey: event.target.value }))}
+                placeholder='sk-...'
+              />
+              <button
+                className='ghost-button icon-only tiny'
+                type='button'
+                onClick={() => setApiKeyVisible((current) => !current)}
+                title={apiKeyVisible ? '隐藏 Key' : '显示 Key'}
+                aria-label={apiKeyVisible ? '隐藏 Key' : '显示 Key'}
+              >
+                {apiKeyVisible ? <EyeOff size={14} /> : <Eye size={14} />}
+              </button>
+            </div>
+          </label>
+          <label>
+            <span>默认模型</span>
+            <input
+              value={config.customDefaultModel}
+              onChange={(event) => onChange((current) => ({ ...current, customDefaultModel: event.target.value }))}
+              placeholder='gpt-4.1-mini'
+              list='aichat-provider-models'
+            />
+            <datalist id='aichat-provider-models'>
+              {config.customModels.map((model) => (
+                <option key={model} value={model} />
+              ))}
+            </datalist>
+          </label>
+        </div>
+        <div className='record-row'>
+          <div>
+            <strong>模型列表</strong>
+            <span>{config.customModels.length ? config.customModels.join(' · ') : '点击测试连接后会尝试自动读取。'}</span>
+          </div>
+          <button className='secondary-button tiny' type='button' disabled={testing} onClick={() => void handleTestCustomProvider()}>
+            {testing ? <LoaderCircle className='spin' size={14} /> : <RotateCcw size={14} />}
+            <span>{testing ? '检测中' : '测试连接'}</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function MeAnonymousWorkspace(props: {
+  toast: (message: string) => void
+  themeMode: ThemeMode
+  onToggleTheme: () => void
+  visible: boolean
+  providerConfig: AiChatProviderConfig
+  providerState: AiChatProviderState
+  onProviderConfigChange: (updater: (current: AiChatProviderConfig) => AiChatProviderConfig) => void
+  onRequestLogin: () => void
+}) {
+  const { toast, themeMode, onToggleTheme, visible, providerConfig, providerState, onProviderConfigChange, onRequestLogin } = props
+  return (
+    <section className={`workspace-page full-bleed-page ${visible ? '' : 'workspace-hidden'}`}>
+      <article className='panel scroll-panel page-surface'>
+        <div className='panel-header compact'>
+          <div>
+            <h2>环境部署</h2>
+          </div>
+          <div className='inline-actions'>
+            <button className='secondary-button tiny' type='button' onClick={onRequestLogin}>
+              <LockKeyhole size={14} />
+              <span>登录 OneAPI</span>
+            </button>
+            <button
+              className='ghost-button tiny theme-toggle-button'
+              type='button'
+              onClick={onToggleTheme}
+              title={themeMode === 'dark' ? '切换到明亮模式' : '切换到暗黑模式'}
+              aria-label={themeMode === 'dark' ? '切换到明亮模式' : '切换到暗黑模式'}
+            >
+              {themeMode === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+              <span>{themeMode === 'dark' ? '明亮' : '暗黑'}</span>
+            </button>
+          </div>
+        </div>
+        <div className='panel-scroll'>
+          <div className='content-grid me-layout page-blocks'>
+            <div className='me-column me-column-left'>
+              <div className='panel-block'>
+                <div className='subrecords'>
+                  <div className='record-row highlighted'>
+                    <div>
+                      <strong>未登录模式</strong>
+                      <span>可以配置自己的 OpenAI 兼容 API 使用 AIChat 与 Image；套餐、账单、App 互联和一键部署需要登录 OneAPI。</span>
+                    </div>
+                    <button className='secondary-button tiny' type='button' onClick={onRequestLogin}>登录</button>
+                  </div>
+                </div>
+              </div>
+              <AiChatProviderSettingsCard
+                config={providerConfig}
+                providerState={providerState}
+                toast={toast}
+                onChange={onProviderConfigChange}
+              />
+            </div>
+          </div>
+        </div>
+      </article>
+    </section>
+  )
+}
+
 function MeWorkspace(props: {
+  user: UserProfile | null
+  toast: (message: string) => void
+  themeMode: ThemeMode
+  onToggleTheme: () => void
+  visible: boolean
+  providerConfig: AiChatProviderConfig
+  providerState: AiChatProviderState
+  onProviderConfigChange: (updater: (current: AiChatProviderConfig) => AiChatProviderConfig) => void
+  onRequestLogin: () => void
+}) {
+  const { user, toast, themeMode, onToggleTheme, visible, providerConfig, providerState, onProviderConfigChange, onRequestLogin } = props
+  if (!user) {
+    return (
+      <MeAnonymousWorkspace
+        toast={toast}
+        themeMode={themeMode}
+        onToggleTheme={onToggleTheme}
+        visible={visible}
+        providerConfig={providerConfig}
+        providerState={providerState}
+        onProviderConfigChange={onProviderConfigChange}
+        onRequestLogin={onRequestLogin}
+      />
+    )
+  }
+  return (
+    <MeAuthenticatedWorkspace
+      user={user}
+      toast={toast}
+      themeMode={themeMode}
+      onToggleTheme={onToggleTheme}
+      visible={visible}
+      providerConfig={providerConfig}
+      providerState={providerState}
+      onProviderConfigChange={onProviderConfigChange}
+    />
+  )
+}
+
+function MeAuthenticatedWorkspace(props: {
   user: UserProfile
   toast: (message: string) => void
   themeMode: ThemeMode
   onToggleTheme: () => void
   visible: boolean
+  providerConfig: AiChatProviderConfig
+  providerState: AiChatProviderState
+  onProviderConfigChange: (updater: (current: AiChatProviderConfig) => AiChatProviderConfig) => void
 }) {
-  const { user, toast, themeMode, onToggleTheme, visible } = props
+  const { user, toast, themeMode, onToggleTheme, visible, providerConfig, providerState, onProviderConfigChange } = props
   const [apiKeys, setApiKeys] = useState<
     Array<{
       id: number
@@ -8729,6 +9066,13 @@ function MeWorkspace(props: {
                   </div>
                 </div>
 
+                <AiChatProviderSettingsCard
+                  config={providerConfig}
+                  providerState={providerState}
+                  toast={toast}
+                  onChange={onProviderConfigChange}
+                />
+
                 <div className='panel-block me-device-binding-card'>
                   <div className='list-block-header'>
                     <strong>设备绑定</strong>
@@ -8946,10 +9290,11 @@ function CliWorkspace(props: {
   openSettings: () => void
   active: boolean
   serverBaseUrl: string
+  aiChatProviderMode: AiChatProviderState['mode']
   runningState: CliRunningState
   onRunningStateChange: (client: CliClient, state: CliRunningState) => void
 }) {
-  const { client, toast, openSettings, active, serverBaseUrl, runningState, onRunningStateChange } = props
+  const { client, toast, openSettings, active, serverBaseUrl, aiChatProviderMode, runningState, onRunningStateChange } = props
   const performanceMode = useAppPerformanceMode()
   const lastProjectPathStorageKey = `oneapi-desktop-${client}-last-project-path`
   const projectSessionMapStorageKey = `oneapi-desktop-${client}-project-session-map`
@@ -9124,6 +9469,10 @@ function CliWorkspace(props: {
   const visibleCliModels = useMemo(
     () => filterModelsByVendor(compatibleCliModels, effectiveCliModelVendorFilter),
     [compatibleCliModels, effectiveCliModelVendorFilter]
+  )
+  const selectableCliModels = useMemo(
+    () => compatibleCliModels.filter((item) => !shouldDisableCliModelForProvider(item.value, aiChatProviderMode)),
+    [aiChatProviderMode, compatibleCliModels]
   )
   const selectedModelLabel =
     compatibleCliModels.find((item) => item.value === selectedModel)?.label || selectedModel || preferredCliModel
@@ -9370,6 +9719,14 @@ function CliWorkspace(props: {
       }),
     [activeLogs, activeMessages, activePartial, selectedModelLabel]
   )
+  useEffect(() => {
+    if (!selectedModel || !shouldDisableCliModelForProvider(selectedModel, aiChatProviderMode)) {
+      return
+    }
+    const nextModel = selectableCliModels[0]?.value || ''
+    setSelectedModel(nextModel)
+    toast('该模型需要 OneAPI 专用桥接服务，已切换到当前通道可用模型。')
+  }, [aiChatProviderMode, client, selectableCliModels, selectedModel, toast])
   useAutoFollowScroll(threadRef, [activeTimeline, running, activePartial])
   const buildCliExportLogGroups = useCallback((logs: CliLogEntry[]) => {
     const grouped = new Map<string, ExportCliLogGroup>()
@@ -11006,6 +11363,10 @@ function CliWorkspace(props: {
       )
       return
     }
+    if (shouldDisableCliModelForProvider(resolvedCliModel, aiChatProviderMode)) {
+      toast('该模型需要登录并使用 OneAPI 专用桥接服务。')
+      return
+    }
     const userMessage = {
       id: `user-${Date.now()}`,
       role: 'user' as const,
@@ -11653,13 +12014,23 @@ function CliWorkspace(props: {
                           </div>
                         ) : null}
                         <div className='picker-menu-list'>
+                          {aiChatProviderMode === 'custom' ? (
+                            <div className='picker-service-notice'>OneAPI专用桥接服务</div>
+                          ) : null}
                           {visibleCliModels.length ? (
-                            visibleCliModels.map((item: ChatModelOption) => (
+                            visibleCliModels.map((item: ChatModelOption) => {
+                              const disabled = shouldDisableCliModelForProvider(item.value, aiChatProviderMode)
+                              return (
                               <button
                                 key={item.value}
                                 type='button'
-                                className={`picker-option ${item.value === selectedModel ? 'active' : ''}`}
+                                className={`picker-option ${item.value === selectedModel ? 'active' : ''} ${disabled ? 'disabled' : ''}`}
+                                disabled={disabled}
                                 onClick={() => {
+                                  if (disabled) {
+                                    toast('该模型需要登录并使用 OneAPI 专用桥接服务。')
+                                    return
+                                  }
                                   setSelectedModel(item.value)
                                   setModelMenuOpen(false)
                                 }}
@@ -11678,8 +12049,10 @@ function CliWorkspace(props: {
                                     <Star size={13} />
                                   </button>
                                 </div>
+                                {disabled ? <small>需要登录并使用 OneAPI 专用桥接服务</small> : null}
                               </button>
-                            ))
+                              )
+                            })
                           ) : (
                             <div className='picker-empty-state'>当前筛选下没有可用模型</div>
                           )}
@@ -12158,8 +12531,9 @@ function AssistantWorkspace(props: {
   visible: boolean
   enabledModes: AssistantMode[]
   serverBaseUrl: string
+  providerState: AiChatProviderState
 }) {
-  const { mode, setMode, toast, openSettings, visible, enabledModes, serverBaseUrl } = props
+  const { mode, setMode, toast, openSettings, visible, enabledModes, serverBaseUrl, providerState } = props
   const [cliRunningState, setCliRunningState] = useState<Record<CliClient, CliRunningState>>({
     codex: { running: false, requestId: '' },
     claude: { running: false, requestId: '' },
@@ -12209,10 +12583,10 @@ function AssistantWorkspace(props: {
 
       <div className='workspace-host assistant-host'>
         <div className={mode === 'chat' ? 'workspace-shell active' : 'workspace-shell'}>
-          <AssistantsChatWorkspace toast={toast} active={visible && mode === 'chat'} />
+          <AssistantsChatWorkspace toast={toast} active={visible && mode === 'chat'} providerState={providerState} />
         </div>
         <div className={mode === 'draw' ? 'workspace-shell active' : 'workspace-shell'}>
-          <DrawWorkspace toast={toast} active={visible && mode === 'draw'} />
+          <DrawWorkspace toast={toast} active={visible && mode === 'draw'} providerState={providerState} />
         </div>
         <div className={mode === 'codex' ? 'workspace-shell active' : 'workspace-shell'}>
           <CliWorkspace
@@ -12221,6 +12595,7 @@ function AssistantWorkspace(props: {
             openSettings={openSettings}
             active={visible && mode === 'codex'}
             serverBaseUrl={serverBaseUrl}
+            aiChatProviderMode={providerState.mode}
             runningState={cliRunningState.codex}
             onRunningStateChange={updateCliRunningState}
           />
@@ -12232,6 +12607,7 @@ function AssistantWorkspace(props: {
             openSettings={openSettings}
             active={visible && mode === 'claude'}
             serverBaseUrl={serverBaseUrl}
+            aiChatProviderMode={providerState.mode}
             runningState={cliRunningState.claude}
             onRunningStateChange={updateCliRunningState}
           />
@@ -12806,6 +13182,10 @@ export function App() {
   const [serverBaseUrl, setServerBaseUrl] = useState('')
   const [serverBaseUrlDraft, setServerBaseUrlDraft] = useState('')
   const [serverBaseUrlDialogOpen, setServerBaseUrlDialogOpen] = useState(false)
+  const [loginDialogOpen, setLoginDialogOpen] = useState(false)
+  const [aiChatProviderConfig, setAiChatProviderConfig] = useState<AiChatProviderConfig>(() =>
+    normalizeAiChatProviderConfig(readJsonStorage<AiChatProviderConfig>(AI_CHAT_PROVIDER_STORAGE_KEY, DEFAULT_AI_CHAT_PROVIDER_CONFIG))
+  )
   const [updatePopoverOpen, setUpdatePopoverOpen] = useState(false)
   const [updateState, setUpdateState] = useState<DesktopUpdateState>({
     status: 'idle',
@@ -12836,6 +13216,20 @@ export function App() {
     () => formatQuotaAsUsd(Number(auth.user?.quota || 0), sidebarQuotaPerUnit),
     [auth.user?.quota, sidebarQuotaPerUnit]
   )
+  const aiChatProviderState = useMemo(
+    () => resolveAiChatProviderState(aiChatProviderConfig, auth.user),
+    [aiChatProviderConfig, auth.user]
+  )
+
+  const updateAiChatProviderConfig = useCallback((
+    updater: (current: AiChatProviderConfig) => AiChatProviderConfig
+  ) => {
+    setAiChatProviderConfig((current) => {
+      const next = normalizeAiChatProviderConfig(updater(current))
+      writeJsonStorage(AI_CHAT_PROVIDER_STORAGE_KEY, next)
+      return next
+    })
+  }, [])
 
   useEffect(() => {
     setBootstrapping(true)
@@ -13079,6 +13473,10 @@ export function App() {
   }
 
   function handleSidebarUserRowClick() {
+    if (!auth.user) {
+      setLoginDialogOpen(true)
+      return
+    }
     handleSidebarSecretClick()
     if (!rightCtrlHeld) {
       setUpdatePopoverOpen((current) => !current)
@@ -13251,24 +13649,6 @@ export function App() {
     setUpdatePopoverOpen(false)
   }
 
-  if (!auth.user) {
-    return (
-      <>
-        <DesktopWindowFrame iconPath={iconPath} productName={productName}>
-          <LoginScreen
-            platformLabel={platformLabel}
-            productName={productName}
-            onLoginSuccess={(user) => {
-              auth.setUser(user)
-            }}
-            toast={setMessage}
-          />
-        </DesktopWindowFrame>
-        {message && <div className='toast-bar'>{message}</div>}
-      </>
-    )
-  }
-
   return (
     <>
       <AppPerformanceModeContext.Provider value={performanceMode}>
@@ -13317,7 +13697,14 @@ export function App() {
                     key={item.key}
                     type='button'
                     className={`side-nav-item ${active ? 'active' : ''}`}
-                    onClick={() => setSideTab(item.key)}
+                    onClick={() => {
+                      if (!auth.user && (item.key === 'subscriptions' || item.key === 'wallet')) {
+                        setLoginDialogOpen(true)
+                        setMessage('请先登录 OneAPI 后使用套餐订阅和用量账单。')
+                        return
+                      }
+                      setSideTab(item.key)
+                    }}
                     title={item.label}
                   >
                     <Icon size={18} />
@@ -13338,28 +13725,41 @@ export function App() {
                   <div className='sidebar-user-stack' ref={updatePopoverRef}>
                     <div className='sidebar-user-row' onClick={handleSidebarUserRowClick}>
                       <span className={`user-pill ${showUpdateDot ? 'has-update-dot' : ''}`}>
-                        {auth.user.username}
-                        {showAnnouncementCount ? (
+                        {auth.user?.username || '登录'}
+                        {auth.user && showAnnouncementCount ? (
                           <span className='user-pill-count-badge'>
                             {unreadAnnouncementCount > 99 ? '99+' : unreadAnnouncementCount}
                           </span>
                         ) : null}
                       </span>
-                      <span className='user-pill secondary'>{sidebarWalletBalance}</span>
-                      <button
-                        className='ghost-button icon-only tiny'
-                        type='button'
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          void handleLogout()
-                        }}
-                        title='退出'
-                        aria-label='退出'
-                      >
-                        <LogOut size={16} />
-                      </button>
+                      {auth.user ? <span className='user-pill secondary'>{sidebarWalletBalance}</span> : null}
+                      {auth.user ? (
+                        <button
+                          className='ghost-button icon-only tiny'
+                          type='button'
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            void handleLogout()
+                          }}
+                          title='退出'
+                          aria-label='退出'
+                        >
+                          <LogOut size={16} />
+                        </button>
+                      ) : (
+                        <button
+                          className='secondary-button tiny'
+                          type='button'
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            setLoginDialogOpen(true)
+                          }}
+                        >
+                          登录
+                        </button>
+                      )}
                     </div>
-                    {updatePopoverOpen && (
+                    {auth.user && updatePopoverOpen && (
                       <div className='desktop-update-popover'>
                         <div className='desktop-notice-section'>
                           <div className='desktop-notice-section-head'>
@@ -13437,11 +13837,11 @@ export function App() {
                   <button
                     className='ghost-button icon-only tiny collapsed-logout-button'
                     type='button'
-                    onClick={() => void handleLogout()}
-                    title='退出'
-                    aria-label='退出'
+                    onClick={() => auth.user ? void handleLogout() : setLoginDialogOpen(true)}
+                    title={auth.user ? '退出' : '登录'}
+                    aria-label={auth.user ? '退出' : '登录'}
                   >
-                    <LogOut size={16} />
+                    {auth.user ? <LogOut size={16} /> : <LockKeyhole size={16} />}
                   </button>
                 )}
               </div>
@@ -13458,9 +13858,10 @@ export function App() {
                 visible={sideTab === 'assistants'}
                 enabledModes={enabledAssistantModes}
                 serverBaseUrl={serverBaseUrl}
+                providerState={aiChatProviderState}
               />
-              {sideTab === 'subscriptions' && <SubscriptionsWorkspace toast={setMessage} />}
-              {sideTab === 'wallet' && <WalletWorkspace user={auth.user} toast={setMessage} />}
+              {sideTab === 'subscriptions' && auth.user ? <SubscriptionsWorkspace toast={setMessage} /> : null}
+              {sideTab === 'wallet' && auth.user ? <WalletWorkspace user={auth.user} toast={setMessage} /> : null}
               {sideTab === 'service-status' && <ServiceStatusWorkspace toast={setMessage} />}
               <MeWorkspace
                 user={auth.user}
@@ -13471,6 +13872,10 @@ export function App() {
                   setThemeMode((current) => (current === 'dark' ? 'light' : 'dark'))
                 }}
                 visible={sideTab === 'me'}
+                providerConfig={aiChatProviderConfig}
+                providerState={aiChatProviderState}
+                onProviderConfigChange={updateAiChatProviderConfig}
+                onRequestLogin={() => setLoginDialogOpen(true)}
               />
               {/* settings removed */}
             </div>
@@ -13479,6 +13884,31 @@ export function App() {
       </DesktopWindowFrame>
 
       {message && <div className='toast-bar'>{message}</div>}
+
+      {loginDialogOpen && (
+        <div className='modal-mask' onClick={() => setLoginDialogOpen(false)}>
+          <div className='login-modal-card' onClick={(event) => event.stopPropagation()}>
+            <button
+              className='ghost-button icon-only tiny login-modal-close'
+              type='button'
+              onClick={() => setLoginDialogOpen(false)}
+              aria-label='关闭登录'
+              title='关闭登录'
+            >
+              <X size={16} />
+            </button>
+            <LoginScreen
+              platformLabel={platformLabel}
+              productName={productName}
+              onLoginSuccess={(user) => {
+                auth.setUser(user)
+                setLoginDialogOpen(false)
+              }}
+              toast={setMessage}
+            />
+          </div>
+        </div>
+      )}
 
       {serverBaseUrlDialogOpen && (
         <div className='modal-mask'>

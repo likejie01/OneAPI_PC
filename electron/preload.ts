@@ -29,6 +29,10 @@ import type {
   DesktopApiResponse,
   DesktopChatStreamPayload,
   DesktopChatStreamRequest,
+  DesktopCustomChatCompletionRequest,
+  DesktopCustomChatStreamRequest,
+  DesktopCustomImageGenerationRequest,
+  DesktopCustomModelListRequest,
   DesktopDeleteCliMessageRequest,
   DesktopDeleteCliSessionsRequest,
   DesktopDeleteCliSessionsResult,
@@ -38,7 +42,7 @@ import type {
   DesktopUpdateState,
   DesktopMobileBridgeDevice,
 } from '../src/shared/desktop'
-import type { ImageGenerationResponse } from '../src/shared/contracts'
+import type { ChatCompletionResponse, ImageGenerationResponse } from '../src/shared/contracts'
 
 contextBridge.exposeInMainWorld('desktopBridge', {
   getPlatform: () => ipcRenderer.invoke('app:get-platform') as Promise<string>,
@@ -78,6 +82,14 @@ contextBridge.exposeInMainWorld('desktopBridge', {
     ipcRenderer.invoke('desktop:api-request', input) as Promise<DesktopApiResponse>,
   streamChatCompletion: (input: DesktopChatStreamRequest) =>
     ipcRenderer.invoke('desktop:chat-stream', input) as Promise<void>,
+  streamCustomChatCompletion: (input: DesktopCustomChatStreamRequest) =>
+    ipcRenderer.invoke('desktop:custom-chat-stream', input) as Promise<void>,
+  sendCustomChatCompletion: (input: DesktopCustomChatCompletionRequest) =>
+    ipcRenderer.invoke('desktop:custom-chat-completion', input) as Promise<ChatCompletionResponse>,
+  sendCustomImageGeneration: (input: DesktopCustomImageGenerationRequest) =>
+    ipcRenderer.invoke('desktop:custom-image-generation', input) as Promise<ImageGenerationResponse>,
+  listCustomProviderModels: (input: DesktopCustomModelListRequest) =>
+    ipcRenderer.invoke('desktop:custom-provider-models', input) as Promise<string[]>,
   stopRequest: (requestId: string) =>
     ipcRenderer.invoke('desktop:stop-api-request', requestId) as Promise<void>,
   openExternal: (url: string) => ipcRenderer.invoke('desktop:open-external', url) as Promise<void>,
