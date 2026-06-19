@@ -2795,12 +2795,6 @@ body:has(.cli-extension-floating-tooltip)::after {
   padding-top: 4px !important;
 }
 
-.cli-page .message-bubble.user {
-  background: var(--bubble-user) !important;
-  border-color: color-mix(in srgb, var(--line) 82%, transparent) !important;
-  box-shadow: var(--shadow-soft) !important;
-}
-
 :root[data-theme='dark'] .chat-page .message-bubble.assistant,
 :root[data-theme='dark'] .chat-page .message-bubble.system {
   background: var(--bubble-ai) !important;
@@ -3114,17 +3108,6 @@ body:has(.cli-extension-floating-tooltip)::after {
   color: #f8fafc !important;
 }
 
-.cli-page .message-bubble.user {
-  background: color-mix(in srgb, var(--accent) 8%, var(--surface) 92%) !important;
-  border-color: color-mix(in srgb, var(--accent) 12%, var(--line)) !important;
-  box-shadow: none !important;
-}
-
-:root[data-theme='dark'] .cli-page .message-bubble.user {
-  background: color-mix(in srgb, var(--accent) 10%, var(--surface) 90%) !important;
-  border-color: color-mix(in srgb, var(--accent) 14%, var(--line)) !important;
-}
-
 .cli-page .message-link-text-strip,
 .cli-page .message-link-chip-strip {
   background: transparent !important;
@@ -3209,6 +3192,38 @@ body:has(.cli-extension-floating-tooltip)::after {
   -webkit-backdrop-filter: none !important;
 }
 
+.cli-page .cli-log-phase-section,
+.cli-page .cli-log-phase-section.plain-status,
+.cli-page .cli-log-output-card,
+.cli-page .cli-log-diagnostic-group,
+.cli-page .cli-log-diagnostic-group.stdout-group,
+.cli-page .cli-log-output-inline,
+.cli-page .cli-log-event-row,
+.cli-page .cli-log-time-group,
+.cli-page .cli-log-output-stack {
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
+.cli-page .cli-log-event-list,
+.cli-page .cli-log-time-lines,
+.cli-page .cli-log-output-card-body,
+.cli-page .cli-log-output-inline-copy {
+  gap: 4px !important;
+}
+
+.cli-page .cli-log-phase-section,
+.cli-page .cli-log-output-stack,
+.cli-page .cli-log-diagnostic-group {
+  gap: 6px !important;
+}
+
 .cli-page .cli-log-entry + .message-bubble.assistant,
 .cli-page .cli-log-entry + .message-bubble.system {
   margin-top: 0 !important;
@@ -3255,12 +3270,14 @@ body:has(.cli-extension-floating-tooltip)::after {
   margin-top: 0 !important;
 }
 
+.chat-page .message-bubble.user,
 .cli-page .message-bubble.user {
   background: var(--bubble-user) !important;
   border-color: color-mix(in srgb, var(--line) 82%, transparent) !important;
   box-shadow: var(--shadow-soft) !important;
 }
 
+:root[data-theme='dark'] .chat-page .message-bubble.user,
 :root[data-theme='dark'] .cli-page .message-bubble.user {
   background: var(--bubble-user) !important;
   border-color: color-mix(in srgb, var(--line) 82%, transparent) !important;
@@ -3319,8 +3336,33 @@ body:has(.cli-extension-floating-tooltip)::after {
 
 .subscription-progress-inline {
   width: 50% !important;
-  min-width: 180px !important;
+  min-width: 0 !important;
   flex: 0 0 50% !important;
+}
+
+.subscription-record-row {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 50%) !important;
+  align-items: center !important;
+  overflow: hidden !important;
+}
+
+.subscription-record-main,
+.subscription-record-side {
+  min-width: 0 !important;
+}
+
+.subscription-record-side {
+  width: 100% !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
+}
+
+.subscription-record-side .subscription-progress-inline {
+  width: 100% !important;
+  flex: 0 0 auto !important;
+  margin-left: 0 !important;
 }
 
 @media (max-width: 880px) {
@@ -3349,5 +3391,43 @@ body:has(.cli-extension-floating-tooltip)::after {
 :root[data-theme='dark'] .cli-page .inline-file-preview-content {
   border-color: color-mix(in srgb, var(--line) 70%, transparent) !important;
   background: color-mix(in srgb, var(--surface) 72%, white 4%) !important;
+}
+
+.anonymous-mode-note {
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+:root[data-theme='dark'] .me-column .panel-block:not(.page-surface),
+:root[data-theme='dark'] .me-column .settings-card,
+:root[data-theme='dark'] .me-column .inline-settings-card,
+:root[data-theme='dark'] .me-column .record-row,
+:root[data-theme='dark'] .me-column .subrecords,
+:root[data-theme='dark'] .me-column .subform,
+:root[data-theme='dark'] .me-column .status-button,
+:root[data-theme='dark'] .me-column .ghost-button,
+:root[data-theme='dark'] .me-column .secondary-button,
+:root[data-theme='dark'] .me-column .theme-toggle-button,
+:root[data-theme='dark'] .me-column .deploy-timeline-list,
+:root[data-theme='dark'] .me-column .deploy-progress-body,
+:root[data-theme='dark'] .me-column .deploy-timeline-item,
+:root[data-theme='dark'] .me-column .inline-notice,
+:root[data-theme='dark'] .me-column .tag,
+:root[data-theme='dark'] .me-column .chip,
+:root[data-theme='dark'] .me-column .metric-pill,
+:root[data-theme='dark'] .me-column .user-pill,
+:root[data-theme='dark'] .anonymous-cli-column .me-claude-card,
+:root[data-theme='dark'] .anonymous-cli-column .me-codex-card {
+  border-color: rgba(151, 164, 172, 0.028) !important;
+}
+
+:root[data-theme='dark'] .me-column .record-row.highlighted,
+:root[data-theme='dark'] .me-column .status-button.active,
+:root[data-theme='dark'] .me-column .status-button:focus-visible {
+  border-color: rgba(86, 139, 190, 0.19) !important;
+  box-shadow: 0 0 0 1px rgba(86, 139, 190, 0.04) !important;
 }
 

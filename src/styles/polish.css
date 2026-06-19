@@ -1765,3 +1765,218 @@ input:checked + .toggle-track {
     rgb(var(--surface-strong-rgb) / 0.36) !important;
   border-color: color-mix(in srgb, var(--line) 86%, transparent) !important;
 }
+
+/* Final Aichat authority: execution logs are text rows, not nested surfaces. */
+.cli-page .cli-log-entry,
+.cli-page .cli-log-entry.error,
+.cli-page .cli-log-phase-section,
+.cli-page .cli-log-phase-section.plain-status,
+.cli-page .cli-log-time-group,
+.cli-page .cli-log-time-lines,
+.cli-page .cli-log-time-line,
+.cli-page .cli-log-event-list,
+.cli-page .cli-log-event-row,
+.cli-page .cli-log-event-body,
+.cli-page .cli-log-event-head,
+.cli-page .cli-log-event-details,
+.cli-page .cli-log-detail-block,
+.cli-page .cli-log-output-stack,
+.cli-page .cli-log-output-card,
+.cli-page .cli-log-output-card-body,
+.cli-page .cli-log-output-inline,
+.cli-page .cli-log-output-inline-copy,
+.cli-page .cli-log-diagnostic-group,
+.cli-page .cli-log-diagnostic-group.stdout-group,
+.cli-page .cli-log-diagnostic-body,
+.cli-page .cli-log-intent-summary,
+.cli-page .cli-log-event-intent-text,
+:root[data-theme='dark'] .cli-page .cli-log-entry,
+:root[data-theme='dark'] .cli-page .cli-log-entry.error,
+:root[data-theme='dark'] .cli-page .cli-log-phase-section,
+:root[data-theme='dark'] .cli-page .cli-log-phase-section.plain-status,
+:root[data-theme='dark'] .cli-page .cli-log-time-group,
+:root[data-theme='dark'] .cli-page .cli-log-time-lines,
+:root[data-theme='dark'] .cli-page .cli-log-time-line,
+:root[data-theme='dark'] .cli-page .cli-log-event-list,
+:root[data-theme='dark'] .cli-page .cli-log-event-row,
+:root[data-theme='dark'] .cli-page .cli-log-event-body,
+:root[data-theme='dark'] .cli-page .cli-log-event-head,
+:root[data-theme='dark'] .cli-page .cli-log-event-details,
+:root[data-theme='dark'] .cli-page .cli-log-detail-block,
+:root[data-theme='dark'] .cli-page .cli-log-output-stack,
+:root[data-theme='dark'] .cli-page .cli-log-output-card,
+:root[data-theme='dark'] .cli-page .cli-log-output-card-body,
+:root[data-theme='dark'] .cli-page .cli-log-output-inline,
+:root[data-theme='dark'] .cli-page .cli-log-output-inline-copy,
+:root[data-theme='dark'] .cli-page .cli-log-diagnostic-group,
+:root[data-theme='dark'] .cli-page .cli-log-diagnostic-group.stdout-group,
+:root[data-theme='dark'] .cli-page .cli-log-diagnostic-body,
+:root[data-theme='dark'] .cli-page .cli-log-intent-summary,
+:root[data-theme='dark'] .cli-page .cli-log-event-intent-text {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.cli-page .cli-log-phase-section,
+.cli-page .cli-log-output-card,
+.cli-page .cli-log-diagnostic-group,
+.cli-page .cli-log-intent-summary,
+.cli-page .cli-log-event-intent-text {
+  padding: 0 !important;
+  border-radius: 0 !important;
+}
+
+.cli-page .cli-log-detail-window,
+.cli-page .cli-log-detail-window.compact,
+.cli-page .timeline-code,
+.cli-page .timeline-detail,
+.cli-page .inline-file-preview,
+.cli-page .inline-file-preview-content {
+  background: rgba(255, 255, 255, 0.4) !important;
+  background-color: rgba(255, 255, 255, 0.4) !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
+:root[data-theme='dark'] .cli-page .cli-log-detail-window,
+:root[data-theme='dark'] .cli-page .cli-log-detail-window.compact,
+:root[data-theme='dark'] .cli-page .timeline-code,
+:root[data-theme='dark'] .cli-page .timeline-detail,
+:root[data-theme='dark'] .cli-page .inline-file-preview,
+:root[data-theme='dark'] .cli-page .inline-file-preview-content {
+  background: rgba(0, 0, 0, 0.3) !important;
+  background-color: rgba(0, 0, 0, 0.3) !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
+.chat-page .message-bubble.user,
+.cli-page .message-bubble.user {
+  background: rgba(255, 255, 255, 0.6) !important;
+  background-color: rgba(255, 255, 255, 0.6) !important;
+  background-image: none !important;
+  border-color: rgba(255, 255, 255, 0.16) !important;
+  box-shadow: none !important;
+}
+
+:root[data-theme='dark'] .chat-page .message-bubble.user,
+:root[data-theme='dark'] .cli-page .message-bubble.user {
+  background: rgba(0, 0, 0, 0.098) !important;
+  background-color: rgba(0, 0, 0, 0.098) !important;
+  background-image: none !important;
+  border-color: rgba(255, 255, 255, 0.055) !important;
+  box-shadow: none !important;
+}
+
+.workspace-page.chat-page,
+.workspace-page.cli-page {
+  margin-right: -12px !important;
+  padding-right: 0 !important;
+}
+
+.chat-page .conversation-scroll-region,
+.cli-page .conversation-scroll-region {
+  width: calc(100% + 12px) !important;
+  max-width: calc(100% + 12px) !important;
+  margin-right: -12px !important;
+  overflow: visible !important;
+}
+
+.chat-page .message-stream,
+.cli-page .cli-thread {
+  width: 100% !important;
+  max-width: 100% !important;
+  margin-right: 0 !important;
+  padding-right: 12px !important;
+  box-sizing: border-box !important;
+  scrollbar-gutter: auto !important;
+  overflow-y: scroll !important;
+}
+
+.conversation-scroll-dock {
+  right: 18px !important;
+  pointer-events: none !important;
+  opacity: 0.15 !important;
+}
+
+.conversation-scroll-dock .conversation-scroll-button {
+  pointer-events: auto !important;
+}
+
+.conversation-scroll-dock:hover,
+.conversation-scroll-dock:focus-within {
+  opacity: 1 !important;
+}
+
+.chat-history-panel,
+.cli-history-panel {
+  background: rgba(255, 255, 255, 0.35) !important;
+  background-color: rgba(255, 255, 255, 0.35) !important;
+  background-image: none !important;
+}
+
+:root[data-theme='dark'] .chat-history-panel,
+:root[data-theme='dark'] .cli-history-panel {
+  background: rgba(0, 0, 0, 0.35) !important;
+  background-color: rgba(0, 0, 0, 0.35) !important;
+  background-image: none !important;
+}
+
+:root[data-theme='dark'] .inline-settings-card .inline-notice.success,
+.inline-settings-card .inline-notice.success {
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
+.cli-page .message-role,
+.cli-page .cli-log-card-title .message-role,
+.cli-page .cli-log-time-copy strong,
+.cli-page .cli-log-time-copy small,
+.cli-page .cli-log-event-copy strong,
+.cli-page .cli-log-event-copy small,
+.cli-page .cli-log-output-stack-title strong,
+.cli-page .cli-log-detail-label {
+  color: #000 !important;
+  opacity: 1 !important;
+}
+
+:root[data-theme='dark'] .cli-page .message-role,
+:root[data-theme='dark'] .cli-page .cli-log-card-title .message-role,
+:root[data-theme='dark'] .cli-page .cli-log-time-copy strong,
+:root[data-theme='dark'] .cli-page .cli-log-time-copy small,
+:root[data-theme='dark'] .cli-page .cli-log-event-copy strong,
+:root[data-theme='dark'] .cli-page .cli-log-event-copy small,
+:root[data-theme='dark'] .cli-page .cli-log-output-stack-title strong,
+:root[data-theme='dark'] .cli-page .cli-log-detail-label {
+  color: #fff !important;
+  opacity: 1 !important;
+}
+
+.cli-page .cli-log-card-title .message-role {
+  font-size: 13px !important;
+  line-height: 1.5 !important;
+}
+
+.subscription-progress-inline.exhausted .usage-bar-fill,
+.subscription-record-row.exhausted .usage-bar-fill,
+.billing-card.exhausted .billing-card-fill {
+  background: rgba(136, 142, 150, 0.72) !important;
+}
+
+:root {
+  --client-bg-image: url('/light.jpg?v=20260619-192334') !important;
+}
+
+:root[data-theme='dark'] {
+  --client-bg-image: url('/dark.jpg?v=20260619-192401') !important;
+}

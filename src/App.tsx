@@ -426,8 +426,26 @@ function writeServiceStatusCache(value: ServiceStatusCacheStore) {
   writeJsonStorage(SERVICE_STATUS_CACHE_KEY, value)
 }
 
+function readPublicSubscriptionPlansCache() {
+  return readJsonStorage<PlanRecord[]>(PUBLIC_SUBSCRIPTION_PLANS_CACHE_KEY, [])
+}
+
+function writePublicSubscriptionPlansCache(value: PlanRecord[]) {
+  writeJsonStorage(PUBLIC_SUBSCRIPTION_PLANS_CACHE_KEY, value)
+}
+
 function countPlanPurchases(records: SubscriptionSelfData['all_subscriptions'], planId: number) {
   return records.filter((item) => item.subscription.plan_id === planId).length
+}
+
+function isAuthRequiredErrorMessage(message: string) {
+  const normalized = message.toLowerCase()
+  return (
+    message.includes('未登录且未提供 access token') ||
+    message.includes('access token 无效') ||
+    normalized.includes('not logged in and no access token provided') ||
+    normalized.includes('access token invalid')
+  )
 }
 
 function isTrialSubscriptionPlan(plan: PlanRecord['plan']) {
@@ -435,6 +453,14 @@ function isTrialSubscriptionPlan(plan: PlanRecord['plan']) {
   const purchaseLimit = Number(plan.max_purchase_per_user || 0)
   const priceAmount = Number(plan.price_amount || 0)
   return title.includes('尝鲜') || title.includes('trial') || (purchaseLimit === 1 && priceAmount <= 1)
+}
+
+function isSubscriptionPlanPurchaseLimitReached(
+  plan: PlanRecord['plan'],
+  records: SubscriptionSelfData['all_subscriptions']
+) {
+  const purchaseLimit = Number(plan.max_purchase_per_user || 0)
+  return purchaseLimit > 0 && countPlanPurchases(records, plan.id) >= purchaseLimit
 }
 
 function isAssistantHistoryTriggerTarget(target: EventTarget | null) {
@@ -447,7 +473,20 @@ function isSubscriptionExhausted(subscription: SubscriptionSelfData['all_subscri
   return total > 0 && used >= total
 }
 
-function resolveSubscriptionStatusLabel(status?: string) {
+function isSubscriptionExpired(subscription: SubscriptionSelfData['all_subscriptions'][number]['subscription']) {
+  const status = String(subscription.status || '').toLowerCase()
+  if (status === 'expired') {
+    return true
+  }
+  const endTime = Number(subscription.end_time || 0)
+  return endTime > 0 && endTime * 1000 < Date.now()
+}
+
+function resolveSubscriptionStatusLabel(subscription: SubscriptionSelfData['all_subscriptions'][number]['subscription']) {
+  if (isSubscriptionExhausted(subscription)) {
+    return '已失效'
+  }
+  const status = String(subscription.status || '').toLowerCase()
   switch (String(status || '').toLowerCase()) {
     case 'active':
       return '生效中'
@@ -456,7 +495,7 @@ function resolveSubscriptionStatusLabel(status?: string) {
     case 'cancelled':
       return '已取消'
     default:
-      return status || '未知状态'
+      return subscription.status || '未知状态'
   }
 }
 
@@ -493,6 +532,9 @@ function useToastState() {
   const [message, setMessageState] = useState('')
 
   const setMessage = useCallback((nextMessage: string) => {
+    if (isAuthRequiredErrorMessage(nextMessage)) {
+      return
+    }
     setMessageState(formatUserFacingMessage(nextMessage))
   }, [])
 
@@ -1091,11 +1133,62 @@ const CHAT_CONTEXT_WINDOW_STORAGE_KEY = 'oneapi-desktop-chat-context-window'
 const DRAW_SESSIONS_STORAGE_KEY = 'oneapi-desktop-draw-sessions'
 const DRAW_ACTIVE_SESSION_STORAGE_KEY = 'oneapi-desktop-draw-active-session'
 const SERVICE_STATUS_CACHE_KEY = 'oneapi-desktop-service-status'
+const PUBLIC_SUBSCRIPTION_PLANS_CACHE_KEY = 'oneapi-desktop-public-subscription-plans'
 const SERVICE_STATUS_REFRESH_INTERVAL_MS = 5 * 60 * 1000
 const CHAT_PENDING_MESSAGE_LABEL = 'Thinking...'
 const CLI_PENDING_MESSAGE_LABEL = 'Coding...'
 const DRAW_PENDING_MESSAGE_LABEL = 'Drawing...'
 const DRAW_PENDING_IMAGE_URL = '__oneapi_draw_pending__'
+const PUBLIC_SUBSCRIPTION_PLAN_FALLBACKS: PlanRecord[] = [
+  {
+    plan: {
+      id: -101,
+      title: '推荐套餐',
+      subtitle: '适合桌面端日常 AIChat、Codex 与 Claude 工作流。',
+      price_amount: 29.9,
+      currency: 'CNY',
+      duration_unit: 'month',
+      duration_value: 1,
+      quota_reset_period: 'monthly',
+      total_amount: 15_000_000,
+      enabled: true,
+      sort_order: 30,
+      max_purchase_per_user: 0,
+    },
+  },
+  {
+    plan: {
+      id: -102,
+      title: '专业套餐',
+      subtitle: '适合高频开发、长上下文任务和多端协作。',
+      price_amount: 99,
+      currency: 'CNY',
+      duration_unit: 'month',
+      duration_value: 1,
+      quota_reset_period: 'monthly',
+      total_amount: 60_000_000,
+      enabled: true,
+      sort_order: 20,
+      max_purchase_per_user: 0,
+    },
+  },
+  {
+    plan: {
+      id: -103,
+      title: '年度套餐',
+      subtitle: '适合长期稳定使用，年度额度与权益持续生效。',
+      price_amount: 699,
+      currency: 'CNY',
+      duration_unit: 'year',
+      duration_value: 1,
+      quota_reset_period: 'monthly',
+      total_amount: 480_000_000,
+      enabled: true,
+      sort_order: 10,
+      max_purchase_per_user: 0,
+    },
+  },
+]
 
 function hasKnownImageModelForProvider(providerState: AiChatProviderState) {
   if (providerState.mode !== 'custom') {
@@ -7739,15 +7832,22 @@ function SubscriptionsWorkspace(props: {
   onRequestLogin: () => void
 }) {
   const { toast, user, onRequestLogin } = props
-  const [plans, setPlans] = useState<PlanRecord[]>([])
+  const initialPublicPlanCache = useMemo(() => readPublicSubscriptionPlansCache(), [])
+  const [plans, setPlans] = useState<PlanRecord[]>(
+    initialPublicPlanCache.length ? initialPublicPlanCache : PUBLIC_SUBSCRIPTION_PLAN_FALLBACKS
+  )
   const [subscriptionSelf, setSubscriptionSelf] = useState<SubscriptionSelfData | null>(null)
   const [paymentInfo, setPaymentInfo] = useState<SubscriptionPaymentInfo | null>(null)
   const [quotaPerUnit, setQuotaPerUnit] = useState(500_000)
   const [buyingPlanId, setBuyingPlanId] = useState(0)
   const activeSubscriptions = (subscriptionSelf?.subscriptions || []).filter(
-    (item) => !isSubscriptionExhausted(item.subscription)
+    (item) => !isSubscriptionExhausted(item.subscription) && !isSubscriptionExpired(item.subscription)
   )
   const allSubscriptions = subscriptionSelf?.all_subscriptions || []
+  const visibleSubscriptionRecords = useMemo(
+    () => allSubscriptions.filter((item) => !isSubscriptionExpired(item.subscription)),
+    [allSubscriptions]
+  )
   const recommendedPlanId = useMemo(() => resolveRecommendedSubscriptionPlanId(plans), [plans])
   const planById = useMemo(
     () => new Map(plans.map((item) => [item.plan.id, item.plan])),
@@ -7760,12 +7860,12 @@ function SubscriptionsWorkspace(props: {
   const visiblePlans = useMemo(
     () =>
       plans.filter((item) => {
-        if (isTrialSubscriptionPlan(item.plan) && countPlanPurchases(allSubscriptions, item.plan.id) > 0) {
+        if (user && isSubscriptionPlanPurchaseLimitReached(item.plan, allSubscriptions)) {
           return false
         }
         return true
       }),
-    [allSubscriptions, plans]
+    [allSubscriptions, plans, user]
   )
   const paymentOptions = useMemo(() => {
     const next: Array<{ key: string; label: string; variant: 'primary' | 'secondary' }> = []
@@ -7792,14 +7892,36 @@ function SubscriptionsWorkspace(props: {
     }
   }
 
+  const applyPlans = useCallback((nextPlans: PlanRecord[]) => {
+    const enabledPlans = nextPlans.filter((item) => item.plan.enabled)
+    if (!enabledPlans.length) {
+      setPlans((current) => (current.length ? current : PUBLIC_SUBSCRIPTION_PLAN_FALLBACKS))
+      return
+    }
+    setPlans(enabledPlans)
+    writePublicSubscriptionPlansCache(enabledPlans)
+  }, [])
+
+  const loadPublicPlansForSubscriptionWorkspace = useCallback(async () => {
+    try {
+      return await getPublicPlans()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : ''
+      if (!user || isAuthRequiredErrorMessage(message)) {
+        return initialPublicPlanCache.length ? initialPublicPlanCache : PUBLIC_SUBSCRIPTION_PLAN_FALLBACKS
+      }
+      throw error
+    }
+  }, [initialPublicPlanCache, user])
+
   const refreshSubscriptions = useCallback(async () => {
-    const nextPlans = await getPublicPlans()
+    const nextPlans = await loadPublicPlansForSubscriptionWorkspace()
     const [nextSelf, nextPaymentInfo, nextStatus] = await Promise.all([
       user ? getSelfSubscriptions().catch(() => null) : Promise.resolve(null),
       user ? getSubscriptionPaymentInfo().catch(() => null) : Promise.resolve(null),
       unwrapEnvelope(getAuthStatus()).catch(() => null),
     ])
-    setPlans(nextPlans.filter((item) => item.plan.enabled))
+    applyPlans(nextPlans)
     setSubscriptionSelf(nextSelf ?? null)
     setPaymentInfo(nextPaymentInfo ?? null)
     const resolvedQuotaPerUnit = Number(nextStatus?.quota_per_unit || 0)
@@ -7813,7 +7935,7 @@ function SubscriptionsWorkspace(props: {
 
     void (async () => {
       try {
-        const nextPlans = await getPublicPlans()
+        const nextPlans = await loadPublicPlansForSubscriptionWorkspace()
         const [nextSelf, nextPaymentInfo, nextStatus] = await Promise.all([
           user ? getSelfSubscriptions().catch(() => null) : Promise.resolve(null),
           user ? getSubscriptionPaymentInfo().catch(() => null) : Promise.resolve(null),
@@ -7824,7 +7946,7 @@ function SubscriptionsWorkspace(props: {
           return
         }
 
-        setPlans(nextPlans.filter((item) => item.plan.enabled))
+        applyPlans(nextPlans)
         setSubscriptionSelf(nextSelf ?? null)
         setPaymentInfo(nextPaymentInfo ?? null)
         const resolvedQuotaPerUnit = Number(nextStatus?.quota_per_unit || 0)
@@ -7833,7 +7955,10 @@ function SubscriptionsWorkspace(props: {
         }
       } catch (error) {
         if (!disposed) {
-          toast(error instanceof Error ? error.message : '加载订阅信息失败')
+          const message = error instanceof Error ? error.message : '加载订阅信息失败'
+          if (!isAuthRequiredErrorMessage(message)) {
+            toast(message)
+          }
         }
       }
     })()
@@ -7841,7 +7966,7 @@ function SubscriptionsWorkspace(props: {
     return () => {
       disposed = true
     }
-  }, [toast, user])
+  }, [applyPlans, loadPublicPlansForSubscriptionWorkspace, toast, user])
 
   async function handleBuyPlan(planId: number, paymentMethod: string) {
     if (!user) {
@@ -8007,37 +8132,40 @@ function SubscriptionsWorkspace(props: {
                   <span>查看当前订阅状态与额度使用情况</span>
                 </div>
                 <div className='subrecords'>
-                  {allSubscriptions.length === 0 ? (
+                  {visibleSubscriptionRecords.length === 0 ? (
                     <EmptyState title='还没有订阅记录' description='购买套餐后会在这里看到订阅状态和用量。' />
                   ) : (
-                    allSubscriptions.map((item) => (
-                      <div key={item.subscription.id} className='record-row subscription-record-row'>
-                        <div className='subscription-record-main'>
-                          <strong>{planTitleMap.get(item.subscription.plan_id) || `订阅 #${item.subscription.id}`}</strong>
-                          <span>
-                            {resolveSubscriptionUsagePrefix(item.subscription.plan_id)} {formatQuotaAsUsd(item.subscription.amount_used, quotaPerUnit)} /{' '}
-                            {Number(item.subscription.amount_total || 0) > 0
-                              ? formatQuotaAsUsd(item.subscription.amount_total, quotaPerUnit)
-                              : '不限额度'}
-                          </span>
-                          <small>
-                            有效至 {formatDateTime(item.subscription.end_time)}
-                            {item.subscription.next_reset_time ? ` · 下次重置 ${formatDateTime(item.subscription.next_reset_time)}` : ''}
-                          </small>
-                        </div>
-                        <div className='subscription-record-side'>
-                          <div className='subscription-progress-inline'>
-                            <div className='usage-bar-track'>
-                              <div
-                                className='usage-bar-fill'
-                                style={{ width: `${percentageOf(item.subscription.amount_used, item.subscription.amount_total)}%` }}
-                              />
-                            </div>
+                    visibleSubscriptionRecords.map((item) => {
+                      const exhausted = isSubscriptionExhausted(item.subscription)
+                      return (
+                        <div key={item.subscription.id} className={`record-row subscription-record-row ${exhausted ? 'exhausted' : ''}`}>
+                          <div className='subscription-record-main'>
+                            <strong>{planTitleMap.get(item.subscription.plan_id) || `订阅 #${item.subscription.id}`}</strong>
+                            <span>
+                              {resolveSubscriptionUsagePrefix(item.subscription.plan_id)} {formatQuotaAsUsd(item.subscription.amount_used, quotaPerUnit)} /{' '}
+                              {Number(item.subscription.amount_total || 0) > 0
+                                ? formatQuotaAsUsd(item.subscription.amount_total, quotaPerUnit)
+                                : '不限额度'}
+                            </span>
+                            <small>
+                              有效至 {formatDateTime(item.subscription.end_time)}
+                              {item.subscription.next_reset_time ? ` · 下次重置 ${formatDateTime(item.subscription.next_reset_time)}` : ''}
+                            </small>
                           </div>
-                          <small className='subscription-record-status'>{resolveSubscriptionStatusLabel(item.subscription.status)}</small>
+                          <div className='subscription-record-side'>
+                            <div className={`subscription-progress-inline ${exhausted ? 'exhausted' : ''}`}>
+                              <div className='usage-bar-track'>
+                                <div
+                                  className='usage-bar-fill'
+                                  style={{ width: `${percentageOf(item.subscription.amount_used, item.subscription.amount_total)}%` }}
+                                />
+                              </div>
+                            </div>
+                            <small className='subscription-record-status'>{resolveSubscriptionStatusLabel(item.subscription)}</small>
+                          </div>
                         </div>
-                      </div>
-                    ))
+                      )
+                    })
                   )}
                 </div>
               </div>
@@ -8307,21 +8435,25 @@ function WalletWorkspace(props: {
                   <EmptyState title='当前没有账单记录' description='充值、兑换或订阅支付后会显示在这里。' />
                 ) : (
                   <div className='billing-grid'>
-                    {recentBills.map((item, index) => (
-                      <div key={String(item.trade_no || index)} className='billing-card'>
-                        <div
-                          className='billing-card-fill'
-                          style={{
-                            width: `${resolveBillingUsagePercentage(item)}%`,
-                          }}
-                        />
-                        <div className='billing-card-inner'>
-                          <strong>{formatBillingLabel(item)}</strong>
-                          <span>{formatPrice(item.money || item.amount || 0, 'CNY')}</span>
-                          <small>{item.status === 'success' ? '已完成' : item.status === 'pending' ? '处理中' : '已过期'}</small>
+                    {recentBills.map((item, index) => {
+                      const usagePercentage = resolveBillingUsagePercentage(item)
+                      const exhausted = usagePercentage >= 100
+                      return (
+                        <div key={String(item.trade_no || index)} className={`billing-card ${exhausted ? 'exhausted' : ''}`}>
+                          <div
+                            className='billing-card-fill'
+                            style={{
+                              width: `${usagePercentage}%`,
+                            }}
+                          />
+                          <div className='billing-card-inner'>
+                            <strong>{formatBillingLabel(item)}</strong>
+                            <span>{formatPrice(item.money || item.amount || 0, 'CNY')}</span>
+                            <small>{item.status === 'success' ? '已完成' : item.status === 'pending' ? '处理中' : '已过期'}</small>
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 )}
               </div>
@@ -8460,8 +8592,10 @@ function ServiceStatusWorkspace(props: {
       })
     } catch (error) {
       const message = error instanceof Error ? error.message : '加载服务状态失败'
-      setServiceStatusError(message)
-      if (serviceStatusItems.length === 0) {
+      if (!isAuthRequiredErrorMessage(message)) {
+        setServiceStatusError(message)
+      }
+      if (serviceStatusItems.length === 0 && !isAuthRequiredErrorMessage(message)) {
         toast(message)
       }
     } finally {
@@ -8761,7 +8895,7 @@ function MeAnonymousWorkspace(props: {
         <div className='panel-scroll'>
           <div className='content-grid me-layout page-blocks'>
             <div className='me-column me-column-left'>
-              <div className='panel-block anonymous-mode-note'>
+              <div className='anonymous-mode-note'>
                 <div className='subrecords'>
                   <div className='record-row highlighted'>
                     <div>
@@ -9469,6 +9603,13 @@ function CliWorkspace(props: {
     () => filterModelsByVendor(compatibleCliModels, effectiveCliModelVendorFilter),
     [compatibleCliModels, effectiveCliModelVendorFilter]
   )
+  const showCliBridgeServiceNotice =
+    aiChatProviderMode === 'custom' &&
+    effectiveCliModelVendorFilter !== 'all' &&
+    !(
+      (client === 'codex' && effectiveCliModelVendorFilter === 'openai') ||
+      (client === 'claude' && effectiveCliModelVendorFilter === 'anthropic')
+    )
   const selectableCliModels = useMemo(
     () => compatibleCliModels.filter((item) => !shouldDisableCliModelForProvider(item.value, aiChatProviderMode)),
     [aiChatProviderMode, compatibleCliModels]
@@ -9708,6 +9849,28 @@ function CliWorkspace(props: {
       }),
     [activeLogs, activeMessages, activePartial, selectedModelLabel]
   )
+  const cliLogCompletionPlacement = useMemo(() => {
+    const lastAssistantMessageIds = new Map<string, string>()
+    const logByRequestId = new Map<string, Extract<CliTimelineEntry, { kind: 'log' }>>()
+
+    for (const item of activeTimeline) {
+      if (item.kind === 'log') {
+        if (!item.requestId) {
+          continue
+        }
+        logByRequestId.set(item.requestId, item)
+        continue
+      }
+      if (item.kind === 'message' && item.role === 'assistant' && item.requestId) {
+        lastAssistantMessageIds.set(item.requestId, item.id)
+      }
+    }
+
+    return {
+      lastAssistantMessageIds,
+      logByRequestId,
+    }
+  }, [activeTimeline])
   useEffect(() => {
     if (!selectedModel || !shouldDisableCliModelForProvider(selectedModel, aiChatProviderMode)) {
       return
@@ -11755,15 +11918,8 @@ function CliWorkspace(props: {
                 />
               ) : activeTimeline.map((item) => {
                 if (item.kind === 'log') {
-                  const hasFollowingAssistantReply =
-                    !!item.requestId &&
-                    activeTimeline
-                      .slice(activeTimeline.indexOf(item) + 1)
-                      .some((timelineItem) =>
-                        timelineItem.kind === 'message' &&
-                        timelineItem.role === 'assistant' &&
-                        timelineItem.requestId === item.requestId
-                      )
+                  const hasAssistantReply =
+                    !!item.requestId && cliLogCompletionPlacement.lastAssistantMessageIds.has(item.requestId)
                   return (
                     <Fragment key={item.id}>
                     <CliLogBubble
@@ -11778,18 +11934,16 @@ function CliWorkspace(props: {
                       respondingInteractionIds={respondingInteractionIds}
                       previewFile={previewFile}
                     />
-                    {!hasFollowingAssistantReply ? <CliLogCompletionFooter item={item} /> : null}
+                    {!hasAssistantReply ? <CliLogCompletionFooter item={item} /> : null}
                     </Fragment>
                   )
                 }
 
                 const precedingLog =
                   item.kind === 'message' && item.role === 'assistant' && item.requestId
-                    ? [...activeTimeline.slice(0, activeTimeline.indexOf(item))]
-                        .reverse()
-                        .find((timelineItem): timelineItem is Extract<CliTimelineEntry, { kind: 'log' }> =>
-                          timelineItem.kind === 'log' && timelineItem.requestId === item.requestId
-                        )
+                    ? cliLogCompletionPlacement.lastAssistantMessageIds.get(item.requestId) === item.id
+                      ? cliLogCompletionPlacement.logByRequestId.get(item.requestId) || null
+                      : null
                     : null
 
                 return (
@@ -11996,7 +12150,7 @@ function CliWorkspace(props: {
                           </div>
                         ) : null}
                         <div className='picker-menu-list'>
-                          {aiChatProviderMode === 'custom' && effectiveCliModelVendorFilter !== 'all' ? (
+                          {showCliBridgeServiceNotice ? (
                             <div className='picker-service-notice'>OneAPI专用桥接服务</div>
                           ) : null}
                           {visibleCliModels.length ? (
@@ -13334,7 +13488,9 @@ export function App() {
       useAuthStore.getState().reset()
       setUser(null)
       setBootstrapping(false)
-      setMessage(detail?.message || '登录态已失效，请重新登录。')
+      if (!isAuthRequiredErrorMessage(detail?.message || '')) {
+        setMessage(detail?.message || '登录态已失效，请重新登录。')
+      }
     }
 
     window.addEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired as EventListener)
