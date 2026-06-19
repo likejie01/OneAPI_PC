@@ -52,12 +52,59 @@ test('cli log entries remove the outer bubble surface and spacing authority', ()
   assert.doesNotMatch(appSource, /className='cli-log-bubble'/)
   assert.match(modalsStylesSource, /\/\* Final Codex\/Claude execution log layout authority\. \*\//)
   assert.match(modalsStylesSource, /\.cli-page \.cli-log-entry,[\s\S]*?border:\s*0 !important[\s\S]*?background:\s*transparent !important[\s\S]*?box-shadow:\s*none !important/)
+  assert.match(modalsStylesSource, /\.cli-page \.cli-log-phase-section,[\s\S]*?\.cli-page \.cli-log-output-card,[\s\S]*?\.cli-page \.cli-log-diagnostic-group,[\s\S]*?padding:\s*0 !important[\s\S]*?border:\s*0 !important[\s\S]*?background:\s*transparent !important/)
   assert.match(modalsStylesSource, /\.cli-page \.cli-log-entry \+ \.message-bubble\.assistant,[\s\S]*?margin-top:\s*0 !important/)
+  assert.match(polishStylesSource, /\/\* Final Aichat authority: execution logs are text rows, not nested surfaces\. \*\//)
+  assert.match(polishStylesSource, /\.cli-page \.cli-log-entry,[\s\S]*?\.cli-page \.cli-log-event-intent-text,[\s\S]*?background:\s*transparent !important[\s\S]*?background-image:\s*none !important[\s\S]*?box-shadow:\s*none !important/)
+  assert.match(polishStylesSource, /\.cli-page \.cli-log-detail-window,[\s\S]*?\.cli-page \.inline-file-preview-content\s*\{[\s\S]*?background:\s*rgba\(255, 255, 255, 0\.4\) !important[\s\S]*?background-image:\s*none !important/)
+  assert.match(polishStylesSource, /:root\[data-theme='dark'\] \.cli-page \.cli-log-detail-window,[\s\S]*?:root\[data-theme='dark'\] \.cli-page \.inline-file-preview-content\s*\{[\s\S]*?background:\s*rgba\(0, 0, 0, 0\.3\) !important/)
+})
+
+test('cli log completion footer is attached only after the final assistant message for the request', () => {
+  assert.match(appSource, /const cliLogCompletionPlacement = useMemo/)
+  assert.match(appSource, /lastAssistantMessageIds\.set\(item\.requestId, item\.id\)/)
+  assert.match(appSource, /cliLogCompletionPlacement\.lastAssistantMessageIds\.get\(item\.requestId\) === item\.id/)
+  assert.doesNotMatch(appSource, /slice\(activeTimeline\.indexOf\(item\) \+ 1\)[\s\S]*?hasFollowingAssistantReply/)
+})
+
+test('cli bridge notice is hidden under native codex openai and claude anthropic filters', () => {
+  assert.match(appSource, /const showCliBridgeServiceNotice =/)
+  assert.match(appSource, /client === 'codex' && effectiveCliModelVendorFilter === 'openai'/)
+  assert.match(appSource, /client === 'claude' && effectiveCliModelVendorFilter === 'anthropic'/)
+  assert.match(appSource, /\{showCliBridgeServiceNotice \? \(/)
 })
 
 test('cli user bubbles inherit the chat user bubble style instead of redefining their own surface', () => {
-  assert.doesNotMatch(polishStylesSource, /\.cli-page \.message-bubble\.user\s*\{[\s\S]*?background:/)
-  assert.match(modalsStylesSource, /\.cli-page \.message-bubble\.user\s*\{[\s\S]*?background:\s*var\(--bubble-user\) !important/)
+  assert.doesNotMatch(modalsStylesSource, /\.cli-page \.message-bubble\.user\s*\{[\s\S]*?color-mix\(in srgb, var\(--accent\)/)
+  assert.match(modalsStylesSource, /\.chat-page \.message-bubble\.user,[\s\S]*?\.cli-page \.message-bubble\.user\s*\{[\s\S]*?background:\s*var\(--bubble-user\) !important/)
+  assert.match(modalsStylesSource, /:root\[data-theme='dark'\] \.chat-page \.message-bubble\.user,[\s\S]*?:root\[data-theme='dark'\] \.cli-page \.message-bubble\.user\s*\{[\s\S]*?background:\s*var\(--bubble-user\) !important/)
+  assert.match(polishStylesSource, /\.chat-page \.message-bubble\.user,[\s\S]*?\.cli-page \.message-bubble\.user\s*\{[\s\S]*?background:\s*rgba\(255, 255, 255, 0\.6\) !important/)
+  assert.match(polishStylesSource, /:root\[data-theme='dark'\] \.chat-page \.message-bubble\.user,[\s\S]*?:root\[data-theme='dark'\] \.cli-page \.message-bubble\.user\s*\{[\s\S]*?background:\s*rgba\(0, 0, 0, 0\.098\) !important/)
+})
+
+test('aichat conversation scrollbars are owned by the edge-aligned scroll containers', () => {
+  assert.match(polishStylesSource, /\.workspace-page\.chat-page,[\s\S]*?\.workspace-page\.cli-page\s*\{[\s\S]*?margin-right:\s*-12px !important/)
+  assert.match(polishStylesSource, /\.chat-page \.conversation-scroll-region,[\s\S]*?\.cli-page \.conversation-scroll-region\s*\{[\s\S]*?width:\s*calc\(100% \+ 12px\) !important[\s\S]*?margin-right:\s*-12px !important/)
+  assert.match(polishStylesSource, /\.chat-page \.message-stream,[\s\S]*?\.cli-page \.cli-thread\s*\{[\s\S]*?overflow-y:\s*scroll !important/)
+  assert.match(polishStylesSource, /\.conversation-scroll-dock\s*\{[\s\S]*?right:\s*18px !important[\s\S]*?opacity:\s*0\.15 !important/)
+  assert.match(polishStylesSource, /\.conversation-scroll-dock:hover,[\s\S]*?\.conversation-scroll-dock:focus-within\s*\{[\s\S]*?opacity:\s*1 !important/)
+})
+
+test('cli log labels use theme foreground colors and readable header sizing', () => {
+  assert.match(polishStylesSource, /\.cli-page \.message-role,[\s\S]*?\.cli-page \.cli-log-detail-label\s*\{[\s\S]*?color:\s*#000 !important[\s\S]*?opacity:\s*1 !important/)
+  assert.match(polishStylesSource, /:root\[data-theme='dark'\] \.cli-page \.message-role,[\s\S]*?:root\[data-theme='dark'\] \.cli-page \.cli-log-detail-label\s*\{[\s\S]*?color:\s*#fff !important[\s\S]*?opacity:\s*1 !important/)
+  assert.match(polishStylesSource, /\.cli-page \.cli-log-card-title \.message-role\s*\{[\s\S]*?font-size:\s*13px !important/)
+})
+
+test('aichat history panels and ready environment notices use final transparent surfaces', () => {
+  assert.match(polishStylesSource, /\.chat-history-panel,[\s\S]*?\.cli-history-panel\s*\{[\s\S]*?background:\s*rgba\(255, 255, 255, 0\.35\) !important/)
+  assert.match(polishStylesSource, /:root\[data-theme='dark'\] \.chat-history-panel,[\s\S]*?:root\[data-theme='dark'\] \.cli-history-panel\s*\{[\s\S]*?background:\s*rgba\(0, 0, 0, 0\.35\) !important/)
+  assert.match(polishStylesSource, /\.inline-settings-card \.inline-notice\.success\s*\{[\s\S]*?padding:\s*0 !important[\s\S]*?background:\s*transparent !important/)
+})
+
+test('client background images use the packaged light and dark jpg assets with cache busting', () => {
+  assert.match(polishStylesSource, /--client-bg-image:\s*url\('\/light\.jpg\?v=20260619-192334'\) !important/)
+  assert.match(polishStylesSource, /--client-bg-image:\s*url\('\/dark\.jpg\?v=20260619-192401'\) !important/)
 })
 
 test('cli extension chips have no selected-strip backplate above the input', () => {
@@ -72,4 +119,11 @@ test('toast notifications are anchored above the composer at the right edge', ()
 test('context menus and side navigation use restrained radius', () => {
   assert.match(modalsStylesSource, /\.session-context-menu,[\s\S]*?\.markdown-code-action-menu\s*\{[\s\S]*?border-radius:\s*8px !important/)
   assert.match(modalsStylesSource, /\.side-nav-item\.active,[\s\S]*?\.sidebar\.collapsed \.side-nav-item\.active\s*\{[\s\S]*?border-radius:\s*8px !important/)
+})
+
+test('anonymous deploy note has no outer panel frame and dark deploy outlines are subdued', () => {
+  assert.match(appSource, /<div className='anonymous-mode-note'>/)
+  assert.doesNotMatch(appSource, /className='panel-block anonymous-mode-note'/)
+  assert.match(modalsStylesSource, /\.anonymous-mode-note\s*\{[\s\S]*?padding:\s*0 !important[\s\S]*?border:\s*0 !important/)
+  assert.match(modalsStylesSource, /:root\[data-theme='dark'\] \.me-column \.panel-block:not\(\.page-surface\),[\s\S]*?border-color:\s*rgba\(151, 164, 172, 0\.028\) !important/)
 })

@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { readFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import {
   buildServiceStatusItems,
@@ -7,6 +10,8 @@ import {
   collectConfiguredServices,
   hydrateServiceStatusItems,
 } from './service-status.ts'
+
+const appSource = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '..', 'App.tsx'), 'utf8')
 
 test('classifyConfiguredService infers configured services from channel type and text', () => {
   assert.equal(classifyConfiguredService({ id: 1, type: 14, models: 'claude-sonnet-4' }), 'claude')
@@ -129,4 +134,12 @@ test('hydrateServiceStatusItems preserves cached history and appends latest snap
   assert.equal(items[0].history?.length, 2)
   assert.equal(items[0].history?.[0].tone, 'up')
   assert.equal(items[0].history?.[1].tone, 'down')
+})
+
+test('service status page suppresses anonymous auth-required toast only', () => {
+  assert.match(appSource, /function isAuthRequiredErrorMessage/)
+  assert.match(appSource, /const setMessage = useCallback\(\(nextMessage: string\) => \{\s*if \(isAuthRequiredErrorMessage\(nextMessage\)\) \{\s*return\s*\}/)
+  assert.match(appSource, /if \(!isAuthRequiredErrorMessage\(detail\?\.message \|\| ''\)\) \{[\s\S]*?setMessage\(detail\?\.message \|\| '登录态已失效，请重新登录。'\)/)
+  assert.match(appSource, /if \(!isAuthRequiredErrorMessage\(message\)\) \{\s*setServiceStatusError\(message\)/)
+  assert.match(appSource, /serviceStatusItems\.length === 0 && !isAuthRequiredErrorMessage\(message\)/)
 })
