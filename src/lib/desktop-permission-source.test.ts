@@ -87,13 +87,49 @@ test('mobile bridge active session snapshots include running logs', () => {
   assert.match(mainSource, /logCount: item\.logs\.length/)
 })
 
+test('split cli services receive mobile bridge snapshot synchronizer from main process', () => {
+  assert.match(cliServicesSource, /syncMobileBridgeSessionsSnapshot/)
+  assert.match(
+    cliServicesSource,
+    /const \{[\s\S]*?syncMobileBridgeSessionsSnapshot,[\s\S]*?\} = deps/,
+  )
+  assert.match(
+    mainSource,
+    /createCliServices\(\{[\s\S]*?syncMobileBridgeSessionsSnapshot,[\s\S]*?\}\)/,
+  )
+})
+
+test('split cli services import shared cli history parsing helpers', () => {
+  assert.match(
+    cliServicesSource,
+    /import \{[\s\S]*?extractCodexAssistantTextFromEvent[\s\S]*?extractCodexFileChanges[\s\S]*?extractClaudeFileChanges[\s\S]*?mergeFileChanges[\s\S]*?shouldIgnoreCodexMessage[\s\S]*?\} from '\.\/main-cli-history\.ts'/
+  )
+  assert.match(
+    readFileSync(resolve(projectRoot, 'electron', 'main-cli-history.ts'), 'utf8'),
+    /export function extractCodexAssistantTextFromEvent/
+  )
+  assert.match(
+    readFileSync(resolve(projectRoot, 'electron', 'main-cli-history.ts'), 'utf8'),
+    /export function shouldIgnoreCodexMessage/
+  )
+})
+
 test('cli deploy and runtime use only the active enabled desktop api key', () => {
   assert.match(rendererRuntimeSources, /activeApiKey: ActiveDesktopApiKeySummary/)
+  assert.match(appSource, /const authenticatedUserId = auth\.user\.id/)
+  assert.match(appSource, /getSelectedDesktopApiKeyStorageKey\(authenticatedUserId\)/)
+  assert.match(appSource, /readJsonStorage<number \| null>\(selectedApiKeyStorageKey, null\)/)
+  assert.match(
+    appSource,
+    /resolveActiveDesktopApiKeySummary\(keyPage\?\.items \?\? \[\], persistedSelectedApiKeyId\)/
+  )
+  assert.match(assistantChatDrawSource, /activeApiKey: ActiveDesktopApiKeySummary/)
   assert.match(appSource, /fetchApiKeySecret\(activeApiKey\.id\)/)
   assert.match(appSource, /loadOneApiModelsForActiveKey\(activeApiKey\)/)
   assert.match(activeKeyModelSource, /const apiKey = await loader\.fetchApiKeySecret\(activeApiKey\.id\)/)
-  assert.match(activeKeyModelSource, /const models = await loader\.getApiKeyModels\(apiKey\)/)
+  assert.match(activeKeyModelSource, /scopedModels = await loader\.getApiKeyModels\(apiKey\)/)
   assert.match(activeKeyModelSource, /const fallbackModels = await loader\.getUserModels\(\)/)
+  assert.match(activeKeyModelSource, /mergeModelOptions\(scopedModels, filterModelsForDesktopApiKey\(fallbackModels, activeApiKey\)\)/)
   assert.doesNotMatch(rendererRuntimeSources, /ACTIVE_KEY_MODEL_CACHE_TTL_MS/)
   assert.doesNotMatch(rendererRuntimeSources, /activeKeyModelCache/)
   assert.doesNotMatch(rendererRuntimeSources, /activeKeyModelRequests/)
@@ -112,6 +148,76 @@ test('cli deploy and runtime use only the active enabled desktop api key', () =>
   assert.doesNotMatch(rendererRuntimeSources, /启用该 Key 并关闭其他 Key/)
 })
 
+test('cli prompt cache proxy is available inside split cli services', () => {
+  assert.match(cliServicesSource, /async function createCliPromptCacheProxy\(/)
+  assert.match(cliServicesSource, /apiKey: string/)
+  assert.match(cliServicesSource, /headers\.set\('authorization', `Bearer \$\{input\.apiKey\}`\)/)
+  assert.match(cliServicesSource, /buildCliPromptCacheKey\(/)
+  assert.match(cliServicesSource, /injectCliPromptCacheKeyIntoJsonBody\(/)
+  assert.match(cliServicesSource, /createCliPromptCacheProxy\([\s\S]*?targetBaseUrl: runtimeBaseUrl[\s\S]*?apiKey: runtimeApiKey/)
+})
+
+test('cli proxy bridges codex responses and claude messages to openai compatible chat completions', () => {
+  assert.match(cliServicesSource, /function convertResponsesRequestToChatRequest\(/)
+  assert.match(cliServicesSource, /function convertClaudeMessagesRequestToChatRequest\(/)
+  assert.match(cliServicesSource, /function normalizeResponsesUsage\(/)
+  assert.match(cliServicesSource, /shouldBridgeResponses = input\.client === 'codex'[\s\S]*?\/\\\/responses\$\/i/)
+  assert.match(cliServicesSource, /shouldBridgeClaudeMessages = input\.client === 'claude'[\s\S]*?\/\\\/messages\$\/i/)
+  assert.match(cliServicesSource, /const bridgedPath = shouldBridgeResponses \|\| shouldBridgeClaudeMessages \? '\/v1\/chat\/completions'/)
+  assert.match(cliServicesSource, /responsesInputToChatMessages[\s\S]*?type === 'function_call' \|\| type === 'custom_tool_call'/)
+  assert.match(cliServicesSource, /convertResponsesToolsToChatTools\(body\.tools\)/)
+  assert.match(cliServicesSource, /convertClaudeMessagesRequestToChatRequest[\s\S]*?tool_use[\s\S]*?tool_result/)
+  assert.match(cliServicesSource, /pipeConvertedChatSse\(upstream, response, input\.client, requestBodyObject\?\.model, requestBodyObject\)/)
+  assert.match(cliServicesSource, /convertChatResponseToResponses\(data, requestBodyObject\?\.model, requestBodyObject\)/)
+  assert.match(cliServicesSource, /convertChatResponseToClaude\(data, requestBodyObject\?\.model\)/)
+  assert.match(cliServicesSource, /usage: normalizeResponsesUsage\(usage\)/)
+  assert.match(cliServicesSource, /usage: normalizeResponsesUsage\(\(data as Record<string, unknown>\)\?\.usage\)/)
+  assert.doesNotMatch(rendererRuntimeSources, /该模型需要登录并使用 OneAPI 专用桥接服务/)
+})
+
+test('claude bridge output with a cli error is downgraded to warning instead of failed', () => {
+  assert.match(
+    cliServicesSource,
+    /const completedWithWarnings =[\s\S]*?output\.length > 0[\s\S]*?\(!!runtimeDiagnostics\.policyIssue \|\| \(sawClaudeResult && finalResult\?\.is_error === true\)\)/
+  )
+  assert.match(cliServicesSource, /sourceKind: 'result\.with_warnings'/)
+  assert.match(cliServicesSource, /return \{\s*success: success \|\| completedWithWarnings/)
+})
+
+test('desktop image requests resolve async poll_url tasks before returning to renderer', () => {
+  assert.match(mainSource, /function isImageApiPath\(pathname: string\)/)
+  assert.match(mainSource, /resolveImagePendingPollUrl/)
+  assert.match(mainSource, /resolveImagePendingStatus/)
+  assert.match(mainSource, /async function requestApi[\s\S]*?const data = await parseResponse\(response\)[\s\S]*?isImageApiPath\(input\.path\)[\s\S]*?resolveAsyncImageGenerationResponse\(data/)
+  assert.match(mainSource, /async function requestImageEdit[\s\S]*?return resolveAsyncImageGenerationResponse\(data/)
+  assert.match(mainSource, /status === 'completed'[\s\S]*?图片任务已完成但未返回可展示图片/)
+})
+
+test('custom provider image edit uses desktop multipart bridge instead of oneapi-only path', () => {
+  assert.match(mainSource, /async function requestCustomImageEdit\(input: DesktopCustomImageEditRequest\)/)
+  assert.match(mainSource, /buildOpenAICompatibleUrl\(input\.baseUrl, '\/images\/edits'\)/)
+  assert.match(mainSource, /ipcMain\.handle\('desktop:custom-image-edit'/)
+  assert.match(assistantChatDrawSource, /providerState\.mode === 'custom'[\s\S]*?sendAiImageEdit\(providerState, editRequest\)/)
+  assert.doesNotMatch(assistantChatDrawSource, /自定义 API 通道当前仅支持文本生图/)
+})
+
+test('cli submit cleanup clears local Coding partial after ipc errors', () => {
+  assert.match(appSource, /setSessionPartialMap\(\(current\) => \(\{\s*\.\.\.current,\s*\[currentSessionKey\]: CLI_PENDING_MESSAGE_LABEL/)
+  assert.match(appSource, /finally \{[\s\S]*?setSessionPartialMap\(\(current\) => \(\{\s*\.\.\.current,\s*\[finalSessionKey\]: '',\s*\}\)\)/)
+})
+
+test('cli submit resumes the resolved current session instead of stale active session', () => {
+  assert.match(appSource, /const projectSessionMapRef = useRef\(projectSessionMap\)/)
+  assert.match(appSource, /function updateProjectSessionMap\(/)
+  assert.match(appSource, /projectSessionMapRef\.current = updater\(projectSessionMapRef\.current\)/)
+  assert.match(
+    appSource,
+    /const currentSessionKey =[\s\S]*?projectSessionMapRef\.current\[requestProjectKey\]\?\.trim\(\)[\s\S]*?\|\|[\s\S]*?activeSessionId[\s\S]*?\|\|[\s\S]*?`draft-\$\{client\}-\$\{Date\.now\(\)\}`/,
+  )
+  assert.match(appSource, /sessionId: getCliResumeSessionId\(currentSessionKey\)/)
+  assert.doesNotMatch(appSource, /sessionId: getCliResumeSessionId\(activeSessionId\)/)
+})
+
 test('draw workspace also uses the active enabled desktop api key', () => {
   assert.match(assistantChatDrawSource, /function DrawWorkspace\(props: \{[\s\S]*?activeApiKey: ActiveDesktopApiKeySummary/)
   assert.match(assistantChatDrawSource, /const \{ toast, active, providerState, activeApiKey \} = props/)
@@ -125,4 +231,12 @@ test('inactive windows pause aurora and hidden cli panes poll less often', () =>
   assert.match(appSource, /document\.documentElement\.dataset\.windowActive = active \? 'active' : 'inactive'/)
   assert.match(appSource, /const shouldPollActively = active \|\| effectiveRunning/)
   assert.match(appSource, /const intervalMs = shouldPollActively \? 30000 : 180000/)
+})
+
+test('settings persists explicit desktop api key selection per user', () => {
+  const settingsSource = readFileSync(resolve(projectRoot, 'src', 'features', 'settings', 'SettingsWorkspaces.tsx'), 'utf8')
+  assert.match(settingsSource, /getSelectedDesktopApiKeyStorageKey\(user\.id\)/)
+  assert.match(settingsSource, /readJsonStorage<number \| null>\(selectedApiKeyStorageKey, null\)/)
+  assert.match(settingsSource, /writeJsonStorage\(selectedApiKeyStorageKey, nextId\)/)
+  assert.match(settingsSource, /removeStorage\(selectedApiKeyStorageKey\)/)
 })

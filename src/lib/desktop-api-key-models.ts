@@ -20,12 +20,12 @@ function normalizeKnownBridgeModelFamily(value: string) {
 
 function isKnownDeepSeekBridgeModel(value: string) {
   const normalized = normalizeModelValue(value)
-  return normalized === 'deepseek-v4-flash' || normalized === 'deepseek-v4-pro'
+  return normalized.startsWith('deepseek-v4-flash') || normalized.startsWith('deepseek-v4-pro')
 }
 
 function isKnownMimoBridgeModel(value: string) {
   const normalized = normalizeKnownBridgeModelFamily(value)
-  return normalized === 'mimo-v2.5' || normalized === 'mimo-v2.5-pro'
+  return normalized === 'mimo-v2.5' || normalized.startsWith('mimo-v2.5-pro')
 }
 
 function selectedGroupLooksLikeDeepSeekOrMimo(groups: string[]) {

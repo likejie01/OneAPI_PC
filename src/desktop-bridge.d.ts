@@ -24,6 +24,7 @@ import type {
   DesktopChatStreamRequest,
   DesktopCustomChatCompletionRequest,
   DesktopCustomChatStreamRequest,
+  DesktopCustomImageEditRequest,
   DesktopCustomImageGenerationRequest,
   DesktopCustomModelListRequest,
   DesktopCopyImageRequest,
@@ -75,6 +76,7 @@ declare global {
       streamCustomChatCompletion: (input: DesktopCustomChatStreamRequest) => Promise<void>
       sendCustomChatCompletion: (input: DesktopCustomChatCompletionRequest) => Promise<ChatCompletionResponse>
       sendCustomImageGeneration: (input: DesktopCustomImageGenerationRequest) => Promise<ImageGenerationResponse>
+      editCustomImage: (input: DesktopCustomImageEditRequest) => Promise<ImageGenerationResponse>
       listCustomProviderModels: (input: DesktopCustomModelListRequest) => Promise<string[]>
       stopRequest: (requestId: string) => Promise<void>
       openExternal: (url: string) => Promise<void>

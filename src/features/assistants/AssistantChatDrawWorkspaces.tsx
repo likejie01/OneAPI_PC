@@ -4,7 +4,7 @@ import { Bot, Copy, Crop, Download, Eye, EyeOff, LoaderCircle, MessageSquareText
 import { createAssistant, loadAssistants, saveActiveAssistantId, saveAssistants } from '../../domains/assistants'
 import { createImageStylePreset, loadImageStylePresets, saveImageStylePresets } from '../../domains/image-style-presets'
 import { copyImageToClipboard, getUserGroups, saveImageToDisk, sendDirectImageGeneration, sendImageEdit, stopChatCompletion } from '../../domains/chat'
-import { sendAiChatCompletion, sendAiImageGeneration, streamAiChatCompletion } from '../../domains/aichat-provider'
+import { sendAiChatCompletion, sendAiImageEdit, sendAiImageGeneration, streamAiChatCompletion } from '../../domains/aichat-provider'
 import { getLocalMobileBridgeDevice, syncMobileDesktopAssistantsSnapshot } from '../../domains/mobile-bridge'
 import { filterAssistantModels, filterModelsByVendor, prioritizeFavoriteModels, resolveCompatibleModel, type ModelVendorFilter } from '../../lib/assistant-workspace'
 import { loadOneApiModelsForActiveKey, type ActiveDesktopApiKeySummary } from '../desktop-api-key-models'
@@ -2849,28 +2849,34 @@ export function DrawWorkspace(props: {
 
   async function executeDrawRequest(request: PendingDrawRetryRequest) {
     if (request.kind === 'edit') {
-      if (providerState.mode !== 'oneapi') {
-        throw new Error('图片编辑需要登录并使用 OneAPI 服务，自定义 API 通道当前仅支持文本生图。')
+      let activeApiKeySecret = ''
+      if (providerState.mode === 'oneapi') {
+        if (!activeApiKey?.id) {
+          throw new Error('请先在已有 Key 中启用一个 Key。')
+        }
+        activeApiKeySecret = await fetchApiKeySecret(activeApiKey.id)
+      } else if (providerState.mode !== 'custom') {
+        throw new Error(providerState.reason || '请先登录 OneAPI 或配置自定义 API 通道。')
       }
-      if (!activeApiKey?.id) {
-        throw new Error('请先在已有 Key 中启用一个 Key。')
+      if (providerState.mode === 'custom' && (!providerState.apiKey.trim() || !providerState.baseUrl.trim())) {
+        throw new Error('请先在 AIChat 服务通道中配置 Base URL 和 API Key。')
       }
-      const activeApiKeySecret = await fetchApiKeySecret(activeApiKey.id)
 
       try {
-        return await sendImageEdit(
-          buildImageEditRequest({
-            apiKey: activeApiKeySecret,
-            model: request.model,
-            fallbackModel: DEFAULT_DRAW_MODEL,
-            prompt: request.prompt,
-            imageName: request.imageName,
-            mimeType: request.mimeType,
-            dataBase64: request.dataBase64,
-            size: request.size,
-            quality: request.quality,
-          })
-        )
+        const editRequest = buildImageEditRequest({
+          apiKey: activeApiKeySecret,
+          model: request.model,
+          fallbackModel: DEFAULT_DRAW_MODEL,
+          prompt: request.prompt,
+          imageName: request.imageName,
+          mimeType: request.mimeType,
+          dataBase64: request.dataBase64,
+          size: request.size,
+          quality: request.quality,
+        })
+        return providerState.mode === 'custom'
+          ? await sendAiImageEdit(providerState, editRequest)
+          : await sendImageEdit(editRequest)
       } catch (error) {
         throw new Error(mapImageEditError(error), { cause: error })
       }

@@ -6,10 +6,11 @@ import { ensureDesktopServiceKey, fetchApiKeySecret, getApiKeys, updateApiKeySta
 import { deleteMobileDesktopBinding, deleteMobileDesktopDevice, getLocalMobileBridgeDevice, getMobileDesktopDevices, resetLocalMobileBridgeDevice, type MobileDesktopDevice } from '../../domains/mobile-bridge'
 import { verifyCurrentPassword } from '../../domains/profile'
 import { resolveCliDeploySettings } from '../../lib/cli-deploy'
-import { API_KEY_STATUS_DISABLED, API_KEY_STATUS_ENABLED, resolveSelectedDesktopApiKeyId } from '../../lib/desktop-api-keys'
+import { API_KEY_STATUS_DISABLED, API_KEY_STATUS_ENABLED, getSelectedDesktopApiKeyStorageKey, resolveSelectedDesktopApiKeyId } from '../../lib/desktop-api-keys'
 import { describeCliWorkspaceStatus, resolveCliSetupPeerState } from '../../lib/desktop-service'
 import { formatDateTime } from '../../lib/format'
 import { normalizeOpenAICompatibleBaseUrl, type AiChatProviderConfig, type AiChatProviderState } from '../../lib/aichat-provider'
+import { readJsonStorage, removeStorage, writeJsonStorage } from '../../lib/storage'
 import { resolveActiveDesktopApiKeySummary, resolveCliDeployModelForActiveKey, refreshOneApiModelsForActiveKey, type ActiveDesktopApiKeySummary } from '../desktop-api-key-models'
 import { PasswordField } from '../../components/PasswordField'
 import type { CliClient, CliDeployPreset, CliStatus, DeployProgressPayload } from '../../shared/desktop'
@@ -360,7 +361,10 @@ export function MeAuthenticatedWorkspace(props: {
   const [activeDeployClient, setActiveDeployClient] = useState<CliClient | null>(null)
   const [mobileBridgeDevice, setMobileBridgeDevice] = useState<MobileDesktopDevice | null>(null)
   const [mobileBridgeLoading, setMobileBridgeLoading] = useState(false)
-  const [selectedApiKeyId, setSelectedApiKeyId] = useState<number | null>(null)
+  const selectedApiKeyStorageKey = useMemo(() => getSelectedDesktopApiKeyStorageKey(user.id), [user.id])
+  const [selectedApiKeyId, setSelectedApiKeyId] = useState<number | null>(() =>
+    readJsonStorage<number | null>(selectedApiKeyStorageKey, null)
+  )
   const [updatingApiKeyId, setUpdatingApiKeyId] = useState<number | null>(null)
   const selectedActiveApiKey = useMemo(
     () => resolveActiveDesktopApiKeySummary(apiKeys, selectedApiKeyId),
@@ -434,9 +438,26 @@ export function MeAuthenticatedWorkspace(props: {
     return () => window.clearTimeout(timer)
   }, [refreshMobileBridge, toast, visible])
 
+  const persistSelectedApiKeyId = useCallback((nextId: number | null) => {
+    if (nextId) {
+      writeJsonStorage(selectedApiKeyStorageKey, nextId)
+    } else {
+      removeStorage(selectedApiKeyStorageKey)
+    }
+    setSelectedApiKeyId(nextId)
+  }, [selectedApiKeyStorageKey])
+
   useEffect(() => {
-    setSelectedApiKeyId((current) => resolveSelectedDesktopApiKeyId(apiKeys, current))
-  }, [apiKeys])
+    setSelectedApiKeyId((current) => {
+      const resolved = resolveSelectedDesktopApiKeyId(apiKeys, current)
+      if (resolved) {
+        writeJsonStorage(selectedApiKeyStorageKey, resolved)
+      } else {
+        removeStorage(selectedApiKeyStorageKey)
+      }
+      return resolved
+    })
+  }, [apiKeys, selectedApiKeyStorageKey])
 
   useEffect(() => {
     onActiveApiKeyChange(selectedActiveApiKey)
@@ -474,7 +495,7 @@ export function MeAuthenticatedWorkspace(props: {
           group: user.group || '',
           preferredNames: apiKeys.map((item) => item.name),
         })
-        setSelectedApiKeyId(result.id)
+        persistSelectedApiKeyId(result.id)
         setRevealedKey(result.key)
         toast(result.reused ? '已复用服务器现有有效 Key。' : '新的 API Key 已创建。')
         await refreshMe()
@@ -504,7 +525,7 @@ export function MeAuthenticatedWorkspace(props: {
     const isCurrent = selectedActiveApiKey?.id === item.id
 
     if (isEnabled && !isCurrent) {
-      setSelectedApiKeyId(item.id)
+      persistSelectedApiKeyId(item.id)
       toast('已切换当前 CLI 使用的 Key。')
       return
     }
@@ -517,14 +538,14 @@ export function MeAuthenticatedWorkspace(props: {
             key.id === item.id ? { ...key, status: API_KEY_STATUS_DISABLED } : key
           )
         )
-        setSelectedApiKeyId(null)
+        persistSelectedApiKeyId(null)
         await updateApiKeyStatus(item.id, API_KEY_STATUS_DISABLED)
         toast('该 Key 已关闭，CLI 请求不会再使用它。')
         await refreshMe()
         return
       }
 
-      setSelectedApiKeyId(item.id)
+      persistSelectedApiKeyId(item.id)
       setApiKeys((current) =>
         current.map((key) =>
           key.id === item.id ? { ...key, status: API_KEY_STATUS_ENABLED } : key

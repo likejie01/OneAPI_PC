@@ -122,5 +122,7 @@ export function isOneApiBridgeOnlyCliModel(model: string) {
 }
 
 export function shouldDisableCliModelForProvider(model: string, providerMode: AiChatProviderMode) {
-  return providerMode === 'custom' && isOneApiBridgeOnlyCliModel(model)
+  void model
+  void providerMode
+  return false
 }

@@ -4,13 +4,16 @@ import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const appSource = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '..', 'App.tsx'), 'utf8')
+const srcRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+const appSource = readFileSync(resolve(srcRoot, 'App.tsx'), 'utf8')
+const attachmentSource = readFileSync(resolve(srcRoot, 'hooks', 'use-composer-attachments.ts'), 'utf8')
+const assistantChatDrawSource = readFileSync(resolve(srcRoot, 'features', 'assistants', 'AssistantChatDrawWorkspaces.tsx'), 'utf8')
 
 function readFunctionSource(name: string) {
-  const start = appSource.indexOf(`function ${name}`)
+  const start = attachmentSource.indexOf(`function ${name}`)
   assert.notEqual(start, -1, `${name} should exist`)
-  const nextFunction = appSource.indexOf('\nfunction ', start + 1)
-  return appSource.slice(start, nextFunction === -1 ? undefined : nextFunction)
+  const nextFunction = attachmentSource.indexOf('\nfunction ', start + 1)
+  return attachmentSource.slice(start, nextFunction === -1 ? undefined : nextFunction)
 }
 
 test('chat file attachments are downgraded to text parts instead of unsupported file parts', () => {
@@ -24,11 +27,11 @@ test('chat file attachments are downgraded to text parts instead of unsupported 
 })
 
 test('chat keeps parsed file attachment content available for later context turns', () => {
-  assert.match(appSource, /function buildPersistedChatRequestContent/)
-  assert.match(appSource, /requestContent: persistedRequestContent/)
-  assert.match(appSource, /function resolveChatMessageRequestContent\(message: ChatMessage\)/)
-  assert.match(appSource, /resolveChatMessageRequestContent\(item\)/)
-  assert.match(appSource, /buildChatAttachmentContent\(item\.content, attachments\)/)
+  assert.match(attachmentSource, /function buildPersistedChatRequestContent/)
+  assert.match(assistantChatDrawSource, /requestContent: persistedRequestContent/)
+  assert.match(attachmentSource, /function resolveChatMessageRequestContent\(message: ChatMessage\)/)
+  assert.match(assistantChatDrawSource, /resolveChatMessageRequestContent\(item\)/)
+  assert.match(assistantChatDrawSource, /buildChatAttachmentContent\(item\.content, attachments\)/)
 })
 
 test('performance mode is fixed without an account-page toggle', () => {

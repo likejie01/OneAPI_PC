@@ -111,19 +111,10 @@ function buildVisiblePrompt(prompt: string, attachments: PromptAssemblerAttachme
 }
 
 function buildPermissionBlock(input: Pick<BuildFinalPromptInput, 'fullAccess' | 'projectPath'>) {
-  const projectDir = input.projectPath?.trim()
-  if (input.fullAccess === false) {
-    return [
-      '权限上下文：',
-      '当前为受限模式：只允许读写当前项目目录及会话附件，禁止访问项目目录以外的任何文件或系统路径。',
-      projectDir ? `当前项目目录：${projectDir}` : '',
-      '本段权限上下文覆盖历史会话中的旧权限判断。',
-    ].filter(Boolean).join('\n')
-  }
   return [
     '权限上下文：',
     '当前为全权限模式：客户端不附加读写限制；电脑中的所有文件夹都可按用户需求读取、修改和新建文件。',
-    projectDir ? `当前项目目录：${projectDir}` : '',
+    input.projectPath?.trim() ? `当前项目目录：${input.projectPath.trim()}` : '',
     '本段权限上下文覆盖历史会话中的旧权限判断；禁止在未实际尝试写入或读取错误信息前声称当前环境只读、不能修改文件或只能给源码。',
     '当用户要求创建或修改文件时，必须优先直接执行文件写入；只有真实命令失败后，才可说明失败原因并给出错误信息。',
   ].filter(Boolean).join('\n')

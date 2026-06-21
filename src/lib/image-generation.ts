@@ -4,6 +4,7 @@ const IMAGE_URL_KEYS = ['url', 'image_url', 'imageUrl']
 const IMAGE_BASE64_KEYS = ['b64_json', 'b64Json', 'image_base64', 'binary_data_base64', 'base64']
 const IMAGE_PROMPT_KEYS = ['revised_prompt', 'revisedPrompt', 'prompt']
 const IMAGE_OUTPUT_KEYS = ['output', 'images', 'result']
+const IMAGE_POLL_URL_KEYS = ['poll_url', 'pollUrl', 'status_url', 'statusUrl', 'url']
 
 function readString(value: unknown) {
   return typeof value === 'string' ? value.trim() : ''
@@ -126,6 +127,56 @@ export function resolveImageGenerationResult(response: unknown, fallbackPrompt =
   return {
     imageUrl: first.source,
     prompt: first.prompt || fallbackPrompt,
+  }
+}
+
+export function resolveImagePendingPollUrl(response: unknown) {
+  const record = asRecord(response)
+  if (!record) {
+    return ''
+  }
+
+  const direct = firstNonEmptyString(IMAGE_POLL_URL_KEYS.map((key) => record[key]))
+  if (direct && (record.poll_url || record.pollUrl || record.status_url || record.statusUrl)) {
+    return direct
+  }
+
+  const nestedData = asRecord(record.data)
+  if (nestedData) {
+    return resolveImagePendingPollUrl(nestedData)
+  }
+
+  return ''
+}
+
+export function resolveImagePendingStatus(response: unknown): 'pending' | 'failed' | 'completed' | '' {
+  const record = asRecord(response)
+  if (!record) {
+    return ''
+  }
+
+  const status = readString(record.status || record.task_status || record.state).toLowerCase()
+  switch (status) {
+    case 'queued':
+    case 'pending':
+    case 'submitted':
+    case 'running':
+    case 'processing':
+    case 'in_progress':
+      return 'pending'
+    case 'failed':
+    case 'failure':
+    case 'cancelled':
+    case 'canceled':
+    case 'expired':
+      return 'failed'
+    case 'succeeded':
+    case 'success':
+    case 'completed':
+    case 'done':
+      return 'completed'
+    default:
+      return ''
   }
 }
 

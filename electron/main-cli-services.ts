@@ -3,6 +3,7 @@ import { clipboard, dialog, nativeImage, shell, type WebContents } from 'electro
 import { randomUUID } from 'node:crypto'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createReadStream, createWriteStream, mkdirSync, promises as fs, writeFileSync } from 'node:fs'
+import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import readline from 'node:readline'
@@ -26,7 +27,7 @@ import { MIN_DESKTOP_CLI_NODE_MAJOR, buildClaudePermissionArgs, buildCodexSandbo
 import { buildCliRetryOutputSnapshot, buildCliInteractionResponse, classifyCliStderrLine, detectCliInteractionFromText, detectCliInteractionFromToolUse, summarizeCliFailure, shouldAutoRetryCliRequest } from '../src/lib/cli-runtime.ts'
 import { extractCodexCommandExecutionOutputEntries, extractCodexCommandExecutionToolUseEntries, extractCodexFunctionCallOutputEntries, extractCodexFunctionCallToolUseEntries, normalizeCliToolInputForDetail } from '../src/lib/cli-tool-events.ts'
 import { resolveInteractionDecision } from '../src/process/execution-orchestrator/interaction-policy.ts'
-import { createCliHistoryServices } from './main-cli-history.ts'
+import { createCliHistoryServices, extractCodexAssistantTextFromEvent, extractCodexFileChanges, extractClaudeFileChanges, mergeFileChanges, shouldIgnoreCodexMessage } from './main-cli-history.ts'
 import { createPeerMcpBridgeServices } from './main-peer-mcp.ts'
 import { createCliNodeRuntimeServices } from './main-cli-node-runtime.ts'
 
@@ -37,10 +38,1029 @@ export function createCliServices(deps) {
     getToolchainRoot, getManagedNodeRoot, getManagedNpmPrefix, getManagedPrefixBin, getManagedCliExecutableCandidates, getManagedNodeExecutableCandidates, getManagedNpmExecutableCandidates, getNpmCliScriptCandidates, getNpmCommand, firstExistingPath, resolveNpmCliScriptPath, buildNpmInvocation,
     clearDirectory, flattenSingleNestedDirectory, describeDirectoryEntries, shouldUseWindowsCommandShim, createLineConsumer, spawnCommandWithHandlers, stopChildProcess, writeChildStdinSafely, runCommand, locateSystemExecutable, locateExecutable, resolveCliSpawnCommand, resolveNodeBackedCliInvocation, inspectCli,
     getRendererStorageValue, setRendererStorageValue, applyRendererDesktopModelSelection, getDesktopUserHeaderValue, getDesktopAccessTokenHeaderValue, requestMobileBridgeApi, requestMobileBridgeJson,
-    resolveCliAdditionalAccessDirectories, rememberCliAuthorizedDirectory, readBridgeClientProjectPath, postMobileBridgeJobEvent, createLocalCliMobileBridgeMirror,
+    resolveCliAdditionalAccessDirectories, rememberCliAuthorizedDirectory, readBridgeClientProjectPath, postMobileBridgeJobEvent, createLocalCliMobileBridgeMirror, syncMobileBridgeSessionsSnapshot,
     startCliPowerSaveBlocker, stopCliPowerSaveBlocker, activeCliProcesses, activeCliRequestStates, stoppedCliRequests, mobileBridgeProgressMirrors, updateActiveCliSessionState,
   } = deps
   const getServerBaseUrl = () => serverBaseUrlRef.value
+
+function readJsonObject(raw: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null
+  } catch {
+    return null
+  }
+}
+
+function normalizeCliTextContent(content: unknown): string {
+  if (typeof content === 'string') {
+    return content
+  }
+  if (!Array.isArray(content)) {
+    return ''
+  }
+  return content
+    .map((item) => {
+      if (typeof item === 'string') {
+        return item
+      }
+      if (!item || typeof item !== 'object') {
+        return ''
+      }
+      const record = item as Record<string, unknown>
+      return typeof record.text === 'string'
+        ? record.text
+        : typeof record.content === 'string'
+          ? record.content
+          : ''
+    })
+    .filter(Boolean)
+    .join('\n')
+}
+
+function stringifyCliJsonValue(value: unknown) {
+  if (value === undefined || value === null) {
+    return ''
+  }
+  if (typeof value === 'string') {
+    return value
+  }
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return String(value)
+  }
+}
+
+function normalizeCustomToolCallArguments(input: unknown) {
+  return JSON.stringify({ input: stringifyCliJsonValue(input) })
+}
+
+function extractCustomToolInputFromArguments(argumentsText: string) {
+  const trimmed = argumentsText.trim()
+  if (!trimmed) {
+    return ''
+  }
+  try {
+    const parsed = JSON.parse(trimmed)
+    if (parsed && typeof parsed === 'object' && 'input' in parsed) {
+      return stringifyCliJsonValue((parsed as Record<string, unknown>).input)
+    }
+    if (typeof parsed === 'string') {
+      return parsed
+    }
+  } catch {
+    // Fall through to raw tool text.
+  }
+  return trimmed
+}
+
+function normalizeChatImageUrl(value: unknown) {
+  if (typeof value === 'string') {
+    return value
+  }
+  const record = value && typeof value === 'object' ? value as Record<string, unknown> : {}
+  return typeof record.url === 'string' ? record.url : stringifyCliJsonValue(value)
+}
+
+function responsesInputToChatMessages(input: unknown) {
+  if (typeof input === 'string') {
+    return [{ role: 'user', content: input }]
+  }
+  if (!Array.isArray(input)) {
+    return []
+  }
+  const messages: Array<Record<string, unknown>> = []
+  let pendingAssistantIndex = -1
+  let pendingReasoning = ''
+  const appendToolCallToPendingAssistant = (toolCall: Record<string, unknown>) => {
+    if (pendingAssistantIndex < 0 || !messages[pendingAssistantIndex]) {
+      messages.push({
+        role: 'assistant',
+        content: '',
+        ...(pendingReasoning ? { reasoning_content: pendingReasoning } : {}),
+      })
+      pendingAssistantIndex = messages.length - 1
+      pendingReasoning = ''
+    }
+    const current = messages[pendingAssistantIndex]
+    const existing = Array.isArray(current.tool_calls) ? current.tool_calls : []
+    current.tool_calls = [...existing, toolCall]
+  }
+  for (const item of input) {
+    if (!item || typeof item !== 'object') {
+      continue
+    }
+    const record = item as Record<string, unknown>
+    const type = typeof record.type === 'string' ? record.type : ''
+    if (type === 'function_call_output' || type === 'custom_tool_call_output') {
+      pendingAssistantIndex = -1
+      pendingReasoning = ''
+      messages.push({
+        role: 'tool',
+        tool_call_id: typeof record.call_id === 'string' ? record.call_id : undefined,
+        content: stringifyCliJsonValue(record.output),
+      })
+      continue
+    }
+    if (type === 'function_call' || type === 'custom_tool_call') {
+      const name = typeof record.name === 'string' ? record.name.trim() : ''
+      if (!name) {
+        continue
+      }
+      appendToolCallToPendingAssistant({
+        id: typeof record.call_id === 'string' ? record.call_id : `call_${messages.length}`,
+        type: 'function',
+        function: {
+          name,
+          arguments: type === 'custom_tool_call'
+            ? normalizeCustomToolCallArguments(record.input)
+            : stringifyCliJsonValue(record.arguments),
+        },
+      })
+      continue
+    }
+    if (type === 'reasoning') {
+      const summary = Array.isArray(record.summary)
+        ? record.summary.map((part) => normalizeCliTextContent((part as Record<string, unknown>)?.text)).join('')
+        : normalizeCliTextContent(record.text || record.content)
+      if (summary.trim()) {
+        if (pendingAssistantIndex >= 0 && messages[pendingAssistantIndex]) {
+          messages[pendingAssistantIndex].reasoning_content = summary
+        } else {
+          pendingReasoning = summary
+        }
+      }
+      continue
+    }
+    const role = record.role === 'assistant' ? 'assistant' : record.role === 'system' || record.role === 'developer' ? 'system' : 'user'
+    const contentValue = Array.isArray(record.content)
+      ? record.content.map((part) => {
+        const partRecord = part && typeof part === 'object' ? part as Record<string, unknown> : {}
+        const partType = typeof partRecord.type === 'string' ? partRecord.type : ''
+        if (partType === 'input_text' || partType === 'output_text') {
+          return { type: 'text', text: normalizeCliTextContent(partRecord.text) }
+        }
+        if (partType === 'input_image') {
+          return { type: 'image_url', image_url: normalizeChatImageUrl(partRecord.image_url) }
+        }
+        if (partType === 'summary_text' || partType === 'reasoning_text') {
+          return null
+        }
+        return partRecord.text ? { type: 'text', text: normalizeCliTextContent(partRecord.text) } : null
+      }).filter(Boolean)
+      : normalizeCliTextContent(record.content)
+    const message: Record<string, unknown> = {
+      role,
+      content: Array.isArray(contentValue) && contentValue.length === 1 && contentValue[0]?.type === 'text'
+        ? contentValue[0].text
+        : contentValue,
+    }
+    if (role === 'assistant') {
+      if (pendingReasoning) {
+        message.reasoning_content = pendingReasoning
+        pendingReasoning = ''
+      }
+      pendingAssistantIndex = messages.length
+    } else {
+      pendingAssistantIndex = -1
+      pendingReasoning = ''
+    }
+    messages.push(message)
+  }
+  return messages
+}
+
+function resolveResponsesToolName(toolDef: Record<string, unknown>) {
+  const direct = typeof toolDef.name === 'string' ? toolDef.name.trim() : ''
+  if (direct) {
+    return direct
+  }
+  const custom = toolDef.custom && typeof toolDef.custom === 'object'
+    ? toolDef.custom as Record<string, unknown>
+    : null
+  return typeof custom?.name === 'string' ? custom.name.trim() : ''
+}
+
+function convertResponsesToolsToChatTools(tools: unknown) {
+  if (!Array.isArray(tools)) {
+    return {}
+  }
+  const customToolNames = new Set<string>()
+  const chatTools = tools.flatMap((tool) => {
+    if (!tool || typeof tool !== 'object') {
+      return []
+    }
+    const record = tool as Record<string, unknown>
+    const type = typeof record.type === 'string' ? record.type : ''
+    if (type === 'function') {
+      const name = resolveResponsesToolName(record)
+      return name ? [{
+        type: 'function',
+        function: {
+          name,
+          description: typeof record.description === 'string' ? record.description : '',
+          parameters: record.parameters || { type: 'object' },
+        },
+      }] : []
+    }
+    if (type === 'custom') {
+      const name = resolveResponsesToolName(record)
+      if (!name) {
+        return []
+      }
+      customToolNames.add(name)
+      return [{
+        type: 'function',
+        function: {
+          name,
+          description: [
+            typeof record.description === 'string' ? record.description : '',
+            'Return the tool payload in the single string field `input`.',
+          ].filter(Boolean).join('\n\n'),
+          parameters: {
+            type: 'object',
+            properties: {
+              input: {
+                type: 'string',
+                description: 'Raw tool input to pass through exactly as provided by the model.',
+              },
+            },
+            required: ['input'],
+            additionalProperties: false,
+          },
+        },
+      }]
+    }
+    return []
+  })
+  return {
+    tools: chatTools.length ? chatTools : undefined,
+    customToolNames,
+  }
+}
+
+function convertResponsesRequestToChatRequest(body: Record<string, unknown>) {
+  const { tools, customToolNames } = convertResponsesToolsToChatTools(body.tools)
+  return {
+    model: body.model,
+    messages: [
+      ...(typeof body.instructions === 'string' && body.instructions.trim()
+        ? [{ role: 'system', content: body.instructions }]
+        : []),
+      ...responsesInputToChatMessages(body.input),
+    ].filter((item) => item.content || item.role === 'tool' || item.tool_calls),
+    stream: body.stream === true,
+    temperature: body.temperature,
+    top_p: body.top_p,
+    max_tokens: body.max_output_tokens,
+    max_completion_tokens: body.max_output_tokens,
+    tools,
+    tool_choice: body.tool_choice,
+    parallel_tool_calls: body.parallel_tool_calls,
+    reasoning_effort:
+      body.reasoning && typeof body.reasoning === 'object'
+        ? (body.reasoning as Record<string, unknown>).effort
+        : undefined,
+  }
+}
+
+function convertClaudeMessagesRequestToChatRequest(body: Record<string, unknown>) {
+  const tools = Array.isArray(body.tools)
+    ? body.tools.flatMap((tool) => {
+      const record = tool && typeof tool === 'object' ? tool as Record<string, unknown> : {}
+      const name = typeof record.name === 'string' ? record.name.trim() : ''
+      return name ? [{
+        type: 'function',
+        function: {
+          name,
+          description: typeof record.description === 'string' ? record.description : '',
+          parameters: record.input_schema || { type: 'object' },
+        },
+      }] : []
+    })
+    : undefined
+  const messages: Array<Record<string, unknown>> = []
+  for (const item of Array.isArray(body.messages) ? body.messages : []) {
+    const record = item && typeof item === 'object' ? item as Record<string, unknown> : {}
+    const role = record.role === 'assistant' ? 'assistant' : 'user'
+    if (Array.isArray(record.content)) {
+      const textParts: string[] = []
+      const toolCalls: Array<Record<string, unknown>> = []
+      for (const part of record.content) {
+        const partRecord = part && typeof part === 'object' ? part as Record<string, unknown> : {}
+        const partType = typeof partRecord.type === 'string' ? partRecord.type : ''
+        if (partType === 'text') {
+          textParts.push(normalizeCliTextContent(partRecord.text))
+        } else if (partType === 'tool_use' && role === 'assistant') {
+          const name = typeof partRecord.name === 'string' ? partRecord.name.trim() : ''
+          if (name) {
+            toolCalls.push({
+              id: typeof partRecord.id === 'string' ? partRecord.id : `call_${toolCalls.length}`,
+              type: 'function',
+              function: {
+                name,
+                arguments: stringifyCliJsonValue(partRecord.input || {}),
+              },
+            })
+          }
+        } else if (partType === 'tool_result') {
+          messages.push({
+            role: 'tool',
+            tool_call_id: typeof partRecord.tool_use_id === 'string' ? partRecord.tool_use_id : '',
+            content: normalizeCliTextContent(partRecord.content) || stringifyCliJsonValue(partRecord.content),
+          })
+        }
+      }
+      if (toolCalls.length || textParts.join('').trim()) {
+        messages.push({
+          role,
+          content: textParts.join('\n'),
+          ...(toolCalls.length ? { tool_calls: toolCalls } : {}),
+        })
+      }
+      continue
+    }
+    messages.push({
+      role,
+      content: normalizeCliTextContent(record.content),
+    })
+  }
+  return {
+    model: body.model,
+    messages: [
+      ...(typeof body.system === 'string' && body.system.trim()
+        ? [{ role: 'system', content: body.system }]
+        : []),
+      ...messages,
+    ].filter((item) => item.content || item.tool_calls || item.role === 'tool'),
+    tools: tools?.length ? tools : undefined,
+    stream: body.stream === true,
+    temperature: body.temperature,
+    top_p: body.top_p,
+    max_tokens: body.max_tokens,
+  }
+}
+
+function extractChatResponseText(data: unknown) {
+  const record = data && typeof data === 'object' ? data as Record<string, unknown> : {}
+  const choices = Array.isArray(record.choices) ? record.choices : []
+  const first = choices[0] && typeof choices[0] === 'object' ? choices[0] as Record<string, unknown> : {}
+  const message = first.message && typeof first.message === 'object' ? first.message as Record<string, unknown> : {}
+  return normalizeCliTextContent(message.content)
+}
+
+function extractChatResponseMessage(data: unknown) {
+  const record = data && typeof data === 'object' ? data as Record<string, unknown> : {}
+  const choices = Array.isArray(record.choices) ? record.choices : []
+  const first = choices[0] && typeof choices[0] === 'object' ? choices[0] as Record<string, unknown> : {}
+  return first.message && typeof first.message === 'object' ? first.message as Record<string, unknown> : {}
+}
+
+function getCustomToolNames(requestBodyObject: Record<string, unknown> | null | undefined) {
+  const converted = requestBodyObject ? convertResponsesToolsToChatTools(requestBodyObject.tools) : {}
+  return converted.customToolNames || new Set<string>()
+}
+
+function readUsageNumber(source: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = source[key]
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return Math.max(0, Math.floor(value))
+    }
+  }
+  return 0
+}
+
+function normalizeResponsesUsage(value: unknown) {
+  const source = value && typeof value === 'object' ? value as Record<string, unknown> : {}
+  const inputTokens = readUsageNumber(source, ['input_tokens', 'prompt_tokens'])
+  const outputTokens = readUsageNumber(source, ['output_tokens', 'completion_tokens'])
+  const totalTokens = readUsageNumber(source, ['total_tokens'])
+  const normalizedTotal = totalTokens || inputTokens + outputTokens
+  return {
+    input_tokens: inputTokens,
+    input_tokens_details: source.input_tokens_details && typeof source.input_tokens_details === 'object'
+      ? source.input_tokens_details
+      : { cached_tokens: readUsageNumber(source, ['prompt_cache_hit_tokens']) },
+    output_tokens: outputTokens,
+    output_tokens_details: source.output_tokens_details && typeof source.output_tokens_details === 'object'
+      ? source.output_tokens_details
+      : { reasoning_tokens: 0 },
+    total_tokens: normalizedTotal,
+  }
+}
+
+function convertChatResponseToResponses(data: unknown, model: unknown, requestBodyObject?: Record<string, unknown> | null) {
+  const text = extractChatResponseText(data)
+  const message = extractChatResponseMessage(data)
+  const customToolNames = getCustomToolNames(requestBodyObject)
+  const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : []
+  const output = [
+    ...(text ? [{
+      id: `msg_${Date.now()}`,
+      type: 'message',
+      role: 'assistant',
+      status: 'completed',
+      content: [{ type: 'output_text', text }],
+    }] : []),
+    ...toolCalls.flatMap((toolCall, index) => {
+      const record = toolCall && typeof toolCall === 'object' ? toolCall as Record<string, unknown> : {}
+      const fn = record.function && typeof record.function === 'object' ? record.function as Record<string, unknown> : {}
+      const name = typeof fn.name === 'string' ? fn.name : ''
+      if (!name) {
+        return []
+      }
+      const callId = typeof record.id === 'string' ? record.id : `call_${index}`
+      const argumentsText = typeof fn.arguments === 'string' ? fn.arguments : stringifyCliJsonValue(fn.arguments)
+      const isCustom = customToolNames.has(name)
+      return [{
+        id: callId,
+        type: isCustom ? 'custom_tool_call' : 'function_call',
+        status: 'completed',
+        call_id: callId,
+        name,
+        ...(isCustom ? { input: extractCustomToolInputFromArguments(argumentsText) } : { arguments: argumentsText }),
+      }]
+    }),
+  ]
+  return {
+    id: `resp_${Date.now()}`,
+    object: 'response',
+    created_at: Math.floor(Date.now() / 1000),
+    model,
+    status: 'completed',
+    output,
+    output_text: text,
+    usage: normalizeResponsesUsage((data as Record<string, unknown>)?.usage),
+  }
+}
+
+function convertChatResponseToClaude(data: unknown, model: unknown) {
+  const text = extractChatResponseText(data)
+  const message = extractChatResponseMessage(data)
+  const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : []
+  const usage = (data as Record<string, any>)?.usage || {}
+  return {
+    id: `msg_${Date.now()}`,
+    type: 'message',
+    role: 'assistant',
+    model,
+    content: [
+      ...(text ? [{ type: 'text', text }] : []),
+      ...toolCalls.flatMap((toolCall, index) => {
+        const record = toolCall && typeof toolCall === 'object' ? toolCall as Record<string, unknown> : {}
+        const fn = record.function && typeof record.function === 'object' ? record.function as Record<string, unknown> : {}
+        const name = typeof fn.name === 'string' ? fn.name : ''
+        if (!name) {
+          return []
+        }
+        const rawInput = typeof fn.arguments === 'string' ? fn.arguments : stringifyCliJsonValue(fn.arguments)
+        let input: unknown = {}
+        try {
+          input = rawInput.trim() ? JSON.parse(rawInput) : {}
+        } catch {
+          input = rawInput
+        }
+        return [{
+          type: 'tool_use',
+          id: typeof record.id === 'string' ? record.id : `call_${index}`,
+          name,
+          input,
+        }]
+      }),
+    ],
+    stop_reason: toolCalls.length ? 'tool_use' : 'end_turn',
+    stop_sequence: null,
+    usage: {
+      input_tokens: Number(usage.prompt_tokens || 0),
+      output_tokens: Number(usage.completion_tokens || 0),
+    },
+  }
+}
+
+function createChatSseBridge(client: CliClient, model: unknown, requestBodyObject?: Record<string, unknown> | null) {
+  const responseId = `resp_${Date.now()}`
+  const messageId = `msg_${Date.now()}`
+  const customToolNames = getCustomToolNames(requestBodyObject)
+  let started = false
+  let textStarted = false
+  let textDone = false
+  let closed = false
+  let claudeTextStarted = false
+  let nextOutputIndex = 0
+  let assistantOutputIndex = -1
+  let bufferedText = ''
+  const toolIndexes = new Map<number, {
+    outputIndex: number
+    id: string
+    name: string
+    args: string
+    isCustom: boolean
+    added: boolean
+  }>()
+
+  const event = (payload: unknown, eventName?: string) =>
+    client === 'claude'
+      ? `${eventName ? `event: ${eventName}\n` : ''}data: ${JSON.stringify(payload)}\n\n`
+      : `data: ${JSON.stringify(payload)}\n\n`
+
+  const start = () => {
+    if (started) {
+      return ''
+    }
+    started = true
+    if (client === 'claude') {
+      return event({
+        type: 'message_start',
+        message: {
+          id: messageId,
+          type: 'message',
+          role: 'assistant',
+          model,
+          content: [],
+          usage: { input_tokens: 0, output_tokens: 0 },
+        },
+      }, 'message_start')
+    }
+    return event({
+      type: 'response.created',
+      response: {
+        id: responseId,
+        object: 'response',
+        created_at: Math.floor(Date.now() / 1000),
+        status: 'in_progress',
+        model,
+      },
+    })
+  }
+
+  const ensureTextStarted = () => {
+    if (client === 'claude') {
+      if (claudeTextStarted) {
+        return ''
+      }
+      claudeTextStarted = true
+      assistantOutputIndex = nextOutputIndex++
+      return event({
+        type: 'content_block_start',
+        index: assistantOutputIndex,
+        content_block: { type: 'text', text: '' },
+      }, 'content_block_start')
+    }
+    if (textStarted) {
+      return ''
+    }
+    textStarted = true
+    assistantOutputIndex = nextOutputIndex++
+    return [
+      event({
+        type: 'response.output_item.added',
+        output_index: assistantOutputIndex,
+        item: { id: messageId, type: 'message', role: 'assistant', status: 'in_progress', content: [] },
+      }),
+      event({
+        type: 'response.content_part.added',
+        item_id: messageId,
+        output_index: assistantOutputIndex,
+        content_index: 0,
+        part: { type: 'output_text', text: '' },
+      }),
+    ].join('')
+  }
+
+  const ensureTextDone = () => {
+    if (textDone) {
+      return ''
+    }
+    textDone = true
+    if (client === 'claude') {
+      return claudeTextStarted
+        ? event({ type: 'content_block_stop', index: assistantOutputIndex }, 'content_block_stop')
+        : ''
+    }
+    return textStarted
+      ? [
+        event({
+          type: 'response.output_text.done',
+          item_id: messageId,
+          output_index: assistantOutputIndex,
+          content_index: 0,
+          text: bufferedText,
+        }),
+        event({
+          type: 'response.content_part.done',
+          item_id: messageId,
+          output_index: assistantOutputIndex,
+          content_index: 0,
+          part: { type: 'output_text', text: bufferedText },
+        }),
+        event({
+          type: 'response.output_item.done',
+          output_index: assistantOutputIndex,
+          item: {
+            id: messageId,
+            type: 'message',
+            role: 'assistant',
+            status: 'completed',
+            content: [{ type: 'output_text', text: bufferedText }],
+          },
+        }),
+      ].join('')
+      : ''
+  }
+
+  const emitTextDelta = (text: string) => {
+    if (!text) {
+      return ''
+    }
+    bufferedText += text
+    if (client === 'claude') {
+      return start() + ensureTextStarted() + event({
+        type: 'content_block_delta',
+        index: assistantOutputIndex,
+        delta: { type: 'text_delta', text },
+      }, 'content_block_delta')
+    }
+    return start() + ensureTextStarted() + event({
+      type: 'response.output_text.delta',
+      item_id: messageId,
+      output_index: assistantOutputIndex,
+      content_index: 0,
+      delta: text,
+    })
+  }
+
+  const emitToolDelta = (toolCall: Record<string, unknown>, fallbackIndex: number) => {
+    const index = typeof toolCall.index === 'number' ? toolCall.index : fallbackIndex
+    const fn = toolCall.function && typeof toolCall.function === 'object'
+      ? toolCall.function as Record<string, unknown>
+      : {}
+    let state = toolIndexes.get(index)
+    if (!state) {
+      const id = typeof toolCall.id === 'string' && toolCall.id.trim() ? toolCall.id.trim() : `call_${index}`
+      const name = typeof fn.name === 'string' ? fn.name.trim() : ''
+      state = {
+        outputIndex: nextOutputIndex++,
+        id,
+        name,
+        args: '',
+        isCustom: customToolNames.has(name),
+        added: false,
+      }
+      toolIndexes.set(index, state)
+    }
+    if (typeof toolCall.id === 'string' && toolCall.id.trim()) {
+      state.id = toolCall.id.trim()
+    }
+    if (typeof fn.name === 'string' && fn.name.trim()) {
+      state.name = fn.name.trim()
+      state.isCustom = customToolNames.has(state.name)
+    }
+    const argsDelta = typeof fn.arguments === 'string' ? fn.arguments : ''
+    state.args += argsDelta
+    const chunks: string[] = [start(), ensureTextDone()]
+    if (client === 'claude') {
+      if (!state.added && state.name) {
+        state.added = true
+        chunks.push(event({
+          type: 'content_block_start',
+          index: state.outputIndex,
+          content_block: {
+            type: 'tool_use',
+            id: state.id,
+            name: state.name,
+            input: {},
+          },
+        }, 'content_block_start'))
+      }
+      if (argsDelta) {
+        chunks.push(event({
+          type: 'content_block_delta',
+          index: state.outputIndex,
+          delta: {
+            type: 'input_json_delta',
+            partial_json: argsDelta,
+          },
+        }, 'content_block_delta'))
+      }
+      return chunks.join('')
+    }
+    if (!state.added && state.name) {
+      state.added = true
+      chunks.push(event({
+        type: 'response.output_item.added',
+        output_index: state.outputIndex,
+        item: {
+          id: state.id,
+          type: state.isCustom ? 'custom_tool_call' : 'function_call',
+          status: 'in_progress',
+          call_id: state.id,
+          name: state.name,
+        },
+      }))
+    }
+    if (argsDelta) {
+      chunks.push(event(state.isCustom ? {
+        type: 'response.custom_tool_call_input.delta',
+        item_id: state.id,
+        output_index: state.outputIndex,
+        delta: extractCustomToolInputFromArguments(state.args),
+      } : {
+        type: 'response.function_call_arguments.delta',
+        item_id: state.id,
+        output_index: state.outputIndex,
+        delta: argsDelta,
+      }))
+    }
+    return chunks.join('')
+  }
+
+  const handlePayload = (data: Record<string, unknown>) => {
+    const choice = Array.isArray(data.choices) ? data.choices[0] as Record<string, unknown> : null
+    const delta = choice?.delta && typeof choice.delta === 'object' ? choice.delta as Record<string, unknown> : null
+    const chunks: string[] = []
+    if (delta) {
+      const reasoning = normalizeCliTextContent(delta.reasoning_content || delta.reasoning)
+      const text = normalizeCliTextContent(delta.content)
+      if (reasoning) {
+        chunks.push(emitTextDelta(reasoning))
+      }
+      if (text) {
+        chunks.push(emitTextDelta(text))
+      }
+      if (Array.isArray(delta.tool_calls)) {
+        delta.tool_calls.forEach((toolCall, index) => {
+          if (toolCall && typeof toolCall === 'object') {
+            chunks.push(emitToolDelta(toolCall as Record<string, unknown>, index))
+          }
+        })
+      }
+    }
+    if (choice?.finish_reason) {
+      chunks.push(finish(data.usage as Record<string, unknown> | undefined))
+    }
+    return chunks.join('')
+  }
+
+  const finish = (usage?: Record<string, unknown>) => {
+    if (closed) {
+      return ''
+    }
+    closed = true
+    const chunks = [start(), ensureTextDone()]
+    if (client === 'claude') {
+      for (const [, state] of [...toolIndexes].sort(([left], [right]) => left - right)) {
+        if (state.added) {
+          chunks.push(event({ type: 'content_block_stop', index: state.outputIndex }, 'content_block_stop'))
+        }
+      }
+      chunks.push(event({
+        type: 'message_delta',
+        delta: { stop_reason: toolIndexes.size ? 'tool_use' : 'end_turn', stop_sequence: null },
+        usage: { output_tokens: Number(usage?.completion_tokens || 0) },
+      }, 'message_delta'))
+      chunks.push(event({ type: 'message_stop' }, 'message_stop'))
+      return chunks.join('')
+    }
+    for (const [, state] of [...toolIndexes].sort(([left], [right]) => left - right)) {
+      const payload = state.isCustom ? {
+        type: 'response.custom_tool_call_input.done',
+        item_id: state.id,
+        output_index: state.outputIndex,
+        call_id: state.id,
+        name: state.name,
+        input: extractCustomToolInputFromArguments(state.args),
+      } : {
+        type: 'response.function_call_arguments.done',
+        item_id: state.id,
+        output_index: state.outputIndex,
+        call_id: state.id,
+        name: state.name,
+        arguments: state.args,
+      }
+      chunks.push(event(payload))
+      chunks.push(event({
+        type: 'response.output_item.done',
+        output_index: state.outputIndex,
+        item: {
+          id: state.id,
+          type: state.isCustom ? 'custom_tool_call' : 'function_call',
+          status: 'completed',
+          call_id: state.id,
+          name: state.name,
+          ...(state.isCustom
+            ? { input: extractCustomToolInputFromArguments(state.args) }
+            : { arguments: state.args }),
+        },
+      }))
+    }
+    chunks.push(event({
+      type: 'response.completed',
+      response: {
+        id: responseId,
+        object: 'response',
+        created_at: Math.floor(Date.now() / 1000),
+        status: 'completed',
+        model,
+        output: [],
+        usage: normalizeResponsesUsage(usage),
+      },
+    }))
+    chunks.push('data: [DONE]\n\n')
+    return chunks.join('')
+  }
+
+  return { handlePayload, finish }
+}
+
+async function pipeConvertedChatSse(upstream: Response, response: http.ServerResponse, client: CliClient, model: unknown, requestBodyObject?: Record<string, unknown> | null) {
+  const bridge = createChatSseBridge(client, model, requestBodyObject)
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let finished = false
+  const emit = (text: string) => {
+    if (text) {
+      response.write(text)
+    }
+  }
+  const consumeEvent = (eventText: string) => {
+    const dataLines = eventText
+      .split(/\r?\n/)
+      .filter((line) => line.startsWith('data:'))
+      .map((line) => line.slice(5).trim())
+    for (const payload of dataLines) {
+      if (!payload) {
+        continue
+      }
+      if (payload === '[DONE]') {
+        if (!finished) {
+          emit(bridge.finish())
+          finished = true
+        }
+        continue
+      }
+      const data = readJsonObject(payload)
+      if (data) {
+        emit(bridge.handlePayload(data))
+      }
+    }
+  }
+  if (upstream.body) {
+    for await (const chunk of Readable.fromWeb(upstream.body)) {
+      buffer += decoder.decode(chunk as Buffer, { stream: true })
+      let separatorIndex = buffer.search(/\r?\n\r?\n/)
+      while (separatorIndex >= 0) {
+        const eventText = buffer.slice(0, separatorIndex)
+        const match = buffer.slice(separatorIndex).match(/^\r?\n\r?\n/)
+        buffer = buffer.slice(separatorIndex + (match?.[0].length || 2))
+        consumeEvent(eventText)
+        separatorIndex = buffer.search(/\r?\n\r?\n/)
+      }
+    }
+  }
+  buffer += decoder.decode()
+  if (buffer.trim()) {
+    consumeEvent(buffer)
+  }
+  if (!finished) {
+    emit(bridge.finish())
+  }
+}
+
+async function createCliPromptCacheProxy(input: {
+  targetBaseUrl: string
+  apiKey: string
+  client: CliClient
+  projectPath: string
+  sessionId?: string
+}) {
+  const targetBase = new URL(input.targetBaseUrl)
+  const promptCacheKey = buildCliPromptCacheKey({
+    client: input.client,
+    projectPath: input.projectPath,
+    sessionId: input.sessionId || `${input.client}-${Date.now()}`,
+  })
+
+  const server = http.createServer(async (request, response) => {
+    try {
+      const chunks: Buffer[] = []
+      for await (const chunk of request) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+      }
+
+      const requestUrl = new URL(request.url || '/', targetBase)
+      const shouldBridgeResponses = input.client === 'codex' && /\/responses$/i.test(requestUrl.pathname)
+      const shouldBridgeClaudeMessages = input.client === 'claude' && /\/messages$/i.test(requestUrl.pathname)
+      const bridgedPath = shouldBridgeResponses || shouldBridgeClaudeMessages ? '/v1/chat/completions' : requestUrl.pathname
+      const targetUrl = new URL(bridgedPath + requestUrl.search, targetBase)
+      const headers = new Headers()
+      for (const [key, value] of Object.entries(request.headers)) {
+        if (!value || key.toLowerCase() === 'host' || key.toLowerCase() === 'content-length') {
+          continue
+        }
+        headers.set(key, Array.isArray(value) ? value.join(', ') : value)
+      }
+      if (shouldBridgeResponses || shouldBridgeClaudeMessages) {
+        headers.set('authorization', `Bearer ${input.apiKey}`)
+        headers.delete('x-api-key')
+        headers.delete('anthropic-version')
+        headers.delete('anthropic-beta')
+      }
+
+      let body: BodyInit | undefined
+      let requestBodyObject: Record<string, unknown> | null = null
+      if (chunks.length > 0) {
+        const rawBody = Buffer.concat(chunks).toString('utf8')
+        const contentType = headers.get('content-type') || ''
+        if (contentType.toLowerCase().includes('application/json')) {
+          const withPromptCacheKey = injectCliPromptCacheKeyIntoJsonBody(rawBody, promptCacheKey)
+          requestBodyObject = readJsonObject(withPromptCacheKey)
+          if (requestBodyObject && shouldBridgeResponses) {
+            body = JSON.stringify(convertResponsesRequestToChatRequest(requestBodyObject))
+          } else if (requestBodyObject && shouldBridgeClaudeMessages) {
+            body = JSON.stringify(convertClaudeMessagesRequestToChatRequest(requestBodyObject))
+          } else {
+            body = withPromptCacheKey
+          }
+          headers.set('content-length', Buffer.byteLength(body).toString())
+        } else {
+          body = rawBody
+        }
+      }
+
+      const upstream = await fetch(targetUrl, {
+        method: request.method || 'GET',
+        headers,
+        body,
+      })
+      const upstreamHeaders = Object.fromEntries(upstream.headers.entries())
+      if ((shouldBridgeResponses || shouldBridgeClaudeMessages) && upstream.ok) {
+        const contentType = upstream.headers.get('content-type') || ''
+        if (contentType.includes('text/event-stream')) {
+          delete upstreamHeaders['content-length']
+          delete upstreamHeaders['content-encoding']
+          response.writeHead(upstream.status, {
+            ...upstreamHeaders,
+            'content-type': 'text/event-stream; charset=utf-8',
+          })
+          await pipeConvertedChatSse(upstream, response, input.client, requestBodyObject?.model, requestBodyObject)
+          response.end()
+          return
+        }
+        const upstreamText = await upstream.text()
+        const data = readJsonObject(upstreamText)
+        const converted = input.client === 'claude'
+          ? convertChatResponseToClaude(data, requestBodyObject?.model)
+          : convertChatResponseToResponses(data, requestBodyObject?.model, requestBodyObject)
+        const convertedText = JSON.stringify(converted)
+        response.writeHead(upstream.status, {
+          ...upstreamHeaders,
+          'content-type': 'application/json; charset=utf-8',
+          'content-length': Buffer.byteLength(convertedText).toString(),
+        })
+        response.end(convertedText)
+        return
+      }
+
+      response.writeHead(upstream.status, upstreamHeaders)
+      if (upstream.body) {
+        for await (const chunk of Readable.fromWeb(upstream.body)) {
+          response.write(chunk)
+        }
+      }
+      response.end()
+    } catch (error) {
+      response.writeHead(502, { 'content-type': 'application/json; charset=utf-8' })
+      response.end(JSON.stringify({
+        error: {
+          message: error instanceof Error ? error.message : 'CLI prompt cache proxy failed',
+        },
+      }))
+    }
+  })
+
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', () => {
+      server.off('error', reject)
+      resolve()
+    })
+  })
+
+  const address = server.address()
+  if (!address || typeof address === 'string') {
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+    throw new Error('CLI prompt cache proxy failed to bind local port')
+  }
+
+  return {
+    baseUrl: `http://127.0.0.1:${address.port}`,
+    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+  }
+}
 
 async function readCurrentCodexConfig() {
   const targetPath = cliConfig.codex.configPath
@@ -3395,6 +4415,7 @@ async function runCodexPrompt(
   const codexProxy = runtimeBaseUrl
     ? await createCliPromptCacheProxy({
       targetBaseUrl: runtimeBaseUrl,
+      apiKey: runtimeApiKey,
       client: 'codex',
       projectPath: input.projectPath,
       sessionId: sessionId || input.sessionId,
@@ -3941,6 +4962,7 @@ async function runClaudePrompt(
   const claudeProxy = runtimeBaseUrl
     ? await createCliPromptCacheProxy({
       targetBaseUrl: runtimeBaseUrl,
+      apiKey: runtimeApiKey,
       client: 'claude',
       projectPath: input.projectPath,
       sessionId: sessionId || input.sessionId,
@@ -4467,7 +5489,11 @@ async function runClaudePrompt(
       (sawClaudeResult && stoppedAfterClaudeResult) ||
       (sawClaudeResult && finalResult?.is_error !== true)
     )
-  const completedWithWarnings = !aborted && !success && output.length > 0 && !!runtimeDiagnostics.policyIssue
+  const completedWithWarnings =
+    !aborted &&
+    !success &&
+    output.length > 0 &&
+    (!!runtimeDiagnostics.policyIssue || (sawClaudeResult && finalResult?.is_error === true))
   if (!aborted) {
     progress.status('Claude 输出已结束，正在整理会话记录。', sessionId, true, undefined, {
       logKind: 'status',

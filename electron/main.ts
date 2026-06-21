@@ -34,6 +34,7 @@ import type {
   DesktopChatStreamRequest,
   DesktopCustomChatCompletionRequest,
   DesktopCustomChatStreamRequest,
+  DesktopCustomImageEditRequest,
   DesktopCustomImageGenerationRequest,
   DesktopCustomModelListRequest,
   DesktopDeleteCliMessageRequest,
@@ -53,6 +54,12 @@ import {
   formatDesktopRequestTimeoutMessage,
   resolveDesktopRequestTimeoutMs,
 } from '../src/lib/request-timeouts.ts'
+import {
+  resolveImageGenerationResult,
+  resolveImagePendingPollUrl,
+  resolveImagePendingStatus,
+  resolveImageResponseErrorMessage,
+} from '../src/lib/image-generation.ts'
 import {
   assertAllowedExternalUrl,
   createCliAccessDirectoryResolver,
@@ -216,8 +223,12 @@ function stopApiPowerSaveBlocker(requestId: string) {
 
 function shouldKeepAwakeForApiPath(pathname: string) {
   const normalized = pathname.split('?', 1)[0]
-  return normalized === '/pg/chat/completions' ||
-    normalized === '/pg/images/generations' ||
+  return normalized === '/pg/chat/completions' || isImageApiPath(normalized)
+}
+
+function isImageApiPath(pathname: string) {
+  const normalized = pathname.split('?', 1)[0]
+  return normalized === '/pg/images/generations' ||
     normalized === '/v1/images/generations' ||
     normalized === '/v1/images/edits'
 }
@@ -1641,7 +1652,12 @@ async function requestCustomImageGeneration(input: DesktopCustomImageGenerationR
     if (!response.ok) {
       throw new Error(getResponseErrorMessage(data, response.status, '自定义 API 图片生成失败'))
     }
-    return data as ImageGenerationResponse
+    return resolveAsyncImageGenerationResponse(data, {
+      authorization: `Bearer ${input.apiKey}`,
+      pollBaseUrl: input.baseUrl,
+      signal: controller?.signal,
+      timeoutMessage: formatDesktopRequestTimeoutMessage(timeoutMs),
+    })
   } finally {
     if (timer) {
       clearTimeout(timer)
@@ -1651,6 +1667,86 @@ async function requestCustomImageGeneration(input: DesktopCustomImageGenerationR
       stopApiPowerSaveBlocker(input.requestId)
     }
   }
+}
+
+const IMAGE_POLL_INTERVAL_MS = 2000
+
+function sleep(ms: number, signal?: AbortSignal | null) {
+  return new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new Error('请求已取消'))
+      return
+    }
+    const timer = setTimeout(resolve, ms)
+    signal?.addEventListener('abort', () => {
+      clearTimeout(timer)
+      reject(new Error('请求已取消'))
+    }, { once: true })
+  })
+}
+
+async function resolveAsyncImageGenerationResponse(
+  initialData: unknown,
+  options: {
+    authorization?: string
+    pollBaseUrl?: string
+    signal?: AbortSignal | null
+    timeoutMessage?: string
+  } = {}
+): Promise<ImageGenerationResponse> {
+  let data = initialData
+  let pollUrl = resolveImagePendingPollUrl(data)
+
+  for (let attempt = 0; attempt < 300 && pollUrl; attempt += 1) {
+    if (resolveImageGenerationResult(data)) {
+      return data as ImageGenerationResponse
+    }
+
+    const status = resolveImagePendingStatus(data)
+    if (status === 'failed') {
+      throw new Error(resolveImageResponseErrorMessage(data) || '图片任务执行失败')
+    }
+    if (status === 'completed') {
+      throw new Error(resolveImageResponseErrorMessage(data) || '图片任务已完成但未返回可展示图片')
+    }
+    if (attempt > 0 || status === 'pending' || pollUrl) {
+      await sleep(IMAGE_POLL_INTERVAL_MS, options.signal)
+    }
+
+    const response = await getDesktopSession().fetch(resolveImagePollUrl(pollUrl, options.pollBaseUrl), {
+      method: 'GET',
+      headers: {
+        ...(options.authorization ? { Authorization: options.authorization } : {}),
+      },
+      signal: options.signal ?? undefined,
+    })
+    data = await parseResponse(response)
+    if (!response.ok) {
+      throw new Error(getResponseErrorMessage(data, response.status, '图片任务轮询失败'))
+    }
+    pollUrl = resolveImagePendingPollUrl(data) || pollUrl
+  }
+
+  if (resolveImageGenerationResult(data)) {
+    return data as ImageGenerationResponse
+  }
+
+  if (pollUrl) {
+    throw new Error(options.timeoutMessage || '图片任务超时')
+  }
+
+  return data as ImageGenerationResponse
+}
+
+function resolveImagePollUrl(pollUrl: string, pollBaseUrl?: string) {
+  const normalizedPollUrl = pollUrl.trim()
+  if (/^https?:\/\//i.test(normalizedPollUrl)) {
+    return normalizedPollUrl
+  }
+  if (pollBaseUrl?.trim()) {
+    return buildOpenAICompatibleUrl(pollBaseUrl, normalizedPollUrl)
+  }
+  return buildUrl(normalizedPollUrl)
 }
 
 async function requestCustomProviderModels(input: DesktopCustomModelListRequest) {
@@ -1727,11 +1823,21 @@ async function requestApi(input: DesktopApiRequest): Promise<DesktopApiResponse>
       signal: controller?.signal,
     })
 
+    const data = await parseResponse(response)
+    const resolvedData =
+      response.ok && isImageApiPath(input.path)
+        ? await resolveAsyncImageGenerationResponse(data, {
+            authorization: headers.get('Authorization') || '',
+            signal: controller?.signal,
+            timeoutMessage: formatDesktopRequestTimeoutMessage(timeoutMs),
+          })
+        : data
+
     return {
       ok: response.ok,
       status: response.status,
       headers: Object.fromEntries(response.headers.entries()),
-      data: await parseResponse(response),
+      data: resolvedData,
     }
   } catch (error) {
     if (controller?.signal.aborted) {
@@ -3163,6 +3269,25 @@ async function statDesktopPath(targetPath: string) {
 }
 
 async function requestImageEdit(input: DesktopImageEditRequest) {
+  return requestImageEditToUrl(input, {
+    url: buildUrl('/v1/images/edits'),
+    powerSaveRequestId: `image-edit-${randomUUID()}`,
+  })
+}
+
+async function requestCustomImageEdit(input: DesktopCustomImageEditRequest) {
+  return requestImageEditToUrl(input, {
+    url: buildOpenAICompatibleUrl(input.baseUrl, '/images/edits'),
+    pollBaseUrl: input.baseUrl,
+    powerSaveRequestId: input.requestId || `custom-image-edit-${randomUUID()}`,
+  })
+}
+
+async function requestImageEditToUrl(input: DesktopImageEditRequest, target: {
+  url: string
+  pollBaseUrl?: string
+  powerSaveRequestId: string
+}) {
   const headers = new Headers()
   if (input.apiKey?.trim()) {
     headers.set('Authorization', `Bearer ${input.apiKey.trim()}`)
@@ -3194,16 +3319,26 @@ async function requestImageEdit(input: DesktopImageEditRequest) {
   const timeoutMs = resolveDesktopRequestTimeoutMs('/v1/images/edits')
   const controller = timeoutMs > 0 ? new AbortController() : null
   const timer = timeoutMs > 0 && controller ? setTimeout(() => controller.abort(), timeoutMs) : null
-  const powerSaveRequestId = `image-edit-${randomUUID()}`
-  startApiPowerSaveBlocker(powerSaveRequestId)
+  startApiPowerSaveBlocker(target.powerSaveRequestId)
 
-  let response: Response
   try {
-    response = await getDesktopSession().fetch(buildUrl('/v1/images/edits'), {
+    const response = await getDesktopSession().fetch(target.url, {
       method: 'POST',
       headers,
       body: formData,
       signal: controller?.signal,
+    })
+
+    const data = await parseResponse(response)
+    if (!response.ok) {
+      throw new Error(getResponseErrorMessage(data, response.status, '图片编辑失败'))
+    }
+
+    return resolveAsyncImageGenerationResponse(data, {
+      authorization: headers.get('Authorization') || '',
+      pollBaseUrl: target.pollBaseUrl,
+      signal: controller?.signal,
+      timeoutMessage: formatDesktopRequestTimeoutMessage(timeoutMs),
     })
   } catch (error) {
     if (controller?.signal.aborted) {
@@ -3214,22 +3349,8 @@ async function requestImageEdit(input: DesktopImageEditRequest) {
     if (timer) {
       clearTimeout(timer)
     }
-    stopApiPowerSaveBlocker(powerSaveRequestId)
+    stopApiPowerSaveBlocker(target.powerSaveRequestId)
   }
-
-  const data = await parseResponse(response)
-  if (!response.ok) {
-    const message =
-      typeof data === 'object' &&
-      data &&
-      'message' in data &&
-      typeof data.message === 'string'
-        ? data.message
-        : `图片编辑失败（${response.status}）`
-    throw new Error(message)
-  }
-
-  return data
 }
 
 async function syncAssistantHistory(
@@ -3459,6 +3580,7 @@ const cliServices = createCliServices({
   readBridgeClientProjectPath,
   postMobileBridgeJobEvent,
   createLocalCliMobileBridgeMirror,
+  syncMobileBridgeSessionsSnapshot,
   startCliPowerSaveBlocker,
   stopCliPowerSaveBlocker,
   activeCliProcesses,
@@ -3677,6 +3799,9 @@ ipcMain.handle('desktop:custom-chat-completion', async (_event, request: Desktop
 })
 ipcMain.handle('desktop:custom-image-generation', async (_event, request: DesktopCustomImageGenerationRequest) => {
   return requestCustomImageGeneration(request)
+})
+ipcMain.handle('desktop:custom-image-edit', async (_event, request: DesktopCustomImageEditRequest) => {
+  return requestCustomImageEdit(request)
 })
 ipcMain.handle('desktop:custom-provider-models', async (_event, request: DesktopCustomModelListRequest) => {
   return requestCustomProviderModels(request)
