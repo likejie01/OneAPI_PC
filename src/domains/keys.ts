@@ -58,6 +58,26 @@ export async function fetchApiKeySecret(id: number) {
   return response.data.key
 }
 
+export async function updateApiKeyStatus(id: number, status: number) {
+  const response = await desktopEnvelope({
+    method: 'PUT',
+    path: '/api/token/',
+    query: {
+      status_only: 'true',
+    },
+    body: {
+      id,
+      status,
+    },
+  })
+
+  if (!response.success) {
+    throw new Error(response.message || '更新 Key 状态失败')
+  }
+
+  return true
+}
+
 export async function createDesktopCliKey(name: string, group: string) {
   await createApiKey({
     name,

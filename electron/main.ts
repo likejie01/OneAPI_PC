@@ -18,6 +18,7 @@ import { NsisUpdater, type ProgressInfo, type UpdateDownloadedEvent } from 'elec
 import { randomUUID } from 'node:crypto'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createReadStream, createWriteStream, mkdirSync, promises as fs, writeFileSync } from 'node:fs'
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import readline from 'node:readline'
@@ -81,6 +82,10 @@ import {
 import { extractCliUserTask } from '../src/lib/cli-prompt.ts'
 import { isCliSessionReadyForLatestTurn } from '../src/lib/cli-session-readiness.ts'
 import { normalizeDesktopCliApiKey } from '../src/lib/cli-deploy.ts'
+import {
+  buildCliPromptCacheKey,
+  injectCliPromptCacheKeyIntoJsonBody,
+} from '../src/lib/cli-prompt-cache-key.ts'
 import {
   MIN_DESKTOP_CLI_NODE_MAJOR,
   buildClaudePermissionArgs,
@@ -169,6 +174,7 @@ const activeCliRequestStates = new Map<string, {
   autoApprove: boolean
   interactions: Map<string, CliInteractionPrompt>
   interactionKeys: Set<string>
+  mobileBridgeLogs: Array<Record<string, unknown>>
 }>()
 const stoppedCliRequests = new Set<string>()
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
@@ -572,6 +578,8 @@ interface CliRunRequest {
   model?: string
   reasoningEffort?: string
   fullAccess?: boolean
+  apiKey?: string
+  baseUrl?: string
 }
 
 interface CliRunResponse {
@@ -587,6 +595,11 @@ interface CliRunResponse {
 interface CliRuntimeDiagnostics extends SharedCliRuntimeDiagnostics {
   sessionFileFound?: boolean
   sessionReadAttempts?: number
+}
+
+interface CliPromptCacheProxy {
+  baseUrl: string
+  close: () => Promise<void>
 }
 
 interface CliProgressPayload {
@@ -1387,6 +1400,137 @@ function buildOpenAICompatibleUrl(baseUrl: string, requestPath: string) {
   return new URL(`${baseWithVersion}${normalizedPath}`).toString()
 }
 
+function isResponsesApiPath(pathname: string) {
+  return /^\/(?:v1\/)?responses\/?$/i.test(pathname)
+}
+
+function buildCliPromptCacheProxyTargetUrl(targetBase: URL, incomingUrl: URL) {
+  const basePath = targetBase.pathname.replace(/\/+$/, '')
+  const incomingPath = incomingUrl.pathname
+  const forwardedPath = basePath && incomingPath.toLowerCase().startsWith(`${basePath.toLowerCase()}/`)
+    ? incomingPath
+    : `${basePath}${incomingPath}`
+  return new URL(`${forwardedPath}${incomingUrl.search}`, targetBase)
+}
+
+function readProxyRequestBody(request: IncomingMessage) {
+  return new Promise<Buffer>((resolve, reject) => {
+    const chunks: Buffer[] = []
+    request.on('data', (chunk) => {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+    })
+    request.on('end', () => resolve(Buffer.concat(chunks)))
+    request.on('error', reject)
+  })
+}
+
+function writeProxyError(response: ServerResponse, statusCode: number, message: string) {
+  response.writeHead(statusCode, {
+    'content-type': 'application/json; charset=utf-8',
+  })
+  response.end(JSON.stringify({ error: { message } }))
+}
+
+async function createCliPromptCacheProxy(options: {
+  targetBaseUrl: string
+  client: CliClient
+  projectPath: string
+  sessionId?: string
+}): Promise<CliPromptCacheProxy | null> {
+  const sessionId = options.sessionId?.trim()
+  const promptCacheKey = sessionId
+    ? buildCliPromptCacheKey({
+      client: options.client,
+      projectPath: options.projectPath,
+      sessionId,
+    })
+    : ''
+  if (!promptCacheKey) {
+    return null
+  }
+  const stableSessionId = sessionId || ''
+
+  const targetBaseUrl = options.targetBaseUrl.replace(/\/+$/, '')
+  const targetBase = new URL(targetBaseUrl)
+  const server = createServer(async (request, response) => {
+    try {
+      const incomingUrl = new URL(request.url || '/', 'http://127.0.0.1')
+      const targetUrl = buildCliPromptCacheProxyTargetUrl(targetBase, incomingUrl)
+      const headers = new Headers()
+      for (const [key, value] of Object.entries(request.headers)) {
+        if (!value || ['host', 'connection', 'content-length'].includes(key.toLowerCase())) {
+          continue
+        }
+        headers.set(key, Array.isArray(value) ? value.join(', ') : value)
+      }
+      headers.set('session_id', stableSessionId)
+      headers.set('x-codex-project-path', options.projectPath)
+
+      let body: Buffer | undefined
+      if (request.method && !['GET', 'HEAD'].includes(request.method.toUpperCase())) {
+        const rawBody = await readProxyRequestBody(request)
+        body = rawBody
+        if (request.method.toUpperCase() === 'POST' && isResponsesApiPath(incomingUrl.pathname)) {
+          const contentType = headers.get('content-type') || ''
+          if (!contentType || contentType.includes('application/json')) {
+            try {
+              const injected = injectCliPromptCacheKeyIntoJsonBody(rawBody.toString('utf8'), promptCacheKey)
+              body = Buffer.from(injected, 'utf8')
+              headers.set('content-type', contentType || 'application/json')
+            } catch {
+              body = rawBody
+            }
+          }
+        }
+        if (Buffer.isBuffer(body)) {
+          headers.set('content-length', String(body.byteLength))
+        }
+      }
+
+      const upstream = await fetch(targetUrl, {
+        method: request.method || 'GET',
+        headers,
+        body,
+        redirect: 'manual',
+      })
+
+      const responseHeaders: Record<string, string> = {}
+      upstream.headers.forEach((value, key) => {
+        responseHeaders[key] = value
+      })
+      response.writeHead(upstream.status, responseHeaders)
+      if (upstream.body) {
+        await pipeline(Readable.fromWeb(upstream.body), response)
+      } else {
+        response.end()
+      }
+    } catch (error) {
+      writeProxyError(response, 502, error instanceof Error ? error.message : 'CLI 请求代理失败')
+    }
+  })
+
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', () => {
+      server.off('error', reject)
+      resolve()
+    })
+  })
+
+  const address = server.address()
+  if (!address || typeof address === 'string') {
+    server.close()
+    return null
+  }
+
+  return {
+    baseUrl: `http://127.0.0.1:${address.port}`,
+    close: () => new Promise((resolve) => {
+      server.close(() => resolve())
+    }),
+  }
+}
+
 function normalizeCodexBaseUrl(value?: string) {
   const normalized = (value || '').trim()
   if (!normalized) {
@@ -2047,7 +2191,7 @@ function buildActiveMobileBridgeSessionSnapshot(requestId: string, state: NonNul
       text: prompt,
       timestamp: state.startedAt,
     }] : [],
-    logs: [],
+    logs: state.mobileBridgeLogs.slice(-80),
   }
 }
 
@@ -2150,6 +2294,8 @@ async function syncMobileBridgeSessionsSnapshot(force = false) {
     status: item.status,
     preview: item.preview.slice(0, 200),
     messageCount: item.messages.length,
+    logCount: item.logs.length,
+    lastLog: JSON.stringify(item.logs.at(-1) || {}).slice(0, 200),
   })))
   if (!force && signature === mobileBridgeLastSessionsSnapshotSignature) {
     return
@@ -3962,6 +4108,14 @@ function resolveDeployCliApiKey(request: Pick<CliDeployRequest, 'apiKey' | 'apiK
     return resolveDesktopCliKeyRecord(trimmed)
   }
   return normalizeDesktopCliApiKey(request.apiKey)
+}
+
+function resolveRuntimeCliApiKey(request: Pick<CliRunRequest, 'apiKey'>, fallbackApiKey?: string) {
+  const requested = request.apiKey?.trim()
+  if (requested) {
+    return resolveDesktopCliKeyRecord(requested)
+  }
+  return resolveDesktopCliKeyRecord(fallbackApiKey?.trim() || '')
 }
 
 function maskSensitiveText(value?: string) {
@@ -6853,6 +7007,27 @@ function createCliProgressEmitter(
         plan: input.plan,
         interaction: input.interaction,
       } satisfies CliProgressPayload
+      const state = activeCliRequestStates.get(requestId)
+      if (state) {
+        state.mobileBridgeLogs.push({
+          id: `${requestId}-${payload.createdAt}-${payload.kind}-${payload.sourceKind || payload.logKind || 'status'}-${state.mobileBridgeLogs.length}`,
+          type: payload.kind === 'error' || payload.logKind === 'error' ? 'error' : 'log',
+          phase: payload.sourceKind || payload.logKind || payload.kind,
+          level: payload.kind === 'error' || payload.logKind === 'stderr' ? 2 : 0,
+          title: payload.message,
+          body: payload.detail || payload.message,
+          command: payload.command,
+          interactionId: payload.interaction?.id,
+          interactionStatus: payload.interaction?.status,
+          indentLevel: payload.indentLevel || 0,
+          source: 'desktop',
+          origin: 'desktop',
+          timestamp: payload.createdAt,
+        })
+        if (state.mobileBridgeLogs.length > 120) {
+          state.mobileBridgeLogs.splice(0, state.mobileBridgeLogs.length - 120)
+        }
+      }
       mobileBridgeProgressMirrors.get(requestId)?.(payload)
       if (webContents && !webContents.isDestroyed()) {
         webContents.send('desktop:cli-progress', payload)
@@ -7705,8 +7880,22 @@ async function runCodexPrompt(
   const supportsAskForApproval = await detectCodexAskForApprovalSupport(executablePath, managedRuntime)
   const currentConfig = await readCurrentCodexConfig().catch(() => null)
   const claudeSettingsForCodex = await readResolvedClaudeSettingsDocument().catch(() => null)
+  const runtimeApiKey = resolveRuntimeCliApiKey(input, currentConfig?.apiKey)
+  const runtimeBaseUrl = normalizeCodexBaseUrl(input.baseUrl || currentConfig?.baseUrl)
+  const codexProxy = runtimeBaseUrl
+    ? await createCliPromptCacheProxy({
+      targetBaseUrl: runtimeBaseUrl,
+      client: 'codex',
+      projectPath: input.projectPath,
+      sessionId: sessionId || input.sessionId,
+    }).catch(() => null)
+    : null
+  const codexRuntimeConfig = {
+    apiKey: runtimeApiKey,
+    baseUrl: codexProxy?.baseUrl || runtimeBaseUrl,
+  }
   const codexEnv = buildCodexCliEnv(managedRuntime, claudeSettingsForCodex)
-  let args = buildCodexExecArgs(input, resumeSessionId, supportsAskForApproval, currentConfig ?? undefined)
+  let args = buildCodexExecArgs(input, resumeSessionId, supportsAskForApproval, codexRuntimeConfig)
   const takeAssistantChunk = (snapshot: string, explicitChunk = '') => {
     const normalizedExplicitChunk = explicitChunk.trim()
     if (snapshot.length < consumedAssistantChars) {
@@ -7877,6 +8066,7 @@ async function runCodexPrompt(
         autoApprove: false,
         interactions: new Map(),
         interactionKeys: new Set(),
+        mobileBridgeLogs: [],
       })
       void syncMobileBridgeSessionsSnapshot(true).catch(() => undefined)
     },
@@ -8042,7 +8232,7 @@ async function runCodexPrompt(
     stoppedAfterCodexCompletion = false
     activeCodexChild = null
     clearCodexCompletionStopTimer()
-    args = buildCodexExecArgs(input, undefined, supportsAskForApproval, currentConfig ?? undefined)
+    args = buildCodexExecArgs(input, undefined, supportsAskForApproval, codexRuntimeConfig)
     attempt += 1
     result = await runCodexOnce()
     clearCodexCompletionStopTimer()
@@ -8080,6 +8270,7 @@ async function runCodexPrompt(
   }
   activeCliProcesses.delete(input.requestId)
   activeCliRequestStates.delete(input.requestId)
+  await codexProxy?.close().catch(() => undefined)
   stopCliPowerSaveBlocker(input.requestId)
   void syncMobileBridgeSessionsSnapshot(true).catch(() => undefined)
   const aborted = stoppedCliRequests.delete(input.requestId)
@@ -8235,6 +8426,16 @@ async function runClaudePrompt(
   const executablePath = await locateExecutable('claude')
   const managedRuntime = await readManagedNodeRuntime()
   const claudeSettings = await readResolvedClaudeSettingsDocument().catch(() => null)
+  const runtimeApiKey = resolveRuntimeCliApiKey(input, pickClaudeApiKey(claudeSettings?.env || {}))
+  const runtimeBaseUrl = normalizeClaudeBaseUrl(input.baseUrl || claudeSettings?.env?.ANTHROPIC_BASE_URL)
+  const claudeProxy = runtimeBaseUrl
+    ? await createCliPromptCacheProxy({
+      targetBaseUrl: runtimeBaseUrl,
+      client: 'claude',
+      projectPath: input.projectPath,
+      sessionId: sessionId || input.sessionId,
+    }).catch(() => null)
+    : null
   let args = buildClaudePromptArgs(input, resumeSessionId)
   const takeAssistantChunk = (snapshot: string, explicitChunk = '') => {
     const normalizedExplicitChunk = explicitChunk.trim()
@@ -8393,7 +8594,14 @@ async function runClaudePrompt(
     return spawnCommandWithHandlers(invocation.command, invocation.args, {
     cwd: input.projectPath,
     timeoutMs: 15 * 60 * 1000,
-    env: buildClaudeCliEnv(managedRuntime, claudeSettings),
+    env: {
+      ...buildClaudeCliEnv(managedRuntime, claudeSettings),
+      ANTHROPIC_API_KEY: runtimeApiKey,
+      ANTHROPIC_BASE_URL: runtimeBaseUrl,
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+      API_TIMEOUT_MS: '600000',
+      ...(claudeProxy ? { ANTHROPIC_BASE_URL: claudeProxy.baseUrl } : {}),
+    },
     keepStdinOpen: false,
     stdinData: '\n',
     onSpawn: (child) => {
@@ -8416,6 +8624,7 @@ async function runClaudePrompt(
         autoApprove: false,
         interactions: new Map(),
         interactionKeys: new Set(),
+        mobileBridgeLogs: [],
       })
       void syncMobileBridgeSessionsSnapshot(true).catch(() => undefined)
     },
@@ -8677,6 +8886,7 @@ async function runClaudePrompt(
   }
   activeCliProcesses.delete(input.requestId)
   activeCliRequestStates.delete(input.requestId)
+  await claudeProxy?.close().catch(() => undefined)
   stopCliPowerSaveBlocker(input.requestId)
   void syncMobileBridgeSessionsSnapshot(true).catch(() => undefined)
   const aborted = stoppedCliRequests.delete(input.requestId)

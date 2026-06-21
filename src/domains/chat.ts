@@ -16,6 +16,40 @@ import type { DesktopChatStreamPayload } from '../shared/desktop'
 import { mergePricingAndUserModels, type PricingModelLike } from '../lib/model-options'
 import { resolveDesktopRequestTimeoutMs } from '../lib/request-timeouts'
 
+type OpenAIModelListItem = {
+  id?: string
+  supported_endpoint_types?: string[]
+}
+
+function normalizeOpenAIModelList(data: unknown) {
+  if (!Array.isArray(data)) {
+    return []
+  }
+  const pricingModels: PricingModelLike[] = []
+  const modelNames: string[] = []
+  for (const item of data) {
+    if (typeof item === 'string') {
+      modelNames.push(item)
+      continue
+    }
+    if (!item || typeof item !== 'object') {
+      continue
+    }
+    const model = item as OpenAIModelListItem
+    const modelName = model.id?.trim()
+    if (!modelName) {
+      continue
+    }
+    pricingModels.push({
+      model_name: modelName,
+      supported_endpoint_types: Array.isArray(model.supported_endpoint_types)
+        ? model.supported_endpoint_types
+        : undefined,
+    })
+  }
+  return mergePricingAndUserModels(pricingModels, modelNames)
+}
+
 export async function getUserModels() {
   let pricingModels: PricingModelLike[] = []
   try {
@@ -31,16 +65,66 @@ export async function getUserModels() {
     // Fallback for older servers that do not expose pricing metadata consistently.
   }
 
-  if (pricingModels.length) {
-    return mergePricingAndUserModels(pricingModels, [])
-  }
-
   const response = await desktopEnvelope<string[]>({
     method: 'GET',
     path: '/api/user/models',
   })
 
   return mergePricingAndUserModels(pricingModels, response.data ?? [])
+}
+
+export async function getAllChannelGroupModels() {
+  let pricingModels: PricingModelLike[] = []
+  try {
+    const pricingResponse = await desktopEnvelope<PricingModelLike[]>({
+      method: 'GET',
+      path: '/api/pricing',
+    })
+
+    if (pricingResponse.success && Array.isArray(pricingResponse.data) && pricingResponse.data.length) {
+      pricingModels = pricingResponse.data
+    }
+  } catch {
+    // Keep model loading usable on older servers without pricing metadata.
+  }
+
+  try {
+    const enabledModelsResponse = await desktopEnvelope<string[]>({
+      method: 'GET',
+      path: '/api/channel/models_enabled',
+    })
+
+    if (enabledModelsResponse.success && Array.isArray(enabledModelsResponse.data)) {
+      return mergePricingAndUserModels(pricingModels, enabledModelsResponse.data)
+    }
+  } catch {
+    // Non-admin accounts may not have access on older servers; fall back below.
+  }
+
+  const userModelsResponse = await desktopEnvelope<string[]>({
+    method: 'GET',
+    path: '/api/user/models',
+  })
+
+  return mergePricingAndUserModels(pricingModels, userModelsResponse.data ?? [])
+}
+
+export async function getApiKeyModels(apiKey: string) {
+  const response = await desktopRequest<ApiEnvelope<OpenAIModelListItem[]> & {
+    data?: OpenAIModelListItem[] | string[]
+  }>({
+    method: 'GET',
+    path: '/v1/models',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+    },
+  })
+
+  if (response && typeof response === 'object' && 'success' in response && response.success === false) {
+    throw new Error(response.message || '读取当前 Key 可用模型失败')
+  }
+
+  return normalizeOpenAIModelList(response.data)
 }
 
 export async function getUserGroups() {

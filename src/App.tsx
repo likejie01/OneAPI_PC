@@ -34,6 +34,7 @@ import {
   PencilLine,
   Pin,
   Plus,
+  RefreshCw,
   RotateCcw,
   Search,
   Send,
@@ -69,6 +70,7 @@ import {
 } from './domains/auth'
 import {
   copyImageToClipboard,
+  getApiKeyModels,
   getUserGroups,
   getUserModels,
   saveImageToDisk,
@@ -113,7 +115,7 @@ import {
   installUpdate,
   onUpdateState,
 } from './domains/update'
-import { ensureDesktopServiceKey, fetchApiKeySecret, getApiKeys } from './domains/keys'
+import { ensureDesktopServiceKey, fetchApiKeySecret, getApiKeys, updateApiKeyStatus } from './domains/keys'
 import {
   deleteMobileDesktopBinding,
   deleteMobileDesktopDevice,
@@ -154,6 +156,12 @@ import {
   resolveCliLogGroupStatus,
 } from './lib/assistant-workspace'
 import { resolveCliDeploySettings } from './lib/cli-deploy'
+import {
+  API_KEY_STATUS_DISABLED,
+  API_KEY_STATUS_ENABLED,
+  resolveSelectedDesktopApiKeyId,
+} from './lib/desktop-api-keys'
+import { filterModelsForDesktopApiKey } from './lib/desktop-api-key-models'
 import {
   applyConversationSearchHighlights,
   clearConversationSearchHighlights,
@@ -231,7 +239,6 @@ import {
 } from './lib/app-update'
 import {
   buildPendingDrawRetryRequest,
-  resolvePendingDrawRequestGroup,
   type PendingDrawRetryRequest,
 } from './lib/draw-request'
 import { isRecoverableNetworkError } from './lib/network-retry'
@@ -274,6 +281,7 @@ import {
   buildCliSessionExportMarkdown,
   buildDrawSessionExportMarkdown,
   buildSessionExportFileName,
+  canDeleteCliMessageFromSessionFile,
   mergeCliMessages,
   type ExportCliLogGroup,
 } from './lib/session-history'
@@ -296,6 +304,7 @@ import {
 import dayjs from 'dayjs'
 import type {
   AssistantRecord,
+  ApiKeyRecord,
   AuthStatus,
   BillingHistoryData,
   ChatMessage,
@@ -4420,12 +4429,67 @@ function EmptyState(props: { title: string; description: string; icon?: typeof B
   )
 }
 
+type ActiveDesktopApiKeyRecord = Pick<ApiKeyRecord, 'id' | 'name' | 'status' | 'group' | 'created_time' | 'model_limits_enabled' | 'model_limits'>
+type ActiveDesktopApiKeySummary = ActiveDesktopApiKeyRecord | null
+
+function resolveActiveDesktopApiKeySummary<T extends ActiveDesktopApiKeyRecord>(
+  keys: T[],
+  selectedApiKeyId: number | null = null
+) {
+  const activeId = resolveSelectedDesktopApiKeyId(keys, selectedApiKeyId)
+  return keys.find((item) => item.id === activeId) || null
+}
+
+function sameActiveDesktopApiKeySummary(left: ActiveDesktopApiKeySummary, right: ActiveDesktopApiKeySummary) {
+  return (
+    (left?.id ?? null) === (right?.id ?? null) &&
+    (left?.status ?? null) === (right?.status ?? null) &&
+    (left?.name ?? '') === (right?.name ?? '') &&
+    (left?.group ?? '') === (right?.group ?? '') &&
+    (left?.model_limits_enabled ?? false) === (right?.model_limits_enabled ?? false) &&
+    (left?.model_limits ?? '') === (right?.model_limits ?? '') &&
+    (left?.created_time ?? 0) === (right?.created_time ?? 0)
+  )
+}
+
+function resolveCliDeployModelForActiveKey(
+  client: CliClient,
+  models: ChatModelOption[],
+  defaultModel: string,
+  presetModel?: string
+) {
+  const requestedModel = presetModel?.trim() || defaultModel
+  return resolveCompatibleModel(client, models, requestedModel, defaultModel)
+}
+
+async function loadOneApiModelsForActiveKey(activeApiKey: ActiveDesktopApiKeySummary) {
+  if (!activeApiKey?.id) {
+    return []
+  }
+  try {
+    const apiKey = await fetchApiKeySecret(activeApiKey.id)
+    const models = await getApiKeyModels(apiKey)
+    if (models.length) {
+      return models
+    }
+  } catch {
+    // Older servers may not expose key-scoped /v1/models consistently.
+  }
+  const fallbackModels = await getUserModels()
+  return filterModelsForDesktopApiKey(fallbackModels, activeApiKey)
+}
+
+async function refreshOneApiModelsForActiveKey(activeApiKey: ActiveDesktopApiKeySummary) {
+  return loadOneApiModelsForActiveKey(activeApiKey)
+}
+
 function AssistantsChatWorkspace(props: {
   toast: (message: string) => void
   active: boolean
   providerState: AiChatProviderState
+  activeApiKey: ActiveDesktopApiKeySummary
 }) {
-  const { toast, active, providerState } = props
+  const { toast, active, providerState, activeApiKey } = props
   const performanceMode = useAppPerformanceMode()
   const [models, setModels] = useState<ChatModelOption[]>([])
   const [favoriteModels, setFavoriteModels] = useState<string[]>(() => loadFavoriteModels('oneapi-desktop-chat-favorites'))
@@ -4816,7 +4880,7 @@ function AssistantsChatWorkspace(props: {
         }
 
         const [nextModels, nextGroups] = await Promise.all([
-          getUserModels(),
+          loadOneApiModelsForActiveKey(activeApiKey),
           getUserGroups(),
         ])
 
@@ -4824,10 +4888,9 @@ function AssistantsChatWorkspace(props: {
           return
         }
 
-        const filteredModels = filterAssistantModels('chat', nextModels)
-        setModels(filteredModels)
+        setModels(nextModels)
         setSelectedModel((current) =>
-          current || resolvePreferredModel(filteredModels, DEFAULT_CHAT_MODEL, activeAssistant?.model)
+          resolveCompatibleModel('chat', nextModels, current, resolvePreferredModel(nextModels, DEFAULT_CHAT_MODEL, activeAssistant?.model))
         )
         setSelectedGroup((current) => current || nextGroups[0]?.value || '')
         setChatSessions((current) => {
@@ -4845,6 +4908,8 @@ function AssistantsChatWorkspace(props: {
         })
       } catch (error) {
         if (!disposed) {
+          setModels([])
+          setSelectedModel('')
           toast(error instanceof Error ? error.message : '加载聊天配置失败')
         }
       }
@@ -4856,6 +4921,10 @@ function AssistantsChatWorkspace(props: {
   }, [
     activeAssistant?.id,
     activeAssistant?.model,
+    activeApiKey?.group,
+    activeApiKey?.id,
+    activeApiKey?.model_limits,
+    activeApiKey?.model_limits_enabled,
     initialAssistantsState.assistants,
     providerState.defaultModel,
     providerState.mode,
@@ -6031,7 +6100,7 @@ function AssistantsChatWorkspace(props: {
                               </button>
                             ))
                           ) : (
-                            <div className='picker-empty-state'>当前筛选下没有可用模型</div>
+                            <div className='picker-empty-state'>当前key无可用模型</div>
                           )}
                         </div>
                       </GlassPickerMenu>
@@ -6301,8 +6370,9 @@ function DrawWorkspace(props: {
   toast: (message: string) => void
   active: boolean
   providerState: AiChatProviderState
+  activeApiKey: ActiveDesktopApiKeySummary
 }) {
-  const { toast, active, providerState } = props
+  const { toast, active, providerState, activeApiKey } = props
   const performanceMode = useAppPerformanceMode()
   const [drawSessions, setDrawSessions] = useState<DrawSessionRecord[]>(() => {
     const storedSessions = loadStoredDrawSessions()
@@ -6353,6 +6423,7 @@ function DrawWorkspace(props: {
     name: string
   } | null>(null)
   const [pendingRetry, setPendingRetry] = useState<PendingDrawRetryState | null>(null)
+  const [oneApiDrawModels, setOneApiDrawModels] = useState<ChatModelOption[]>([])
   const {
     attachments,
     inputRef: attachmentInputRef,
@@ -6386,8 +6457,12 @@ function DrawWorkspace(props: {
     DRAW_QUALITY_OPTIONS.find((item) => item.value === drawQuality)?.label || drawQuality
   const drawRandomSeedLabel = drawRandomSeed ? '随机' : '固定'
   const effectiveDrawModel = DEFAULT_DRAW_MODEL
+  const hasAvailableDrawModel =
+    providerState.mode === 'oneapi'
+      ? oneApiDrawModels.some((item) => item.value.trim().toLowerCase() === DEFAULT_DRAW_MODEL)
+      : hasKnownImageModelForProvider(providerState)
   const drawModelButtonLabel =
-    providerState.mode === 'unavailable' || !hasKnownImageModelForProvider(providerState)
+    providerState.mode === 'unavailable' || !hasAvailableDrawModel
       ? '渠道无效'
       : effectiveDrawModel
   const imageStyleMenuItems = useMemo(
@@ -6463,6 +6538,35 @@ function DrawWorkspace(props: {
       window.clearTimeout(timer)
     }
   }, [imageStylePresets])
+
+  useEffect(() => {
+    let disposed = false
+    void (async () => {
+      if (providerState.mode !== 'oneapi') {
+        setOneApiDrawModels([])
+        return
+      }
+      try {
+        const nextModels = await loadOneApiModelsForActiveKey(activeApiKey)
+        if (!disposed) {
+          setOneApiDrawModels(nextModels)
+        }
+      } catch {
+        if (!disposed) {
+          setOneApiDrawModels([])
+        }
+      }
+    })()
+    return () => {
+      disposed = true
+    }
+  }, [
+    activeApiKey?.group,
+    activeApiKey?.id,
+    activeApiKey?.model_limits,
+    activeApiKey?.model_limits_enabled,
+    providerState.mode,
+  ])
 
   const drawSessionsByAssistant = useMemo(
     () => groupDrawSessionsByAssistant(drawSessions, imageStyleTitleById),
@@ -7085,16 +7189,15 @@ function DrawWorkspace(props: {
       if (providerState.mode !== 'oneapi') {
         throw new Error('图片编辑需要登录并使用 OneAPI 服务，自定义 API 通道当前仅支持文本生图。')
       }
-      const serviceKey = await ensureDesktopServiceKey({
-        name: 'OneAPI Desktop Internal Key',
-        group: resolvePendingDrawRequestGroup(request, selectedGroup || ''),
-        preferredNames: ['桌面端专用 Key', 'CODEX 桌面安装 Key', 'CLAUDE 桌面安装 Key'],
-      })
+      if (!activeApiKey?.id) {
+        throw new Error('请先在已有 Key 中启用一个 Key。')
+      }
+      const activeApiKeySecret = await fetchApiKeySecret(activeApiKey.id)
 
       try {
         return await sendImageEdit(
           buildImageEditRequest({
-            apiKey: serviceKey.key,
+            apiKey: activeApiKeySecret,
             model: request.model,
             fallbackModel: DEFAULT_DRAW_MODEL,
             prompt: request.prompt,
@@ -7123,15 +7226,13 @@ function DrawWorkspace(props: {
     if (providerState.mode !== 'oneapi') {
       throw new Error(providerState.reason || '请先登录 OneAPI 或配置自定义 API 通道。')
     }
-
-    const serviceKey = await ensureDesktopServiceKey({
-      name: 'OneAPI Desktop Internal Key',
-      group: request.group || '',
-      preferredNames: ['桌面端专用 Key', 'CODEX 桌面安装 Key', 'CLAUDE 桌面安装 Key'],
-    })
+    if (!activeApiKey?.id) {
+      throw new Error('请先在已有 Key 中启用一个 Key。')
+    }
+    const activeApiKeySecret = await fetchApiKeySecret(activeApiKey.id)
 
     return sendDirectImageGeneration({
-      apiKey: serviceKey.key,
+      apiKey: activeApiKeySecret,
       model: request.model,
       prompt: request.prompt,
       size: request.size,
@@ -7238,8 +7339,10 @@ function DrawWorkspace(props: {
     const imageAttachment = attachments.find((item) => item.kind === 'image')
     const now = getCurrentTimestamp()
     const displayPrompt = draft.trim() || selectedImageStylePreset?.title || selectedImageStylePreset?.prompt.trim() || ''
-    if (providerState.mode === 'custom' && !hasKnownImageModelForProvider(providerState)) {
-      toast('当前自定义通道没有检测到 Image 生图模型，请在默认模型中填写可用的图片模型。')
+    if (!hasAvailableDrawModel) {
+      toast(providerState.mode === 'custom'
+        ? '当前自定义通道没有检测到 Image 生图模型，请在默认模型中填写可用的图片模型。'
+        : '当前启用 Key 没有可用的 Image 生图模型，请切换 Key 或修复服务器图片渠道。')
       return
     }
 
@@ -8819,34 +8922,36 @@ function AiChatProviderSettingsCard(props: {
           />
         </label>
         <div className='provider-form-grid'>
-          <label>
-            <span>Base URL</span>
-            <input
-              value={config.customBaseUrl}
-              onChange={(event) => onChange((current) => ({ ...current, customBaseUrl: event.target.value }))}
-              placeholder='https://api.example.com/v1'
-            />
-          </label>
-          <label>
-            <span>API Key</span>
-            <div className='inline-fields'>
+          <div className='provider-credential-row'>
+            <label>
+              <span>Base URL</span>
               <input
-                type={apiKeyVisible ? 'text' : 'password'}
-                value={config.customApiKey}
-                onChange={(event) => onChange((current) => ({ ...current, customApiKey: event.target.value }))}
-                placeholder='sk-...'
+                value={config.customBaseUrl}
+                onChange={(event) => onChange((current) => ({ ...current, customBaseUrl: event.target.value }))}
+                placeholder='https://api.example.com/v1'
               />
-              <button
-                className='ghost-button icon-only tiny'
-                type='button'
-                onClick={() => setApiKeyVisible((current) => !current)}
-                title={apiKeyVisible ? '隐藏 Key' : '显示 Key'}
-                aria-label={apiKeyVisible ? '隐藏 Key' : '显示 Key'}
-              >
-                {apiKeyVisible ? <EyeOff size={14} /> : <Eye size={14} />}
-              </button>
-            </div>
-          </label>
+            </label>
+            <label>
+              <span>API Key</span>
+              <div className='inline-fields'>
+                <input
+                  type={apiKeyVisible ? 'text' : 'password'}
+                  value={config.customApiKey}
+                  onChange={(event) => onChange((current) => ({ ...current, customApiKey: event.target.value }))}
+                  placeholder='sk-...'
+                />
+                <button
+                  className='ghost-button icon-only tiny'
+                  type='button'
+                  onClick={() => setApiKeyVisible((current) => !current)}
+                  title={apiKeyVisible ? '隐藏 Key' : '显示 Key'}
+                  aria-label={apiKeyVisible ? '隐藏 Key' : '显示 Key'}
+                >
+                  {apiKeyVisible ? <EyeOff size={14} /> : <Eye size={14} />}
+                </button>
+              </div>
+            </label>
+          </div>
         </div>
         <div className='record-row provider-model-row'>
           <div>
@@ -8922,6 +9027,7 @@ function MeAnonymousWorkspace(props: {
                   className='me-claude-card'
                   activeDeployClient={null}
                   setActiveDeployClient={() => undefined}
+                  activeApiKey={null}
                 />
                 <CliSetupCard
                   client='codex'
@@ -8931,6 +9037,7 @@ function MeAnonymousWorkspace(props: {
                   className='me-codex-card'
                   activeDeployClient={null}
                   setActiveDeployClient={() => undefined}
+                  activeApiKey={null}
                 />
               </div>
             </div>
@@ -8951,8 +9058,15 @@ function MeWorkspace(props: {
   providerState: AiChatProviderState
   onProviderConfigChange: (updater: (current: AiChatProviderConfig) => AiChatProviderConfig) => void
   onRequestLogin: () => void
+  onActiveApiKeyChange: (apiKey: ActiveDesktopApiKeySummary) => void
 }) {
-  const { user, toast, themeMode, onToggleTheme, visible, providerConfig, providerState, onProviderConfigChange } = props
+  const { user, toast, themeMode, onToggleTheme, visible, providerConfig, providerState, onProviderConfigChange, onActiveApiKeyChange } = props
+  useEffect(() => {
+    if (!user) {
+      onActiveApiKeyChange(null)
+    }
+  }, [onActiveApiKeyChange, user])
+
   if (!user) {
     return (
       <MeAnonymousWorkspace
@@ -8976,6 +9090,7 @@ function MeWorkspace(props: {
       providerConfig={providerConfig}
       providerState={providerState}
       onProviderConfigChange={onProviderConfigChange}
+      onActiveApiKeyChange={onActiveApiKeyChange}
     />
   )
 }
@@ -8989,8 +9104,9 @@ function MeAuthenticatedWorkspace(props: {
   providerConfig: AiChatProviderConfig
   providerState: AiChatProviderState
   onProviderConfigChange: (updater: (current: AiChatProviderConfig) => AiChatProviderConfig) => void
+  onActiveApiKeyChange: (apiKey: ActiveDesktopApiKeySummary) => void
 }) {
-  const { user, toast, themeMode, onToggleTheme, visible, providerConfig, providerState, onProviderConfigChange } = props
+  const { user, toast, themeMode, onToggleTheme, visible, providerConfig, providerState, onProviderConfigChange, onActiveApiKeyChange } = props
   const [apiKeys, setApiKeys] = useState<
     Array<{
       id: number
@@ -9009,6 +9125,12 @@ function MeAuthenticatedWorkspace(props: {
   const [activeDeployClient, setActiveDeployClient] = useState<CliClient | null>(null)
   const [mobileBridgeDevice, setMobileBridgeDevice] = useState<MobileDesktopDevice | null>(null)
   const [mobileBridgeLoading, setMobileBridgeLoading] = useState(false)
+  const [selectedApiKeyId, setSelectedApiKeyId] = useState<number | null>(null)
+  const [updatingApiKeyId, setUpdatingApiKeyId] = useState<number | null>(null)
+  const selectedActiveApiKey = useMemo(
+    () => resolveActiveDesktopApiKeySummary(apiKeys, selectedApiKeyId),
+    [apiKeys, selectedApiKeyId]
+  )
 
   const refreshMe = useCallback(async () => {
     const nextKeys = await getApiKeys()
@@ -9077,6 +9199,14 @@ function MeAuthenticatedWorkspace(props: {
     return () => window.clearTimeout(timer)
   }, [refreshMobileBridge, toast, visible])
 
+  useEffect(() => {
+    setSelectedApiKeyId((current) => resolveSelectedDesktopApiKeyId(apiKeys, current))
+  }, [apiKeys])
+
+  useEffect(() => {
+    onActiveApiKeyChange(selectedActiveApiKey)
+  }, [onActiveApiKeyChange, selectedActiveApiKey])
+
   function openPasswordGate(purpose: 'view-key' | 'create-key', keyId?: number) {
     if (isVerificationStillValid(user.id)) {
       void continueAfterVerification(purpose, keyId)
@@ -9109,6 +9239,7 @@ function MeAuthenticatedWorkspace(props: {
           group: user.group || '',
           preferredNames: apiKeys.map((item) => item.name),
         })
+        setSelectedApiKeyId(result.id)
         setRevealedKey(result.key)
         toast(result.reused ? '已复用服务器现有有效 Key。' : '新的 API Key 已创建。')
         await refreshMe()
@@ -9126,6 +9257,52 @@ function MeAuthenticatedWorkspace(props: {
       await continueAfterVerification(passwordGatePurpose, pendingKeyId ?? undefined)
     } catch (error) {
       toast(error instanceof Error ? error.message : '密码验证失败')
+    }
+  }
+
+  async function handleToggleApiKey(item: { id: number; status: number }) {
+    if (updatingApiKeyId) {
+      return
+    }
+
+    const isEnabled = item.status === API_KEY_STATUS_ENABLED
+    const isCurrent = selectedActiveApiKey?.id === item.id
+
+    if (isEnabled && !isCurrent) {
+      setSelectedApiKeyId(item.id)
+      toast('已切换当前 CLI 使用的 Key。')
+      return
+    }
+
+    setUpdatingApiKeyId(item.id)
+    try {
+      if (isEnabled) {
+        setApiKeys((current) =>
+          current.map((key) =>
+            key.id === item.id ? { ...key, status: API_KEY_STATUS_DISABLED } : key
+          )
+        )
+        setSelectedApiKeyId(null)
+        await updateApiKeyStatus(item.id, API_KEY_STATUS_DISABLED)
+        toast('该 Key 已关闭，CLI 请求不会再使用它。')
+        await refreshMe()
+        return
+      }
+
+      setSelectedApiKeyId(item.id)
+      setApiKeys((current) =>
+        current.map((key) =>
+          key.id === item.id ? { ...key, status: API_KEY_STATUS_ENABLED } : key
+        )
+      )
+      await updateApiKeyStatus(item.id, API_KEY_STATUS_ENABLED)
+      toast('已切换当前 CLI 使用的 Key。')
+      await refreshMe()
+    } catch (error) {
+      toast(error instanceof Error ? error.message : '更新 Key 状态失败')
+      await refreshMe().catch(() => undefined)
+    } finally {
+      setUpdatingApiKeyId(null)
     }
   }
 
@@ -9265,40 +9442,72 @@ function MeAuthenticatedWorkspace(props: {
                 <div className='panel-block me-key-list-card'>
                   <div className='list-block-header'>
                     <strong>已有 Key</strong>
-                    <button
-                      className='secondary-button tiny'
-                      type='button'
-                      onClick={() => openPasswordGate('create-key')}
-                    >
-                      <Plus size={14} />
-                      <span>新建 Key</span>
-                    </button>
+                    <div className='header-actions'>
+                      <button
+                        className='ghost-button tiny'
+                        type='button'
+                        onClick={() => void refreshMe().catch((error) => {
+                          toast(error instanceof Error ? error.message : '刷新 Key 列表失败')
+                        })}
+                        title='刷新 Key 列表'
+                      >
+                        <RefreshCw size={14} />
+                        <span>刷新</span>
+                      </button>
+                      <button
+                        className='secondary-button tiny'
+                        type='button'
+                        onClick={() => openPasswordGate('create-key')}
+                      >
+                        <Plus size={14} />
+                        <span>新建 Key</span>
+                      </button>
+                    </div>
                   </div>
                   <div className='subrecords'>
                     {apiKeys.length === 0 ? (
                       <EmptyState title='当前还没有 API Key' description='验证密码后即可直接新建桌面端专用 Key。' />
                     ) : (
                       <div className='me-key-grid'>
-                        {apiKeys.map((item) => (
-                          <div key={item.id} className='record-row me-key-record'>
-                            <div>
-                              <strong>{item.name}</strong>
-                              <span>{item.group || 'default'} · 创建于 {formatDateTime(item.created_time)}</span>
-                            </div>
-                            <div className='record-actions'>
-                              <small>{item.status === 1 ? '启用中' : '已停用'}</small>
+                        {apiKeys.map((item) => {
+                          const isActive = item.status === API_KEY_STATUS_ENABLED
+                          const isCurrent = selectedActiveApiKey?.id === item.id
+                          return (
+                          <div key={item.id} className={`record-row me-key-record ${isActive ? 'enabled-key' : ''} ${isCurrent ? 'current-key' : ''}`}>
+                            <div className='me-key-record-line me-key-record-primary'>
+                              <div className='me-key-title-line'>
+                                <strong>{item.name}</strong>
+                                <small>{item.group || 'default'}</small>
+                              </div>
                               <button
-                                className='ghost-button icon-only'
+                                className={`key-status-switch ${isActive ? 'enabled' : ''} ${isCurrent ? 'current' : ''}`}
+                                type='button'
+                                role='switch'
+                                aria-checked={isCurrent}
+                                disabled={updatingApiKeyId === item.id}
+                                onClick={() => void handleToggleApiKey(item)}
+                                title={isActive ? (isCurrent ? '关闭该 Key' : '切换为当前 CLI 使用的 Key') : '启用该 Key'}
+                              >
+                                <span className='switch-track-dot' />
+                                <small>{isActive ? (isCurrent ? '使用中' : '可用') : '已停用'}</small>
+                              </button>
+                            </div>
+                            <div className='me-key-record-line me-key-record-secondary'>
+                              <span>创建于 {formatDateTime(item.created_time)}</span>
+                              <button
+                                className='ghost-button key-view-button'
                                 type='button'
                                 title='查看 Key'
                                 aria-label='查看 Key'
                                 onClick={() => openPasswordGate('view-key', item.id)}
                               >
-                                <Eye size={15} />
+                                <Eye size={14} />
+                                <span>查看</span>
                               </button>
                             </div>
                           </div>
-                        ))}
+                          )
+                        })}
                       </div>
                     )}
                     {revealedKey && (
@@ -9320,6 +9529,7 @@ function MeAuthenticatedWorkspace(props: {
                   className='me-claude-card'
                   activeDeployClient={activeDeployClient}
                   setActiveDeployClient={setActiveDeployClient}
+                  activeApiKey={selectedActiveApiKey}
                 />
                 <CliSetupCard
                   client='codex'
@@ -9329,6 +9539,7 @@ function MeAuthenticatedWorkspace(props: {
                   className='me-codex-card'
                   activeDeployClient={activeDeployClient}
                   setActiveDeployClient={setActiveDeployClient}
+                  activeApiKey={selectedActiveApiKey}
                 />
               </div>
             </div>
@@ -9424,11 +9635,13 @@ function CliWorkspace(props: {
   openSettings: () => void
   active: boolean
   serverBaseUrl: string
-  aiChatProviderMode: AiChatProviderState['mode']
+  providerState: AiChatProviderState
+  activeApiKey: ActiveDesktopApiKeySummary
   runningState: CliRunningState
   onRunningStateChange: (client: CliClient, state: CliRunningState) => void
 }) {
-  const { client, toast, openSettings, active, serverBaseUrl, aiChatProviderMode, runningState, onRunningStateChange } = props
+  const { client, toast, openSettings, active, serverBaseUrl, providerState, activeApiKey, runningState, onRunningStateChange } = props
+  const aiChatProviderMode = providerState.mode
   const performanceMode = useAppPerformanceMode()
   const lastProjectPathStorageKey = `oneapi-desktop-${client}-last-project-path`
   const projectSessionMapStorageKey = `oneapi-desktop-${client}-project-session-map`
@@ -9852,6 +10065,9 @@ function CliWorkspace(props: {
   const cliLogCompletionPlacement = useMemo(() => {
     const lastAssistantMessageIds = new Map<string, string>()
     const logByRequestId = new Map<string, Extract<CliTimelineEntry, { kind: 'log' }>>()
+    const logByAssistantMessageId = new Map<string, Extract<CliTimelineEntry, { kind: 'log' }>>()
+    const messageIdByLogId = new Map<string, string>()
+    let pendingLog: Extract<CliTimelineEntry, { kind: 'log' }> | null = null
 
     for (const item of activeTimeline) {
       if (item.kind === 'log') {
@@ -9859,16 +10075,37 @@ function CliWorkspace(props: {
           continue
         }
         logByRequestId.set(item.requestId, item)
+        pendingLog = item
         continue
       }
       if (item.kind === 'message' && item.role === 'assistant' && item.requestId) {
         lastAssistantMessageIds.set(item.requestId, item.id)
       }
+      if (item.kind === 'message' && item.role === 'user') {
+        pendingLog = null
+        continue
+      }
+      if (item.kind === 'message' && item.role === 'assistant' && pendingLog) {
+        logByAssistantMessageId.set(item.id, pendingLog)
+        messageIdByLogId.set(pendingLog.id, item.id)
+        pendingLog = null
+      }
+    }
+
+    for (const [requestId, logItem] of logByRequestId) {
+      const messageId = lastAssistantMessageIds.get(requestId)
+      if (!messageId || messageIdByLogId.has(logItem.id)) {
+        continue
+      }
+      messageIdByLogId.set(logItem.id, messageId)
+      logByAssistantMessageId.set(messageId, logItem)
     }
 
     return {
       lastAssistantMessageIds,
       logByRequestId,
+      logByAssistantMessageId,
+      messageIdByLogId,
     }
   }, [activeTimeline])
   useEffect(() => {
@@ -10415,7 +10652,9 @@ function CliWorkspace(props: {
 
     void (async () => {
       try {
-        const models = await getUserModels()
+        const models = aiChatProviderMode === 'custom'
+          ? await getUserModels()
+          : await loadOneApiModelsForActiveKey(activeApiKey)
         if (!disposed) {
           setCliModels(models)
           setSelectedModel((current) =>
@@ -10432,7 +10671,15 @@ function CliWorkspace(props: {
     return () => {
       disposed = true
     }
-  }, [client, preferredCliModel])
+  }, [
+    activeApiKey?.group,
+    activeApiKey?.id,
+    activeApiKey?.model_limits,
+    activeApiKey?.model_limits_enabled,
+    aiChatProviderMode,
+    client,
+    preferredCliModel,
+  ])
 
   useEffect(() => {
     const shouldPollActively = active || effectiveRunning
@@ -11304,6 +11551,23 @@ function CliWorkspace(props: {
       return
     }
 
+    if (!canDeleteCliMessageFromSessionFile(message)) {
+      setSessionMessagesMap((current) => ({
+        ...current,
+        [sessionId]: (current[sessionId] || []).filter((item) => item.id !== message.id),
+      }))
+      setCliMessageOverlays((current) => ({
+        ...current,
+        [sessionId]: (current[sessionId] || []).filter((item) => {
+          const sameRequest = !!message.requestId && item.requestId === message.requestId
+          const sameContent = item.role === message.role && item.content === message.content
+          return !(sameRequest || sameContent)
+        }),
+      }))
+      toast('已从当前会话视图中移除该条本地消息。')
+      return
+    }
+
     try {
       const details = await deleteCliMessage(client, resumeSessionId, {
         id: message.id,
@@ -11494,6 +11758,30 @@ function CliWorkspace(props: {
       toast('该模型需要登录并使用 OneAPI 专用桥接服务。')
       return
     }
+    let runtimeApiKey = ''
+    let runtimeBaseUrl = ''
+    if (aiChatProviderMode === 'custom') {
+      runtimeApiKey = providerState.apiKey.trim()
+      runtimeBaseUrl = client === 'codex'
+        ? normalizeOpenAICompatibleBaseUrl(providerState.baseUrl)
+        : providerState.baseUrl.replace(/\/v1$/i, '')
+      if (!runtimeApiKey || !runtimeBaseUrl) {
+        toast('请先在 AIChat 服务通道中配置 Base URL 和 API Key。')
+        return
+      }
+    } else {
+      if (!activeApiKey?.id) {
+        toast('请先在已有 Key 中启用一个 Key。')
+        return
+      }
+      try {
+        runtimeApiKey = await fetchApiKeySecret(activeApiKey.id)
+      } catch (error) {
+        toast(error instanceof Error ? error.message : '读取当前 Key 失败')
+        return
+      }
+      runtimeBaseUrl = client === 'codex' ? DEFAULT_CODEX_BASE_URL : DEFAULT_CLAUDE_BASE_URL
+    }
     const userMessage = {
       id: `user-${Date.now()}`,
       role: 'user' as const,
@@ -11581,6 +11869,8 @@ function CliWorkspace(props: {
         model: resolvedCliModel,
         reasoningEffort,
         fullAccess,
+        apiKey: runtimeApiKey,
+        baseUrl: runtimeBaseUrl,
       })
 
       const nextSessionId = response.sessionId || currentSessionKey
@@ -11887,6 +12177,79 @@ function CliWorkspace(props: {
     </div>
   ) : null
 
+  function renderCliTimelineMessage(
+    item: Exclude<CliTimelineEntry, { kind: 'log' }>
+  ) {
+    return (
+      <div
+        className={`message-bubble ${item.role} ${item.kind === 'partial' ? 'streaming-bubble' : ''}`}
+      >
+        <span className='message-role'>
+          {item.role === 'assistant'
+            ? item.modelLabel || selectedModelLabel
+            : ''}
+        </span>
+        <MessageAttachmentGallery
+          attachments={'attachments' in item ? item.attachments : undefined}
+          onPreview={openAttachmentPreview}
+          onAttachmentContextMenu={(event, attachment) =>
+            showAttachmentContextMenu(event, attachment, setSessionContextMenu, openAttachmentPreview)
+          }
+        />
+        {'selectedExtensions' in item ? (
+          <MessageCliExtensionChips items={item.selectedExtensions} />
+        ) : null}
+        {item.kind === 'partial' && item.content === CLI_PENDING_MESSAGE_LABEL ? (
+          <PendingMessageContent />
+        ) : (
+          <LazyMarkdownContent
+            content={item.content}
+            onSelectionContextMenu={handleCliMessageSelectionContextMenu}
+          />
+        )}
+        {'fileChanges' in item && item.role === 'assistant' ? (
+          <MessageFileChangeLinks
+            ownerId={item.id}
+            files={item.fileChanges}
+            previewFile={previewFile}
+            onOpenFile={(ownerId, path) => void handlePreviewFile(ownerId, path)}
+          />
+        ) : null}
+        <BubbleMeta
+          side={item.role === 'user' ? 'right' : 'left'}
+          createdAt={item.createdAt}
+          extra={item.kind === 'message' && item.role === 'assistant' ? <span className='message-usage'>{formatUsageSummary(item.usage)}</span> : null}
+          actions={[
+            {
+              key: 'copy',
+              label: '复制',
+              icon: Copy,
+              onClick: () => void copyText(item.content),
+            },
+            {
+              key: 'delete',
+              label: '删除',
+              icon: Trash2,
+              onClick: () => void handleDeleteCliMessage(item),
+              disabled: effectiveRunning || item.kind === 'partial',
+            },
+            {
+              key: 'edit',
+              label: '编辑',
+              icon: PencilLine,
+              onClick: () =>
+                loadPromptForEdit(
+                  item.content,
+                  'attachments' in item ? item.attachments : undefined,
+                  'selectedExtensions' in item ? item.selectedExtensions : undefined
+                ),
+            },
+          ]}
+        />
+      </div>
+    )
+  }
+
   return (
     <section className='workspace-page cli-page'>
       <div className={`cli-layout ${historyOpen ? 'history-open' : ''}`}>
@@ -11919,7 +12282,34 @@ function CliWorkspace(props: {
               ) : activeTimeline.map((item) => {
                 if (item.kind === 'log') {
                   const hasAssistantReply =
-                    !!item.requestId && cliLogCompletionPlacement.lastAssistantMessageIds.has(item.requestId)
+                    (!!item.requestId && cliLogCompletionPlacement.lastAssistantMessageIds.has(item.requestId)) ||
+                    cliLogCompletionPlacement.messageIdByLogId.has(item.id)
+                  const groupedAssistantMessageId = cliLogCompletionPlacement.messageIdByLogId.get(item.id)
+                  const groupedAssistantMessage = groupedAssistantMessageId
+                    ? activeTimeline.find((timelineItem): timelineItem is Exclude<CliTimelineEntry, { kind: 'log' }> =>
+                        timelineItem.kind !== 'log' && timelineItem.id === groupedAssistantMessageId
+                      ) || null
+                    : null
+                  if (groupedAssistantMessage) {
+                    return (
+                      <div key={item.id} className='cli-turn-group'>
+                        <CliLogBubble
+                          item={item}
+                          expanded={true}
+                          expandedEventIds={expandedLogEventMap[item.id] || []}
+                          onToggleEvent={(eventId) => toggleLogEvent(item.id, eventId)}
+                          onOpenFile={(ownerId, path) => void handlePreviewFile(ownerId, path)}
+                          onCopy={() => void copyText(item.events.map((eventItem) => serializeCliLogEvent(eventItem)).join('\n\n'))}
+                          onDelete={() => handleDeleteCliLogGroup(item)}
+                          onRespondInteraction={handleRespondCliInteraction}
+                          respondingInteractionIds={respondingInteractionIds}
+                          previewFile={previewFile}
+                        />
+                        {renderCliTimelineMessage(groupedAssistantMessage)}
+                        <CliLogCompletionFooter item={item} />
+                      </div>
+                    )
+                  }
                   return (
                     <Fragment key={item.id}>
                     <CliLogBubble
@@ -11939,81 +12329,22 @@ function CliWorkspace(props: {
                   )
                 }
 
+                if (cliLogCompletionPlacement.logByAssistantMessageId.has(item.id)) {
+                  return null
+                }
+
                 const precedingLog =
                   item.kind === 'message' && item.role === 'assistant' && item.requestId
                     ? cliLogCompletionPlacement.lastAssistantMessageIds.get(item.requestId) === item.id
                       ? cliLogCompletionPlacement.logByRequestId.get(item.requestId) || null
                       : null
-                    : null
+                    : item.kind === 'message' && item.role === 'assistant'
+                      ? cliLogCompletionPlacement.logByAssistantMessageId.get(item.id) || null
+                      : null
 
                 return (
                   <Fragment key={item.id}>
-                  <div
-                    className={`message-bubble ${item.role} ${item.kind === 'partial' ? 'streaming-bubble' : ''}`}
-                  >
-                    <span className='message-role'>
-                      {item.role === 'assistant'
-                        ? item.modelLabel || selectedModelLabel
-                        : ''}
-                    </span>
-                    <MessageAttachmentGallery
-                      attachments={'attachments' in item ? item.attachments : undefined}
-                      onPreview={openAttachmentPreview}
-                      onAttachmentContextMenu={(event, attachment) =>
-                        showAttachmentContextMenu(event, attachment, setSessionContextMenu, openAttachmentPreview)
-                      }
-                    />
-                    {'selectedExtensions' in item ? (
-                      <MessageCliExtensionChips items={item.selectedExtensions} />
-                    ) : null}
-                    {item.kind === 'partial' && item.content === CLI_PENDING_MESSAGE_LABEL ? (
-                      <PendingMessageContent />
-                    ) : (
-                      <LazyMarkdownContent
-                        content={item.content}
-                        onSelectionContextMenu={handleCliMessageSelectionContextMenu}
-                      />
-                    )}
-                    {'fileChanges' in item && item.role === 'assistant' ? (
-                      <MessageFileChangeLinks
-                        ownerId={item.id}
-                        files={item.fileChanges}
-                        previewFile={previewFile}
-                        onOpenFile={(ownerId, path) => void handlePreviewFile(ownerId, path)}
-                      />
-                    ) : null}
-                    <BubbleMeta
-                      side={item.role === 'user' ? 'right' : 'left'}
-                      createdAt={item.createdAt}
-                      extra={item.kind === 'message' && item.role === 'assistant' ? <span className='message-usage'>{formatUsageSummary(item.usage)}</span> : null}
-                      actions={[
-                        {
-                          key: 'copy',
-                          label: '复制',
-                          icon: Copy,
-                          onClick: () => void copyText(item.content),
-                        },
-                        {
-                          key: 'delete',
-                          label: '删除',
-                          icon: Trash2,
-                          onClick: () => void handleDeleteCliMessage(item),
-                          disabled: effectiveRunning || item.kind === 'partial',
-                        },
-                        {
-                          key: 'edit',
-                          label: '编辑',
-                          icon: PencilLine,
-                          onClick: () =>
-                            loadPromptForEdit(
-                              item.content,
-                              'attachments' in item ? item.attachments : undefined,
-                              'selectedExtensions' in item ? item.selectedExtensions : undefined
-                            ),
-                        },
-                      ]}
-                    />
-                  </div>
+                  {renderCliTimelineMessage(item)}
                   {precedingLog ? <CliLogCompletionFooter item={precedingLog} /> : null}
                   </Fragment>
                 )
@@ -12190,7 +12521,7 @@ function CliWorkspace(props: {
                               )
                             })
                           ) : (
-                            <div className='picker-empty-state'>当前筛选下没有可用模型</div>
+                            <div className='picker-empty-state'>当前key无可用模型</div>
                           )}
                         </div>
                       </GlassPickerMenu>
@@ -12440,8 +12771,9 @@ function CliSetupCard(props: {
   className?: string
   activeDeployClient: CliClient | null
   setActiveDeployClient: Dispatch<SetStateAction<CliClient | null>>
+  activeApiKey: ActiveDesktopApiKeySummary
 }) {
-  const { client, user, providerState, toast, className, activeDeployClient, setActiveDeployClient } = props
+  const { client, user, providerState, toast, className, activeDeployClient, setActiveDeployClient, activeApiKey } = props
   const [status, setStatus] = useState<CliStatus>(buildEmptyCliStatus(client))
   const [deploying, setDeploying] = useState(false)
   const [deployLog, setDeployLog] = useState<DeployProgressPayload[]>([])
@@ -12543,23 +12875,27 @@ function CliSetupCard(props: {
       if (!useCustomProvider && !user) {
         throw new Error('请先登录 OneAPI，或在 AIChat 服务通道中配置自定义 API。')
       }
-      const generated = useCustomProvider
-        ? null
-        : await ensureDesktopServiceKey({
-            name: 'OneAPI Desktop Internal Key',
-            group: user?.group || '',
-            preferredNames: [
-              `OneAPI Desktop ${client.toUpperCase()} Key`,
-              'OneAPI Desktop CODEX Key',
-              'OneAPI Desktop CLAUDE Key',
-              'OneAPI Desktop Internal Key',
-              '桌面端专用 Key',
-              'CODEX 桌面安装 Key',
-              'CLAUDE 桌面安装 Key',
-            ],
-          })
-      if (generated) {
-        toast(generated.reused ? '已复用服务器现有有效 API Key。' : '未找到可用 API Key，已自动创建新的桌面端 Key。')
+      const activeApiKeySecret = useCustomProvider ? '' : await (async () => {
+        if (!activeApiKey?.id) {
+          throw new Error('请先在已有 Key 中启用一个 Key，再执行一键部署。')
+        }
+        return fetchApiKeySecret(activeApiKey.id)
+      })()
+      const defaultModel = client === 'codex' ? DEFAULT_CODEX_MODEL : DEFAULT_CLAUDE_MODEL
+      const activeKeyDeployModel = useCustomProvider
+        ? ''
+        : resolveCliDeployModelForActiveKey(
+            client,
+            await refreshOneApiModelsForActiveKey(activeApiKey),
+            defaultModel,
+            preset?.model
+          )
+      if (!useCustomProvider && !activeKeyDeployModel) {
+        throw new Error(
+          client === 'codex'
+            ? '当前启用 Key 没有可用于 Codex 的模型，请切换 Key 或修复服务器 Codex 渠道。'
+            : '当前启用 Key 没有可用于 Claude 的模型，请切换 Key 或修复服务器 Claude 渠道。'
+        )
       }
       const resolvedDeploySettings = useCustomProvider
         ? {
@@ -12567,16 +12903,17 @@ function CliSetupCard(props: {
             baseUrl: client === 'codex'
               ? normalizeOpenAICompatibleBaseUrl(providerState.baseUrl)
               : providerState.baseUrl.replace(/\/v1$/i, ''),
-            model: providerState.defaultModel || (client === 'codex' ? DEFAULT_CODEX_MODEL : DEFAULT_CLAUDE_MODEL),
+            model: providerState.defaultModel || defaultModel,
             apiKeySource: 'custom' as const,
           }
         : {
             ...resolveCliDeploySettings({
               preset,
-              generatedApiKey: generated?.key || '',
+              generatedApiKey: activeApiKeySecret,
               defaultBaseUrl: client === 'codex' ? DEFAULT_CODEX_BASE_URL : DEFAULT_CLAUDE_BASE_URL,
-              defaultModel: client === 'codex' ? DEFAULT_CODEX_MODEL : DEFAULT_CLAUDE_MODEL,
+              defaultModel: activeKeyDeployModel,
             }),
+            model: activeKeyDeployModel,
             apiKeySource: 'oneapi' as const,
           }
       await deployCli({
@@ -12691,8 +13028,9 @@ function AssistantWorkspace(props: {
   enabledModes: AssistantMode[]
   serverBaseUrl: string
   providerState: AiChatProviderState
+  activeApiKey: ActiveDesktopApiKeySummary
 }) {
-  const { mode, setMode, toast, openSettings, visible, enabledModes, serverBaseUrl, providerState } = props
+  const { mode, setMode, toast, openSettings, visible, enabledModes, serverBaseUrl, providerState, activeApiKey } = props
   const [cliRunningState, setCliRunningState] = useState<Record<CliClient, CliRunningState>>({
     codex: { running: false, requestId: '' },
     claude: { running: false, requestId: '' },
@@ -12742,10 +13080,20 @@ function AssistantWorkspace(props: {
 
       <div className='workspace-host assistant-host'>
         <div className={mode === 'chat' ? 'workspace-shell active' : 'workspace-shell'}>
-          <AssistantsChatWorkspace toast={toast} active={visible && mode === 'chat'} providerState={providerState} />
+          <AssistantsChatWorkspace
+            toast={toast}
+            active={visible && mode === 'chat'}
+            providerState={providerState}
+            activeApiKey={activeApiKey}
+          />
         </div>
         <div className={mode === 'draw' ? 'workspace-shell active' : 'workspace-shell'}>
-          <DrawWorkspace toast={toast} active={visible && mode === 'draw'} providerState={providerState} />
+          <DrawWorkspace
+            toast={toast}
+            active={visible && mode === 'draw'}
+            providerState={providerState}
+            activeApiKey={activeApiKey}
+          />
         </div>
         <div className={mode === 'codex' ? 'workspace-shell active' : 'workspace-shell'}>
           <CliWorkspace
@@ -12754,7 +13102,8 @@ function AssistantWorkspace(props: {
             openSettings={openSettings}
             active={visible && mode === 'codex'}
             serverBaseUrl={serverBaseUrl}
-            aiChatProviderMode={providerState.mode}
+            providerState={providerState}
+            activeApiKey={activeApiKey}
             runningState={cliRunningState.codex}
             onRunningStateChange={updateCliRunningState}
           />
@@ -12766,7 +13115,8 @@ function AssistantWorkspace(props: {
             openSettings={openSettings}
             active={visible && mode === 'claude'}
             serverBaseUrl={serverBaseUrl}
-            aiChatProviderMode={providerState.mode}
+            providerState={providerState}
+            activeApiKey={activeApiKey}
             runningState={cliRunningState.claude}
             onRunningStateChange={updateCliRunningState}
           />
@@ -13363,6 +13713,7 @@ export function App() {
   const updatePopoverRef = useRef<HTMLDivElement | null>(null)
   const { message, setMessage } = useToastState()
   const [cliStatus, setCliStatus] = useState<{ codex: CliStatus; claude: CliStatus } | null>(null)
+  const [activeDesktopApiKey, setActiveDesktopApiKey] = useState<ActiveDesktopApiKeySummary>(null)
   const enabledAssistantModes = useMemo(() => {
     const next: AssistantMode[] = ['chat', 'draw']
     if (cliStatus?.codex && isCliStatusInstalled(cliStatus.codex)) {
@@ -13381,6 +13732,9 @@ export function App() {
     () => resolveAiChatProviderState(aiChatProviderConfig, auth.user),
     [aiChatProviderConfig, auth.user]
   )
+  const handleActiveDesktopApiKeyChange = useCallback((apiKey: ActiveDesktopApiKeySummary) => {
+    setActiveDesktopApiKey((current) => sameActiveDesktopApiKeySummary(current, apiKey) ? current : apiKey)
+  }, [])
 
   const updateAiChatProviderConfig = useCallback((
     updater: (current: AiChatProviderConfig) => AiChatProviderConfig
@@ -13457,21 +13811,27 @@ export function App() {
 
   useEffect(() => {
     if (!auth.user?.id) {
+      setActiveDesktopApiKey(null)
       return
     }
 
     let disposed = false
-    void unwrapEnvelope(getAuthStatus())
-      .then((status) => {
+    void Promise.all([
+      unwrapEnvelope(getAuthStatus()).catch(() => null),
+      getApiKeys(1, 100).catch(() => null),
+    ])
+      .then(([status, keyPage]) => {
         if (disposed) {
           return
         }
         const resolved = Number(status?.quota_per_unit || 0)
         setSidebarQuotaPerUnit(resolved > 0 ? resolved : 500_000)
+        setActiveDesktopApiKey(resolveActiveDesktopApiKeySummary(keyPage?.items ?? []))
       })
       .catch(() => {
         if (!disposed) {
           setSidebarQuotaPerUnit(500_000)
+          setActiveDesktopApiKey(null)
         }
       })
 
@@ -14030,6 +14390,7 @@ export function App() {
                 enabledModes={enabledAssistantModes}
                 serverBaseUrl={serverBaseUrl}
                 providerState={aiChatProviderState}
+                activeApiKey={activeDesktopApiKey}
               />
               {sideTab === 'subscriptions' ? (
                 <SubscriptionsWorkspace
@@ -14053,6 +14414,7 @@ export function App() {
                 providerState={aiChatProviderState}
                 onProviderConfigChange={updateAiChatProviderConfig}
                 onRequestLogin={() => setLoginDialogOpen(true)}
+                onActiveApiKeyChange={handleActiveDesktopApiKeyChange}
               />
               {/* settings removed */}
             </div>

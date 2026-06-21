@@ -286,6 +286,8 @@ export interface CliRunRequest {
   model?: string
   reasoningEffort?: string
   fullAccess?: boolean
+  apiKey?: string
+  baseUrl?: string
 }
 
 export interface CliRunResponse {

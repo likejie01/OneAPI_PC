@@ -185,6 +185,52 @@ test('filterAssistantModels uses the DeepSeek and MIMO CLI support matrix when m
   )
 })
 
+test('filterAssistantModels recognizes XiaomiMIMO prefixed model names', () => {
+  const models = [
+    { label: 'xiaomimimo-v2.5-pro', value: 'xiaomimimo-v2.5-pro' },
+    { label: 'xiaomi-mimo-v2.5', value: 'xiaomi-mimo-v2.5' },
+    { label: 'xiaomimimo-v2-pro', value: 'xiaomimimo-v2-pro' },
+  ]
+
+  assert.deepEqual(
+    filterModelsByVendor(models, 'xiaomimimo').map((item) => item.value),
+    ['xiaomimimo-v2.5-pro', 'xiaomi-mimo-v2.5', 'xiaomimimo-v2-pro']
+  )
+  assert.deepEqual(
+    filterAssistantModels('chat', models).map((item) => item.value),
+    ['xiaomimimo-v2.5-pro', 'xiaomi-mimo-v2.5', 'xiaomimimo-v2-pro']
+  )
+  assert.deepEqual(
+    filterAssistantModels('codex', models).map((item) => item.value),
+    ['xiaomimimo-v2.5-pro', 'xiaomi-mimo-v2.5']
+  )
+  assert.deepEqual(
+    filterAssistantModels('claude', models).map((item) => item.value),
+    ['xiaomimimo-v2.5-pro']
+  )
+})
+
+test('filterAssistantModels keeps MIMO models appended without pricing endpoint metadata', () => {
+  const models = [
+    {
+      label: 'gpt-5.5',
+      value: 'gpt-5.5',
+      supportedEndpointTypes: ['openai-response'],
+    },
+    { label: 'mimo-v2.5-pro', value: 'mimo-v2.5-pro' },
+    { label: 'mimo-v2.5', value: 'mimo-v2.5' },
+  ]
+
+  assert.deepEqual(
+    filterAssistantModels('codex', models).map((item) => item.value),
+    ['gpt-5.5', 'mimo-v2.5-pro', 'mimo-v2.5']
+  )
+  assert.deepEqual(
+    filterAssistantModels('claude', models).map((item) => item.value),
+    ['mimo-v2.5-pro']
+  )
+})
+
 test('resolveCompatibleModel falls back to preferred compatible model', () => {
   const models = [
     { label: 'gpt-5.4', value: 'gpt-5.4' },
