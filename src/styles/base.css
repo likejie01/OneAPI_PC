@@ -952,6 +952,12 @@ select {
   font-size: 16px;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .inline-fields,
 .inline-actions,
 .modal-actions,

@@ -136,13 +136,19 @@ function isDeepSeekClaudeCompatibleModel(value: string) {
   return isDeepSeekCodexCompatibleModel(value)
 }
 
+function normalizeMimoModelFamily(value: string) {
+  return normalizeModelValue(value)
+    .replace(/^xiaomi[-_]?mimo[-_]?/, 'mimo-')
+    .replace(/^xiaomimimo[-_]?/, 'mimo-')
+}
+
 function isMimoCodexCompatibleModel(value: string) {
-  const normalized = normalizeModelValue(value)
+  const normalized = normalizeMimoModelFamily(value)
   return normalized === 'mimo-v2.5' || normalized === 'mimo-v2.5-pro'
 }
 
 function isMimoClaudeCompatibleModel(value: string) {
-  return normalizeModelValue(value) === 'mimo-v2.5-pro'
+  return normalizeMimoModelFamily(value) === 'mimo-v2.5-pro'
 }
 
 function isClaudeTextCompatibleModel(value: string) {

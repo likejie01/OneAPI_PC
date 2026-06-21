@@ -128,6 +128,10 @@ export function hasActiveCliPlan(plan?: CliPlanState | null) {
   return !!plan?.items?.some((item) => item.status !== 'completed')
 }
 
+export function canDeleteCliMessageFromSessionFile(message: Pick<CliSessionMessage, 'sourceFilePath' | 'sourceLineNumber'>) {
+  return !!message.sourceFilePath?.trim() || Number(message.sourceLineNumber || 0) > 0
+}
+
 function formatExportTimestamp(value: number) {
   const normalized = normalizeTimestampMs(value)
   if (!normalized) {

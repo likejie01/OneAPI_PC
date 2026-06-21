@@ -73,9 +73,44 @@ test('mobile bridge marks cli jobs as running before cli output arrives', () => 
   assert.match(mainSource, /id: `\$\{request\.requestId\}-running`[\s\S]*?phase: 'running'[\s\S]*?title: `\$\{request\.client === 'codex' \? 'Codex' : 'Claude'\} 正在执行`/)
 })
 
-test('cli one-click deploy uses one shared desktop api key name', () => {
-  assert.match(appSource, /name: 'OneAPI Desktop Internal Key'[\s\S]*?preferredNames: \[[\s\S]*?`OneAPI Desktop \$\{client\.toUpperCase\(\)\} Key`/)
-  assert.doesNotMatch(appSource, /name: `OneAPI Desktop \$\{client\.toUpperCase\(\)\} Key`/)
+test('mobile bridge active session snapshots include running logs', () => {
+  assert.match(mainSource, /mobileBridgeLogs: Array<Record<string, unknown>>/)
+  assert.match(mainSource, /state\.mobileBridgeLogs\.push\(/)
+  assert.match(mainSource, /logs: state\.mobileBridgeLogs\.slice\(-80\)/)
+  assert.match(mainSource, /logCount: item\.logs\.length/)
+})
+
+test('cli deploy and runtime use only the active enabled desktop api key', () => {
+  assert.match(appSource, /activeApiKey: ActiveDesktopApiKeySummary/)
+  assert.match(appSource, /fetchApiKeySecret\(activeApiKey\.id\)/)
+  const modelLoader = appSource.match(/async function loadOneApiModelsForActiveKey[\s\S]*?\n}\n\nfunction AssistantsChatWorkspace/)?.[0] || ''
+  assert.match(modelLoader, /const apiKey = await fetchApiKeySecret\(activeApiKey\.id\)/)
+  assert.match(modelLoader, /const models = await getApiKeyModels\(apiKey\)/)
+  assert.doesNotMatch(modelLoader, /const models = await getUserModels\(\)/)
+  assert.doesNotMatch(appSource, /ACTIVE_KEY_MODEL_CACHE_TTL_MS/)
+  assert.doesNotMatch(appSource, /activeKeyModelCache/)
+  assert.doesNotMatch(appSource, /activeKeyModelRequests/)
+  assert.match(appSource, /runtimeBaseUrl = client === 'codex' \? DEFAULT_CODEX_BASE_URL : DEFAULT_CLAUDE_BASE_URL/)
+  assert.match(appSource, /apiKey: runtimeApiKey/)
+  assert.match(appSource, /baseUrl: runtimeBaseUrl/)
+  assert.doesNotMatch(mainSource, /ensureCliApiKeyEnabled/)
+  assert.doesNotMatch(mainSource, /path: '\/api\/usage\/token'/)
+  assert.match(mainSource, /baseUrl: `http:\/\/127\.0\.0\.1:\$\{address\.port\}`/)
+  assert.doesNotMatch(mainSource, /baseUrl: `http:\/\/127\.0\.0\.1:\$\{address\.port\}\$\{targetBase\.pathname/)
+  assert.match(mainSource, /const runtimeApiKey = resolveRuntimeCliApiKey\(input, currentConfig\?\.apiKey\)/)
+  assert.match(mainSource, /const runtimeApiKey = resolveRuntimeCliApiKey\(input, pickClaudeApiKey\(claudeSettings\?\.env \|\| \{\}\)\)/)
+  assert.doesNotMatch(appSource, /generated = useCustomProvider[\s\S]*?ensureDesktopServiceKey/)
+  assert.doesNotMatch(appSource, /previouslyEnabledKeys[\s\S]*?updateApiKeyStatus\(key\.id, API_KEY_STATUS_DISABLED\)/)
+  assert.doesNotMatch(appSource, /启用该 Key 并关闭其他 Key/)
+})
+
+test('draw workspace also uses the active enabled desktop api key', () => {
+  assert.match(appSource, /function DrawWorkspace\(props: \{[\s\S]*?activeApiKey: ActiveDesktopApiKeySummary/)
+  assert.match(appSource, /const \{ toast, active, providerState, activeApiKey \} = props/)
+  const drawExecutor = appSource.match(/async function executeDrawRequest[\s\S]*?\r?\n  }\r?\n\r?\n  function buildResolvedDrawAssistantMessage/)?.[0] || ''
+  assert.match(drawExecutor, /if \(!activeApiKey\?\.id\) \{[\s\S]*?请先在已有 Key 中启用一个 Key/)
+  assert.match(drawExecutor, /const activeApiKeySecret = await fetchApiKeySecret\(activeApiKey\.id\)/)
+  assert.doesNotMatch(drawExecutor, /ensureDesktopServiceKey/)
 })
 
 test('inactive windows pause aurora and hidden cli panes poll less often', () => {

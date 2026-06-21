@@ -3,6 +3,7 @@ import type { ChatModelOption } from '../shared/contracts'
 export type PricingModelLike = {
   model_name: string
   supported_endpoint_types?: string[]
+  enable_groups?: string[]
 }
 
 export function mergePricingAndUserModels(
@@ -11,8 +12,6 @@ export function mergePricingAndUserModels(
 ): ChatModelOption[] {
   const merged: ChatModelOption[] = []
   const seen = new Set<string>()
-  const hasPricingModels = pricingModels.length > 0
-
   for (const item of pricingModels) {
     const modelName = item.model_name?.trim()
     if (!modelName || seen.has(modelName)) {
@@ -25,11 +24,8 @@ export function mergePricingAndUserModels(
       supportedEndpointTypes: Array.isArray(item.supported_endpoint_types)
         ? item.supported_endpoint_types
         : undefined,
+      enableGroups: Array.isArray(item.enable_groups) ? item.enable_groups : undefined,
     })
-  }
-
-  if (hasPricingModels) {
-    return merged
   }
 
   for (const model of userModels) {

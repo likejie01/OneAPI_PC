@@ -128,6 +128,7 @@ export interface ChatModelOption {
   provider?: 'openai' | 'codex' | 'claude'
   favorite?: boolean
   supportedEndpointTypes?: string[]
+  enableGroups?: string[]
 }
 
 export interface ChatGroupOption {
@@ -316,6 +317,8 @@ export interface ApiKeyRecord {
   created_time: number
   accessed_time: number
   group?: string
+  model_limits_enabled?: boolean
+  model_limits?: string
 }
 
 export interface ApiKeyPageData {

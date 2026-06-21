@@ -5,6 +5,7 @@ import {
   buildChatSessionExportMarkdown,
   buildCliSessionExportMarkdown,
   buildSessionExportFileName,
+  canDeleteCliMessageFromSessionFile,
   hasActiveCliPlan,
   mergeCliMessages,
 } from './session-history.ts'
@@ -139,6 +140,13 @@ test('hasActiveCliPlan hides fully completed plans', () => {
     }),
     true
   )
+})
+
+test('canDeleteCliMessageFromSessionFile only allows hydrated session-file messages', () => {
+  assert.equal(canDeleteCliMessageFromSessionFile({ sourceFilePath: 'C:\\Users\\test\\.claude\\abc.jsonl' }), true)
+  assert.equal(canDeleteCliMessageFromSessionFile({ sourceLineNumber: 12 }), true)
+  assert.equal(canDeleteCliMessageFromSessionFile({ sourceFilePath: '', sourceLineNumber: 0 }), false)
+  assert.equal(canDeleteCliMessageFromSessionFile({}), false)
 })
 
 test('buildChatSessionExportMarkdown includes think content and attachments', () => {

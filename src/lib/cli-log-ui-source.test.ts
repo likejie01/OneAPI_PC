@@ -63,8 +63,19 @@ test('cli log entries remove the outer bubble surface and spacing authority', ()
 test('cli log completion footer is attached only after the final assistant message for the request', () => {
   assert.match(appSource, /const cliLogCompletionPlacement = useMemo/)
   assert.match(appSource, /lastAssistantMessageIds\.set\(item\.requestId, item\.id\)/)
+  assert.match(appSource, /logByAssistantMessageId\.set\(item\.id, pendingLog\)/)
+  assert.match(appSource, /messageIdByLogId\.set\(pendingLog\.id, item\.id\)/)
+  assert.match(appSource, /messageIdByLogId\.set\(logItem\.id, messageId\)/)
+  assert.match(appSource, /className='cli-turn-group'/)
+  assert.match(appSource, /renderCliTimelineMessage\(groupedAssistantMessage\)/)
+  assert.match(appSource, /cliLogCompletionPlacement\.logByAssistantMessageId\.has\(item\.id\)[\s\S]*?return null/)
   assert.match(appSource, /cliLogCompletionPlacement\.lastAssistantMessageIds\.get\(item\.requestId\) === item\.id/)
+  assert.match(appSource, /cliLogCompletionPlacement\.logByAssistantMessageId\.get\(item\.id\)/)
   assert.doesNotMatch(appSource, /slice\(activeTimeline\.indexOf\(item\) \+ 1\)[\s\S]*?hasFollowingAssistantReply/)
+  assert.match(polishStylesSource, /\.cli-page \.cli-log-status-bar\s*\{[\s\S]*?display:\s*inline-flex !important[\s\S]*?max-width:\s*min\(50%, 560px\) !important/)
+  assert.match(polishStylesSource, /\.cli-page \.cli-turn-group\s*\{[\s\S]*?border-radius:\s*8px !important[\s\S]*?background:\s*rgba\(255, 255, 255, 0\.6\) !important/)
+  assert.match(polishStylesSource, /:root\[data-theme='dark'\] \.cli-page \.cli-turn-group\s*\{[\s\S]*?background:\s*rgba\(0, 0, 0, 0\.5\) !important/)
+  assert.match(polishStylesSource, /\.cli-page \.cli-turn-group \.cli-log-status-bar\s*\{[\s\S]*?max-width:\s*min\(50%, 560px\) !important[\s\S]*?border-top:\s*1px solid/)
 })
 
 test('cli bridge notice is hidden under native codex openai and claude anthropic filters', () => {
@@ -79,20 +90,32 @@ test('cli user bubbles inherit the chat user bubble style instead of redefining 
   assert.match(modalsStylesSource, /\.chat-page \.message-bubble\.user,[\s\S]*?\.cli-page \.message-bubble\.user\s*\{[\s\S]*?background:\s*var\(--bubble-user\) !important/)
   assert.match(modalsStylesSource, /:root\[data-theme='dark'\] \.chat-page \.message-bubble\.user,[\s\S]*?:root\[data-theme='dark'\] \.cli-page \.message-bubble\.user\s*\{[\s\S]*?background:\s*var\(--bubble-user\) !important/)
   assert.match(polishStylesSource, /\.chat-page \.message-bubble\.user,[\s\S]*?\.cli-page \.message-bubble\.user\s*\{[\s\S]*?background:\s*rgba\(255, 255, 255, 0\.6\) !important/)
-  assert.match(polishStylesSource, /:root\[data-theme='dark'\] \.chat-page \.message-bubble\.user,[\s\S]*?:root\[data-theme='dark'\] \.cli-page \.message-bubble\.user\s*\{[\s\S]*?background:\s*rgba\(0, 0, 0, 0\.098\) !important/)
+  assert.match(polishStylesSource, /:root\[data-theme='dark'\] \.chat-page \.message-bubble\.user,[\s\S]*?:root\[data-theme='dark'\] \.cli-page \.message-bubble\.user\s*\{[\s\S]*?background:\s*rgba\(0, 0, 0, 0\.18\) !important/)
 })
 
 test('aichat conversation scrollbars are owned by the edge-aligned scroll containers', () => {
-  assert.match(polishStylesSource, /\.workspace-page\.chat-page,[\s\S]*?\.workspace-page\.cli-page\s*\{[\s\S]*?margin-right:\s*-12px !important/)
-  assert.match(polishStylesSource, /\.chat-page \.conversation-scroll-region,[\s\S]*?\.cli-page \.conversation-scroll-region\s*\{[\s\S]*?width:\s*calc\(100% \+ 12px\) !important[\s\S]*?margin-right:\s*-12px !important/)
-  assert.match(polishStylesSource, /\.chat-page \.message-stream,[\s\S]*?\.cli-page \.cli-thread\s*\{[\s\S]*?overflow-y:\s*scroll !important/)
-  assert.match(polishStylesSource, /\.conversation-scroll-dock\s*\{[\s\S]*?right:\s*18px !important[\s\S]*?opacity:\s*0\.15 !important/)
+  assert.match(polishStylesSource, /\/\* Final pass: conversation edge controls, completion footer, composer clipping, and markdown code surfaces\. \*\//)
+  assert.match(polishStylesSource, /\.workspace-page\.chat-page,[\s\S]*?\.workspace-page\.cli-page\s*\{[\s\S]*?margin-right:\s*0 !important/)
+  assert.match(polishStylesSource, /\.chat-page \.conversation-scroll-region,[\s\S]*?\.cli-page \.conversation-scroll-region\s*\{[\s\S]*?width:\s*100% !important[\s\S]*?overflow:\s*hidden !important/)
+  assert.match(polishStylesSource, /\.chat-page \.message-stream,[\s\S]*?\.cli-page \.cli-thread\s*\{[\s\S]*?scrollbar-gutter:\s*stable !important[\s\S]*?overflow-y:\s*scroll !important/)
+  assert.match(polishStylesSource, /\.conversation-scroll-dock\s*\{[\s\S]*?right:\s*22px !important[\s\S]*?opacity:\s*0\.5 !important/)
   assert.match(polishStylesSource, /\.conversation-scroll-dock:hover,[\s\S]*?\.conversation-scroll-dock:focus-within\s*\{[\s\S]*?opacity:\s*1 !important/)
+})
+
+test('composer focus rings and assistant code blocks keep only the intended surface', () => {
+  assert.match(polishStylesSource, /\.shell-composer,[\s\S]*?\.composer-input-zone\s*\{[\s\S]*?overflow:\s*visible !important/)
+  assert.match(polishStylesSource, /\.shell-composer textarea,[\s\S]*?\.cli-composer textarea\s*\{[\s\S]*?outline-offset:\s*-1px !important/)
+  assert.match(polishStylesSource, /\.chat-page \.message-bubble\.assistant \.markdown-body pre:has\(\.markdown-code-block\),[\s\S]*?\.cli-page \.message-bubble\.assistant \.markdown-body pre\s*\{[\s\S]*?padding:\s*0 !important/)
+  assert.match(polishStylesSource, /\.chat-page \.message-bubble\.assistant \.markdown-body pre:has\(\.markdown-code-block\),[\s\S]*?\.cli-page \.message-bubble\.assistant \.markdown-body pre\s*\{[\s\S]*?background:\s*transparent !important/)
+  assert.match(polishStylesSource, /\.chat-page \.message-bubble\.assistant \.markdown-code-block,[\s\S]*?\.cli-page \.message-bubble\.assistant \.markdown-code-block\s*\{[\s\S]*?background:\s*rgba\(255, 255, 255, 0\.16\) !important[\s\S]*?background-image:\s*none !important/)
+  assert.match(polishStylesSource, /:root\[data-theme='dark'\] \.sidebar-account,[\s\S]*?:root\[data-theme='dark'\] \.sidebar-user-row\s*\{[\s\S]*?background:\s*rgba\(0, 0, 0, 0\.5\) !important/)
 })
 
 test('cli log labels use theme foreground colors and readable header sizing', () => {
   assert.match(polishStylesSource, /\.cli-page \.message-role,[\s\S]*?\.cli-page \.cli-log-detail-label\s*\{[\s\S]*?color:\s*#000 !important[\s\S]*?opacity:\s*1 !important/)
   assert.match(polishStylesSource, /:root\[data-theme='dark'\] \.cli-page \.message-role,[\s\S]*?:root\[data-theme='dark'\] \.cli-page \.cli-log-detail-label\s*\{[\s\S]*?color:\s*#fff !important[\s\S]*?opacity:\s*1 !important/)
+  assert.match(polishStylesSource, /\.cli-page \.cli-log-card-title strong,[\s\S]*?\.cli-page \.cli-log-phase-headline strong,[\s\S]*?color:\s*#000 !important/)
+  assert.match(polishStylesSource, /:root\[data-theme='dark'\] \.cli-page \.cli-log-card-title strong,[\s\S]*?:root\[data-theme='dark'\] \.cli-page \.cli-log-phase-headline strong,[\s\S]*?color:\s*#fff !important/)
   assert.match(polishStylesSource, /\.cli-page \.cli-log-card-title \.message-role\s*\{[\s\S]*?font-size:\s*13px !important/)
 })
 
