@@ -58,6 +58,13 @@ import {
   formatDesktopRequestTimeoutMessage,
   resolveDesktopRequestTimeoutMs,
 } from '../src/lib/request-timeouts.ts'
+import {
+  assertAllowedExternalUrl,
+  createCliAccessDirectoryResolver,
+  pathExists,
+  readFilePreview,
+  resolveOpenTarget,
+} from './desktop-boundaries.ts'
 import { parseDesktopChatStreamEventBlock, type DesktopChatStreamParsedLine } from '../src/lib/chat-reasoning.ts'
 import {
   buildClaudePlanStateFromRecords,
@@ -197,29 +204,14 @@ let mobileBridgeLastSessionsSnapshotSignature = ''
 let mobileBridgeLastSessionsSnapshotAt = 0
 let mobileBridgeLastModelSelectionErrorAt = 0
 const assistantHistoryWriteSignatures = new Map<string, string>()
-const FILE_PREVIEW_MAX_BYTES = 10 * 1024 * 1024
-const EXTERNAL_URL_PROTOCOL_ALLOWLIST = new Set(['http:', 'https:', 'mailto:'])
-const cliUserAuthorizedDirectories = new Set<string>()
-
-function normalizeDirectoryForAccess(targetPath: string) {
-  const normalized = targetPath.trim()
-  return normalized ? path.resolve(normalized) : ''
-}
+const cliAccessDirectories = createCliAccessDirectoryResolver(getDesktopAttachmentDirectory)
 
 function rememberCliAuthorizedDirectory(targetPath: string) {
-  const normalized = normalizeDirectoryForAccess(targetPath)
-  if (normalized) {
-    cliUserAuthorizedDirectories.add(normalized)
-  }
+  cliAccessDirectories.rememberDirectory(targetPath)
 }
 
 async function rememberCliAuthorizedOpenTarget(targetPath: string) {
-  const normalized = normalizeDirectoryForAccess(targetPath)
-  if (!normalized) {
-    return
-  }
-  const stat = await fs.stat(normalized).catch(() => null)
-  rememberCliAuthorizedDirectory(stat?.isFile() ? path.dirname(normalized) : normalized)
+  await cliAccessDirectories.rememberOpenTarget(targetPath)
 }
 
 function getDesktopAttachmentDirectory() {
@@ -227,32 +219,7 @@ function getDesktopAttachmentDirectory() {
 }
 
 function resolveCliAdditionalAccessDirectories(projectPath: string) {
-  const projectRoot = normalizeDirectoryForAccess(projectPath)
-  const directories = new Set<string>()
-  if (projectRoot) {
-    directories.add(projectRoot)
-  }
-  directories.add(getDesktopAttachmentDirectory())
-  for (const directory of cliUserAuthorizedDirectories) {
-    const normalized = normalizeDirectoryForAccess(directory)
-    if (normalized) {
-      directories.add(normalized)
-    }
-  }
-  return Array.from(directories)
-}
-
-function assertAllowedExternalUrl(url: string) {
-  let parsed: URL
-  try {
-    parsed = new URL(url)
-  } catch {
-    throw new Error('外部链接格式无效。')
-  }
-  if (!EXTERNAL_URL_PROTOCOL_ALLOWLIST.has(parsed.protocol)) {
-    throw new Error(`不支持打开 ${parsed.protocol || '未知'} 协议链接。`)
-  }
-  return parsed.toString()
+  return cliAccessDirectories.resolve(projectPath)
 }
 
 function openExternalSafely(url: string) {
@@ -3389,34 +3356,6 @@ async function inspectCli(client: CliClient): Promise<CliStatus> {
   }
 }
 
-async function pathExists(target: string) {
-  try {
-    await fs.access(target)
-    return true
-  } catch {
-    return false
-  }
-}
-
-async function resolveOpenTarget(targetPath: string) {
-  const normalized = targetPath.trim()
-  if (!normalized) {
-    return ''
-  }
-
-  if (await pathExists(normalized)) {
-    const stat = await fs.stat(normalized)
-    return stat.isDirectory() ? normalized : path.dirname(normalized)
-  }
-
-  const parentDirectory = path.dirname(normalized)
-  if (await pathExists(parentDirectory)) {
-    return parentDirectory
-  }
-
-  return ''
-}
-
 async function saveDesktopAttachment(input: DesktopAttachmentSaveRequest) {
   const extension = path.extname(input.name || '')
   const sanitizedName = path
@@ -3444,25 +3383,6 @@ async function saveDesktopAttachment(input: DesktopAttachmentSaveRequest) {
   await fs.writeFile(targetPath, Buffer.from(input.dataBase64, 'base64'))
   return {
     path: targetPath,
-  }
-}
-
-async function readFilePreview(targetPath: string) {
-  const resolved = path.resolve(targetPath)
-  const stat = await fs.stat(resolved)
-  if (!stat.isFile()) {
-    throw new Error('当前路径不是文件。')
-  }
-  if (stat.size > FILE_PREVIEW_MAX_BYTES) {
-    throw new Error('文件超过 10MB，已阻止预览以避免客户端卡顿。')
-  }
-
-  const buffer = await fs.readFile(resolved)
-  const content = buffer.toString('utf8')
-  return {
-    path: resolved,
-    name: path.basename(resolved),
-    content,
   }
 }
 
