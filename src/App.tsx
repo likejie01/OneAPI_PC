@@ -70,7 +70,6 @@ import {
 } from './domains/auth'
 import {
   copyImageToClipboard,
-  getApiKeyModels,
   getUserGroups,
   getUserModels,
   saveImageToDisk,
@@ -161,7 +160,14 @@ import {
   API_KEY_STATUS_ENABLED,
   resolveSelectedDesktopApiKeyId,
 } from './lib/desktop-api-keys'
-import { filterModelsForDesktopApiKey } from './lib/desktop-api-key-models'
+import {
+  loadOneApiModelsForActiveKey,
+  refreshOneApiModelsForActiveKey,
+  resolveActiveDesktopApiKeySummary,
+  resolveCliDeployModelForActiveKey,
+  sameActiveDesktopApiKeySummary,
+  type ActiveDesktopApiKeySummary,
+} from './features/desktop-api-key-models'
 import {
   applyConversationSearchHighlights,
   clearConversationSearchHighlights,
@@ -304,7 +310,6 @@ import {
 import dayjs from 'dayjs'
 import type {
   AssistantRecord,
-  ApiKeyRecord,
   AuthStatus,
   BillingHistoryData,
   ChatMessage,
@@ -4427,60 +4432,6 @@ function EmptyState(props: { title: string; description: string; icon?: typeof B
       <p>{description}</p>
     </div>
   )
-}
-
-type ActiveDesktopApiKeyRecord = Pick<ApiKeyRecord, 'id' | 'name' | 'status' | 'group' | 'created_time' | 'model_limits_enabled' | 'model_limits'>
-type ActiveDesktopApiKeySummary = ActiveDesktopApiKeyRecord | null
-
-function resolveActiveDesktopApiKeySummary<T extends ActiveDesktopApiKeyRecord>(
-  keys: T[],
-  selectedApiKeyId: number | null = null
-) {
-  const activeId = resolveSelectedDesktopApiKeyId(keys, selectedApiKeyId)
-  return keys.find((item) => item.id === activeId) || null
-}
-
-function sameActiveDesktopApiKeySummary(left: ActiveDesktopApiKeySummary, right: ActiveDesktopApiKeySummary) {
-  return (
-    (left?.id ?? null) === (right?.id ?? null) &&
-    (left?.status ?? null) === (right?.status ?? null) &&
-    (left?.name ?? '') === (right?.name ?? '') &&
-    (left?.group ?? '') === (right?.group ?? '') &&
-    (left?.model_limits_enabled ?? false) === (right?.model_limits_enabled ?? false) &&
-    (left?.model_limits ?? '') === (right?.model_limits ?? '') &&
-    (left?.created_time ?? 0) === (right?.created_time ?? 0)
-  )
-}
-
-function resolveCliDeployModelForActiveKey(
-  client: CliClient,
-  models: ChatModelOption[],
-  defaultModel: string,
-  presetModel?: string
-) {
-  const requestedModel = presetModel?.trim() || defaultModel
-  return resolveCompatibleModel(client, models, requestedModel, defaultModel)
-}
-
-async function loadOneApiModelsForActiveKey(activeApiKey: ActiveDesktopApiKeySummary) {
-  if (!activeApiKey?.id) {
-    return []
-  }
-  try {
-    const apiKey = await fetchApiKeySecret(activeApiKey.id)
-    const models = await getApiKeyModels(apiKey)
-    if (models.length) {
-      return models
-    }
-  } catch {
-    // Older servers may not expose key-scoped /v1/models consistently.
-  }
-  const fallbackModels = await getUserModels()
-  return filterModelsForDesktopApiKey(fallbackModels, activeApiKey)
-}
-
-async function refreshOneApiModelsForActiveKey(activeApiKey: ActiveDesktopApiKeySummary) {
-  return loadOneApiModelsForActiveKey(activeApiKey)
 }
 
 function AssistantsChatWorkspace(props: {
