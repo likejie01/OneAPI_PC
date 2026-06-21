@@ -129,7 +129,7 @@ function isOpenAITextCompatibleModel(value: string) {
 
 function isDeepSeekCodexCompatibleModel(value: string) {
   const normalized = normalizeModelValue(value)
-  return normalized === 'deepseek-v4-flash' || normalized === 'deepseek-v4-pro'
+  return normalized.startsWith('deepseek-v4-flash') || normalized.startsWith('deepseek-v4-pro')
 }
 
 function isDeepSeekClaudeCompatibleModel(value: string) {
@@ -144,11 +144,11 @@ function normalizeMimoModelFamily(value: string) {
 
 function isMimoCodexCompatibleModel(value: string) {
   const normalized = normalizeMimoModelFamily(value)
-  return normalized === 'mimo-v2.5' || normalized === 'mimo-v2.5-pro'
+  return normalized === 'mimo-v2.5' || normalized.startsWith('mimo-v2.5-pro')
 }
 
 function isMimoClaudeCompatibleModel(value: string) {
-  return normalizeMimoModelFamily(value) === 'mimo-v2.5-pro'
+  return normalizeMimoModelFamily(value).startsWith('mimo-v2.5-pro')
 }
 
 function isClaudeTextCompatibleModel(value: string) {
@@ -526,21 +526,63 @@ export function buildCliTimeline(input: {
     .sort((left, right) => left.createdAt - right.createdAt)
 
   const sortedLogs = [...groupedLogs].sort((left, right) => left.startedAt - right.startedAt)
+  const requestUserIds = new Set<string>()
+  for (const item of entries) {
+    if (item.kind === 'message' && item.role === 'user' && item.requestId) {
+      requestUserIds.add(item.requestId)
+    }
+  }
+  const requestLogs = sortedLogs.reduce<Map<string, typeof sortedLogs>>((map, item) => {
+    if (!item.requestId) {
+      return map
+    }
+    const previous = map.get(item.requestId) || []
+    previous.push(item)
+    map.set(item.requestId, previous)
+    return map
+  }, new Map<string, typeof sortedLogs>())
+  const pushedLogIds = new Set<string>()
   const timeline: CliTimelineEntry[] = []
   let logIndex = 0
+  const pushLog = (item: (typeof sortedLogs)[number]) => {
+    if (pushedLogIds.has(item.id)) {
+      return
+    }
+    timeline.push(item)
+    pushedLogIds.add(item.id)
+  }
+  const pushRequestLogs = (requestId?: string) => {
+    if (!requestId) {
+      return
+    }
+    for (const item of requestLogs.get(requestId) || []) {
+      pushLog(item)
+    }
+  }
+  const pushChronologicalLogsBefore = (createdAt: number) => {
+    while (logIndex < sortedLogs.length && sortedLogs[logIndex].startedAt <= createdAt) {
+      const log = sortedLogs[logIndex]
+      logIndex += 1
+      if (log.requestId && requestUserIds.has(log.requestId) && !pushedLogIds.has(log.id)) {
+        continue
+      }
+      pushLog(log)
+    }
+  }
 
   for (const entry of entries.sort((left, right) => left.createdAt - right.createdAt)) {
     if (entry.kind === 'message' && entry.role === 'assistant') {
-      while (logIndex < sortedLogs.length && sortedLogs[logIndex].startedAt <= entry.createdAt) {
-        timeline.push(sortedLogs[logIndex])
-        logIndex += 1
-      }
+      pushRequestLogs(entry.requestId)
+      pushChronologicalLogsBefore(entry.createdAt)
     }
     timeline.push(entry)
+    if (entry.kind === 'message' && entry.role === 'user') {
+      pushRequestLogs(entry.requestId)
+    }
   }
 
   while (logIndex < sortedLogs.length) {
-    timeline.push(sortedLogs[logIndex])
+    pushLog(sortedLogs[logIndex])
     logIndex += 1
   }
 

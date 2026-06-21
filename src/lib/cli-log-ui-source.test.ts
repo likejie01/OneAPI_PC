@@ -5,6 +5,8 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const appSource = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '..', 'App.tsx'), 'utf8')
+const assistantSupportSource = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '..', 'features', 'assistants', 'AssistantWorkspaceSupport.tsx'), 'utf8')
+const settingsWorkspaceSource = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '..', 'features', 'settings', 'SettingsWorkspaces.tsx'), 'utf8')
 const cliStylesSource = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '..', 'styles', 'cli.css'), 'utf8')
 const modalsStylesSource = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '..', 'styles', 'modals.css'), 'utf8')
 const polishStylesSource = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '..', 'styles', 'polish.css'), 'utf8')
@@ -44,8 +46,8 @@ test('slash plan command enables plan mode instead of direct command passthrough
 
 test('cli log tools are rendered in the log header without the old tool-call label', () => {
   assert.doesNotMatch(appSource, /实际工具调用/)
-  assert.match(appSource, /<div className='cli-log-card-head'>[\s\S]*?<strong>\{`已执行 \$\{item\.events\.length\} 步`\}<\/strong>[\s\S]*?executedToolNames\.length > 0/)
-  assert.match(appSource, /<div className='cli-log-header-tools'>[\s\S]*?executedToolNames\.map/)
+  assert.match(assistantSupportSource, /<div className='cli-log-card-head'>[\s\S]*?<strong>\{`已执行 \$\{item\.events\.length\} 步`\}<\/strong>[\s\S]*?executedToolNames\.length > 0/)
+  assert.match(assistantSupportSource, /<div className='cli-log-header-tools'>[\s\S]*?executedToolNames\.map/)
 })
 
 test('cli log entries remove the outer bubble surface and spacing authority', () => {
@@ -145,8 +147,8 @@ test('context menus and side navigation use restrained radius', () => {
 })
 
 test('anonymous deploy note has no outer panel frame and dark deploy outlines are subdued', () => {
-  assert.match(appSource, /<div className='anonymous-mode-note'>/)
-  assert.doesNotMatch(appSource, /className='panel-block anonymous-mode-note'/)
+  assert.match(settingsWorkspaceSource, /<div className='anonymous-mode-note'>/)
+  assert.doesNotMatch(settingsWorkspaceSource, /className='panel-block anonymous-mode-note'/)
   assert.match(modalsStylesSource, /\.anonymous-mode-note\s*\{[\s\S]*?padding:\s*0 !important[\s\S]*?border:\s*0 !important/)
   assert.match(modalsStylesSource, /:root\[data-theme='dark'\] \.me-column \.panel-block:not\(\.page-surface\),[\s\S]*?border-color:\s*rgba\(151, 164, 172, 0\.028\) !important/)
 })

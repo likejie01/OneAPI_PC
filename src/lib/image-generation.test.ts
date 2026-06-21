@@ -1,6 +1,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { resolveImageGenerationResult, resolveImageMessageSource } from './image-generation.ts'
+import {
+  resolveImageGenerationResult,
+  resolveImageMessageSource,
+  resolveImagePendingPollUrl,
+  resolveImagePendingStatus,
+} from './image-generation.ts'
 
 test('resolveImageMessageSource keeps normalized OpenAI image urls', () => {
   assert.equal(
@@ -76,6 +81,24 @@ test('resolveImageGenerationResult supports responses image generation output bl
       prompt: 'fallback',
     }
   )
+})
+
+test('resolveImagePendingPollUrl reads async image task poll urls', () => {
+  assert.equal(
+    resolveImagePendingPollUrl({
+      id: 'img_task_123',
+      status: 'queued',
+      poll_url: 'https://api.example.com/v1/images/tasks/img_task_123',
+      message: 'Image task accepted. Poll poll_url with the same Authorization header.',
+    }),
+    'https://api.example.com/v1/images/tasks/img_task_123'
+  )
+})
+
+test('resolveImagePendingStatus recognizes in-progress and failed image task responses', () => {
+  assert.equal(resolveImagePendingStatus({ status: 'in_progress' }), 'pending')
+  assert.equal(resolveImagePendingStatus({ status: 'queued' }), 'pending')
+  assert.equal(resolveImagePendingStatus({ status: 'failed' }), 'failed')
 })
 
 test('resolveImageResponseErrorMessage reads nested upstream errors', async () => {

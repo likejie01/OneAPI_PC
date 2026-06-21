@@ -36,6 +36,19 @@ export interface AiImageGenerationPayload {
   response_format?: 'url' | 'b64_json'
 }
 
+export interface AiImageEditPayload {
+  apiKey?: string
+  userId?: string
+  model: string
+  prompt: string
+  imageName: string
+  mimeType?: string
+  dataBase64: string
+  size?: string
+  quality?: string
+  response_format?: 'url' | 'b64_json'
+}
+
 function assertProviderAvailable(provider: AiChatProviderState) {
   if (provider.mode === 'unavailable') {
     throw new Error(provider.reason || '请先登录 OneAPI 或配置自定义 API 通道。')
@@ -167,6 +180,30 @@ export async function sendAiImageGeneration(
     })
   }
   return sendImageGeneration(payload, options)
+}
+
+export async function sendAiImageEdit(
+  provider: AiChatProviderState,
+  payload: AiImageEditPayload,
+  options: { requestId?: string } = {}
+): Promise<ImageGenerationResponse> {
+  assertProviderAvailable(provider)
+  if (provider.mode === 'custom') {
+    return desktopBridge().editCustomImage({
+      requestId: options.requestId,
+      baseUrl: provider.baseUrl,
+      apiKey: provider.apiKey,
+      model: payload.model,
+      prompt: payload.prompt,
+      imageName: payload.imageName,
+      mimeType: payload.mimeType,
+      dataBase64: payload.dataBase64,
+      size: payload.size,
+      quality: payload.quality,
+      response_format: payload.response_format,
+    })
+  }
+  return desktopBridge().editImage(payload)
 }
 
 export function listCustomAiChatProviderModels(provider: AiChatProviderState) {

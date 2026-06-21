@@ -7,6 +7,11 @@ export type DesktopApiKeyItem = {
 export const API_KEY_STATUS_ENABLED = 1
 export const API_KEY_STATUS_DISABLED = 2
 export const ALL_CHANNEL_GROUPS_KEY_GROUP = 'default'
+export const SELECTED_DESKTOP_API_KEY_STORAGE_PREFIX = 'oneapi-desktop-selected-api-key'
+
+export function getSelectedDesktopApiKeyStorageKey(userId: number | string) {
+  return `${SELECTED_DESKTOP_API_KEY_STORAGE_PREFIX}-${userId}`
+}
 
 export function isAllChannelGroupsDesktopApiKeyGroup(group: string | null | undefined) {
   const normalized = (group || '').trim()

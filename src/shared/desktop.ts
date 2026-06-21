@@ -84,6 +84,12 @@ export interface DesktopCustomImageGenerationRequest {
   response_format?: 'url' | 'b64_json'
 }
 
+export interface DesktopCustomImageEditRequest extends DesktopImageEditRequest {
+  requestId?: string
+  baseUrl: string
+  apiKey: string
+}
+
 export interface DesktopCustomModelListRequest {
   baseUrl: string
   apiKey: string

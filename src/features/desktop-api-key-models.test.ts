@@ -44,20 +44,23 @@ test('sameActiveDesktopApiKeySummary detects group and model limit changes', () 
   )
 })
 
-test('loadOneApiModelsForActiveKey prefers key-scoped models', async () => {
+test('loadOneApiModelsForActiveKey merges key-scoped models with filtered user models', async () => {
   const scopedModels: ChatModelOption[] = [
     { label: 'mimo-v2.5', value: 'mimo-v2.5' },
-    { label: 'mimo-v2.5-pro', value: 'mimo-v2.5-pro' },
   ]
   const loader: ActiveKeyModelLoader = {
     fetchApiKeySecret: async () => 'sk-active',
     getApiKeyModels: async () => scopedModels,
-    getUserModels: async () => [{ label: 'gpt-5.5', value: 'gpt-5.5' }],
+    getUserModels: async () => [
+      { label: 'mimo-v2.5', value: 'mimo-v2.5' },
+      { label: 'xiaomimimo-v2.5-pro', value: 'xiaomimimo-v2.5-pro' },
+      { label: 'gpt-5.5', value: 'gpt-5.5', enableGroups: ['1.60x'] },
+    ],
   }
 
   assert.deepEqual(
-    await loadOneApiModelsForActiveKey(key({ group: '1.10x' }), loader),
-    scopedModels
+    (await loadOneApiModelsForActiveKey(key({ group: '1.10x DeepSeek / Xiaomi MIMO官方' }), loader)).map((item) => item.value),
+    ['mimo-v2.5', 'xiaomimimo-v2.5-pro']
   )
 })
 

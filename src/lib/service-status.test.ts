@@ -12,6 +12,10 @@ import {
 } from './service-status.ts'
 
 const appSource = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '..', 'App.tsx'), 'utf8')
+const accountWorkspaceSource = readFileSync(
+  resolve(dirname(fileURLToPath(import.meta.url)), '..', 'features', 'account', 'AccountWorkspaces.tsx'),
+  'utf8'
+)
 
 test('classifyConfiguredService infers configured services from channel type and text', () => {
   assert.equal(classifyConfiguredService({ id: 1, type: 14, models: 'claude-sonnet-4' }), 'claude')
@@ -140,6 +144,6 @@ test('service status page suppresses anonymous auth-required toast only', () => 
   assert.match(appSource, /function isAuthRequiredErrorMessage/)
   assert.match(appSource, /const setMessage = useCallback\(\(nextMessage: string\) => \{\s*if \(isAuthRequiredErrorMessage\(nextMessage\)\) \{\s*return\s*\}/)
   assert.match(appSource, /if \(!isAuthRequiredErrorMessage\(detail\?\.message \|\| ''\)\) \{[\s\S]*?setMessage\(detail\?\.message \|\| '登录态已失效，请重新登录。'\)/)
-  assert.match(appSource, /if \(!isAuthRequiredErrorMessage\(message\)\) \{\s*setServiceStatusError\(message\)/)
-  assert.match(appSource, /serviceStatusItems\.length === 0 && !isAuthRequiredErrorMessage\(message\)/)
+  assert.match(accountWorkspaceSource, /if \(!isAuthRequiredErrorMessage\(message\)\) \{\s*setServiceStatusError\(message\)/)
+  assert.match(accountWorkspaceSource, /serviceStatusItems\.length === 0 && !isAuthRequiredErrorMessage\(message\)/)
 })

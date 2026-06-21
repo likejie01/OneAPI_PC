@@ -5,10 +5,13 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const sourceDir = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const appSource = readFileSync(resolve(sourceDir, 'App.tsx'), 'utf8')
+const assistantChatSource = readFileSync(
+  resolve(sourceDir, 'features', 'assistants', 'AssistantChatDrawWorkspaces.tsx'),
+  'utf8',
+)
 const markdownSource = readFileSync(resolve(sourceDir, 'components', 'MarkdownMessageContent.tsx'), 'utf8')
 const mermaidSource = readFileSync(resolve(sourceDir, 'components', 'MermaidDiagram.tsx'), 'utf8')
-const stylesSource = readFileSync(resolve(sourceDir, 'styles.css'), 'utf8')
+const stylesSource = readFileSync(resolve(sourceDir, 'styles', 'workspace.css'), 'utf8')
 
 test('mermaid png export renders a large white-background image', () => {
   assert.match(mermaidSource, /const MIN_EXPORT_WIDTH = 3200/)
@@ -42,5 +45,5 @@ test('mermaid chart view supports zoom and pan in a max-width bubble', () => {
 test('streaming chat messages defer mermaid rendering until final content arrives', () => {
   assert.match(markdownSource, /renderMermaid\?: boolean/)
   assert.match(markdownSource, /if \(!renderMermaid\)/)
-  assert.match(appSource, /renderMermaid=\{!item\.pending\}/)
+  assert.match(assistantChatSource, /renderMermaid=\{!item\.pending\}/)
 })

@@ -31,6 +31,7 @@ import type {
   DesktopChatStreamRequest,
   DesktopCustomChatCompletionRequest,
   DesktopCustomChatStreamRequest,
+  DesktopCustomImageEditRequest,
   DesktopCustomImageGenerationRequest,
   DesktopCustomModelListRequest,
   DesktopDeleteCliMessageRequest,
@@ -88,6 +89,8 @@ contextBridge.exposeInMainWorld('desktopBridge', {
     ipcRenderer.invoke('desktop:custom-chat-completion', input) as Promise<ChatCompletionResponse>,
   sendCustomImageGeneration: (input: DesktopCustomImageGenerationRequest) =>
     ipcRenderer.invoke('desktop:custom-image-generation', input) as Promise<ImageGenerationResponse>,
+  editCustomImage: (input: DesktopCustomImageEditRequest) =>
+    ipcRenderer.invoke('desktop:custom-image-edit', input) as Promise<ImageGenerationResponse>,
   listCustomProviderModels: (input: DesktopCustomModelListRequest) =>
     ipcRenderer.invoke('desktop:custom-provider-models', input) as Promise<string[]>,
   stopRequest: (requestId: string) =>

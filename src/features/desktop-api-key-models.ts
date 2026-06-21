@@ -64,6 +64,20 @@ export function resolveCliDeployModelForActiveKey(
   return resolveCompatibleModel(client, models, requestedModel, defaultModel)
 }
 
+function mergeModelOptions(left: ChatModelOption[], right: ChatModelOption[]) {
+  const seen = new Set<string>()
+  const merged: ChatModelOption[] = []
+  for (const item of [...left, ...right]) {
+    const key = item.value.trim()
+    if (!key || seen.has(key)) {
+      continue
+    }
+    seen.add(key)
+    merged.push(item)
+  }
+  return merged
+}
+
 export async function loadOneApiModelsForActiveKey(
   activeApiKey: ActiveDesktopApiKeySummary,
   loader: ActiveKeyModelLoader = defaultActiveKeyModelLoader
@@ -71,17 +85,15 @@ export async function loadOneApiModelsForActiveKey(
   if (!activeApiKey?.id) {
     return []
   }
+  let scopedModels: ChatModelOption[] = []
   try {
     const apiKey = await loader.fetchApiKeySecret(activeApiKey.id)
-    const models = await loader.getApiKeyModels(apiKey)
-    if (models.length) {
-      return models
-    }
+    scopedModels = await loader.getApiKeyModels(apiKey)
   } catch {
     // Older servers may not expose key-scoped /v1/models consistently.
   }
   const fallbackModels = await loader.getUserModels()
-  return filterModelsForDesktopApiKey(fallbackModels, activeApiKey)
+  return mergeModelOptions(scopedModels, filterModelsForDesktopApiKey(fallbackModels, activeApiKey))
 }
 
 export async function refreshOneApiModelsForActiveKey(activeApiKey: ActiveDesktopApiKeySummary) {

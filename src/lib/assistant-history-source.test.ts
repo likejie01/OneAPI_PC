@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const mainSource = readFileSync(resolve(projectRoot, 'electron', 'main.ts'), 'utf8')
+const cliHistorySource = readFileSync(resolve(projectRoot, 'electron', 'main-cli-history.ts'), 'utf8')
 
 test('assistant history sync skips unchanged session writes', () => {
   assert.match(mainSource, /const assistantHistoryWriteSignatures = new Map<string, string>\(\)/)
@@ -18,12 +19,12 @@ test('assistant history sync skips unchanged session writes', () => {
 
 test('codex session hydration keeps assistant messages without a final_answer phase', () => {
   assert.match(
-    mainSource,
+    cliHistorySource,
     /role === 'assistant' && typeof parsed\.payload\.phase === 'string' && parsed\.payload\.phase !== 'final_answer'/
   )
 })
 
 test('codex history list is corrected from hydrated session metadata', () => {
-  assert.match(mainSource, /const previous = grouped\.get\(sessionId\)/)
-  assert.match(mainSource, /details\?\.updatedAt \|\| Math\.floor\(metadata\.mtimeMs \/ 1000\) \|\| previous\?\.updatedAt/)
+  assert.match(cliHistorySource, /const previous = grouped\.get\(sessionId\)/)
+  assert.match(cliHistorySource, /details\?\.updatedAt \|\| Math\.floor\(metadata\.mtimeMs \/ 1000\) \|\| previous\?\.updatedAt/)
 })

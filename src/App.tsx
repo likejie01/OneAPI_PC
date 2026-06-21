@@ -85,6 +85,7 @@ import {
   sameActiveDesktopApiKeySummary,
   type ActiveDesktopApiKeySummary,
 } from './features/desktop-api-key-models'
+import { getSelectedDesktopApiKeyStorageKey } from './lib/desktop-api-keys'
 import {
   resolveCliHistorySessionForProject,
   resolvePreferredCliSessionId,
@@ -535,6 +536,7 @@ function CliWorkspace(props: {
   const extensionsPaletteRef = useRef<HTMLDivElement | null>(null)
   const historyPanelRef = useRef<HTMLDivElement | null>(null)
   const threadRef = useRef<HTMLDivElement | null>(null)
+  const projectSessionMapRef = useRef(projectSessionMap)
   const requestSessionMapRef = useRef(requestSessionMap)
   const activeRequestIdRef = useRef('')
   const stoppingRunRef = useRef(false)
@@ -1548,7 +1550,7 @@ function CliWorkspace(props: {
 
       if (payload.sessionId && tracked?.sessionId && payload.sessionId !== tracked.sessionId) {
         const nextSessionId = payload.sessionId
-        setProjectSessionMap((current) => ({
+        updateProjectSessionMap((current) => ({
           ...current,
           [normalizeProjectKey(tracked.projectPath)]: nextSessionId,
         }))
@@ -1795,6 +1797,13 @@ function CliWorkspace(props: {
     setSessionContextMenu(null)
   }
 
+  function updateProjectSessionMap(
+    updater: (current: Record<string, string>) => Record<string, string>
+  ) {
+    projectSessionMapRef.current = updater(projectSessionMapRef.current)
+    setProjectSessionMap(projectSessionMapRef.current)
+  }
+
   function persistHiddenSessions(next: string[]) {
     setHiddenSessionIds(next)
     writeJsonStorage(`oneapi-desktop-${client}-hidden-sessions`, next)
@@ -1864,7 +1873,7 @@ function CliWorkspace(props: {
       }
       return next
     })
-    setProjectSessionMap((current) =>
+    updateProjectSessionMap((current) =>
       Object.fromEntries(
         Object.entries(current).filter(([, sessionId]) => !removeSet.has(sessionId))
       )
@@ -1930,7 +1939,7 @@ function CliWorkspace(props: {
       ...current,
       [sessionId]: nextProjectPath,
     }))
-    setProjectSessionMap((current) => ({
+    updateProjectSessionMap((current) => ({
       ...current,
       [nextProjectKey]: sessionId,
     }))
@@ -2499,7 +2508,10 @@ function CliWorkspace(props: {
     const requestId = `${client}-${Date.now()}`
     const requestProjectPath = targetProjectPath
     const requestProjectKey = normalizeProjectKey(requestProjectPath)
-    const currentSessionKey = activeSessionId || `draft-${client}-${Date.now()}`
+    const currentSessionKey =
+      projectSessionMapRef.current[requestProjectKey]?.trim() ||
+      activeSessionId ||
+      `draft-${client}-${Date.now()}`
     const matchedBuiltinCommand = matchCliBuiltinCommand(client, cleanedPrompt)
     const planMode = matchedBuiltinCommand?.id === 'plan'
     const visiblePrompt = planMode ? stripCliPlanCommandPrompt(cleanedPrompt) : cleanedPrompt
@@ -2541,7 +2553,7 @@ function CliWorkspace(props: {
       return
     }
     if (shouldDisableCliModelForProvider(resolvedCliModel, aiChatProviderMode)) {
-      toast('该模型需要登录并使用 OneAPI 专用桥接服务。')
+      toast('当前服务通道暂不支持该模型。')
       return
     }
     let runtimeApiKey = ''
@@ -2578,7 +2590,7 @@ function CliWorkspace(props: {
       selectedExtensions: requestExtensions,
     }
 
-    setProjectSessionMap((current) => ({
+    updateProjectSessionMap((current) => ({
       ...current,
       [requestProjectKey]: currentSessionKey,
     }))
@@ -2651,7 +2663,7 @@ function CliWorkspace(props: {
         requestId,
         projectPath: requestProjectPath,
         prompt: promptWithAttachments,
-        sessionId: getCliResumeSessionId(activeSessionId),
+        sessionId: getCliResumeSessionId(currentSessionKey),
         model: resolvedCliModel,
         reasoningEffort,
         fullAccess,
@@ -2767,6 +2779,10 @@ function CliWorkspace(props: {
         delete next[requestId]
         return next
       })
+      setSessionPartialMap((current) => ({
+        ...current,
+        [finalSessionKey]: '',
+      }))
       activeRequestIdRef.current = ''
       stoppingRunRef.current = false
       setRunning(false)
@@ -3280,10 +3296,10 @@ function CliWorkspace(props: {
                                 className={`picker-option ${item.value === selectedModel ? 'active' : ''} ${disabled ? 'disabled' : ''}`}
                                 disabled={disabled}
                                 onClick={() => {
-                                  if (disabled) {
-                                    toast('该模型需要登录并使用 OneAPI 专用桥接服务。')
-                                    return
-                                  }
+                                if (disabled) {
+                                  toast('当前服务通道暂不支持该模型。')
+                                  return
+                                }
                                   setSelectedModel(item.value)
                                   setModelMenuOpen(false)
                                 }}
@@ -3798,6 +3814,7 @@ export function App() {
       setActiveDesktopApiKey(null)
       return
     }
+    const authenticatedUserId = auth.user.id
 
     let disposed = false
     void Promise.all([
@@ -3809,8 +3826,10 @@ export function App() {
           return
         }
         const resolved = Number(status?.quota_per_unit || 0)
+        const selectedApiKeyStorageKey = getSelectedDesktopApiKeyStorageKey(authenticatedUserId)
+        const persistedSelectedApiKeyId = readJsonStorage<number | null>(selectedApiKeyStorageKey, null)
         setSidebarQuotaPerUnit(resolved > 0 ? resolved : 500_000)
-        setActiveDesktopApiKey(resolveActiveDesktopApiKeySummary(keyPage?.items ?? []))
+        setActiveDesktopApiKey(resolveActiveDesktopApiKeySummary(keyPage?.items ?? [], persistedSelectedApiKeyId))
       })
       .catch(() => {
         if (!disposed) {

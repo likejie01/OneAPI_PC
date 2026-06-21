@@ -416,6 +416,24 @@ test('buildCliTimeline keeps grouped logs after the user bubble even when log ti
   )
 })
 
+test('buildCliTimeline anchors each request log group after its own user message', () => {
+  const timeline = buildCliTimeline({
+    messages: [
+      { id: 'user-1', role: 'user', content: 'first', createdAt: 100, requestId: 'req-1' },
+      { id: 'user-2', role: 'user', content: 'second', createdAt: 120, requestId: 'req-2' },
+    ],
+    logs: [
+      { id: 'log-1', requestId: 'req-1', level: 'status', content: 'first log', createdAt: 200 },
+      { id: 'log-2', requestId: 'req-2', level: 'status', content: 'second log', createdAt: 210 },
+    ],
+  })
+
+  assert.deepEqual(
+    timeline.map((item) => item.id),
+    ['user-1', 'log-1', 'user-2', 'log-2']
+  )
+})
+
 test('buildCliTimeline strips assistant intent chunks already attached to logs', () => {
   const timeline = buildCliTimeline({
     messages: [

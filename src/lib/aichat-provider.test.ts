@@ -61,12 +61,12 @@ test('hasUsableCustomAiChatProvider rejects incomplete custom provider config', 
   }), true)
 })
 
-test('DeepSeek and Xiaomi MiMo are OneAPI-only bridge models for custom provider mode', () => {
+test('DeepSeek and Xiaomi MiMo cli models stay available for custom provider bridge mode', () => {
   assert.equal(isOneApiBridgeOnlyCliModel('deepseek-chat'), true)
   assert.equal(isOneApiBridgeOnlyCliModel('mimo-v2.5-pro'), true)
   assert.equal(isOneApiBridgeOnlyCliModel('xiaomi-mimo'), true)
   assert.equal(isOneApiBridgeOnlyCliModel('gpt-5.4'), false)
 
-  assert.equal(shouldDisableCliModelForProvider('deepseek-chat', 'custom'), true)
+  assert.equal(shouldDisableCliModelForProvider('deepseek-chat', 'custom'), false)
   assert.equal(shouldDisableCliModelForProvider('deepseek-chat', 'oneapi'), false)
 })

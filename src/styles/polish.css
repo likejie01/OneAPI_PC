@@ -2404,3 +2404,140 @@ input:checked + .toggle-track {
     grid-template-columns: 1fr !important;
   }
 }
+
+/* Final performance pass: keep efficiency mode above later glass refinements. */
+:root[data-performance-mode='efficiency'] {
+  --aurora-opacity: 0;
+  --ui-opacity: 1;
+  --ui-solidness: 1;
+  --panel: rgb(var(--panel-rgb));
+  --panel-strong: rgb(var(--panel-strong-rgb));
+  --surface: rgb(var(--surface-rgb));
+  --surface-strong: rgb(var(--surface-strong-rgb));
+  --bubble-user: rgb(var(--surface-strong-rgb));
+  --bubble-ai: rgb(var(--panel-rgb));
+  --bubble-log: rgb(var(--surface-rgb));
+  --glass-shadow: none;
+  --glass-shadow-strong: none;
+  --glass-highlight: none;
+  --glass-border: var(--line);
+  --shadow: none;
+}
+
+:root[data-performance-mode='efficiency'] *,
+:root[data-performance-mode='efficiency'] *::before,
+:root[data-performance-mode='efficiency'] *::after {
+  animation: none !important;
+  transition-duration: 0s !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+:root[data-performance-mode='efficiency'] .workspace-aurora,
+:root[data-performance-mode='efficiency'] .workspace-aurora::before,
+:root[data-performance-mode='efficiency'] .workspace-aurora::after,
+:root[data-performance-mode='efficiency'] .workspace-aurora-veil,
+:root[data-performance-mode='efficiency'] .workspace-aurora-blob {
+  display: none !important;
+  opacity: 0 !important;
+  animation: none !important;
+  filter: none !important;
+  background: transparent !important;
+  background-image: none !important;
+}
+
+:root[data-performance-mode='efficiency'] .desktop-window-shell,
+:root[data-performance-mode='efficiency'] .main-panel {
+  background: var(--bg) !important;
+  box-shadow: none !important;
+}
+
+:root[data-performance-mode='efficiency'] .desktop-window-shell::before {
+  background: transparent !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
+:root[data-performance-mode='efficiency'] .sidebar {
+  background: var(--panel-strong) !important;
+  box-shadow: none !important;
+}
+
+:root[data-performance-mode='efficiency'] .panel,
+:root[data-performance-mode='efficiency'] .modal-card,
+:root[data-performance-mode='efficiency'] .login-card,
+:root[data-performance-mode='efficiency'] .panel-block,
+:root[data-performance-mode='efficiency'] .pricing-card,
+:root[data-performance-mode='efficiency'] .mini-stat,
+:root[data-performance-mode='efficiency'] .status-card,
+:root[data-performance-mode='efficiency'] .service-status-card,
+:root[data-performance-mode='efficiency'] .empty-card,
+:root[data-performance-mode='efficiency'] .key-reveal,
+:root[data-performance-mode='efficiency'] .result-block,
+:root[data-performance-mode='efficiency'] .cli-history-panel,
+:root[data-performance-mode='efficiency'] .chat-history-panel,
+:root[data-performance-mode='efficiency'] .settings-card,
+:root[data-performance-mode='efficiency'] .settings-intro-card,
+:root[data-performance-mode='efficiency'] .billing-card,
+:root[data-performance-mode='efficiency'] .record-row,
+:root[data-performance-mode='efficiency'] .wallet-overview-card,
+:root[data-performance-mode='efficiency'] .wallet-overview-metric,
+:root[data-performance-mode='efficiency'] .inline-notice,
+:root[data-performance-mode='efficiency'] .reasoning-card,
+:root[data-performance-mode='efficiency'] .picker-menu,
+:root[data-performance-mode='efficiency'] .session-context-menu,
+:root[data-performance-mode='efficiency'] .cli-plan-floating-panel,
+:root[data-performance-mode='efficiency'] .image-preview-modal,
+:root[data-performance-mode='efficiency'] .attachment-preview-modal,
+:root[data-performance-mode='efficiency'] .desktop-update-popover,
+:root[data-performance-mode='efficiency'] .announcement-modal-card,
+:root[data-performance-mode='efficiency'] .cli-extension-menu,
+:root[data-performance-mode='efficiency'] .assistant-menu,
+:root[data-performance-mode='efficiency'] .image-style-menu,
+:root[data-performance-mode='efficiency'] .image-config-menu,
+:root[data-performance-mode='efficiency'] .model-menu,
+:root[data-performance-mode='efficiency'] .translation-modal-card,
+:root[data-performance-mode='efficiency'] .toast-bar,
+:root[data-performance-mode='efficiency'] .cli-extension-floating-tooltip,
+:root[data-performance-mode='efficiency'] .markdown-code-action-menu {
+  background: var(--panel-strong) !important;
+  background-color: var(--panel-strong) !important;
+  background-image: none !important;
+  border-color: var(--line) !important;
+  box-shadow: none !important;
+}
+
+:root[data-performance-mode='efficiency'] .message-bubble.user,
+:root[data-performance-mode='efficiency'] .message-bubble.assistant,
+:root[data-performance-mode='efficiency'] .message-bubble.system,
+:root[data-performance-mode='efficiency'] .cli-log-bubble,
+:root[data-performance-mode='efficiency'] .cli-log-bubble.error {
+  background: var(--panel-strong) !important;
+  background-color: var(--panel-strong) !important;
+  border-color: var(--line) !important;
+  box-shadow: none !important;
+}
+
+:root[data-performance-mode='efficiency'] .ghost-button,
+:root[data-performance-mode='efficiency'] .collapse-button,
+:root[data-performance-mode='efficiency'] .secondary-button,
+:root[data-performance-mode='efficiency'] .theme-toggle-button,
+:root[data-performance-mode='efficiency'] .picker-trigger,
+:root[data-performance-mode='efficiency'] .icon-picker-trigger,
+:root[data-performance-mode='efficiency'] .icon-pill-trigger,
+:root[data-performance-mode='efficiency'] input,
+:root[data-performance-mode='efficiency'] select,
+:root[data-performance-mode='efficiency'] textarea,
+:root[data-performance-mode='efficiency'] .message-extension-chip {
+  background: var(--surface-strong) !important;
+  background-color: var(--surface-strong) !important;
+  border-color: var(--line) !important;
+  box-shadow: none !important;
+}
+
+:root[data-performance-mode='efficiency'] .modal-mask,
+:root[data-performance-mode='efficiency'] .image-preview-modal-mask {
+  background: var(--bg) !important;
+  background-image: none !important;
+  filter: none !important;
+}
