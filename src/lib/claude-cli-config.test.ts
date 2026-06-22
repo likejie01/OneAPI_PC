@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   normalizeClaudeApiKey,
+  normalizeClaudeApiKeyForSource,
   pickClaudeApiKeyFromUnknown,
   pickClaudeBaseUrlFromUnknown,
   resolveClaudeDesktopEnv,
@@ -12,6 +13,12 @@ test('normalizeClaudeApiKey keeps sk-prefixed keys and normalizes bare keys', ()
   assert.equal(normalizeClaudeApiKey('demo'), 'sk-demo')
   assert.equal(normalizeClaudeApiKey('  demo  '), 'sk-demo')
   assert.equal(normalizeClaudeApiKey(''), '')
+})
+
+test('normalizeClaudeApiKeyForSource preserves custom provider keys', () => {
+  assert.equal(normalizeClaudeApiKeyForSource('mimo-secret', 'custom'), 'mimo-secret')
+  assert.equal(normalizeClaudeApiKeyForSource('demo', 'oneapi'), 'sk-demo')
+  assert.equal(normalizeClaudeApiKeyForSource('demo'), 'sk-demo')
 })
 
 test('pickClaudeApiKeyFromUnknown reads only API key and ignores legacy auth token', () => {
@@ -62,6 +69,24 @@ test('resolveClaudeDesktopEnv restores missing base url from auth document', () 
   assert.equal(env.ANTHROPIC_API_KEY, 'sk-demo')
   assert.equal(env.ANTHROPIC_AUTH_TOKEN, undefined)
   assert.equal(env.ANTHROPIC_BASE_URL, 'https://ai.oneapi.center')
+})
+
+test('resolveClaudeDesktopEnv preserves custom provider key source', () => {
+  const env = resolveClaudeDesktopEnv({
+    currentEnv: {
+      ANTHROPIC_API_KEY: 'mimo-secret',
+      ONEAPI_API_KEY_SOURCE: 'custom',
+    },
+    authDocument: {
+      ANTHROPIC_API_KEY: 'other-secret',
+      ANTHROPIC_BASE_URL: 'https://custom.example.com',
+    },
+    defaultBaseUrl: 'https://fallback.example.com',
+  })
+
+  assert.equal(env.ANTHROPIC_API_KEY, 'mimo-secret')
+  assert.equal(env.ONEAPI_API_KEY_SOURCE, 'custom')
+  assert.equal(env.ANTHROPIC_BASE_URL, 'https://custom.example.com')
 })
 
 test('resolveClaudeDesktopEnv falls back to default base url and fallback key', () => {

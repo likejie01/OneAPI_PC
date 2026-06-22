@@ -1,61 +1,36 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  API_KEY_STATUS_DISABLED,
-  API_KEY_STATUS_ENABLED,
-  applySingleActiveDesktopApiKey,
-  getActiveDesktopApiKey,
-  isAllChannelGroupsDesktopApiKeyGroup,
-  resolveSelectedDesktopApiKeyId,
+  clearSelectedDesktopApiKeyId,
+  readSelectedDesktopApiKeyId,
+  SELECTED_DESKTOP_API_KEY_FALLBACK_STORAGE_KEY,
+  writeSelectedDesktopApiKeyId,
 } from './desktop-api-keys.ts'
 
-test('active desktop api key ignores disabled keys', () => {
-  const keys = [
-    { id: 1, status: API_KEY_STATUS_DISABLED },
-    { id: 2, status: API_KEY_STATUS_ENABLED },
-  ]
+test('selected desktop api key falls back to the last explicit selection', () => {
+  const storage = new Map<string, unknown>([
+    [SELECTED_DESKTOP_API_KEY_FALLBACK_STORAGE_KEY, 42],
+  ])
+  const readJsonStorage = <T>(key: string, fallback: T) =>
+    storage.has(key) ? storage.get(key) as T : fallback
 
-  assert.equal(getActiveDesktopApiKey(keys)?.id, 2)
+  assert.equal(readSelectedDesktopApiKeyId(7, readJsonStorage), 42)
 })
 
-test('selected desktop api key falls back when selected key is disabled', () => {
-  const keys = [
-    { id: 1, status: API_KEY_STATUS_DISABLED },
-    { id: 2, status: API_KEY_STATUS_ENABLED },
-  ]
+test('selected desktop api key writes and clears user scoped and fallback storage', () => {
+  const storage = new Map<string, unknown>()
+  const readJsonStorage = <T>(key: string, fallback: T) =>
+    storage.has(key) ? storage.get(key) as T : fallback
+  const writeJsonStorage = <T>(key: string, value: T) => {
+    storage.set(key, value)
+  }
+  const removeStorage = (key: string) => {
+    storage.delete(key)
+  }
 
-  assert.equal(resolveSelectedDesktopApiKeyId(keys, 1), 2)
-})
+  writeSelectedDesktopApiKeyId(7, 99, writeJsonStorage)
+  assert.equal(readSelectedDesktopApiKeyId(7, readJsonStorage), 99)
 
-test('selected desktop api key returns null when no enabled key exists', () => {
-  const keys = [
-    { id: 1, status: API_KEY_STATUS_DISABLED },
-    { id: 2, status: API_KEY_STATUS_DISABLED },
-  ]
-
-  assert.equal(resolveSelectedDesktopApiKeyId(keys, 1), null)
-})
-
-test('single active desktop api key disables all peers', () => {
-  const keys = applySingleActiveDesktopApiKey([
-    { id: 1, status: API_KEY_STATUS_ENABLED },
-    { id: 2, status: API_KEY_STATUS_DISABLED },
-    { id: 3, status: API_KEY_STATUS_ENABLED },
-  ], 2)
-
-  assert.deepEqual(
-    keys.map((item) => [item.id, item.status]),
-    [
-      [1, API_KEY_STATUS_DISABLED],
-      [2, API_KEY_STATUS_ENABLED],
-      [3, API_KEY_STATUS_DISABLED],
-    ]
-  )
-})
-
-test('all channel groups api key group includes empty and default groups', () => {
-  assert.equal(isAllChannelGroupsDesktopApiKeyGroup(''), true)
-  assert.equal(isAllChannelGroupsDesktopApiKeyGroup('default'), true)
-  assert.equal(isAllChannelGroupsDesktopApiKeyGroup('OpenAI'), false)
-  assert.equal(isAllChannelGroupsDesktopApiKeyGroup('auto'), false)
+  clearSelectedDesktopApiKeyId(7, removeStorage)
+  assert.equal(readSelectedDesktopApiKeyId(7, readJsonStorage), null)
 })

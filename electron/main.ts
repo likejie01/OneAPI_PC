@@ -468,6 +468,7 @@ interface CliRunRequest {
   reasoningEffort?: string
   fullAccess?: boolean
   apiKey?: string
+  apiKeySource?: 'oneapi' | 'custom'
   baseUrl?: string
 }
 

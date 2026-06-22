@@ -1,4 +1,5 @@
 import type { UserProfile } from '../shared/contracts'
+import type { ChatModelOption } from '../shared/contracts'
 
 export type AiChatProviderMode = 'oneapi' | 'custom' | 'unavailable'
 
@@ -125,4 +126,21 @@ export function shouldDisableCliModelForProvider(model: string, providerMode: Ai
   void model
   void providerMode
   return false
+}
+
+export function listCustomAiChatProviderModels(providerState: Pick<AiChatProviderState, 'mode' | 'defaultModel' | 'models'>): ChatModelOption[] {
+  if (providerState.mode !== 'custom') {
+    return []
+  }
+
+  return Array.from(
+    new Set(
+      [providerState.defaultModel, ...providerState.models]
+        .map((item) => item.trim())
+        .filter(Boolean)
+    )
+  ).map((item) => ({
+    label: item,
+    value: item,
+  }))
 }

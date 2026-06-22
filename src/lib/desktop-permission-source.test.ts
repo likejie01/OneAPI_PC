@@ -117,8 +117,8 @@ test('split cli services import shared cli history parsing helpers', () => {
 test('cli deploy and runtime use only the active enabled desktop api key', () => {
   assert.match(rendererRuntimeSources, /activeApiKey: ActiveDesktopApiKeySummary/)
   assert.match(appSource, /const authenticatedUserId = auth\.user\.id/)
-  assert.match(appSource, /getSelectedDesktopApiKeyStorageKey\(authenticatedUserId\)/)
-  assert.match(appSource, /readJsonStorage<number \| null>\(selectedApiKeyStorageKey, null\)/)
+  assert.match(appSource, /readSelectedDesktopApiKeyId\(authenticatedUserId, readJsonStorage\)/)
+  assert.match(appSource, /oneapi:desktop-api-key-selection/)
   assert.match(
     appSource,
     /resolveActiveDesktopApiKeySummary\(keyPage\?\.items \?\? \[\], persistedSelectedApiKeyId\)/
@@ -148,6 +148,12 @@ test('cli deploy and runtime use only the active enabled desktop api key', () =>
   assert.doesNotMatch(rendererRuntimeSources, /启用该 Key 并关闭其他 Key/)
 })
 
+test('custom provider cli models come from local provider config without login', () => {
+  assert.match(appSource, /listCustomAiChatProviderModels\(providerState\)/)
+  assert.match(assistantChatDrawSource, /listCustomAiChatProviderModels\(providerState\)/)
+  assert.doesNotMatch(appSource, /aiChatProviderMode === 'custom'[\s\S]{0,80}await getUserModels\(\)/)
+})
+
 test('cli prompt cache proxy is available inside split cli services', () => {
   assert.match(cliServicesSource, /async function createCliPromptCacheProxy\(/)
   assert.match(cliServicesSource, /apiKey: string/)
@@ -173,6 +179,27 @@ test('cli proxy bridges codex responses and claude messages to openai compatible
   assert.match(cliServicesSource, /usage: normalizeResponsesUsage\(usage\)/)
   assert.match(cliServicesSource, /usage: normalizeResponsesUsage\(\(data as Record<string, unknown>\)\?\.usage\)/)
   assert.doesNotMatch(rendererRuntimeSources, /该模型需要登录并使用 OneAPI 专用桥接服务/)
+})
+
+test('custom provider cli runtime keeps third-party api keys unchanged', () => {
+  assert.match(cliServicesSource, /function resolveRuntimeCliApiKey/)
+  assert.match(cliServicesSource, /function normalizeRuntimeCliApiKey/)
+  assert.match(appSource, /apiKeySource: aiChatProviderMode === 'custom' \? 'custom' : 'oneapi'/)
+  assert.match(cliServicesSource, /apiKeySource === 'custom'[\s\S]*?return trimmed/)
+  assert.match(cliServicesSource, /function resolveDeployCliApiKey[\s\S]*?request\.apiKeySource === 'custom'[\s\S]*?return trimmed/)
+  assert.match(cliServicesSource, /DESKTOP_CLI_RUNTIME_ONEAPI_KEY_PATTERN\.test\(trimmed\)/)
+  assert.match(cliServicesSource, /return trimmed/)
+  assert.doesNotMatch(cliServicesSource, /return resolveDesktopCliKeyRecord\(requested\)/)
+  assert.doesNotMatch(cliServicesSource, /const apiKey = normalizeDesktopCliApiKey\(runtimeConfig\.apiKey\)/)
+  assert.match(cliServicesSource, /const apiKey = runtimeConfig\.apiKey\.trim\(\)/)
+  assert.match(cliServicesSource, /ONEAPI_API_KEY_SOURCE: request\.apiKeySource \|\| 'oneapi'/)
+  assert.match(cliServicesSource, /normalizeClaudeApiKeyForSource\(apiKey, configEnv\.ONEAPI_API_KEY_SOURCE\)/)
+  assert.match(cliServicesSource, /normalizeCliApiKeyForSource\(current\.apiKey, request\.apiKeySource\) === resolvedKey/)
+})
+
+test('chat pending messages do not render placeholder thinking when reasoning is empty', () => {
+  assert.doesNotMatch(assistantChatDrawSource, /PendingMessageContent label=\{CHAT_PENDING_MESSAGE_LABEL\.replace/)
+  assert.doesNotMatch(assistantChatDrawSource, /content: hasVisibleContent \? visibleContent : CHAT_PENDING_MESSAGE_LABEL/)
 })
 
 test('claude bridge output with a cli error is downgraded to warning instead of failed', () => {
@@ -235,8 +262,8 @@ test('inactive windows pause aurora and hidden cli panes poll less often', () =>
 
 test('settings persists explicit desktop api key selection per user', () => {
   const settingsSource = readFileSync(resolve(projectRoot, 'src', 'features', 'settings', 'SettingsWorkspaces.tsx'), 'utf8')
-  assert.match(settingsSource, /getSelectedDesktopApiKeyStorageKey\(user\.id\)/)
-  assert.match(settingsSource, /readJsonStorage<number \| null>\(selectedApiKeyStorageKey, null\)/)
-  assert.match(settingsSource, /writeJsonStorage\(selectedApiKeyStorageKey, nextId\)/)
-  assert.match(settingsSource, /removeStorage\(selectedApiKeyStorageKey\)/)
+  assert.match(settingsSource, /readSelectedDesktopApiKeyId\(user\.id, readJsonStorage\)/)
+  assert.match(settingsSource, /writeSelectedDesktopApiKeyId\(user\.id, nextId, writeJsonStorage\)/)
+  assert.match(settingsSource, /clearSelectedDesktopApiKeyId\(user\.id, removeStorage\)/)
+  assert.match(settingsSource, /oneapi:desktop-api-key-selection/)
 })

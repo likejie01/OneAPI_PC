@@ -6,7 +6,14 @@ import { ensureDesktopServiceKey, fetchApiKeySecret, getApiKeys, updateApiKeySta
 import { deleteMobileDesktopBinding, deleteMobileDesktopDevice, getLocalMobileBridgeDevice, getMobileDesktopDevices, resetLocalMobileBridgeDevice, type MobileDesktopDevice } from '../../domains/mobile-bridge'
 import { verifyCurrentPassword } from '../../domains/profile'
 import { resolveCliDeploySettings } from '../../lib/cli-deploy'
-import { API_KEY_STATUS_DISABLED, API_KEY_STATUS_ENABLED, getSelectedDesktopApiKeyStorageKey, resolveSelectedDesktopApiKeyId } from '../../lib/desktop-api-keys'
+import {
+  API_KEY_STATUS_DISABLED,
+  API_KEY_STATUS_ENABLED,
+  clearSelectedDesktopApiKeyId,
+  readSelectedDesktopApiKeyId,
+  resolveSelectedDesktopApiKeyId,
+  writeSelectedDesktopApiKeyId,
+} from '../../lib/desktop-api-keys'
 import { describeCliWorkspaceStatus, resolveCliSetupPeerState } from '../../lib/desktop-service'
 import { formatDateTime } from '../../lib/format'
 import { normalizeOpenAICompatibleBaseUrl, type AiChatProviderConfig, type AiChatProviderState } from '../../lib/aichat-provider'
@@ -361,9 +368,8 @@ export function MeAuthenticatedWorkspace(props: {
   const [activeDeployClient, setActiveDeployClient] = useState<CliClient | null>(null)
   const [mobileBridgeDevice, setMobileBridgeDevice] = useState<MobileDesktopDevice | null>(null)
   const [mobileBridgeLoading, setMobileBridgeLoading] = useState(false)
-  const selectedApiKeyStorageKey = useMemo(() => getSelectedDesktopApiKeyStorageKey(user.id), [user.id])
   const [selectedApiKeyId, setSelectedApiKeyId] = useState<number | null>(() =>
-    readJsonStorage<number | null>(selectedApiKeyStorageKey, null)
+    readSelectedDesktopApiKeyId(user.id, readJsonStorage)
   )
   const [updatingApiKeyId, setUpdatingApiKeyId] = useState<number | null>(null)
   const selectedActiveApiKey = useMemo(
@@ -440,24 +446,30 @@ export function MeAuthenticatedWorkspace(props: {
 
   const persistSelectedApiKeyId = useCallback((nextId: number | null) => {
     if (nextId) {
-      writeJsonStorage(selectedApiKeyStorageKey, nextId)
+      writeSelectedDesktopApiKeyId(user.id, nextId, writeJsonStorage)
     } else {
-      removeStorage(selectedApiKeyStorageKey)
+      clearSelectedDesktopApiKeyId(user.id, removeStorage)
     }
     setSelectedApiKeyId(nextId)
-  }, [selectedApiKeyStorageKey])
+    window.dispatchEvent(new CustomEvent('oneapi:desktop-api-key-selection', {
+      detail: {
+        userId: user.id,
+        apiKeyId: nextId,
+      },
+    }))
+  }, [user.id])
 
   useEffect(() => {
     setSelectedApiKeyId((current) => {
       const resolved = resolveSelectedDesktopApiKeyId(apiKeys, current)
       if (resolved) {
-        writeJsonStorage(selectedApiKeyStorageKey, resolved)
+        writeSelectedDesktopApiKeyId(user.id, resolved, writeJsonStorage)
       } else {
-        removeStorage(selectedApiKeyStorageKey)
+        clearSelectedDesktopApiKeyId(user.id, removeStorage)
       }
       return resolved
     })
-  }, [apiKeys, selectedApiKeyStorageKey])
+  }, [apiKeys, user.id])
 
   useEffect(() => {
     onActiveApiKeyChange(selectedActiveApiKey)

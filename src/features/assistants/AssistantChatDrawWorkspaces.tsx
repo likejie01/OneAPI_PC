@@ -23,7 +23,7 @@ import { buildChatAttachmentContent, buildPersistedChatRequestContent, fileToBas
 import { useDebouncedJsonStorage } from '../../hooks/use-debounced-json-storage'
 import { buildChatSessionExportMarkdown, buildDrawSessionExportMarkdown, buildSessionExportFileName } from '../../lib/session-history'
 import { readJsonStorage, writeJsonStorage } from '../../lib/storage'
-import { type AiChatProviderState } from '../../lib/aichat-provider'
+import { listCustomAiChatProviderModels, type AiChatProviderState } from '../../lib/aichat-provider'
 import { applyAssistantSelectionToEmptyChatSession, resolveChatSessionAssistant, shouldCreateAssistantSwitchChatSession } from '../../lib/chat-session'
 import { deriveDesktopChatDisplayState } from '../../lib/chat-reasoning'
 import { clipText, formatDateTime } from '../../lib/format'
@@ -59,7 +59,6 @@ import {
   MessageAttachmentGallery,
   MODEL_VENDOR_FILTER_OPTIONS,
   PendingImageContent,
-  PendingMessageContent,
   ReasoningMessageContent,
   SessionContextMenu,
   SessionTitleEditor,
@@ -278,15 +277,8 @@ export function AssistantsChatWorkspace(props: {
 
   const messages = activeSession?.messages || []
   const customProviderModels = useMemo<ChatModelOption[]>(
-    () =>
-      providerState.mode === 'custom'
-        ? Array.from(new Set([providerState.defaultModel, ...providerState.models].map((item) => item.trim()).filter(Boolean)))
-            .map((item) => ({
-              label: item,
-              value: item,
-            }))
-        : [],
-    [providerState.defaultModel, providerState.mode, providerState.models]
+    () => listCustomAiChatProviderModels(providerState),
+    [providerState]
   )
   const availableChatModels = providerState.mode === 'custom' ? customProviderModels : models
   const compatibleChatModels = useMemo(
@@ -494,13 +486,7 @@ export function AssistantsChatWorkspace(props: {
     void (async () => {
       try {
         if (providerState.mode === 'custom') {
-          const customModels = Array.from(new Set([
-            providerState.defaultModel,
-            ...providerState.models,
-          ].map((item) => item.trim()).filter(Boolean))).map((item) => ({
-            label: item,
-            value: item,
-          }))
+          const customModels = listCustomAiChatProviderModels(providerState)
           if (disposed) {
             return
           }
@@ -1003,7 +989,7 @@ export function AssistantsChatWorkspace(props: {
           item.id === pendingAssistantId
             ? {
                 ...item,
-                content: hasVisibleContent ? visibleContent : CHAT_PENDING_MESSAGE_LABEL,
+                content: hasVisibleContent ? visibleContent : '',
                 reasoningContent: reasoningContent || undefined,
                 reasoningPending: displayState.reasoningPending,
                 createdAt: Date.now(),
@@ -1486,7 +1472,7 @@ export function AssistantsChatWorkspace(props: {
                     item.pending &&
                     !item.reasoningContent?.trim() &&
                     (!item.content.trim() || item.content === CHAT_PENDING_MESSAGE_LABEL)
-                      ? <PendingMessageContent label={CHAT_PENDING_MESSAGE_LABEL.replace(/\.+$/, '')} />
+                      ? null
                       : <LazyMarkdownContent
                           content={item.content}
                           onSelectionContextMenu={handleMessageSelectionContextMenu}

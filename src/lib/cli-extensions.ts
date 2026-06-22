@@ -2,7 +2,17 @@ import type { CliClient, CliExtensionEntry, CliExtensionKind, CliSessionMessage 
 
 export type CliMessageOverlay = Pick<
   CliSessionMessage,
-  'role' | 'content' | 'attachments' | 'selectedExtensions' | 'requestId'
+  | 'role'
+  | 'content'
+  | 'attachments'
+  | 'selectedExtensions'
+  | 'requestId'
+  | 'createdAt'
+  | 'id'
+  | 'modelLabel'
+  | 'usage'
+  | 'fileChanges'
+  | 'files'
 >
 
 export type CliExtensionViewItem = CliExtensionEntry & {
@@ -266,6 +276,7 @@ export function applyCliMessageOverlays<T extends CliSessionMessage>(
   messages: T[],
   overlays: CliMessageOverlay[]
 ) {
+  const restoredMessages = [...messages]
   const overlayQueues = overlays.reduce<Map<string, CliMessageOverlay[]>>((map, item) => {
     const key = buildCliOverlayMatchKey(item.role, item.content)
     const current = map.get(key) || []
@@ -274,20 +285,69 @@ export function applyCliMessageOverlays<T extends CliSessionMessage>(
     return map
   }, new Map())
 
-  return messages.map((message) => {
+  const appliedOverlayIds = new Set<string>()
+  const appliedMessages = restoredMessages.map((message) => {
     const key = buildCliOverlayMatchKey(message.role, message.content)
     const queue = overlayQueues.get(key)
     const overlay = queue?.shift()
     if (!overlay) {
       return message
     }
+    if (overlay.id) {
+      appliedOverlayIds.add(overlay.id)
+    }
     return {
       ...message,
       attachments: overlay.attachments || message.attachments,
       selectedExtensions: overlay.selectedExtensions || message.selectedExtensions,
       requestId: overlay.requestId || message.requestId,
+      modelLabel: overlay.modelLabel || message.modelLabel,
+      usage: overlay.usage || message.usage,
+      fileChanges: overlay.fileChanges || message.fileChanges,
+      files: overlay.files || message.files,
     }
   })
+
+  for (const overlay of overlays) {
+    if (overlay.role !== 'assistant') {
+      continue
+    }
+    if (overlay.id && appliedOverlayIds.has(overlay.id)) {
+      continue
+    }
+    const key = buildCliOverlayMatchKey(overlay.role, overlay.content)
+    const remaining = overlayQueues.get(key)
+    if (remaining && !remaining.includes(overlay)) {
+      continue
+    }
+    const duplicate = appliedMessages.some((message) => {
+      if (message.role !== overlay.role) {
+        return false
+      }
+      if (overlay.requestId && message.requestId === overlay.requestId) {
+        return true
+      }
+      return buildCliOverlayMatchKey(message.role, message.content) === key
+    })
+    if (duplicate) {
+      continue
+    }
+    appliedMessages.push({
+      id: overlay.id || `overlay-assistant-${overlay.requestId || appliedMessages.length}`,
+      role: 'assistant',
+      content: overlay.content,
+      createdAt: overlay.createdAt || Date.now(),
+      requestId: overlay.requestId,
+      modelLabel: overlay.modelLabel,
+      usage: overlay.usage,
+      attachments: overlay.attachments,
+      selectedExtensions: overlay.selectedExtensions,
+      fileChanges: overlay.fileChanges,
+      files: overlay.files,
+    } as T)
+  }
+
+  return appliedMessages.sort((left, right) => left.createdAt - right.createdAt)
 }
 
 export function collectCliToolNames(sourceKinds: Array<string | undefined>) {

@@ -375,6 +375,56 @@ test('applyCliMessageOverlays restores attachments and selected extensions onto 
   assert.equal(restored[0].requestId, 'req-1')
 })
 
+test('applyCliMessageOverlays restores persisted assistant replies when native history omits them', () => {
+  const restored = applyCliMessageOverlays(
+    [
+      {
+        id: 'm1',
+        role: 'user',
+        content: '请生成页面',
+        createdAt: 1,
+        requestId: 'req-1',
+      },
+    ],
+    [
+      {
+        id: 'assistant-req-1',
+        role: 'assistant',
+        content: '页面已经创建完成。',
+        createdAt: 2,
+        requestId: 'req-1',
+        modelLabel: 'deepseek-v4-pro',
+      },
+    ]
+  )
+
+  assert.deepEqual(
+    restored.map((item) => ({
+      id: item.id,
+      role: item.role,
+      content: item.content,
+      requestId: item.requestId,
+      modelLabel: item.modelLabel,
+    })),
+    [
+      {
+        id: 'm1',
+        role: 'user',
+        content: '请生成页面',
+        requestId: 'req-1',
+        modelLabel: undefined,
+      },
+      {
+        id: 'assistant-req-1',
+        role: 'assistant',
+        content: '页面已经创建完成。',
+        requestId: 'req-1',
+        modelLabel: 'deepseek-v4-pro',
+      },
+    ]
+  )
+})
+
 test('collectCliToolNames extracts unique tool names from source kinds', () => {
   assert.deepEqual(
     collectCliToolNames([
