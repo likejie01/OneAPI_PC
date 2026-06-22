@@ -2541,3 +2541,57 @@ input:checked + .toggle-track {
   background-image: none !important;
   filter: none !important;
 }
+
+/* Final CLI transcript authority: preserve full process text and avoid assistant reply backplates. */
+.cli-page .cli-turn-group {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.cli-page .message-bubble.assistant {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.cli-page .message-bubble.assistant > .message-role {
+  display: none !important;
+}
+
+.cli-page .cli-log-card-head,
+.cli-page .cli-log-card-title,
+.cli-page .cli-log-phase-head,
+.cli-page .cli-log-phase-headline,
+.cli-page .cli-log-time-head,
+.cli-page .cli-log-time-copy,
+.cli-page .cli-log-event-head,
+.cli-page .cli-log-event-copy,
+.cli-page .cli-log-event-toggle,
+.cli-page .cli-log-output-stack-title,
+.cli-page .cli-log-output-inline-copy {
+  min-width: 0 !important;
+  max-width: 100% !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  white-space: normal !important;
+}
+
+.cli-page .cli-log-card-title strong,
+.cli-page .cli-log-phase-headline strong,
+.cli-page .cli-log-time-copy strong,
+.cli-page .cli-log-event-copy strong,
+.cli-page .cli-log-event-toggle strong,
+.cli-page .cli-log-event-toggle span,
+.cli-page .cli-log-output-stack-title strong,
+.cli-page .cli-log-output-inline-copy strong {
+  overflow: visible !important;
+  text-overflow: clip !important;
+  white-space: pre-wrap !important;
+  overflow-wrap: anywhere !important;
+  word-break: break-word !important;
+}

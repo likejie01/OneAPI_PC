@@ -18,7 +18,7 @@ import { buildExecutionCycleEvents } from '../src/process/execution-orchestrator
 import { buildFinalPrompt } from '../src/process/prompt-assembler/build-final-prompt.ts'
 import { buildCliExtensionDedupeKey, parseMarkdownFrontmatterMeta } from '../src/lib/cli-extensions.ts'
 import { buildBundledCodexCuratedSkillEntries, buildBundledMarketplaceEntries } from '../src/lib/cli-marketplace-catalog.ts'
-import { pickClaudeApiKeyFromUnknown, resolveClaudeDesktopEnv } from '../src/lib/claude-cli-config.ts'
+import { normalizeClaudeApiKeyForSource, pickClaudeApiKeyFromUnknown, resolveClaudeDesktopEnv } from '../src/lib/claude-cli-config.ts'
 import { extractCliUserTask } from '../src/lib/cli-prompt.ts'
 import { isCliSessionReadyForLatestTurn } from '../src/lib/cli-session-readiness.ts'
 import { normalizeDesktopCliApiKey } from '../src/lib/cli-deploy.ts'
@@ -1228,9 +1228,12 @@ function createCodexPeerMcpEnv(
   }
   const apiKey = pickClaudeApiKey(settingsEnv)
   if (apiKey) {
-    const normalizedKey = resolveDesktopCliKeyRecord(apiKey)
+    const normalizedKey = normalizeClaudeApiKeyForSource(apiKey, settingsEnv.ONEAPI_API_KEY_SOURCE)
     env.ANTHROPIC_API_KEY = normalizedKey
     delete env.ANTHROPIC_AUTH_TOKEN
+  }
+  if (settingsEnv.ONEAPI_API_KEY_SOURCE?.trim()) {
+    env.ONEAPI_API_KEY_SOURCE = settingsEnv.ONEAPI_API_KEY_SOURCE.trim()
   }
   if (settingsEnv.ANTHROPIC_BASE_URL?.trim()) {
     env.ANTHROPIC_BASE_URL = normalizeClaudeBaseUrl(settingsEnv.ANTHROPIC_BASE_URL)
@@ -1432,23 +1435,46 @@ function resolveDesktopCliKeyRecord(apiKey: string) {
   return apiKey.startsWith('sk-') ? apiKey : `sk-${apiKey}`
 }
 
+const DESKTOP_CLI_RUNTIME_ONEAPI_KEY_PATTERN = /^[A-Za-z0-9]{48}$/
+
+function normalizeRuntimeCliApiKey(apiKey?: string, apiKeySource?: 'oneapi' | 'custom') {
+  const trimmed = apiKey?.trim() || ''
+  if (!trimmed) {
+    return ''
+  }
+  if (apiKeySource === 'custom') {
+    return trimmed
+  }
+  if (apiKeySource === 'oneapi') {
+    return resolveDesktopCliKeyRecord(trimmed)
+  }
+  if (DESKTOP_CLI_RUNTIME_ONEAPI_KEY_PATTERN.test(trimmed)) {
+    return resolveDesktopCliKeyRecord(trimmed)
+  }
+  return trimmed
+}
+
 function resolveDeployCliApiKey(request: Pick<CliDeployRequest, 'apiKey' | 'apiKeySource'>) {
   if (request.apiKeySource === 'custom') {
     const trimmed = request.apiKey.trim()
     if (!trimmed) {
       throw new Error('请先填写自定义 API Key。')
     }
-    return resolveDesktopCliKeyRecord(trimmed)
+    return trimmed
   }
   return normalizeDesktopCliApiKey(request.apiKey)
 }
 
-function resolveRuntimeCliApiKey(request: Pick<CliRunRequest, 'apiKey'>, fallbackApiKey?: string) {
+function resolveRuntimeCliApiKey(request: Pick<CliRunRequest, 'apiKey' | 'apiKeySource'>, fallbackApiKey?: string) {
   const requested = request.apiKey?.trim()
   if (requested) {
-    return resolveDesktopCliKeyRecord(requested)
+    return normalizeRuntimeCliApiKey(requested, request.apiKeySource)
   }
-  return resolveDesktopCliKeyRecord(fallbackApiKey?.trim() || '')
+  return normalizeRuntimeCliApiKey(fallbackApiKey)
+}
+
+function normalizeCliApiKeyForSource(apiKey: string | undefined, apiKeySource?: 'oneapi' | 'custom') {
+  return normalizeRuntimeCliApiKey(apiKey, apiKeySource)
 }
 
 function maskSensitiveText(value?: string) {
@@ -1586,7 +1612,7 @@ function buildClaudeCliEnv(
 
   const apiKey = pickClaudeApiKey(configEnv)
   if (apiKey) {
-    const normalizedKey = resolveDesktopCliKeyRecord(apiKey)
+    const normalizedKey = normalizeClaudeApiKeyForSource(apiKey, configEnv.ONEAPI_API_KEY_SOURCE)
     nextEnv.ANTHROPIC_API_KEY = normalizedKey
   }
 
@@ -4259,7 +4285,7 @@ function buildCodexExecArgs(
   const args = ['exec']
 
   if (runtimeConfig?.apiKey?.trim() && runtimeConfig.baseUrl?.trim()) {
-    const apiKey = normalizeDesktopCliApiKey(runtimeConfig.apiKey)
+    const apiKey = runtimeConfig.apiKey.trim()
     const baseUrl = normalizeCodexBaseUrl(runtimeConfig.baseUrl)
     args.push(
       '--ignore-user-config',
@@ -5630,6 +5656,7 @@ async function writeClaudeConfig(request: CliDeployRequest) {
     ...currentEnv,
     ANTHROPIC_API_KEY: resolvedApiKey,
     ANTHROPIC_BASE_URL: resolvedBaseUrl,
+    ONEAPI_API_KEY_SOURCE: request.apiKeySource || 'oneapi',
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
     API_TIMEOUT_MS: '600000',
     ONEAPI_ORIGINAL_ANTHROPIC_API_KEY:
@@ -5658,6 +5685,7 @@ async function writeClaudeConfig(request: CliDeployRequest) {
         auth_mode: 'apikey',
         ANTHROPIC_API_KEY: resolvedApiKey,
         ANTHROPIC_BASE_URL: resolvedBaseUrl,
+        ONEAPI_API_KEY_SOURCE: request.apiKeySource || 'oneapi',
         model: resolvedModel,
       },
       null,
@@ -5668,7 +5696,10 @@ async function writeClaudeConfig(request: CliDeployRequest) {
   await persistClaudeApiEnvironment(resolvedApiKey, resolvedBaseUrl)
 
   const written = await readResolvedClaudeSettingsDocument(targetPath)
-  const writtenKey = resolveDesktopCliKeyRecord(pickClaudeApiKey(written.env))
+  const writtenKey = normalizeClaudeApiKeyForSource(
+    pickClaudeApiKey(written.env),
+    written.env?.ONEAPI_API_KEY_SOURCE
+  )
   const writtenBaseUrl = normalizeClaudeBaseUrl(written.env?.ANTHROPIC_BASE_URL)
   const writtenModel = written.model?.trim() || DEFAULT_CLAUDE_MODEL
   if (
@@ -5861,7 +5892,7 @@ async function diagnoseCodexEnvironment(
     const current = await readCurrentCodexConfig()
     const configMatches =
       current.baseUrl === resolvedBaseUrl &&
-      resolveDesktopCliKeyRecord(current.apiKey) === resolvedKey
+      normalizeCliApiKeyForSource(current.apiKey, request.apiKeySource) === resolvedKey
     logger.info(
       'diagnose',
       configMatches ? 'success' : 'error',
@@ -5882,7 +5913,9 @@ async function diagnoseCodexEnvironment(
     const raw = await fs.readFile(authPath, 'utf8')
     const parsed = JSON.parse(raw) as Record<string, unknown>
     const authKey =
-      typeof parsed.OPENAI_API_KEY === 'string' ? resolveDesktopCliKeyRecord(parsed.OPENAI_API_KEY) : ''
+      typeof parsed.OPENAI_API_KEY === 'string'
+        ? normalizeCliApiKeyForSource(parsed.OPENAI_API_KEY, request.apiKeySource)
+        : ''
     logger.info(
       'diagnose',
       authKey === resolvedKey ? 'success' : 'error',
@@ -6001,7 +6034,7 @@ async function diagnoseClaudeEnvironment(
     const current = await readCurrentClaudeConfig()
     const configMatches =
       current.baseUrl === resolvedBaseUrl &&
-      resolveDesktopCliKeyRecord(current.apiKey) === resolvedKey
+      normalizeCliApiKeyForSource(current.apiKey, request.apiKeySource) === resolvedKey
     logger.info(
       'diagnose',
       configMatches ? 'success' : 'error',
@@ -6019,7 +6052,7 @@ async function diagnoseClaudeEnvironment(
 
   try {
     const parsed = await readClaudeAuthDocument()
-    const authKey = resolveDesktopCliKeyRecord(pickClaudeApiKeyFromUnknown(parsed))
+    const authKey = normalizeCliApiKeyForSource(pickClaudeApiKeyFromUnknown(parsed), request.apiKeySource)
     logger.info(
       'diagnose',
       authKey === resolvedKey ? 'success' : 'error',

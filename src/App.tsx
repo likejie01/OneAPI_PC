@@ -37,7 +37,6 @@ import {
 } from './domains/auth'
 import {
   copyImageToClipboard,
-  getUserModels,
   sendChatCompletion,
 } from './domains/chat'
 import {
@@ -85,7 +84,7 @@ import {
   sameActiveDesktopApiKeySummary,
   type ActiveDesktopApiKeySummary,
 } from './features/desktop-api-key-models'
-import { getSelectedDesktopApiKeyStorageKey } from './lib/desktop-api-keys'
+import { readSelectedDesktopApiKeyId } from './lib/desktop-api-keys'
 import {
   resolveCliHistorySessionForProject,
   resolvePreferredCliSessionId,
@@ -235,6 +234,7 @@ import { readJsonStorage, writeJsonStorage } from './lib/storage'
 import {
   AI_CHAT_PROVIDER_STORAGE_KEY,
   DEFAULT_AI_CHAT_PROVIDER_CONFIG,
+  listCustomAiChatProviderModels,
   normalizeAiChatProviderConfig,
   normalizeOpenAICompatibleBaseUrl,
   resolveAiChatProviderState,
@@ -538,9 +538,12 @@ function CliWorkspace(props: {
   const threadRef = useRef<HTMLDivElement | null>(null)
   const projectSessionMapRef = useRef(projectSessionMap)
   const requestSessionMapRef = useRef(requestSessionMap)
+  const sessionLogsMapRef = useRef(sessionLogsMap)
+  const cliMessageOverlaysRef = useRef(cliMessageOverlays)
   const activeRequestIdRef = useRef('')
   const stoppingRunRef = useRef(false)
   const autoHydratingSessionIdsRef = useRef<Set<string>>(new Set())
+  const emptyDraftSessionIdsRef = useRef<Set<string>>(new Set())
   const pendingCliLogEntriesRef = useRef<Record<string, CliLogEntry[]>>({})
   const pendingCliLogFlushTimerRef = useRef<number | null>(null)
   const cliLogEntrySequenceRef = useRef(0)
@@ -1035,6 +1038,7 @@ function CliWorkspace(props: {
         [toSessionId]: [...(current[toSessionId] || []), ...fromEntries],
       }
       delete next[fromSessionId]
+      cliMessageOverlaysRef.current = next
       return next
     })
     setSessionPlansMap((current) => {
@@ -1051,20 +1055,30 @@ function CliWorkspace(props: {
   }, [])
 
   const persistCliMessageOverlay = useCallback((sessionId: string, message: CliMessage) => {
-    if (!sessionId || message.role !== 'user') {
+    if (!sessionId) {
       return
     }
     const nextOverlay: CliMessageOverlay = {
+      id: message.id,
       role: message.role,
       content: message.content,
+      createdAt: message.createdAt,
       requestId: message.requestId,
+      modelLabel: message.modelLabel,
+      usage: message.usage,
       attachments: message.attachments,
       selectedExtensions: message.selectedExtensions,
+      fileChanges: message.fileChanges,
+      files: message.files,
     }
-    setCliMessageOverlays((current) => ({
-      ...current,
-      [sessionId]: [...(current[sessionId] || []), nextOverlay],
-    }))
+    setCliMessageOverlays((current) => {
+      const next = {
+        ...current,
+        [sessionId]: [...(current[sessionId] || []), nextOverlay],
+      }
+      cliMessageOverlaysRef.current = next
+      return next
+    })
   }, [])
 
   const flushPendingCliLogEntries = useCallback(() => {
@@ -1076,37 +1090,52 @@ function CliWorkspace(props: {
       return
     }
 
-    startTransition(() => {
-      setSessionLogsMap((current) => {
-        let changed = false
-        const next: Record<string, CliLogEntry[]> = { ...current }
+    let changed = false
+    const next: Record<string, CliLogEntry[]> = { ...sessionLogsMapRef.current }
 
-        for (const sessionId of sessionIds) {
-          const entries = pending[sessionId]
-          if (!entries?.length) {
-            continue
-          }
-          let sessionLogs = next[sessionId] || []
-          for (const entry of entries) {
-            const lastEntry = sessionLogs.at(-1)
-            if (isSameCliLogEntry(lastEntry, entry)) {
-              continue
-            }
-            if (shouldReplaceStreamingCliIntentEntry(lastEntry, entry)) {
-              const replaceId = lastEntry?.id
-              if (replaceId) {
-                sessionLogs = sessionLogs.map((item) => (item.id === replaceId ? entry : item))
-                changed = true
-              }
-              continue
-            }
-            sessionLogs = [...sessionLogs, entry]
+    for (const sessionId of sessionIds) {
+      const entries = pending[sessionId]
+      if (!entries?.length) {
+        continue
+      }
+      let sessionLogs = next[sessionId] || []
+      for (const entry of entries) {
+        const lastEntry = sessionLogs.at(-1)
+        if (isSameCliLogEntry(lastEntry, entry)) {
+          continue
+        }
+        if (shouldReplaceStreamingCliIntentEntry(lastEntry, entry)) {
+          const replaceId = lastEntry?.id
+          if (replaceId) {
+            sessionLogs = sessionLogs.map((item) => (item.id === replaceId ? entry : item))
             changed = true
           }
-          next[sessionId] = sessionLogs
+          continue
         }
+        sessionLogs = [...sessionLogs, entry]
+        changed = true
+      }
+      next[sessionId] = sessionLogs
+    }
 
-        return changed ? next : current
+    if (!changed) {
+      return
+    }
+
+    sessionLogsMapRef.current = next
+    startTransition(() => {
+      setSessionLogsMap((current) => {
+        if (current === sessionLogsMapRef.current) {
+          return current
+        }
+        let hasNewerState = false
+        for (const sessionId of sessionIds) {
+          if ((current[sessionId] || []).length > (next[sessionId] || []).length) {
+            hasNewerState = true
+            continue
+          }
+        }
+        return hasNewerState ? current : next
       })
     })
   }, [])
@@ -1377,6 +1406,26 @@ function CliWorkspace(props: {
   }, [requestSessionMap])
 
   useEffect(() => {
+    sessionLogsMapRef.current = sessionLogsMap
+  }, [sessionLogsMap])
+
+  useEffect(() => {
+    cliMessageOverlaysRef.current = cliMessageOverlays
+  }, [cliMessageOverlays])
+
+  const flushPersistentCliSessionState = useCallback(() => {
+    flushPendingCliLogEntries()
+    writeJsonStorage(`oneapi-desktop-${client}-message-overlays`, cliMessageOverlaysRef.current)
+    writeJsonStorage(`oneapi-desktop-${client}-session-logs`, sessionLogsMapRef.current)
+    writeJsonStorage(`oneapi-desktop-${client}-session-plans`, sessionPlansMap)
+  }, [client, flushPendingCliLogEntries, sessionPlansMap])
+
+  useEffect(() => {
+    window.addEventListener('beforeunload', flushPersistentCliSessionState)
+    return () => window.removeEventListener('beforeunload', flushPersistentCliSessionState)
+  }, [flushPersistentCliSessionState])
+
+  useEffect(() => {
     writeJsonStorage(`oneapi-desktop-${client}-pinned-groups`, pinnedHistoryGroups)
   }, [client, pinnedHistoryGroups])
 
@@ -1441,7 +1490,7 @@ function CliWorkspace(props: {
     void (async () => {
       try {
         const models = aiChatProviderMode === 'custom'
-          ? await getUserModels()
+          ? listCustomAiChatProviderModels(providerState)
           : await loadOneApiModelsForActiveKey(activeApiKey)
         if (!disposed) {
           setCliModels(models)
@@ -1467,6 +1516,7 @@ function CliWorkspace(props: {
     aiChatProviderMode,
     client,
     preferredCliModel,
+    providerState,
   ])
 
   useEffect(() => {
@@ -1618,6 +1668,36 @@ function CliWorkspace(props: {
           }
         })
         if (payload.done) {
+          const assistantContent = payload.message.trim()
+          if (assistantContent) {
+            const assistantMessage: CliMessage = {
+              id: `assistant-${payload.requestId}`,
+              role: 'assistant',
+              content: assistantContent,
+              createdAt: payload.createdAt,
+              requestId: payload.requestId,
+              modelLabel: selectedModelLabel,
+              fileChanges: payload.files,
+            }
+            setSessionMessagesMap((current) => {
+              const previous = current[targetSessionId] || []
+              const nextMessages = appendCliFallbackAssistantMessage(previous, {
+                id: assistantMessage.id,
+                content: assistantMessage.content,
+                createdAt: assistantMessage.createdAt,
+                requestId: assistantMessage.requestId,
+                modelLabel: assistantMessage.modelLabel,
+                fileChanges: assistantMessage.fileChanges,
+              })
+              return nextMessages === previous
+                ? current
+                : {
+                    ...current,
+                    [targetSessionId]: nextMessages,
+                  }
+            })
+            persistCliMessageOverlay(targetSessionId, assistantMessage)
+          }
           window.setTimeout(() => {
             setSessionPartialMap((current) => ({
               ...current,
@@ -1765,6 +1845,9 @@ function CliWorkspace(props: {
       lastOpenedProjectPath,
     })
     if (isDraftCliSessionId(preferredSessionId)) {
+      if (emptyDraftSessionIdsRef.current.has(preferredSessionId)) {
+        return
+      }
       return
     }
     const targetHistory = resolveCliHistorySessionForProject({
@@ -2081,6 +2164,7 @@ function CliWorkspace(props: {
     }
 
     const nextSessionId = `draft-${client}-${Date.now()}`
+    emptyDraftSessionIdsRef.current.add(nextSessionId)
     bindProjectSession(nextProjectPath, nextSessionId)
     setSessionMessagesMap((current) => ({
       ...current,
@@ -2512,6 +2596,7 @@ function CliWorkspace(props: {
       projectSessionMapRef.current[requestProjectKey]?.trim() ||
       activeSessionId ||
       `draft-${client}-${Date.now()}`
+    emptyDraftSessionIdsRef.current.delete(currentSessionKey)
     const matchedBuiltinCommand = matchCliBuiltinCommand(client, cleanedPrompt)
     const planMode = matchedBuiltinCommand?.id === 'plan'
     const visiblePrompt = planMode ? stripCliPlanCommandPrompt(cleanedPrompt) : cleanedPrompt
@@ -2668,6 +2753,7 @@ function CliWorkspace(props: {
         reasoningEffort,
         fullAccess,
         apiKey: runtimeApiKey,
+        apiKeySource: aiChatProviderMode === 'custom' ? 'custom' : 'oneapi',
         baseUrl: runtimeBaseUrl,
       })
 
@@ -2714,19 +2800,29 @@ function CliWorkspace(props: {
         const responseFileChanges = Array.isArray(response.metadata?.fileChanges)
           ? response.metadata.fileChanges as CliSessionMessage['fileChanges']
           : undefined
+        const assistantMessage: CliMessage = {
+          id: `assistant-${requestId}`,
+          role: 'assistant',
+          content: response.output,
+          createdAt: Date.now(),
+          requestId,
+          modelLabel: selectedModelLabel,
+          fileChanges: responseFileChanges,
+          usage:
+            response.metadata && typeof response.metadata === 'object' && 'usage' in response.metadata
+              ? response.metadata.usage as CliSessionMessage['usage']
+              : undefined,
+        }
         setSessionMessagesMap((current) => {
           const previous = current[nextSessionId] || []
           const nextMessages = appendCliFallbackAssistantMessage(previous, {
-            id: `assistant-${requestId}`,
-            content: response.output,
-            createdAt: Date.now(),
+            id: assistantMessage.id,
+            content: assistantMessage.content,
+            createdAt: assistantMessage.createdAt,
             requestId,
-            modelLabel: selectedModelLabel,
-            fileChanges: responseFileChanges,
-            usage:
-              response.metadata && typeof response.metadata === 'object' && 'usage' in response.metadata
-                ? response.metadata.usage as CliSessionMessage['usage']
-                : undefined,
+            modelLabel: assistantMessage.modelLabel,
+            fileChanges: assistantMessage.fileChanges,
+            usage: assistantMessage.usage,
           })
           if (nextMessages === previous) {
             return current
@@ -2736,6 +2832,7 @@ function CliWorkspace(props: {
             [nextSessionId]: nextMessages,
           }
         })
+        persistCliMessageOverlay(nextSessionId, assistantMessage)
       }
 
       if (!response.success && response.metadata?.aborted !== true) {
@@ -2987,9 +3084,7 @@ function CliWorkspace(props: {
         className={`message-bubble ${item.role} ${item.kind === 'partial' ? 'streaming-bubble' : ''}`}
       >
         <span className='message-role'>
-          {item.role === 'assistant'
-            ? item.modelLabel || selectedModelLabel
-            : ''}
+          {item.role === 'assistant' ? '' : ''}
         </span>
         <MessageAttachmentGallery
           attachments={'attachments' in item ? item.attachments : undefined}
@@ -3097,7 +3192,7 @@ function CliWorkspace(props: {
                       <div key={item.id} className='cli-turn-group'>
                         <CliLogBubble
                           item={item}
-                          expanded={true}
+                          expanded={false}
                           expandedEventIds={expandedLogEventMap[item.id] || []}
                           onToggleEvent={(eventId) => toggleLogEvent(item.id, eventId)}
                           onOpenFile={(ownerId, path) => void handlePreviewFile(ownerId, path)}
@@ -3116,7 +3211,7 @@ function CliWorkspace(props: {
                     <Fragment key={item.id}>
                     <CliLogBubble
                       item={item}
-                      expanded={true}
+                      expanded={!hasAssistantReply}
                       expandedEventIds={expandedLogEventMap[item.id] || []}
                       onToggleEvent={(eventId) => toggleLogEvent(item.id, eventId)}
                       onOpenFile={(ownerId, path) => void handlePreviewFile(ownerId, path)}
@@ -3826,8 +3921,7 @@ export function App() {
           return
         }
         const resolved = Number(status?.quota_per_unit || 0)
-        const selectedApiKeyStorageKey = getSelectedDesktopApiKeyStorageKey(authenticatedUserId)
-        const persistedSelectedApiKeyId = readJsonStorage<number | null>(selectedApiKeyStorageKey, null)
+        const persistedSelectedApiKeyId = readSelectedDesktopApiKeyId(authenticatedUserId, readJsonStorage)
         setSidebarQuotaPerUnit(resolved > 0 ? resolved : 500_000)
         setActiveDesktopApiKey(resolveActiveDesktopApiKeySummary(keyPage?.items ?? [], persistedSelectedApiKeyId))
       })
@@ -3840,6 +3934,26 @@ export function App() {
 
     return () => {
       disposed = true
+    }
+  }, [auth.user?.id])
+
+  useEffect(() => {
+    function handleDesktopApiKeySelection(event: Event) {
+      const detail = (event as CustomEvent<{ userId?: number | string; apiKeyId?: number | null }>).detail
+      if (!auth.user?.id || String(detail?.userId ?? '') !== String(auth.user.id)) {
+        return
+      }
+      void getApiKeys(1, 100)
+        .then((keyPage) => {
+          const selectedApiKeyId = detail?.apiKeyId ?? readSelectedDesktopApiKeyId(auth.user?.id || '', readJsonStorage)
+          setActiveDesktopApiKey(resolveActiveDesktopApiKeySummary(keyPage?.items ?? [], selectedApiKeyId))
+        })
+        .catch(() => undefined)
+    }
+
+    window.addEventListener('oneapi:desktop-api-key-selection', handleDesktopApiKeySelection as EventListener)
+    return () => {
+      window.removeEventListener('oneapi:desktop-api-key-selection', handleDesktopApiKeySelection as EventListener)
     }
   }, [auth.user?.id])
 

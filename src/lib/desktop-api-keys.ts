@@ -8,9 +8,43 @@ export const API_KEY_STATUS_ENABLED = 1
 export const API_KEY_STATUS_DISABLED = 2
 export const ALL_CHANNEL_GROUPS_KEY_GROUP = 'default'
 export const SELECTED_DESKTOP_API_KEY_STORAGE_PREFIX = 'oneapi-desktop-selected-api-key'
+export const SELECTED_DESKTOP_API_KEY_FALLBACK_STORAGE_KEY = `${SELECTED_DESKTOP_API_KEY_STORAGE_PREFIX}-last`
 
 export function getSelectedDesktopApiKeyStorageKey(userId: number | string) {
   return `${SELECTED_DESKTOP_API_KEY_STORAGE_PREFIX}-${userId}`
+}
+
+type JsonStorageReader = <T>(key: string, fallback: T) => T
+type JsonStorageWriter = <T>(key: string, value: T) => void
+type StorageRemover = (key: string) => void
+
+export function readSelectedDesktopApiKeyId(
+  userId: number | string,
+  readJsonStorage: JsonStorageReader
+) {
+  const selectedApiKeyStorageKey = getSelectedDesktopApiKeyStorageKey(userId)
+  return readJsonStorage<number | null>(
+    selectedApiKeyStorageKey,
+    readJsonStorage<number | null>(SELECTED_DESKTOP_API_KEY_FALLBACK_STORAGE_KEY, null)
+  )
+}
+
+export function writeSelectedDesktopApiKeyId(
+  userId: number | string,
+  nextId: number,
+  writeJsonStorage: JsonStorageWriter
+) {
+  const selectedApiKeyStorageKey = getSelectedDesktopApiKeyStorageKey(userId)
+  writeJsonStorage(selectedApiKeyStorageKey, nextId)
+  writeJsonStorage(SELECTED_DESKTOP_API_KEY_FALLBACK_STORAGE_KEY, nextId)
+}
+
+export function clearSelectedDesktopApiKeyId(
+  userId: number | string,
+  removeStorage: StorageRemover
+) {
+  removeStorage(getSelectedDesktopApiKeyStorageKey(userId))
+  removeStorage(SELECTED_DESKTOP_API_KEY_FALLBACK_STORAGE_KEY)
 }
 
 export function isAllChannelGroupsDesktopApiKeyGroup(group: string | null | undefined) {

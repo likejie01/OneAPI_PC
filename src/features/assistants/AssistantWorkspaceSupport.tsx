@@ -2650,7 +2650,7 @@ export function CliLogBubble(props: {
           )
         })}
       </div>
-      {!expanded ? <CliLogStatusFooter logStatus={logStatus} summary={statusSummary} /> : null}
+      {!expanded ? <CliLogStatusFooter logStatus={logStatus} summary={statusSummary} label='Thinking' /> : null}
       {uniqueFiles.length > 0 && !expanded ? (
         <div className='cli-log-files'>
           {uniqueFiles.slice(0, 4).map((fileItem) => (
@@ -2692,13 +2692,14 @@ export function CliLogBubble(props: {
 export function CliLogStatusFooter(props: {
   logStatus: ReturnType<typeof resolveCliLogGroupStatus>
   summary: string
+  label?: string
 }) {
-  const { logStatus, summary } = props
+  const { logStatus, summary, label } = props
   return (
     <div className='cli-log-status-bar'>
       <span className={`cli-log-status-pill ${logStatus.tone}`}>
         {logStatus.tone === 'running' ? <LoaderCircle className='spin' size={13} /> : null}
-        {logStatus.label}
+        {label || logStatus.label}
       </span>
       <small>{summary}</small>
     </div>

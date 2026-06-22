@@ -5,6 +5,7 @@ import {
   DEFAULT_AI_CHAT_PROVIDER_CONFIG,
   hasUsableCustomAiChatProvider,
   isOneApiBridgeOnlyCliModel,
+  listCustomAiChatProviderModels,
   normalizeAiChatProviderConfig,
   normalizeOpenAICompatibleBaseUrl,
   resolveAiChatProviderState,
@@ -69,4 +70,23 @@ test('DeepSeek and Xiaomi MiMo cli models stay available for custom provider bri
 
   assert.equal(shouldDisableCliModelForProvider('deepseek-chat', 'custom'), false)
   assert.equal(shouldDisableCliModelForProvider('deepseek-chat', 'oneapi'), false)
+})
+
+test('custom provider models are available to cli workspaces without login', () => {
+  const state = resolveAiChatProviderState(
+    normalizeAiChatProviderConfig({
+      customEnabled: true,
+      customBaseUrl: 'https://proxy.example.com',
+      customApiKey: 'sk-custom',
+      customDefaultModel: 'deepseek-v4-pro',
+      customModels: ['deepseek-v4-pro', 'xiaomimimo-v2.5-pro', 'claude-sonnet-4-6', ''],
+    }),
+    null
+  )
+
+  assert.equal(state.mode, 'custom')
+  assert.deepEqual(
+    listCustomAiChatProviderModels(state).map((item) => item.value),
+    ['deepseek-v4-pro', 'xiaomimimo-v2.5-pro', 'claude-sonnet-4-6']
+  )
 })

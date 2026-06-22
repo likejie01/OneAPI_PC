@@ -11,8 +11,10 @@ const cliStylesSource = readFileSync(resolve(dirname(fileURLToPath(import.meta.u
 const modalsStylesSource = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '..', 'styles', 'modals.css'), 'utf8')
 const polishStylesSource = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '..', 'styles', 'polish.css'), 'utf8')
 
-test('cli log bubbles render expanded by default without a collapse header action', () => {
-  assert.match(appSource, /<CliLogBubble[\s\S]*?expanded=\{true\}/)
+test('cli log bubbles collapse as Thinking after an assistant reply', () => {
+  assert.match(appSource, /<CliLogBubble[\s\S]*?expanded=\{false\}/)
+  assert.match(appSource, /expanded=\{!hasAssistantReply\}/)
+  assert.match(assistantSupportSource, /label='Thinking'/)
   assert.doesNotMatch(appSource, /点击收起/)
 })
 
@@ -30,6 +32,25 @@ test('cli progress logs are batched without stringify comparisons in the hot pat
   assert.match(appSource, /startTransition\(\(\) => \{\s*setSessionLogsMap/)
   assert.doesNotMatch(appSource, /JSON\.stringify\(lastEntry/)
   assert.doesNotMatch(appSource, /pendingCliLogEntriesRef\.current = \{\s*\.\.\.pendingCliLogEntriesRef\.current/)
+})
+
+test('cli persisted logs and message overlays flush synchronously before window unload', () => {
+  assert.match(appSource, /flushPersistentCliSessionState/)
+  assert.match(appSource, /writeJsonStorage\(`oneapi-desktop-\$\{client\}-message-overlays`, cliMessageOverlaysRef\.current\)/)
+  assert.match(appSource, /writeJsonStorage\(`oneapi-desktop-\$\{client\}-session-logs`, sessionLogsMapRef\.current\)/)
+  assert.match(appSource, /window\.addEventListener\('beforeunload', flushPersistentCliSessionState\)/)
+})
+
+test('cli new session keeps an empty draft instead of auto hydrating the latest project session', () => {
+  assert.match(appSource, /emptyDraftSessionIdsRef/)
+  assert.match(appSource, /emptyDraftSessionIdsRef\.current\.add\(nextSessionId\)/)
+  assert.match(appSource, /emptyDraftSessionIdsRef\.current\.has\(preferredSessionId\)/)
+})
+
+test('cli assistant replies are persisted in message overlays', () => {
+  assert.match(appSource, /persistCliMessageOverlay\(nextSessionId, assistantMessage\)/)
+  assert.match(appSource, /persistCliMessageOverlay\(targetSessionId, assistantMessage\)/)
+  assert.doesNotMatch(appSource, /message\.role !== 'user'/)
 })
 
 test('cli plan panel remains mounted and ignores undefined plan payloads', () => {
@@ -75,8 +96,8 @@ test('cli log completion footer is attached only after the final assistant messa
   assert.match(appSource, /cliLogCompletionPlacement\.logByAssistantMessageId\.get\(item\.id\)/)
   assert.doesNotMatch(appSource, /slice\(activeTimeline\.indexOf\(item\) \+ 1\)[\s\S]*?hasFollowingAssistantReply/)
   assert.match(polishStylesSource, /\.cli-page \.cli-log-status-bar\s*\{[\s\S]*?display:\s*inline-flex !important[\s\S]*?max-width:\s*min\(50%, 560px\) !important/)
-  assert.match(polishStylesSource, /\.cli-page \.cli-turn-group\s*\{[\s\S]*?border-radius:\s*8px !important[\s\S]*?background:\s*rgba\(255, 255, 255, 0\.6\) !important/)
-  assert.match(polishStylesSource, /:root\[data-theme='dark'\] \.cli-page \.cli-turn-group\s*\{[\s\S]*?background:\s*rgba\(0, 0, 0, 0\.5\) !important/)
+  assert.match(polishStylesSource, /Final CLI transcript authority/)
+  assert.match(polishStylesSource, /\.cli-page \.cli-turn-group\s*\{[\s\S]*?background:\s*transparent !important[\s\S]*?box-shadow:\s*none !important/)
   assert.match(polishStylesSource, /\.cli-page \.cli-turn-group \.cli-log-status-bar\s*\{[\s\S]*?max-width:\s*min\(50%, 560px\) !important[\s\S]*?border-top:\s*1px solid/)
 })
 
@@ -119,6 +140,13 @@ test('cli log labels use theme foreground colors and readable header sizing', ()
   assert.match(polishStylesSource, /\.cli-page \.cli-log-card-title strong,[\s\S]*?\.cli-page \.cli-log-phase-headline strong,[\s\S]*?color:\s*#000 !important/)
   assert.match(polishStylesSource, /:root\[data-theme='dark'\] \.cli-page \.cli-log-card-title strong,[\s\S]*?:root\[data-theme='dark'\] \.cli-page \.cli-log-phase-headline strong,[\s\S]*?color:\s*#fff !important/)
   assert.match(polishStylesSource, /\.cli-page \.cli-log-card-title \.message-role\s*\{[\s\S]*?font-size:\s*13px !important/)
+})
+
+test('cli log process text wraps fully and assistant replies omit model labels', () => {
+  assert.match(appSource, /\{item\.role === 'assistant' \? '' : ''\}/)
+  assert.match(polishStylesSource, /\.cli-page \.message-bubble\.assistant > \.message-role\s*\{[\s\S]*?display:\s*none !important/)
+  assert.match(polishStylesSource, /\.cli-page \.cli-log-card-head,[\s\S]*?\.cli-page \.cli-log-output-inline-copy\s*\{[\s\S]*?white-space:\s*normal !important/)
+  assert.match(polishStylesSource, /\.cli-page \.cli-log-card-title strong,[\s\S]*?\.cli-page \.cli-log-output-inline-copy strong\s*\{[\s\S]*?white-space:\s*pre-wrap !important[\s\S]*?overflow-wrap:\s*anywhere !important/)
 })
 
 test('aichat history panels and ready environment notices use final transparent surfaces', () => {
