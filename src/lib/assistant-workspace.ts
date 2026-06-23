@@ -106,6 +106,12 @@ function normalizeModelValue(value: string) {
   return value.trim().toLowerCase()
 }
 
+function normalizeProviderModelValue(value: string) {
+  const normalized = normalizeModelValue(value)
+  const parts = normalized.split('/').map((part) => part.trim()).filter(Boolean)
+  return parts.at(-1) || normalized
+}
+
 function supportsEndpoint(model: ChatModelOption | undefined, endpoint: string) {
   const endpoints = model?.supportedEndpointTypes
   return Array.isArray(endpoints) && endpoints.includes(endpoint)
@@ -116,7 +122,7 @@ function hasEndpointMetadata(model: ChatModelOption | undefined) {
 }
 
 function isOpenAITextCompatibleModel(value: string) {
-  const normalized = normalizeModelValue(value)
+  const normalized = normalizeProviderModelValue(value)
   return (
     normalized.includes('codex') ||
     normalized.startsWith('gpt-') ||
@@ -128,7 +134,7 @@ function isOpenAITextCompatibleModel(value: string) {
 }
 
 function isDeepSeekCodexCompatibleModel(value: string) {
-  const normalized = normalizeModelValue(value)
+  const normalized = normalizeProviderModelValue(value)
   return normalized.startsWith('deepseek-v4-flash') || normalized.startsWith('deepseek-v4-pro')
 }
 
@@ -137,7 +143,7 @@ function isDeepSeekClaudeCompatibleModel(value: string) {
 }
 
 function normalizeMimoModelFamily(value: string) {
-  return normalizeModelValue(value)
+  return normalizeProviderModelValue(value)
     .replace(/^xiaomi[-_]?mimo[-_]?/, 'mimo-')
     .replace(/^xiaomimimo[-_]?/, 'mimo-')
 }
@@ -213,7 +219,7 @@ function stripConsumedAssistantChunks(
 }
 
 export function isCodexModel(model: ChatModelOption | string) {
-  const normalized = normalizeModelValue(typeof model === 'string' ? model : model.value)
+  const normalized = normalizeProviderModelValue(typeof model === 'string' ? model : model.value)
   if (normalized.startsWith('deepseek')) {
     if (!isDeepSeekCodexCompatibleModel(normalized)) {
       return false
@@ -254,7 +260,7 @@ export function isCodexModel(model: ChatModelOption | string) {
 }
 
 export function isClaudeModel(model: ChatModelOption | string) {
-  const normalized = normalizeModelValue(typeof model === 'string' ? model : model.value)
+  const normalized = normalizeProviderModelValue(typeof model === 'string' ? model : model.value)
   if (normalized.startsWith('deepseek')) {
     if (!isDeepSeekClaudeCompatibleModel(normalized)) {
       return false
@@ -291,7 +297,7 @@ export function isImageGenerationModel(value: string) {
 }
 
 export function resolveModelVendorFilter(value: string): Exclude<ModelVendorFilter, 'all'> | null {
-  const normalized = normalizeModelValue(value)
+  const normalized = normalizeProviderModelValue(value)
   if (!normalized) {
     return null
   }

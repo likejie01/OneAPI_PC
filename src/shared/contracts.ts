@@ -244,18 +244,39 @@ export interface SubscriptionPaymentInfo {
 export interface TopupInfo {
   enable_online_topup: boolean
   enable_stripe_topup: boolean
+  enable_alipay_topup?: boolean
   pay_methods: Array<{
     name: string
     type: string
     color?: string
-    min_topup?: number
+    min_topup?: number | string
     icon?: string
   }>
-  min_topup: number
-  stripe_min_topup: number
-  amount_options: number[]
+  min_topup: number | string
+  stripe_min_topup: number | string
+  amount_options: Array<number | string>
   discount: Record<number, number>
   topup_link?: string
+}
+
+export interface AlipayTopupOrder {
+  trade_no: string
+  pay_url?: string
+  checkout_url?: string
+  pay_form?: string
+  qr_code?: string
+  pay_type?: 'page_pay' | string
+  pay_product?: string
+  payment_product?: string
+  pay_scene?: string
+  amount: string | number
+  expires_in: number
+}
+
+export interface AlipayTopupStatus {
+  status: 'pending' | 'success' | 'failed' | 'expired' | string
+  trade_status?: string
+  trade_no: string
 }
 
 export interface BillingRecord {

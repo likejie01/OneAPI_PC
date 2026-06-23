@@ -35,6 +35,7 @@ import type {
   DesktopExportTextFileResult,
   DesktopFilePreview,
   DesktopImageEditRequest,
+  DesktopOpenHtmlRequest,
   DesktopPathInfo,
   DesktopSaveImageRequest,
   DesktopSaveImageResult,
@@ -80,6 +81,7 @@ declare global {
       listCustomProviderModels: (input: DesktopCustomModelListRequest) => Promise<string[]>
       stopRequest: (requestId: string) => Promise<void>
       openExternal: (url: string) => Promise<void>
+      openHtml: (input: DesktopOpenHtmlRequest) => Promise<void>
       openPath: (targetPath: string) => Promise<void>
       openAssistantHistoryFolder: (scope: AssistantHistoryScope, sessionId: string) => Promise<void>
       syncAssistantHistory: (scope: AssistantHistoryScope, entries: AssistantHistorySnapshotEntry[]) => Promise<void>

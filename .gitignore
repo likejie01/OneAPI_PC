@@ -35,6 +35,7 @@ server.env
 *.key
 *.crt
 *.p12
+alipay/
 
 # Local AI/editor state
 .claude/

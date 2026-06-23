@@ -125,6 +125,9 @@ function normalizeChatImageUrl(value: unknown) {
   return typeof record.url === 'string' ? record.url : stringifyCliJsonValue(value)
 }
 
+const CLI_BRIDGE_CHINESE_SYSTEM_PROMPT =
+  '除非用户明确指定其他语言，所有回复、过程说明、工具调用前的意图/目的必须使用简体中文。不要输出英文过程描述。'
+
 function responsesInputToChatMessages(input: unknown) {
   if (typeof input === 'string') {
     return [{ role: 'user', content: input }]
@@ -307,6 +310,7 @@ function convertResponsesRequestToChatRequest(body: Record<string, unknown>) {
   return {
     model: body.model,
     messages: [
+      { role: 'system', content: CLI_BRIDGE_CHINESE_SYSTEM_PROMPT },
       ...(typeof body.instructions === 'string' && body.instructions.trim()
         ? [{ role: 'system', content: body.instructions }]
         : []),
@@ -391,6 +395,7 @@ function convertClaudeMessagesRequestToChatRequest(body: Record<string, unknown>
   return {
     model: body.model,
     messages: [
+      { role: 'system', content: CLI_BRIDGE_CHINESE_SYSTEM_PROMPT },
       ...(typeof body.system === 'string' && body.system.trim()
         ? [{ role: 'system', content: body.system }]
         : []),
@@ -3892,17 +3897,8 @@ function summarizeCliIntentForLog(value: string, maxLength = 260) {
   return `${normalized.slice(0, maxLength - 1).trim()}…`
 }
 
-function summarizeCliIntentStep(value: string, maxLength = 120) {
-  const normalized = summarizeCliIntentForLog(value, maxLength * 2)
-  if (!normalized) {
-    return ''
-  }
-  const segments = normalized
-    .split(/(?<=[。！？；;.!?])\s*|(?<=\))\s+/)
-    .map((item) => item.trim())
-    .filter(Boolean)
-  const lastSegment = segments.at(-1) || normalized
-  return lastSegment.length <= maxLength ? lastSegment : `${lastSegment.slice(0, maxLength - 1).trim()}…`
+function summarizeCliIntentStep(value: string) {
+  return summarizeCliIntentForLog(value, Number.MAX_SAFE_INTEGER)
 }
 
 function describeCliToolUse(name: string, input: unknown) {
@@ -4891,8 +4887,12 @@ async function runCodexPrompt(
   const success =
     !aborted &&
     output.length > 0 &&
-    (result.exitCode === 0 || (completionReached && stoppedAfterCodexCompletion))
-  const completedWithWarnings = !aborted && !success && output.length > 0 && !!runtimeDiagnostics.policyIssue
+    (result.exitCode === 0 || completionReached || stoppedAfterCodexCompletion)
+  const completedWithWarnings =
+    !aborted &&
+    !success &&
+    output.length > 0 &&
+    (completionReached || !!runtimeDiagnostics.policyIssue || result.exitCode !== 0)
 
   if (success) {
     progress.partial(output, sessionId, true)

@@ -1,5 +1,35 @@
 import { desktopEnvelope } from '../lib/desktop-client'
-import type { BillingHistoryData, TopupInfo } from '../shared/contracts'
+import type { AlipayTopupOrder, AlipayTopupStatus, BillingHistoryData, TopupInfo } from '../shared/contracts'
+
+function isMissingAlipayRouteError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error || '')
+  return message.includes('Invalid URL') && message.includes('/api/user/alipay/')
+}
+
+function formatAlipayRouteError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error || '')
+  if (isMissingAlipayRouteError(error)) {
+    return '当前服务地址未部署支付宝扫码充值接口，请切换到已部署支付宝接口的 OneAPI 服务后重试。'
+  }
+  return message || '支付宝充值请求失败'
+}
+
+function decodeHtmlEntities(value: string) {
+  return value
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+}
+
+function normalizeAlipayTopupOrder(order: AlipayTopupOrder) {
+  return {
+    ...order,
+    pay_url: order.pay_url ? decodeHtmlEntities(String(order.pay_url)).trim() : order.pay_url,
+    checkout_url: order.checkout_url ? decodeHtmlEntities(String(order.checkout_url)).trim() : order.checkout_url,
+  }
+}
 
 export async function getTopupInfo() {
   const response = await desktopEnvelope<TopupInfo>({
@@ -40,6 +70,62 @@ export async function requestWalletPayment(amount: number, paymentMethod: string
   }
 
   return response.data
+}
+
+async function requestAlipayTopupOrder(path: string, amount: number) {
+  const response = await desktopEnvelope<AlipayTopupOrder>({
+    method: 'POST',
+    path,
+    body: {
+      amount,
+      pay_scene: 'web_page',
+      pay_product: 'alipay.trade.page.pay',
+      payment_product: 'alipay.trade.page.pay',
+    },
+  })
+
+  if (!response.success && response.message !== 'success') {
+    const message = typeof response.data === 'string' ? response.data : response.message
+    throw new Error(message || '创建支付宝订单失败')
+  }
+
+  if (!response.data?.trade_no || (!response.data.pay_form && !response.data.checkout_url && !response.data.pay_url)) {
+    throw new Error('服务端未返回支付宝收银台地址。')
+  }
+
+  return normalizeAlipayTopupOrder(response.data)
+}
+
+export async function createAlipayTopupOrder(amount: number) {
+  try {
+    return await requestAlipayTopupOrder('/api/user/alipay/pay', amount)
+  } catch (error) {
+    throw new Error(formatAlipayRouteError(error))
+  }
+}
+
+async function requestAlipayTopupStatus(path: string, tradeNo: string) {
+  const response = await desktopEnvelope<AlipayTopupStatus>({
+    method: 'GET',
+    path,
+    query: {
+      trade_no: tradeNo,
+    },
+  })
+
+  if (!response.success && response.message !== 'success') {
+    throw new Error(response.message || '查询支付宝订单失败')
+  }
+
+  return response.data
+}
+
+export async function queryAlipayTopupOrder(tradeNo: string) {
+  try {
+    return await requestAlipayTopupStatus('/api/user/alipay/query', tradeNo)
+  } catch (error) {
+    throw new Error(formatAlipayRouteError(error))
+  }
 }
 
 export async function getBillingHistory(page = 1, pageSize = 8) {

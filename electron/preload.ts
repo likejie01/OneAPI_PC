@@ -39,6 +39,7 @@ import type {
   DesktopDeleteCliSessionsResult,
   DesktopExportTextFileRequest,
   DesktopExportTextFileResult,
+  DesktopOpenHtmlRequest,
   DesktopTranslateSelectionPayload,
   DesktopUpdateState,
   DesktopMobileBridgeDevice,
@@ -96,6 +97,8 @@ contextBridge.exposeInMainWorld('desktopBridge', {
   stopRequest: (requestId: string) =>
     ipcRenderer.invoke('desktop:stop-api-request', requestId) as Promise<void>,
   openExternal: (url: string) => ipcRenderer.invoke('desktop:open-external', url) as Promise<void>,
+  openHtml: (input: DesktopOpenHtmlRequest) =>
+    ipcRenderer.invoke('desktop:open-html', input) as Promise<void>,
   openPath: (targetPath: string) =>
     ipcRenderer.invoke('desktop:open-path', targetPath) as Promise<void>,
   openAssistantHistoryFolder: (scope: AssistantHistoryScope, sessionId: string) =>

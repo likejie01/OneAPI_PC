@@ -465,7 +465,9 @@ function CliWorkspace(props: {
   const [sessionPlansMap, setSessionPlansMap] = useState<Record<string, CliPlanState | null>>(() =>
     readJsonStorage<Record<string, CliPlanState | null>>(`oneapi-desktop-${client}-session-plans`, {})
   )
-  const [sessionPartialMap, setSessionPartialMap] = useState<Record<string, string>>({})
+  const [sessionPartialMap, setSessionPartialMap] = useState<Record<string, string>>(() =>
+    readJsonStorage<Record<string, string>>(`oneapi-desktop-${client}-session-partials`, {})
+  )
   const [respondingInteractionIds, setRespondingInteractionIds] = useState<string[]>([])
   const [expandedLogEventMap, setExpandedLogEventMap] = useState<Record<string, string[]>>({})
   const [previewFile, setPreviewFile] = useState<{
@@ -1077,9 +1079,10 @@ function CliWorkspace(props: {
         [sessionId]: [...(current[sessionId] || []), nextOverlay],
       }
       cliMessageOverlaysRef.current = next
+      writeJsonStorage(`oneapi-desktop-${client}-message-overlays`, next)
       return next
     })
-  }, [])
+  }, [client])
 
   const flushPendingCliLogEntries = useCallback(() => {
     const pending = pendingCliLogEntriesRef.current
@@ -1123,6 +1126,7 @@ function CliWorkspace(props: {
     }
 
     sessionLogsMapRef.current = next
+    writeJsonStorage(`oneapi-desktop-${client}-session-logs`, next)
     startTransition(() => {
       setSessionLogsMap((current) => {
         if (current === sessionLogsMapRef.current) {
@@ -1138,7 +1142,7 @@ function CliWorkspace(props: {
         return hasNewerState ? current : next
       })
     })
-  }, [])
+  }, [client])
 
   const enqueueCliLogEntry = useCallback((sessionId: string, entry: CliLogEntry, urgent = false) => {
     const entries = pendingCliLogEntriesRef.current[sessionId]
@@ -1156,6 +1160,16 @@ function CliWorkspace(props: {
     const delay = urgent ? 0 : performanceMode === 'efficiency' ? 80 : 24
     pendingCliLogFlushTimerRef.current = window.setTimeout(flushPendingCliLogEntries, delay)
   }, [flushPendingCliLogEntries, performanceMode])
+
+  const setPersistedCliPartialMap = useCallback((updater: React.SetStateAction<Record<string, string>>) => {
+    setSessionPartialMap((current) => {
+      const next = typeof updater === 'function'
+        ? (updater as (value: Record<string, string>) => Record<string, string>)(current)
+        : updater
+      writeJsonStorage(`oneapi-desktop-${client}-session-partials`, next)
+      return next
+    })
+  }, [client])
 
   useEffect(() => {
     return () => {
@@ -1417,8 +1431,9 @@ function CliWorkspace(props: {
     flushPendingCliLogEntries()
     writeJsonStorage(`oneapi-desktop-${client}-message-overlays`, cliMessageOverlaysRef.current)
     writeJsonStorage(`oneapi-desktop-${client}-session-logs`, sessionLogsMapRef.current)
+    writeJsonStorage(`oneapi-desktop-${client}-session-partials`, sessionPartialMap)
     writeJsonStorage(`oneapi-desktop-${client}-session-plans`, sessionPlansMap)
-  }, [client, flushPendingCliLogEntries, sessionPlansMap])
+  }, [client, flushPendingCliLogEntries, sessionPartialMap, sessionPlansMap])
 
   useEffect(() => {
     window.addEventListener('beforeunload', flushPersistentCliSessionState)
@@ -1661,7 +1676,7 @@ function CliWorkspace(props: {
       }
 
       if (payload.kind === 'partial') {
-        setSessionPartialMap((current) => {
+        setPersistedCliPartialMap((current) => {
           return {
             ...current,
             [targetSessionId]: payload.message,
@@ -1699,7 +1714,7 @@ function CliWorkspace(props: {
             persistCliMessageOverlay(targetSessionId, assistantMessage)
           }
           window.setTimeout(() => {
-            setSessionPartialMap((current) => ({
+            setPersistedCliPartialMap((current) => ({
               ...current,
               [targetSessionId]: '',
             }))
@@ -1731,7 +1746,7 @@ function CliWorkspace(props: {
       enqueueCliLogEntry(targetSessionId, nextEntry, !!payload.done)
 
       if (payload.done) {
-        setSessionPartialMap((current) => ({
+        setPersistedCliPartialMap((current) => ({
           ...current,
           [targetSessionId]: '',
         }))
@@ -1739,7 +1754,7 @@ function CliWorkspace(props: {
     })
 
     return unsubscribe
-  }, [client, enqueueCliLogEntry, moveCliSessionOverlay, onRunningStateChange, persistCliMessageOverlay, projectPath])
+  }, [client, enqueueCliLogEntry, moveCliSessionOverlay, onRunningStateChange, persistCliMessageOverlay, projectPath, setPersistedCliPartialMap])
 
   useEffect(() => {
     const resetTimer = window.setTimeout(() => {
@@ -1928,7 +1943,7 @@ function CliWorkspace(props: {
       }
       return next
     })
-    setSessionPartialMap((current) => {
+        setPersistedCliPartialMap((current) => {
       const next = { ...current }
       for (const id of removeSet) {
         delete next[id]
@@ -2694,7 +2709,7 @@ function CliWorkspace(props: {
       [currentSessionKey]: [...(current[currentSessionKey] || []), userMessage],
     }))
     persistCliMessageOverlay(currentSessionKey, userMessage)
-    setSessionPartialMap((current) => ({
+    setPersistedCliPartialMap((current) => ({
       ...current,
       [currentSessionKey]: CLI_PENDING_MESSAGE_LABEL,
     }))
@@ -2725,12 +2740,17 @@ function CliWorkspace(props: {
         command: event.command,
         interaction: event.interaction,
       }) satisfies CliLogEntry)
-      return orchestrationLogs.length
+      const nextLogs = orchestrationLogs.length
         ? {
             ...current,
             [currentSessionKey]: [...previous, ...orchestrationLogs],
           }
         : current
+      if (nextLogs !== current) {
+        sessionLogsMapRef.current = nextLogs
+        writeJsonStorage(`oneapi-desktop-${client}-session-logs`, nextLogs)
+      }
+      return nextLogs
     })
     cliPromptHistory.commitInputValue(cleanedPrompt)
     setPrompt('')
@@ -2876,7 +2896,7 @@ function CliWorkspace(props: {
         delete next[requestId]
         return next
       })
-      setSessionPartialMap((current) => ({
+      setPersistedCliPartialMap((current) => ({
         ...current,
         [finalSessionKey]: '',
       }))
@@ -2898,6 +2918,7 @@ function CliWorkspace(props: {
     reasoningEffort,
     refreshCliState,
     resizePrompt,
+    setPersistedCliPartialMap,
     effectiveRunning,
     selectedModel,
     selectedModelLabel,
@@ -4516,7 +4537,15 @@ export function App() {
                   onRequestLogin={() => setLoginDialogOpen(true)}
                 />
               ) : null}
-              {sideTab === 'wallet' && auth.user ? <WalletWorkspace user={auth.user} toast={setMessage} /> : null}
+              {sideTab === 'wallet' && auth.user ? (
+                <WalletWorkspace
+                  user={auth.user}
+                  toast={setMessage}
+                  onUserRefresh={(nextUser) => {
+                    auth.setUser(nextUser)
+                  }}
+                />
+              ) : null}
               {sideTab === 'service-status' && <ServiceStatusWorkspace toast={setMessage} />}
               <MeWorkspace
                 user={auth.user}

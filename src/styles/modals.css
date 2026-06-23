@@ -3365,6 +3365,179 @@ body:has(.cli-extension-floating-tooltip)::after {
   margin-left: 0 !important;
 }
 
+.wallet-topup-split {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important;
+  gap: 12px !important;
+  align-items: stretch !important;
+}
+
+.wallet-topup-pane {
+  display: flex !important;
+  min-width: 0 !important;
+  flex-direction: column !important;
+  gap: 10px !important;
+  padding: 12px !important;
+  border: 1px solid var(--layer-border) !important;
+  border-radius: 8px !important;
+  background: var(--layer-card-bg) !important;
+}
+
+.wallet-topup-pane-head {
+  display: flex !important;
+  min-width: 0 !important;
+  flex-direction: column !important;
+  gap: 3px !important;
+}
+
+.wallet-topup-pane-head strong {
+  color: var(--text-primary) !important;
+  font-size: 14px !important;
+  line-height: 1.35 !important;
+}
+
+.wallet-topup-pane-head span {
+  color: var(--text-secondary) !important;
+  font-size: 12px !important;
+  line-height: 1.45 !important;
+}
+
+.wallet-amount-options {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 8px !important;
+}
+
+.wallet-amount-options .ghost-button {
+  min-width: 0 !important;
+  justify-content: center !important;
+}
+
+.wallet-amount-options .ghost-button.active {
+  border-color: color-mix(in srgb, var(--text-primary) 24%, var(--layer-border)) !important;
+  background: color-mix(in srgb, var(--text-primary) 7%, transparent) !important;
+  color: var(--text-primary) !important;
+}
+
+.wallet-payment-row {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto !important;
+  gap: 8px !important;
+  align-items: center !important;
+}
+
+.wallet-payment-row select,
+.wallet-payment-row .secondary-button {
+  min-width: 0 !important;
+  height: 38px !important;
+}
+
+.wallet-payment-row .secondary-button {
+  white-space: nowrap !important;
+}
+
+.alipay-pay-modal-mask {
+  z-index: 1400 !important;
+}
+
+.alipay-pay-modal {
+  width: min(480px, calc(100vw - 28px)) !important;
+}
+
+.alipay-pay-modal .panel-header.compact {
+  align-items: flex-start !important;
+}
+
+.alipay-pay-close {
+  display: inline-flex !important;
+  width: 32px !important;
+  height: 32px !important;
+  flex: 0 0 32px !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border: 0 !important;
+  border-radius: 8px !important;
+  background: transparent !important;
+  color: var(--text-secondary) !important;
+  box-shadow: none !important;
+  cursor: pointer !important;
+}
+
+.alipay-pay-close:hover {
+  color: var(--text-primary) !important;
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent) !important;
+}
+
+.alipay-qr-body {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 14px !important;
+  padding: 18px !important;
+}
+
+.alipay-cashier-notice {
+  display: grid !important;
+  gap: 8px !important;
+  padding: 16px !important;
+  border: 1px solid var(--layer-border) !important;
+  border-radius: 8px !important;
+  background: var(--layer-card-bg) !important;
+}
+
+.alipay-cashier-notice strong {
+  color: var(--text-primary) !important;
+  font-size: 15px !important;
+  font-weight: 700 !important;
+}
+
+.alipay-cashier-notice span {
+  color: var(--text-secondary) !important;
+  font-size: 13px !important;
+  line-height: 1.6 !important;
+}
+
+.alipay-pay-details {
+  display: grid !important;
+  gap: 8px !important;
+}
+
+.alipay-pay-details div {
+  display: grid !important;
+  grid-template-columns: 72px minmax(0, 1fr) !important;
+  gap: 10px !important;
+  align-items: baseline !important;
+  font-size: 13px !important;
+}
+
+.alipay-pay-details span {
+  color: var(--text-secondary) !important;
+}
+
+.alipay-pay-details strong {
+  min-width: 0 !important;
+  color: var(--text-primary) !important;
+  font-weight: 650 !important;
+  overflow-wrap: anywhere !important;
+}
+
+.alipay-pay-actions {
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 12px !important;
+}
+
+.alipay-pay-actions .ghost-button,
+.alipay-pay-actions .secondary-button {
+  min-width: 0 !important;
+  width: 100% !important;
+  white-space: nowrap !important;
+}
+
+:root[data-theme='dark'] .wallet-topup-pane {
+  border-color: var(--layer-border) !important;
+  background: var(--layer-card-bg) !important;
+}
+
 @media (max-width: 880px) {
   .toast-bar {
     right: 12px !important;
@@ -3376,6 +3549,19 @@ body:has(.cli-extension-floating-tooltip)::after {
     width: 100% !important;
     min-width: 0 !important;
     flex: 0 0 auto !important;
+  }
+
+  .wallet-topup-split {
+    grid-template-columns: 1fr !important;
+  }
+
+  .wallet-amount-options {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .wallet-payment-row,
+  .alipay-pay-actions {
+    grid-template-columns: 1fr !important;
   }
 }
 

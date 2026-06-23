@@ -20,7 +20,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { createWriteStream, promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import process from 'node:process'
 import type { ChatCompletionResponse, ImageGenerationResponse } from '../src/shared/contracts'
 import type {
@@ -43,6 +43,7 @@ import type {
   DesktopReleasePlatform,
   DesktopUpdateState,
   DesktopExportTextFileRequest,
+  DesktopOpenHtmlRequest,
 } from '../src/shared/desktop'
 import {
   buildDesktopReleaseManifestUrlCandidates,
@@ -183,6 +184,31 @@ function openExternalSafely(url: string) {
   } catch {
     // Context-menu and window-open handlers cannot surface IPC errors to the renderer.
   }
+}
+
+function sanitizeHtmlFileName(value?: string) {
+  const normalized = (value || 'alipay-checkout')
+    .trim()
+    .replace(/[^a-zA-Z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 64)
+  return normalized || 'alipay-checkout'
+}
+
+async function openHtmlInExternalBrowser(input: DesktopOpenHtmlRequest) {
+  const html = String(input?.html || '').trim()
+  if (!html || !/<form[\s>]/i.test(html)) {
+    throw new Error('支付表单内容无效。')
+  }
+  const tempDir = path.join(app.getPath('temp'), 'oneapi-pc-payments')
+  await fs.mkdir(tempDir, { recursive: true })
+  const fileName = `${sanitizeHtmlFileName(input.suggestedName)}-${Date.now()}-${randomUUID()}.html`
+  const filePath = path.join(tempDir, fileName)
+  await fs.writeFile(filePath, html, { encoding: 'utf8', mode: 0o600 })
+  await shell.openExternal(pathToFileURL(filePath).toString())
+  setTimeout(() => {
+    void fs.rm(filePath, { force: true }).catch(() => undefined)
+  }, 10 * 60 * 1000)
 }
 
 function startCliPowerSaveBlocker(requestId: string) {
@@ -3814,6 +3840,9 @@ ipcMain.handle('desktop:stop-api-request', async (_event, requestId: string) => 
 })
 ipcMain.handle('desktop:open-external', async (_event, url: string) => {
   await shell.openExternal(assertAllowedExternalUrl(url))
+})
+ipcMain.handle('desktop:open-html', async (_event, input: DesktopOpenHtmlRequest) => {
+  await openHtmlInExternalBrowser(input)
 })
 ipcMain.handle('desktop:open-path', async (_event, targetPath: string) => {
   const resolved = await resolveOpenTarget(targetPath)

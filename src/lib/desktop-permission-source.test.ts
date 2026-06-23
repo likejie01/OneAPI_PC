@@ -166,6 +166,9 @@ test('cli prompt cache proxy is available inside split cli services', () => {
 test('cli proxy bridges codex responses and claude messages to openai compatible chat completions', () => {
   assert.match(cliServicesSource, /function convertResponsesRequestToChatRequest\(/)
   assert.match(cliServicesSource, /function convertClaudeMessagesRequestToChatRequest\(/)
+  assert.match(cliServicesSource, /const CLI_BRIDGE_CHINESE_SYSTEM_PROMPT =/)
+  assert.match(cliServicesSource, /所有回复、过程说明、工具调用前的意图\/目的必须使用简体中文/)
+  assert.match(cliServicesSource, /role: 'system', content: CLI_BRIDGE_CHINESE_SYSTEM_PROMPT/)
   assert.match(cliServicesSource, /function normalizeResponsesUsage\(/)
   assert.match(cliServicesSource, /shouldBridgeResponses = input\.client === 'codex'[\s\S]*?\/\\\/responses\$\/i/)
   assert.match(cliServicesSource, /shouldBridgeClaudeMessages = input\.client === 'claude'[\s\S]*?\/\\\/messages\$\/i/)
@@ -179,6 +182,19 @@ test('cli proxy bridges codex responses and claude messages to openai compatible
   assert.match(cliServicesSource, /usage: normalizeResponsesUsage\(usage\)/)
   assert.match(cliServicesSource, /usage: normalizeResponsesUsage\(\(data as Record<string, unknown>\)\?\.usage\)/)
   assert.doesNotMatch(rendererRuntimeSources, /该模型需要登录并使用 OneAPI 专用桥接服务/)
+})
+
+test('cli intent logs preserve the complete normalized process text', () => {
+  assert.match(cliServicesSource, /function summarizeCliIntentStep\(value: string\)/)
+  assert.match(cliServicesSource, /return summarizeCliIntentForLog\(value, Number\.MAX_SAFE_INTEGER\)/)
+  assert.doesNotMatch(cliServicesSource, /function summarizeCliIntentStep\(value: string, maxLength = 120\)/)
+  assert.doesNotMatch(cliServicesSource, /const lastSegment = segments\.at\(-1\)/)
+})
+
+test('codex bridge completion can finish successfully even when the child process is stopped after completion', () => {
+  assert.match(cliServicesSource, /const success =[\s\S]*?output\.length > 0[\s\S]*?completionReached/)
+  assert.match(cliServicesSource, /const completedWithWarnings =[\s\S]*?output\.length > 0[\s\S]*?completionReached[\s\S]*?result\.exitCode !== 0/)
+  assert.match(cliServicesSource, /return \{\s*success: success \|\| completedWithWarnings/)
 })
 
 test('custom provider cli runtime keeps third-party api keys unchanged', () => {
@@ -229,8 +245,8 @@ test('custom provider image edit uses desktop multipart bridge instead of oneapi
 })
 
 test('cli submit cleanup clears local Coding partial after ipc errors', () => {
-  assert.match(appSource, /setSessionPartialMap\(\(current\) => \(\{\s*\.\.\.current,\s*\[currentSessionKey\]: CLI_PENDING_MESSAGE_LABEL/)
-  assert.match(appSource, /finally \{[\s\S]*?setSessionPartialMap\(\(current\) => \(\{\s*\.\.\.current,\s*\[finalSessionKey\]: '',\s*\}\)\)/)
+  assert.match(appSource, /setPersistedCliPartialMap\(\(current\) => \(\{\s*\.\.\.current,\s*\[currentSessionKey\]: CLI_PENDING_MESSAGE_LABEL/)
+  assert.match(appSource, /finally \{[\s\S]*?setPersistedCliPartialMap\(\(current\) => \(\{\s*\.\.\.current,\s*\[finalSessionKey\]: '',\s*\}\)\)/)
 })
 
 test('cli submit resumes the resolved current session instead of stale active session', () => {
