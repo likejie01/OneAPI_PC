@@ -210,6 +210,38 @@ test('filterAssistantModels recognizes XiaomiMIMO prefixed model names', () => {
   )
 })
 
+test('filterAssistantModels recognizes provider-prefixed DeepSeek and MIMO model names', () => {
+  const models = [
+    { label: 'deepseek-ai/deepseek-v4-pro', value: 'deepseek-ai/deepseek-v4-pro' },
+    { label: 'deepseek-ai/deepseek-v4-flash', value: 'deepseek-ai/deepseek-v4-flash' },
+    { label: 'deepseek-ai/deepseek-chat', value: 'deepseek-ai/deepseek-chat' },
+    { label: 'xiaomi/mimo-v2.5-pro', value: 'xiaomi/mimo-v2.5-pro' },
+    { label: 'xiaomi/mimo-v2.5', value: 'xiaomi/mimo-v2.5' },
+  ]
+
+  assert.deepEqual(
+    filterModelsByVendor(models, 'deepseek').map((item) => item.value),
+    ['deepseek-ai/deepseek-v4-pro', 'deepseek-ai/deepseek-v4-flash', 'deepseek-ai/deepseek-chat']
+  )
+  assert.deepEqual(
+    filterModelsByVendor(models, 'xiaomimimo').map((item) => item.value),
+    ['xiaomi/mimo-v2.5-pro', 'xiaomi/mimo-v2.5']
+  )
+  assert.deepEqual(
+    filterAssistantModels('codex', models).map((item) => item.value),
+    [
+      'deepseek-ai/deepseek-v4-pro',
+      'deepseek-ai/deepseek-v4-flash',
+      'xiaomi/mimo-v2.5-pro',
+      'xiaomi/mimo-v2.5',
+    ]
+  )
+  assert.deepEqual(
+    filterAssistantModels('claude', models).map((item) => item.value),
+    ['deepseek-ai/deepseek-v4-pro', 'deepseek-ai/deepseek-v4-flash', 'xiaomi/mimo-v2.5-pro']
+  )
+})
+
 test('filterAssistantModels keeps MIMO models appended without pricing endpoint metadata', () => {
   const models = [
     {

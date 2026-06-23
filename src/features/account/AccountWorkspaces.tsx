@@ -1,17 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { RotateCcw, Sparkles } from 'lucide-react'
+import { RotateCcw, Sparkles, X } from 'lucide-react'
 import dayjs from 'dayjs'
 import { getAuthStatus, unwrapEnvelope } from '../../domains/auth'
+import { getSelfProfile } from '../../domains/profile'
 import { getPublicPlans, getSelfSubscriptions, getSubscriptionPaymentInfo, paySubscription } from '../../domains/subscriptions'
-import { getBillingHistory, redeemTopupCode } from '../../domains/wallet'
+import { createAlipayTopupOrder, getBillingHistory, getTopupInfo, queryAlipayTopupOrder, redeemTopupCode } from '../../domains/wallet'
 import { getPerfMetricsSummary, getUserUsageLogs } from '../../domains/usage'
 import { getServiceStatusSnapshot } from '../../domains/service-status'
 import { formatDateTime, formatPlainPrice, formatPrice, formatQuota, formatQuotaAsMillions, formatQuotaAsUsd, formatSubscriptionDuration, formatSubscriptionResetPeriod } from '../../lib/format'
 import { resolveSubscriptionPlanBadge } from '../../lib/subscription-plan'
 import { readJsonStorage, writeJsonStorage } from '../../lib/storage'
 import type { ServiceStatusCacheStore, ServiceStatusItem } from '../../lib/service-status'
-import type { BillingHistoryData, PlanRecord, SubscriptionPaymentInfo, SubscriptionSelfData, UsageData, UserProfile } from '../../shared/contracts'
+import type { BillingHistoryData, PlanRecord, SubscriptionPaymentInfo, SubscriptionSelfData, TopupInfo, UsageData, UserProfile } from '../../shared/contracts'
 
 const SERVICE_STATUS_CACHE_KEY = 'oneapi-desktop-service-status'
 const PUBLIC_SUBSCRIPTION_PLANS_CACHE_KEY = 'oneapi-desktop-public-subscription-plans'
@@ -50,9 +51,52 @@ const PUBLIC_SUBSCRIPTION_PLAN_FALLBACKS: PlanRecord[] = [
     },
   },
 ]
+const REDEEM_CODE_PURCHASE_URL = 'https://oneapi.taobao.com/'
+type TopupPaymentMethod = TopupInfo['pay_methods'][number]
 
 function getDesktopBridge() {
   return window.desktopBridge
+}
+
+function getAlipayTopupMethods(topupInfo: TopupInfo | null): TopupPaymentMethod[] {
+  if (!topupInfo?.enable_alipay_topup) {
+    return []
+  }
+
+  const methods = (topupInfo?.pay_methods || [])
+    .filter((item) => item.type?.trim().toLowerCase() === 'alipay')
+    .map((item) => ({
+      ...item,
+      name: item.name?.trim() || '支付宝',
+      type: 'alipay',
+    }))
+
+  if (methods.length) {
+    return methods
+  }
+
+  return [
+    {
+      name: '支付宝',
+      type: 'alipay',
+      min_topup: topupInfo.min_topup,
+    },
+  ]
+}
+
+function formatExpiresIn(seconds: number) {
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    return '以服务端订单为准'
+  }
+  const hours = Math.floor(seconds / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
+  if (hours > 0 && minutes > 0) {
+    return `${hours} 小时 ${minutes} 分钟`
+  }
+  if (hours > 0) {
+    return `${hours} 小时`
+  }
+  return `${Math.max(1, minutes)} 分钟`
 }
 
 function isAuthRequiredErrorMessage(message: string) {
@@ -867,13 +911,27 @@ export function SubscriptionsWorkspace(props: {
 export function WalletWorkspace(props: {
   user: UserProfile
   toast: (message: string) => void
+  onUserRefresh?: (user: UserProfile) => void
 }) {
-  const { user, toast } = props
+  const { user, toast, onUserRefresh } = props
   const [quotaPerUnit, setQuotaPerUnit] = useState(500_000)
   const [billing, setBilling] = useState<BillingHistoryData | null>(null)
   const [walletPlans, setWalletPlans] = useState<PlanRecord[]>([])
   const [walletSubscriptionSelf, setWalletSubscriptionSelf] = useState<SubscriptionSelfData | null>(null)
   const [redeemCode, setRedeemCode] = useState('')
+  const [topupInfo, setTopupInfo] = useState<TopupInfo | null>(null)
+  const [topupAmount, setTopupAmount] = useState('')
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState('')
+  const [payingTopup, setPayingTopup] = useState(false)
+  const [alipayPayment, setAlipayPayment] = useState<{
+    tradeNo: string
+    payUrl?: string
+    checkoutUrl?: string
+    payForm?: string
+    amount: string
+    expiresIn: number
+  } | null>(null)
+  const [checkingAlipay, setCheckingAlipay] = useState(false)
   const [usageData, setUsageData] = useState<UsageData | null>(null)
   const [perfMetrics, setPerfMetrics] = useState<{ requestCount24h: number; avgLatencyMs: number } | null>(null)
   const [usageDistributionPage, setUsageDistributionPage] = useState(0)
@@ -914,6 +972,22 @@ export function WalletWorkspace(props: {
     return timeDiff > 0 ? totalQuota / timeDiff : 0
   }, [totalQuota, usageData?.items])
   const avgLatency = perfMetrics?.avgLatencyMs ?? 0
+  const alipayPollingRef = useRef<number | null>(null)
+  const enabledPaymentMethods = useMemo(() => getAlipayTopupMethods(topupInfo), [topupInfo])
+  const minTopupAmount = useMemo(() => {
+    const methodMin = enabledPaymentMethods
+      .filter((item) => !selectedPaymentMethod || item.type === selectedPaymentMethod)
+      .map((item) => Number(item.min_topup || 0))
+      .find((value) => value > 0)
+    return methodMin || Number(topupInfo?.min_topup || 0) || 1
+  }, [enabledPaymentMethods, selectedPaymentMethod, topupInfo?.min_topup])
+  const amountOptions = useMemo(() => {
+    const options = (topupInfo?.amount_options || [])
+      .map((item) => Number(item))
+      .filter((item) => Number.isFinite(item) && item > 0)
+    const next = options.length ? options : [minTopupAmount, 50, 100]
+    return [...new Set(next.filter((item) => item >= minTopupAmount && item !== 50))]
+  }, [minTopupAmount, topupInfo?.amount_options])
   const subscriptionUsageByTitle = useMemo(() => {
     const planTitleMap = new Map(walletPlans.map((item) => [item.plan.id, item.plan.title]))
     const records = walletSubscriptionSelf?.all_subscriptions || []
@@ -963,14 +1037,26 @@ export function WalletWorkspace(props: {
     return subscriptionUsageByTitle.get(title)?.percentage || 0
   }
 
+  function formatBillingAmount(item: BillingHistoryData['items'][number]) {
+    const method = String(item.payment_method || '').trim().toLowerCase()
+    const amount = method === 'alipay'
+      ? Number(item.amount || item.money || 0)
+      : Number(item.money || item.amount || 0)
+    return formatPrice(amount, 'CNY')
+  }
+
   const refreshWallet = useCallback(async () => {
-    const [nextBilling, nextPlans, nextSelf, nextStatus] = await Promise.all([
+    const [nextBilling, nextTopupInfo, nextPlans, nextSelf, nextStatus] = await Promise.all([
       getBillingHistory(1, 3),
+      getTopupInfo().catch(() => null),
       getPublicPlans().catch(() => []),
       getSelfSubscriptions().catch(() => null),
       unwrapEnvelope(getAuthStatus()).catch(() => null),
     ])
     setBilling(nextBilling ?? null)
+    if (nextTopupInfo) {
+      setTopupInfo(nextTopupInfo)
+    }
     setWalletPlans((nextPlans || []).filter((item) => item.plan.enabled))
     setWalletSubscriptionSelf(nextSelf)
     const resolvedQuotaPerUnit = Number(nextStatus?.quota_per_unit || 0)
@@ -979,13 +1065,101 @@ export function WalletWorkspace(props: {
     }
   }, [])
 
+  const refreshUser = useCallback(async () => {
+    if (!onUserRefresh) {
+      return
+    }
+    const profile = await unwrapEnvelope(getSelfProfile())
+    if (profile) {
+      onUserRefresh(profile as UserProfile)
+    }
+  }, [onUserRefresh])
+
+  const stopAlipayPolling = useCallback(() => {
+    if (!alipayPollingRef.current) {
+      return
+    }
+    window.clearInterval(alipayPollingRef.current)
+    alipayPollingRef.current = null
+  }, [])
+
+  const closeAlipayPayment = useCallback(() => {
+    stopAlipayPolling()
+    setAlipayPayment(null)
+  }, [stopAlipayPolling])
+
+  const completeAlipayPayment = useCallback(async () => {
+    stopAlipayPolling()
+    setAlipayPayment(null)
+    toast('支付成功，余额已刷新。')
+    await refreshWallet()
+    await refreshUser()
+  }, [refreshUser, refreshWallet, stopAlipayPolling, toast])
+
+  const checkAlipayPaymentStatus = useCallback(async (tradeNo: string, manual = false) => {
+    if (!tradeNo) {
+      return
+    }
+    if (manual) {
+      setCheckingAlipay(true)
+    }
+    try {
+      const result = await queryAlipayTopupOrder(tradeNo)
+      if (result?.status === 'success') {
+        await completeAlipayPayment()
+        return
+      }
+      if (manual) {
+        toast('暂未确认支付，请稍后刷新。')
+      }
+    } catch (error) {
+      if (manual) {
+        toast(error instanceof Error ? error.message : '暂未确认支付，请稍后刷新。')
+      }
+    } finally {
+      if (manual) {
+        setCheckingAlipay(false)
+      }
+    }
+  }, [completeAlipayPayment, toast])
+
+  const openAlipayCashier = useCallback(async (payment: { payForm?: string; checkoutUrl?: string; payUrl?: string }) => {
+    const payForm = String(payment.payForm || '').trim()
+    const checkoutUrl = String(payment.checkoutUrl || payment.payUrl || '').trim()
+    if (!payForm && !checkoutUrl) {
+      toast('服务端未返回支付宝收银台地址。')
+      return
+    }
+    try {
+      if (payForm) {
+        await getDesktopBridge()?.openHtml({
+          html: payForm,
+          suggestedName: 'alipay-checkout',
+        })
+        return
+      }
+      await getDesktopBridge()?.openExternal(checkoutUrl)
+    } catch {
+      if (payForm && checkoutUrl) {
+        try {
+          await getDesktopBridge()?.openExternal(checkoutUrl)
+          return
+        } catch {
+          /* fallback failed, surface the generic error below */
+        }
+      }
+      toast('打开支付宝收银台失败，请稍后重试。')
+    }
+  }, [toast])
+
   useEffect(() => {
     let disposed = false
 
     void (async () => {
       try {
-        const [nextBilling, nextUsageData, nextPerfMetrics, nextPlans, nextSelf, nextStatus] = await Promise.all([
+        const [nextBilling, nextTopupInfo, nextUsageData, nextPerfMetrics, nextPlans, nextSelf, nextStatus] = await Promise.all([
           getBillingHistory(1, 3),
+          getTopupInfo().catch(() => null),
           getUserUsageLogs(1, 200),
           getPerfMetricsSummary(24).catch(() => null),
           getPublicPlans().catch(() => []),
@@ -998,6 +1172,18 @@ export function WalletWorkspace(props: {
         }
 
         setBilling(nextBilling ?? null)
+        if (nextTopupInfo) {
+          setTopupInfo(nextTopupInfo)
+          const defaultMethod = nextTopupInfo.pay_methods?.find((item) => item.type?.trim())?.type?.trim() || ''
+          const defaultAlipayMethod = getAlipayTopupMethods(nextTopupInfo)[0]?.type || defaultMethod
+          if (defaultAlipayMethod) {
+            setSelectedPaymentMethod((current) => current || defaultAlipayMethod)
+          }
+          const defaultAmount = Number(nextTopupInfo.amount_options?.find((item) => Number(item) > 0 && Number(item) !== 50) || nextTopupInfo.min_topup || 0)
+          if (defaultAmount > 0) {
+            setTopupAmount((current) => current || String(defaultAmount))
+          }
+        }
         setUsageData(nextUsageData ?? null)
         setWalletPlans((nextPlans || []).filter((item) => item.plan.enabled))
         setWalletSubscriptionSelf(nextSelf)
@@ -1033,6 +1219,32 @@ export function WalletWorkspace(props: {
     setUsageDistributionPage((current) => Math.min(current, usageDistributionPageCount - 1))
   }, [usageDistributionPageCount])
 
+  useEffect(() => {
+    if (!amountOptions.length) {
+      return
+    }
+    const currentAmount = Number(topupAmount)
+    if (!amountOptions.includes(currentAmount)) {
+      setTopupAmount(String(amountOptions[0]))
+    }
+  }, [amountOptions, topupAmount])
+
+  useEffect(() => {
+    stopAlipayPolling()
+    const tradeNo = alipayPayment?.tradeNo
+    if (!tradeNo) {
+      return undefined
+    }
+
+    alipayPollingRef.current = window.setInterval(() => {
+      void checkAlipayPaymentStatus(tradeNo)
+    }, 3000)
+
+    return () => {
+      stopAlipayPolling()
+    }
+  }, [alipayPayment?.tradeNo, checkAlipayPaymentStatus, stopAlipayPolling])
+
   async function handleRedeem() {
     if (!redeemCode.trim()) {
       toast('请输入兑换码。')
@@ -1045,6 +1257,46 @@ export function WalletWorkspace(props: {
       await refreshWallet()
     } catch (error) {
       toast(error instanceof Error ? error.message : '兑换失败')
+    }
+  }
+
+  async function handleOpenRedeemCodePurchase() {
+    await getDesktopBridge()?.openExternal(REDEEM_CODE_PURCHASE_URL)
+  }
+
+  async function handleWalletPayment() {
+    const resolvedAmount = Number(topupAmount)
+    if (!Number.isFinite(resolvedAmount) || resolvedAmount < minTopupAmount) {
+      toast(`充值金额不能低于 ¥${formatPlainPrice(minTopupAmount)}。`)
+      return
+    }
+    if (!selectedPaymentMethod) {
+      toast('请选择支付方式。')
+      return
+    }
+    if (selectedPaymentMethod !== 'alipay') {
+      toast('当前仅支持支付宝收银台充值。')
+      return
+    }
+    setPayingTopup(true)
+    try {
+      const result = await createAlipayTopupOrder(Math.trunc(resolvedAmount))
+      const payUrl = String(result.pay_url || '').trim()
+      const checkoutUrl = String(result.checkout_url || '').trim()
+      const payForm = String(result.pay_form || '').trim()
+      setAlipayPayment({
+        tradeNo: result.trade_no,
+        payUrl,
+        checkoutUrl,
+        payForm,
+        amount: String(Math.trunc(resolvedAmount)),
+        expiresIn: Number(result.expires_in || 0),
+      })
+      await openAlipayCashier({ payForm, checkoutUrl, payUrl })
+    } catch (error) {
+      toast(error instanceof Error ? error.message : '创建支付宝订单失败')
+    } finally {
+      setPayingTopup(false)
     }
   }
 
@@ -1098,17 +1350,70 @@ export function WalletWorkspace(props: {
             <div className='panel-block'>
               <div className='list-block-header'>
                 <strong>充值与兑换</strong>
-                <span>仅保留兑换充值码入口</span>
+                <span>兑换码购买与服务端支付订单入口</span>
               </div>
-              <div className='subform'>
-                <input
-                  value={redeemCode}
-                  onChange={(event) => setRedeemCode(event.target.value)}
-                  placeholder='输入兑换码'
-                />
-                <button className='secondary-button full' type='button' onClick={() => void handleRedeem()}>
-                  兑换充值码
-                </button>
+              <div className='wallet-topup-split'>
+                <div className='wallet-topup-pane'>
+                  <div className='wallet-topup-pane-head'>
+                    <strong>兑换码</strong>
+                    <span>已有兑换码可直接入账</span>
+                  </div>
+                  <div className='subform compact'>
+                    <input
+                      value={redeemCode}
+                      onChange={(event) => setRedeemCode(event.target.value)}
+                      placeholder='输入兑换码'
+                    />
+                    <button className='secondary-button full' type='button' onClick={() => void handleRedeem()}>
+                      兑换充值码
+                    </button>
+                  </div>
+                  <button className='ghost-button full' type='button' onClick={() => void handleOpenRedeemCodePurchase()}>
+                    购买兑换码
+                  </button>
+                </div>
+
+                <div className='wallet-topup-pane'>
+                  <div className='wallet-topup-pane-head'>
+                    <strong>在线充值</strong>
+                    <span>服务端创建支付订单并关联当前账号</span>
+                  </div>
+                  <div className='wallet-amount-options'>
+                    {amountOptions.map((amount) => (
+                      <button
+                        key={amount}
+                        className={`ghost-button tiny ${Number(topupAmount) === amount ? 'active' : ''}`.trim()}
+                        type='button'
+                        onClick={() => setTopupAmount(String(amount))}
+                      >
+                        ¥{formatPlainPrice(amount)}
+                      </button>
+                    ))}
+                  </div>
+                  <div className='wallet-payment-row'>
+                    <select
+                      value={selectedPaymentMethod}
+                      onChange={(event) => setSelectedPaymentMethod(event.target.value)}
+                      disabled={!enabledPaymentMethods.length}
+                    >
+                      {enabledPaymentMethods.length ? enabledPaymentMethods.map((method) => (
+                        <option key={method.type} value={method.type}>
+                          {method.name || method.type}
+                        </option>
+                      )) : (
+                        <option value=''>未启用支付方式</option>
+                      )}
+                    </select>
+                    <button
+                      className='secondary-button'
+                      type='button'
+                      disabled={payingTopup || !enabledPaymentMethods.length || !topupAmount}
+                      onClick={() => void handleWalletPayment()}
+                    >
+                      {payingTopup ? '创建中...' : '支付宝收银台支付'}
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -1135,7 +1440,7 @@ export function WalletWorkspace(props: {
                           />
                           <div className='billing-card-inner'>
                             <strong>{formatBillingLabel(item)}</strong>
-                            <span>{formatPrice(item.money || item.amount || 0, 'CNY')}</span>
+                            <span>{formatBillingAmount(item)}</span>
                             <small>{item.status === 'success' ? '已完成' : item.status === 'pending' ? '处理中' : '已过期'}</small>
                           </div>
                         </div>
@@ -1205,6 +1510,62 @@ export function WalletWorkspace(props: {
           </div>
         </div>
       </article>
+      {alipayPayment ? createPortal(
+        <div className='modal-mask alipay-pay-modal-mask' role='presentation'>
+          <div className='modal-card alipay-pay-modal' role='dialog' aria-modal='true' aria-label='支付宝收银台支付'>
+            <div className='panel-header compact'>
+              <div>
+                <h2>支付宝收银台支付</h2>
+                <p>已打开支付宝收银台，支付完成后余额会自动到账。</p>
+              </div>
+              <button className='alipay-pay-close' type='button' onClick={closeAlipayPayment} aria-label='关闭'>
+                <X size={18} />
+              </button>
+            </div>
+            <div className='alipay-qr-body'>
+              <div className='alipay-cashier-notice'>
+                <strong>请在系统浏览器中完成支付</strong>
+                <span>可在支付宝收银台扫码或登录支付宝支付；本窗口会继续查询支付状态。</span>
+              </div>
+              <div className='alipay-pay-details'>
+                <div>
+                  <span>支付金额</span>
+                  <strong>¥{formatPlainPrice(Number(alipayPayment.amount))}</strong>
+                </div>
+                <div>
+                  <span>订单号</span>
+                  <strong>{alipayPayment.tradeNo}</strong>
+                </div>
+                <div>
+                  <span>有效期</span>
+                  <strong>{formatExpiresIn(alipayPayment.expiresIn)}</strong>
+                </div>
+              </div>
+              <div className='alipay-pay-actions'>
+                <button
+                  className='ghost-button'
+                  type='button'
+                  onClick={() => void openAlipayCashier(alipayPayment)}
+                >
+                  重新打开
+                </button>
+                <button
+                  className='secondary-button'
+                  type='button'
+                  disabled={checkingAlipay}
+                  onClick={() => void checkAlipayPaymentStatus(alipayPayment.tradeNo, true)}
+                >
+                  {checkingAlipay ? '查询中...' : '我已支付'}
+                </button>
+                <button className='ghost-button' type='button' onClick={closeAlipayPayment}>
+                  取消
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      ) : null}
     </section>
   )
 }

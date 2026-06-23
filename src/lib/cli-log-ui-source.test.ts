@@ -7,6 +7,10 @@ import { fileURLToPath } from 'node:url'
 const appSource = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '..', 'App.tsx'), 'utf8')
 const assistantSupportSource = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '..', 'features', 'assistants', 'AssistantWorkspaceSupport.tsx'), 'utf8')
 const settingsWorkspaceSource = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '..', 'features', 'settings', 'SettingsWorkspaces.tsx'), 'utf8')
+const accountWorkspaceSource = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '..', 'features', 'account', 'AccountWorkspaces.tsx'), 'utf8')
+const walletDomainSource = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '..', 'domains', 'wallet.ts'), 'utf8')
+const electronMainSource = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', 'electron', 'main.ts'), 'utf8')
+const electronPreloadSource = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', 'electron', 'preload.ts'), 'utf8')
 const cliStylesSource = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '..', 'styles', 'cli.css'), 'utf8')
 const modalsStylesSource = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '..', 'styles', 'modals.css'), 'utf8')
 const polishStylesSource = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '..', 'styles', 'polish.css'), 'utf8')
@@ -39,6 +43,13 @@ test('cli persisted logs and message overlays flush synchronously before window 
   assert.match(appSource, /writeJsonStorage\(`oneapi-desktop-\$\{client\}-message-overlays`, cliMessageOverlaysRef\.current\)/)
   assert.match(appSource, /writeJsonStorage\(`oneapi-desktop-\$\{client\}-session-logs`, sessionLogsMapRef\.current\)/)
   assert.match(appSource, /window\.addEventListener\('beforeunload', flushPersistentCliSessionState\)/)
+})
+
+test('cli running messages and logs are persisted immediately during streaming', () => {
+  assert.match(appSource, /writeJsonStorage\(`oneapi-desktop-\$\{client\}-message-overlays`, next\)/)
+  assert.match(appSource, /writeJsonStorage\(`oneapi-desktop-\$\{client\}-session-logs`, next\)/)
+  assert.match(appSource, /writeJsonStorage\(`oneapi-desktop-\$\{client\}-session-partials`, next\)/)
+  assert.match(appSource, /setPersistedCliPartialMap/)
 })
 
 test('cli new session keeps an empty draft instead of auto hydrating the latest project session', () => {
@@ -109,7 +120,8 @@ test('cli bridge notice is hidden under native codex openai and claude anthropic
 })
 
 test('cli user bubbles inherit the chat user bubble style instead of redefining their own surface', () => {
-  assert.doesNotMatch(modalsStylesSource, /\.cli-page \.message-bubble\.user\s*\{[\s\S]*?color-mix\(in srgb, var\(--accent\)/)
+  const standaloneCliUserBlocks = modalsStylesSource.match(/\.cli-page \.message-bubble\.user\s*\{[^}]*\}/g) || []
+  assert.ok(standaloneCliUserBlocks.every((block) => !/color-mix\(in srgb, var\(--accent\)/.test(block)))
   assert.match(modalsStylesSource, /\.chat-page \.message-bubble\.user,[\s\S]*?\.cli-page \.message-bubble\.user\s*\{[\s\S]*?background:\s*var\(--bubble-user\) !important/)
   assert.match(modalsStylesSource, /:root\[data-theme='dark'\] \.chat-page \.message-bubble\.user,[\s\S]*?:root\[data-theme='dark'\] \.cli-page \.message-bubble\.user\s*\{[\s\S]*?background:\s*var\(--bubble-user\) !important/)
   assert.match(polishStylesSource, /\.chat-page \.message-bubble\.user,[\s\S]*?\.cli-page \.message-bubble\.user\s*\{[\s\S]*?background:\s*rgba\(255, 255, 255, 0\.6\) !important/)
@@ -147,6 +159,53 @@ test('cli log process text wraps fully and assistant replies omit model labels',
   assert.match(polishStylesSource, /\.cli-page \.message-bubble\.assistant > \.message-role\s*\{[\s\S]*?display:\s*none !important/)
   assert.match(polishStylesSource, /\.cli-page \.cli-log-card-head,[\s\S]*?\.cli-page \.cli-log-output-inline-copy\s*\{[\s\S]*?white-space:\s*normal !important/)
   assert.match(polishStylesSource, /\.cli-page \.cli-log-card-title strong,[\s\S]*?\.cli-page \.cli-log-output-inline-copy strong\s*\{[\s\S]*?white-space:\s*pre-wrap !important[\s\S]*?overflow-wrap:\s*anywhere !important/)
+})
+
+test('wallet recharge area splits redemption and server-created payment entry', () => {
+  assert.match(accountWorkspaceSource, /className='wallet-topup-split'/)
+  assert.match(accountWorkspaceSource, /购买兑换码/)
+  assert.match(accountWorkspaceSource, /https:\/\/oneapi\.taobao\.com\//)
+  assert.match(accountWorkspaceSource, /createAlipayTopupOrder\(Math\.trunc\(resolvedAmount\)\)/)
+  assert.match(accountWorkspaceSource, /queryAlipayTopupOrder\(tradeNo\)/)
+  assert.match(accountWorkspaceSource, /const payUrl = String\(result\.pay_url \|\| ''\)\.trim\(\)/)
+  assert.match(accountWorkspaceSource, /const checkoutUrl = String\(result\.checkout_url \|\| ''\)\.trim\(\)/)
+  assert.match(accountWorkspaceSource, /const payForm = String\(result\.pay_form \|\| ''\)\.trim\(\)/)
+  assert.match(accountWorkspaceSource, /await openAlipayCashier\(\{ payForm, checkoutUrl, payUrl \}\)/)
+  assert.match(accountWorkspaceSource, /await getDesktopBridge\(\)\?\.openHtml\(\{[\s\S]*?html: payForm/)
+  assert.match(accountWorkspaceSource, /amount: String\(Math\.trunc\(resolvedAmount\)\)/)
+  assert.match(accountWorkspaceSource, /className='alipay-pay-close'/)
+  assert.match(accountWorkspaceSource, /重新打开/)
+  assert.match(accountWorkspaceSource, /我已支付/)
+  assert.match(accountWorkspaceSource, /支付宝收银台支付/)
+  assert.match(accountWorkspaceSource, /可在支付宝收银台扫码或登录支付宝支付/)
+  assert.doesNotMatch(accountWorkspaceSource, /QRCode\.toDataURL|alipayQrDataUrl|qrCode/)
+  assert.match(walletDomainSource, /replace\(/)
+  assert.match(walletDomainSource, /&amp;/)
+  assert.match(walletDomainSource, /normalizeAlipayTopupOrder\(response\.data\)/)
+  assert.match(walletDomainSource, /pay_scene:\s*'web_page'/)
+  assert.match(walletDomainSource, /pay_product:\s*'alipay\.trade\.page\.pay'/)
+  assert.match(walletDomainSource, /payment_product:\s*'alipay\.trade\.page\.pay'/)
+  assert.match(walletDomainSource, /response\.data\.pay_form/)
+  assert.match(walletDomainSource, /response\.data\.checkout_url/)
+  assert.match(accountWorkspaceSource, /if \(!topupInfo\?\.enable_alipay_topup\) \{\s*return \[\]/)
+  assert.doesNotMatch(accountWorkspaceSource, /requestWalletPayment\(resolvedAmount, selectedPaymentMethod\)/)
+  assert.match(modalsStylesSource, /\.wallet-topup-split\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\) minmax\(0, 1fr\)/)
+  assert.match(modalsStylesSource, /\.wallet-payment-row\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\) auto/)
+  assert.match(modalsStylesSource, /\.alipay-pay-close\s*\{[\s\S]*?background:\s*transparent !important/)
+  assert.match(modalsStylesSource, /\.alipay-pay-actions\s*\{[\s\S]*?grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\)/)
+  assert.match(modalsStylesSource, /\.alipay-cashier-notice\s*\{[\s\S]*?border-radius:\s*8px/)
+  assert.doesNotMatch(modalsStylesSource, /\.alipay-qr-box/)
+  assert.match(modalsStylesSource, /:root\[data-theme='dark'\] \.wallet-topup-pane/)
+})
+
+test('desktop bridge opens server returned alipay payment forms through temporary html files', () => {
+  assert.match(electronPreloadSource, /openHtml: \(input: DesktopOpenHtmlRequest\) =>[\s\S]*?ipcRenderer\.invoke\('desktop:open-html', input\)/)
+  assert.match(electronMainSource, /function sanitizeHtmlFileName\(value\?: string\)/)
+  assert.match(electronMainSource, /if \(!html \|\| !\/<form\[\\s>\]\/i\.test\(html\)\)/)
+  assert.match(electronMainSource, /oneapi-pc-payments/)
+  assert.match(electronMainSource, /pathToFileURL\(filePath\)\.toString\(\)/)
+  assert.match(electronMainSource, /ipcMain\.handle\('desktop:open-html'[\s\S]*?openHtmlInExternalBrowser\(input\)/)
+  assert.match(electronMainSource, /ipcMain\.handle\('desktop:open-external'[\s\S]*?assertAllowedExternalUrl\(url\)/)
 })
 
 test('aichat history panels and ready environment notices use final transparent surfaces', () => {

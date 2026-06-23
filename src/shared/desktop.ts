@@ -455,6 +455,11 @@ export interface DesktopExportTextFileResult {
   path: string
 }
 
+export interface DesktopOpenHtmlRequest {
+  html: string
+  suggestedName?: string
+}
+
 export interface DesktopTranslateSelectionPayload {
   text: string
 }
