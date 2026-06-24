@@ -1263,6 +1263,21 @@ export function WalletWorkspace(props: {
     try {
       const result = await createAlipayTopupOrder(Math.trunc(resolvedAmount))
       const qrCode = String(result.qr_code || '').trim()
+      const payForm = String(result.pay_form || '').trim()
+      const payUrl = String(result.pay_url || result.checkout_url || '').trim()
+      if (!qrCode && (payForm || payUrl)) {
+        if (payForm) {
+          await getDesktopBridge()?.openHtml({
+            html: payForm,
+            suggestedName: 'alipay-payment.html',
+          })
+        } else if (payUrl) {
+          await getDesktopBridge()?.openExternal(payUrl)
+        }
+        toast('已打开支付宝收银台，支付成功后余额会自动到账。')
+        await refreshWallet()
+        return
+      }
       if (!qrCode) {
         throw new Error('服务端未返回支付宝二维码。')
       }

@@ -90,8 +90,11 @@ async function requestAlipayTopupOrder(path: string, amount: number) {
     throw new Error(message || '创建支付宝订单失败')
   }
 
-  if (!response.data?.trade_no || !response.data.qr_code) {
-    throw new Error('服务端未返回支付宝二维码。')
+  if (
+    !response.data?.trade_no ||
+    (!response.data.qr_code && !response.data.pay_form && !response.data.pay_url && !response.data.checkout_url)
+  ) {
+    throw new Error('服务端未返回支付宝支付参数。')
   }
 
   return normalizeAlipayTopupOrder(response.data)
