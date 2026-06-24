@@ -7,7 +7,7 @@ import { copyImageToClipboard, getUserGroups, saveImageToDisk, sendDirectImageGe
 import { sendAiChatCompletion, sendAiImageEdit, sendAiImageGeneration, streamAiChatCompletion } from '../../domains/aichat-provider'
 import { getLocalMobileBridgeDevice, syncMobileDesktopAssistantsSnapshot } from '../../domains/mobile-bridge'
 import { filterAssistantModels, filterModelsByVendor, prioritizeFavoriteModels, resolveCompatibleModel, type ModelVendorFilter } from '../../lib/assistant-workspace'
-import { loadOneApiModelsForActiveKey, type ActiveDesktopApiKeySummary } from '../desktop-api-key-models'
+import { loadOneApiModelsForActiveKey, resolveOneApiRequestGroupForActiveKey, type ActiveDesktopApiKeySummary } from '../desktop-api-key-models'
 import { decorateAssistants } from '../../lib/assistants'
 import { resolveVisibleDrawMessageContent } from '../../lib/draw-message'
 import { buildImageStyleAugmentedPrompt, decorateImageStylePresets, type ImageStylePreset } from '../../lib/image-style-presets'
@@ -308,6 +308,10 @@ export function AssistantsChatWorkspace(props: {
     CHAT_REASONING_OPTIONS.find((item) => item.value === reasoningEffort)?.label || reasoningEffort
   const selectedContextWindowLabel =
     CHAT_CONTEXT_WINDOW_OPTIONS.find((item) => item.value === contextWindow)?.label || `${contextWindow}`
+  const oneApiRequestGroup = useMemo(
+    () => resolveOneApiRequestGroupForActiveKey(activeApiKey, selectedGroup),
+    [activeApiKey?.group, selectedGroup]
+  )
 
   const activeModelLabel = useMemo(
     () =>
@@ -440,7 +444,7 @@ export function AssistantsChatWorkspace(props: {
 
       const response = await sendAiChatCompletion(providerState, {
         model: resolvedModel,
-        group: selectedGroup || undefined,
+        group: providerState.mode === 'oneapi' ? oneApiRequestGroup || undefined : undefined,
         messages: [
           {
             role: 'system',
@@ -468,7 +472,7 @@ export function AssistantsChatWorkspace(props: {
       })
       toast(error instanceof Error ? error.message : '翻译失败')
     }
-  }, [activeAssistant, availableChatModels, providerState, selectedGroup, selectedModel, toast])
+  }, [activeAssistant, availableChatModels, oneApiRequestGroup, providerState, selectedModel, toast])
 
   useEffect(() => {
     if (!active) {
@@ -919,6 +923,7 @@ export function AssistantsChatWorkspace(props: {
       toast('当前没有可用模型。')
       return
     }
+    const requestGroup = providerState.mode === 'oneapi' ? oneApiRequestGroup : selectedGroup
     const resolvedModelLabel =
       chatModeModels.find((item) => item.value === resolvedModel)?.label ||
       models.find((item) => item.value === resolvedModel)?.label ||
@@ -952,7 +957,7 @@ export function AssistantsChatWorkspace(props: {
       ...session,
       assistantId: activeAssistant?.id || session.assistantId,
       model: resolvedModel,
-      group: selectedGroup,
+      group: requestGroup,
       updatedAt: Date.now(),
       title: clipText(userMessage.content.replace(/\s+/g, ' '), 24) || session.title,
       messages: renderedHistory,
@@ -983,7 +988,7 @@ export function AssistantsChatWorkspace(props: {
         ...session,
         assistantId: activeAssistant?.id || session.assistantId,
         model: resolvedModel,
-        group: selectedGroup,
+        group: requestGroup,
         updatedAt: Date.now(),
         messages: session.messages.map((item) =>
           item.id === pendingAssistantId
@@ -1005,7 +1010,7 @@ export function AssistantsChatWorkspace(props: {
           providerState,
           {
             model: resolvedModel,
-            group: providerState.mode === 'oneapi' ? selectedGroup || undefined : undefined,
+            group: providerState.mode === 'oneapi' ? requestGroup || undefined : undefined,
             prompt: normalizedDraft,
             n: 1,
             response_format: 'b64_json',
@@ -1021,7 +1026,7 @@ export function AssistantsChatWorkspace(props: {
           ...session,
           assistantId: activeAssistant?.id || session.assistantId,
           model: resolvedModel,
-          group: selectedGroup,
+          group: requestGroup,
           updatedAt: Date.now(),
           messages: session.messages.map((item) =>
             item.id === pendingAssistantId
@@ -1041,7 +1046,7 @@ export function AssistantsChatWorkspace(props: {
         const requestHasAttachments = attachments.some((item) => item.dataBase64)
         const chatRequestPayload = {
           model: resolvedModel,
-          group: providerState.mode === 'oneapi' ? selectedGroup || undefined : undefined,
+          group: providerState.mode === 'oneapi' ? requestGroup || undefined : undefined,
           promptCacheKey: providerState.mode === 'oneapi' && shouldAttachPromptCacheKey(resolvedModel) && !requestHasAttachments
             ? resolvedActiveSessionId
             : undefined,
@@ -1114,7 +1119,7 @@ export function AssistantsChatWorkspace(props: {
           ...session,
           assistantId: activeAssistant?.id || session.assistantId,
           model: resolvedModel,
-          group: selectedGroup,
+          group: requestGroup,
           updatedAt: Date.now(),
           messages: session.messages.map((item) =>
             item.id === pendingAssistantId
@@ -2040,6 +2045,10 @@ export function DrawWorkspace(props: {
   const [sending, setSending] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [selectedGroup, setSelectedGroup] = useState('')
+  const oneApiRequestGroup = useMemo(
+    () => resolveOneApiRequestGroupForActiveKey(activeApiKey, selectedGroup),
+    [activeApiKey?.group, selectedGroup]
+  )
   const [drawSize, setDrawSize] = useState<(typeof DRAW_SIZE_OPTIONS)[number]['value']>('1024x1024')
   const [drawQuality, setDrawQuality] = useState<(typeof DRAW_QUALITY_OPTIONS)[number]['value']>('high')
   const [drawRandomSeed, setDrawRandomSeed] = useState(true)
@@ -2616,7 +2625,7 @@ export function DrawWorkspace(props: {
     try {
       const translatedText = await translateSelectedText({
         sourceText: normalizedText,
-        group: selectedGroup || undefined,
+        group: oneApiRequestGroup || undefined,
       })
       setTranslationState({
         sourceText: normalizedText,
@@ -2631,7 +2640,7 @@ export function DrawWorkspace(props: {
       })
       toast(error instanceof Error ? error.message : '翻译失败')
     }
-  }, [selectedGroup, toast])
+  }, [oneApiRequestGroup, toast])
 
   const handleDrawMessageSelectionContextMenu = useCallback((event: MouseEvent<HTMLDivElement>, selectedText: string) => {
     setSessionContextMenu({
@@ -3042,7 +3051,7 @@ export function DrawWorkspace(props: {
       const request = buildPendingDrawRetryRequest({
         model: effectiveDrawModel,
         prompt: nextPrompt,
-        group: selectedGroup || '',
+        group: oneApiRequestGroup || '',
         size: drawSize,
         quality: drawQuality,
         seed: drawRandomSeed ? undefined : 1,
@@ -3063,7 +3072,7 @@ export function DrawWorkspace(props: {
           request: buildPendingDrawRetryRequest({
             model: effectiveDrawModel,
             prompt: nextPrompt,
-            group: selectedGroup || '',
+            group: oneApiRequestGroup || '',
             size: drawSize,
             quality: drawQuality,
             seed: drawRandomSeed ? undefined : 1,

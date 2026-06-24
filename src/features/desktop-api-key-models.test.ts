@@ -4,6 +4,7 @@ import {
   loadOneApiModelsForActiveKey,
   resolveActiveDesktopApiKeySummary,
   resolveCliDeployModelForActiveKey,
+  resolveOneApiRequestGroupForActiveKey,
   sameActiveDesktopApiKeySummary,
   type ActiveKeyModelLoader,
   type ActiveDesktopApiKeyRecord,
@@ -79,6 +80,23 @@ test('loadOneApiModelsForActiveKey falls back to user models filtered by active 
   assert.deepEqual(
     (await loadOneApiModelsForActiveKey(key({ group: '1.10x' }), loader)).map((item) => item.value),
     ['deepseek-v4-pro']
+  )
+})
+
+test('resolveOneApiRequestGroupForActiveKey prefers the active key group over stale session group', () => {
+  assert.equal(
+    resolveOneApiRequestGroupForActiveKey(
+      key({ group: '1.60 OpenAI官方线路' }),
+      'Anthropic官方'
+    ),
+    '1.60 OpenAI官方线路'
+  )
+})
+
+test('resolveOneApiRequestGroupForActiveKey keeps selected group for all-channel keys', () => {
+  assert.equal(
+    resolveOneApiRequestGroupForActiveKey(key({ group: 'default' }), 'Anthropic官方'),
+    'Anthropic官方'
   )
 })
 

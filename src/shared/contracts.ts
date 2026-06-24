@@ -261,19 +261,27 @@ export interface TopupInfo {
 
 export interface AlipayTopupOrder {
   trade_no: string
+  platform?: 'web' | 'pc' | 'android' | string
   pay_url?: string
   checkout_url?: string
   pay_form?: string
   qr_code?: string
-  pay_type?: 'page_pay' | string
+  pay_type?: 'qr_code' | 'page_pay' | string
   pay_product?: string
   payment_product?: string
   pay_scene?: string
   amount: string | number
+  poll_interval?: number
   expires_in: number
 }
 
 export interface AlipayTopupStatus {
+  status: 'pending' | 'success' | 'failed' | 'expired' | string
+  trade_status?: string
+  trade_no: string
+}
+
+export interface AlipayTopupCancel {
   status: 'pending' | 'success' | 'failed' | 'expired' | string
   trade_status?: string
   trade_no: string

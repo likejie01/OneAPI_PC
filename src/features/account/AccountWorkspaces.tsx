@@ -2,10 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { RotateCcw, Sparkles, X } from 'lucide-react'
 import dayjs from 'dayjs'
+import QRCode from 'qrcode'
 import { getAuthStatus, unwrapEnvelope } from '../../domains/auth'
 import { getSelfProfile } from '../../domains/profile'
 import { getPublicPlans, getSelfSubscriptions, getSubscriptionPaymentInfo, paySubscription } from '../../domains/subscriptions'
-import { createAlipayTopupOrder, getBillingHistory, getTopupInfo, queryAlipayTopupOrder, redeemTopupCode } from '../../domains/wallet'
+import { cancelAlipayTopupOrder, createAlipayTopupOrder, getBillingHistory, getTopupInfo, queryAlipayTopupOrder, redeemTopupCode } from '../../domains/wallet'
 import { getPerfMetricsSummary, getUserUsageLogs } from '../../domains/usage'
 import { getServiceStatusSnapshot } from '../../domains/service-status'
 import { formatDateTime, formatPlainPrice, formatPrice, formatQuota, formatQuotaAsMillions, formatQuotaAsUsd, formatSubscriptionDuration, formatSubscriptionResetPeriod } from '../../lib/format'
@@ -925,11 +926,14 @@ export function WalletWorkspace(props: {
   const [payingTopup, setPayingTopup] = useState(false)
   const [alipayPayment, setAlipayPayment] = useState<{
     tradeNo: string
+    qrCode: string
+    qrDataUrl: string
     payUrl?: string
     checkoutUrl?: string
     payForm?: string
     amount: string
     expiresIn: number
+    pollInterval: number
   } | null>(null)
   const [checkingAlipay, setCheckingAlipay] = useState(false)
   const [usageData, setUsageData] = useState<UsageData | null>(null)
@@ -1083,10 +1087,16 @@ export function WalletWorkspace(props: {
     alipayPollingRef.current = null
   }, [])
 
-  const closeAlipayPayment = useCallback(() => {
+  const closeAlipayPayment = useCallback((cancelRemote = true) => {
+    const tradeNo = alipayPayment?.tradeNo
     stopAlipayPolling()
     setAlipayPayment(null)
-  }, [stopAlipayPolling])
+    if (cancelRemote && tradeNo) {
+      void cancelAlipayTopupOrder(tradeNo).catch(() => {
+        /* payment may have completed while the modal was closing */
+      })
+    }
+  }, [alipayPayment?.tradeNo, stopAlipayPolling])
 
   const completeAlipayPayment = useCallback(async () => {
     stopAlipayPolling()
@@ -1122,35 +1132,6 @@ export function WalletWorkspace(props: {
       }
     }
   }, [completeAlipayPayment, toast])
-
-  const openAlipayCashier = useCallback(async (payment: { payForm?: string; checkoutUrl?: string; payUrl?: string }) => {
-    const payForm = String(payment.payForm || '').trim()
-    const checkoutUrl = String(payment.checkoutUrl || payment.payUrl || '').trim()
-    if (!payForm && !checkoutUrl) {
-      toast('服务端未返回支付宝收银台地址。')
-      return
-    }
-    try {
-      if (payForm) {
-        await getDesktopBridge()?.openHtml({
-          html: payForm,
-          suggestedName: 'alipay-checkout',
-        })
-        return
-      }
-      await getDesktopBridge()?.openExternal(checkoutUrl)
-    } catch {
-      if (payForm && checkoutUrl) {
-        try {
-          await getDesktopBridge()?.openExternal(checkoutUrl)
-          return
-        } catch {
-          /* fallback failed, surface the generic error below */
-        }
-      }
-      toast('打开支付宝收银台失败，请稍后重试。')
-    }
-  }, [toast])
 
   useEffect(() => {
     let disposed = false
@@ -1238,12 +1219,12 @@ export function WalletWorkspace(props: {
 
     alipayPollingRef.current = window.setInterval(() => {
       void checkAlipayPaymentStatus(tradeNo)
-    }, 3000)
+    }, Math.max(1, Number(alipayPayment?.pollInterval || 2)) * 1000)
 
     return () => {
       stopAlipayPolling()
     }
-  }, [alipayPayment?.tradeNo, checkAlipayPaymentStatus, stopAlipayPolling])
+  }, [alipayPayment?.pollInterval, alipayPayment?.tradeNo, checkAlipayPaymentStatus, stopAlipayPolling])
 
   async function handleRedeem() {
     if (!redeemCode.trim()) {
@@ -1281,18 +1262,23 @@ export function WalletWorkspace(props: {
     setPayingTopup(true)
     try {
       const result = await createAlipayTopupOrder(Math.trunc(resolvedAmount))
-      const payUrl = String(result.pay_url || '').trim()
-      const checkoutUrl = String(result.checkout_url || '').trim()
-      const payForm = String(result.pay_form || '').trim()
+      const qrCode = String(result.qr_code || '').trim()
+      if (!qrCode) {
+        throw new Error('服务端未返回支付宝二维码。')
+      }
+      const qrDataUrl = await QRCode.toDataURL(qrCode, {
+        width: 220,
+        margin: 1,
+        errorCorrectionLevel: 'M',
+      })
       setAlipayPayment({
         tradeNo: result.trade_no,
-        payUrl,
-        checkoutUrl,
-        payForm,
-        amount: String(Math.trunc(resolvedAmount)),
+        qrCode,
+        qrDataUrl,
+        amount: String(result.amount || Math.trunc(resolvedAmount)),
         expiresIn: Number(result.expires_in || 0),
+        pollInterval: Number(result.poll_interval || 2),
       })
-      await openAlipayCashier({ payForm, checkoutUrl, payUrl })
     } catch (error) {
       toast(error instanceof Error ? error.message : '创建支付宝订单失败')
     } finally {
@@ -1410,7 +1396,7 @@ export function WalletWorkspace(props: {
                       disabled={payingTopup || !enabledPaymentMethods.length || !topupAmount}
                       onClick={() => void handleWalletPayment()}
                     >
-                      {payingTopup ? '创建中...' : '支付宝收银台支付'}
+                      {payingTopup ? '创建中...' : '支付宝扫码支付'}
                     </button>
                   </div>
                 </div>
@@ -1512,20 +1498,23 @@ export function WalletWorkspace(props: {
       </article>
       {alipayPayment ? createPortal(
         <div className='modal-mask alipay-pay-modal-mask' role='presentation'>
-          <div className='modal-card alipay-pay-modal' role='dialog' aria-modal='true' aria-label='支付宝收银台支付'>
+          <div className='modal-card alipay-pay-modal' role='dialog' aria-modal='true' aria-label='支付宝扫码支付'>
             <div className='panel-header compact'>
               <div>
-                <h2>支付宝收银台支付</h2>
-                <p>已打开支付宝收银台，支付完成后余额会自动到账。</p>
+                <h2>支付宝扫码支付</h2>
+                <p>使用支付宝扫描二维码，支付成功后余额会自动到账。</p>
               </div>
-              <button className='alipay-pay-close' type='button' onClick={closeAlipayPayment} aria-label='关闭'>
+              <button className='alipay-pay-close' type='button' onClick={() => closeAlipayPayment()} aria-label='关闭'>
                 <X size={18} />
               </button>
             </div>
             <div className='alipay-qr-body'>
+              <div className='alipay-qr-box'>
+                <img src={alipayPayment.qrDataUrl} alt='支付宝支付二维码' />
+              </div>
               <div className='alipay-cashier-notice'>
-                <strong>请在系统浏览器中完成支付</strong>
-                <span>可在支付宝收银台扫码或登录支付宝支付；本窗口会继续查询支付状态。</span>
+                <strong>请使用支付宝扫码完成支付</strong>
+                <span>支付状态由服务端每 {Math.max(1, Number(alipayPayment.pollInterval || 2))} 秒查询一次，本窗口仅展示服务器确认结果。</span>
               </div>
               <div className='alipay-pay-details'>
                 <div>
@@ -1543,13 +1532,6 @@ export function WalletWorkspace(props: {
               </div>
               <div className='alipay-pay-actions'>
                 <button
-                  className='ghost-button'
-                  type='button'
-                  onClick={() => void openAlipayCashier(alipayPayment)}
-                >
-                  重新打开
-                </button>
-                <button
                   className='secondary-button'
                   type='button'
                   disabled={checkingAlipay}
@@ -1557,7 +1539,7 @@ export function WalletWorkspace(props: {
                 >
                   {checkingAlipay ? '查询中...' : '我已支付'}
                 </button>
-                <button className='ghost-button' type='button' onClick={closeAlipayPayment}>
+                <button className='ghost-button' type='button' onClick={() => closeAlipayPayment()}>
                   取消
                 </button>
               </div>
