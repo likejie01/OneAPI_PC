@@ -1,5 +1,5 @@
 import { desktopEnvelope } from '../lib/desktop-client'
-import type { AlipayTopupOrder, AlipayTopupStatus, BillingHistoryData, TopupInfo } from '../shared/contracts'
+import type { AlipayTopupCancel, AlipayTopupOrder, AlipayTopupStatus, BillingHistoryData, TopupInfo } from '../shared/contracts'
 
 function isMissingAlipayRouteError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error || '')
@@ -78,9 +78,10 @@ async function requestAlipayTopupOrder(path: string, amount: number) {
     path,
     body: {
       amount,
-      pay_scene: 'web_page',
-      pay_product: 'alipay.trade.page.pay',
-      payment_product: 'alipay.trade.page.pay',
+      platform: 'pc',
+      pay_scene: 'pc_qr',
+      pay_product: 'alipay.trade.precreate',
+      payment_product: 'alipay.trade.precreate',
     },
   })
 
@@ -89,8 +90,8 @@ async function requestAlipayTopupOrder(path: string, amount: number) {
     throw new Error(message || '创建支付宝订单失败')
   }
 
-  if (!response.data?.trade_no || (!response.data.pay_form && !response.data.checkout_url && !response.data.pay_url)) {
-    throw new Error('服务端未返回支付宝收银台地址。')
+  if (!response.data?.trade_no || !response.data.qr_code) {
+    throw new Error('服务端未返回支付宝二维码。')
   }
 
   return normalizeAlipayTopupOrder(response.data)
@@ -123,6 +124,24 @@ async function requestAlipayTopupStatus(path: string, tradeNo: string) {
 export async function queryAlipayTopupOrder(tradeNo: string) {
   try {
     return await requestAlipayTopupStatus('/api/user/alipay/query', tradeNo)
+  } catch (error) {
+    throw new Error(formatAlipayRouteError(error))
+  }
+}
+
+export async function cancelAlipayTopupOrder(tradeNo: string) {
+  try {
+    const response = await desktopEnvelope<AlipayTopupCancel>({
+      method: 'POST',
+      path: '/api/user/alipay/cancel',
+      body: {
+        trade_no: tradeNo,
+      },
+    })
+    if (!response.success && response.message !== 'success') {
+      throw new Error(response.message || '关闭支付宝订单失败')
+    }
+    return response.data
   } catch (error) {
     throw new Error(formatAlipayRouteError(error))
   }

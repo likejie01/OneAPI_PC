@@ -1,7 +1,7 @@
 import type { ApiKeyRecord, ChatModelOption } from '../shared/contracts.ts'
 import type { CliClient } from '../shared/desktop.ts'
 import { resolveCompatibleModel } from '../lib/assistant-workspace.ts'
-import { resolveSelectedDesktopApiKeyId } from '../lib/desktop-api-keys.ts'
+import { isAllChannelGroupsDesktopApiKeyGroup, resolveSelectedDesktopApiKeyId } from '../lib/desktop-api-keys.ts'
 import { filterModelsForDesktopApiKey } from '../lib/desktop-api-key-models.ts'
 
 export type ActiveDesktopApiKeyRecord = Pick<
@@ -37,6 +37,17 @@ export function resolveActiveDesktopApiKeySummary<T extends ActiveDesktopApiKeyR
 ): ActiveDesktopApiKeySummary {
   const activeId = resolveSelectedDesktopApiKeyId(keys, selectedApiKeyId)
   return keys.find((item) => item.id === activeId) || null
+}
+
+export function resolveOneApiRequestGroupForActiveKey(
+  activeApiKey: ActiveDesktopApiKeySummary,
+  selectedGroup?: string
+) {
+  const activeKeyGroup = activeApiKey?.group?.trim() || ''
+  if (activeKeyGroup && !isAllChannelGroupsDesktopApiKeyGroup(activeKeyGroup)) {
+    return activeKeyGroup
+  }
+  return selectedGroup?.trim() || ''
 }
 
 export function sameActiveDesktopApiKeySummary(
