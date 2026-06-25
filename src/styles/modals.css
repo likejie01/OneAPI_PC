@@ -3494,6 +3494,26 @@ body:has(.cli-extension-floating-tooltip)::after {
   height: 220px !important;
 }
 
+.alipay-checkout-box {
+  flex-direction: column !important;
+  gap: 10px !important;
+  padding: 18px !important;
+  color: var(--text-primary) !important;
+  text-align: center !important;
+}
+
+.alipay-checkout-box strong {
+  color: var(--text-primary) !important;
+  font-size: 15px !important;
+  font-weight: 700 !important;
+}
+
+.alipay-checkout-box span {
+  color: var(--text-secondary) !important;
+  font-size: 12px !important;
+  line-height: 1.45 !important;
+}
+
 .alipay-cashier-notice {
   display: grid !important;
   gap: 8px !important;
@@ -3634,5 +3654,15 @@ body:has(.cli-extension-floating-tooltip)::after {
 :root[data-theme='dark'] .me-column .status-button:focus-visible {
   border-color: rgba(86, 139, 190, 0.19) !important;
   box-shadow: 0 0 0 1px rgba(86, 139, 190, 0.04) !important;
+}
+
+.compliance-safety-modal {
+  max-width: 620px !important;
+}
+
+.compliance-safety-copy {
+  display: grid;
+  gap: 12px;
+  line-height: 1.7;
 }
 

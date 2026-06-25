@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { RotateCcw, Sparkles, X } from 'lucide-react'
+import { ExternalLink, RotateCcw, Sparkles, X } from 'lucide-react'
 import dayjs from 'dayjs'
 import QRCode from 'qrcode'
 import { getAuthStatus, unwrapEnvelope } from '../../domains/auth'
@@ -926,8 +926,8 @@ export function WalletWorkspace(props: {
   const [payingTopup, setPayingTopup] = useState(false)
   const [alipayPayment, setAlipayPayment] = useState<{
     tradeNo: string
-    qrCode: string
-    qrDataUrl: string
+    qrCode?: string
+    qrDataUrl?: string
     payUrl?: string
     checkoutUrl?: string
     payForm?: string
@@ -990,7 +990,7 @@ export function WalletWorkspace(props: {
       .map((item) => Number(item))
       .filter((item) => Number.isFinite(item) && item > 0)
     const next = options.length ? options : [minTopupAmount, 50, 100]
-    return [...new Set(next.filter((item) => item >= minTopupAmount && item !== 50))]
+    return [...new Set(next.filter((item) => item >= minTopupAmount))]
   }, [minTopupAmount, topupInfo?.amount_options])
   const subscriptionUsageByTitle = useMemo(() => {
     const planTitleMap = new Map(walletPlans.map((item) => [item.plan.id, item.plan.title]))
@@ -1133,6 +1133,24 @@ export function WalletWorkspace(props: {
     }
   }, [completeAlipayPayment, toast])
 
+  const openAlipayCheckout = useCallback(async () => {
+    if (!alipayPayment) {
+      return
+    }
+    const payForm = String(alipayPayment.payForm || '').trim()
+    const payUrl = String(alipayPayment.payUrl || alipayPayment.checkoutUrl || '').trim()
+    if (payForm) {
+      await getDesktopBridge()?.openHtml({
+        html: payForm,
+        suggestedName: 'alipay-payment.html',
+      })
+      return
+    }
+    if (payUrl) {
+      await getDesktopBridge()?.openExternal(payUrl)
+    }
+  }, [alipayPayment])
+
   useEffect(() => {
     let disposed = false
 
@@ -1160,7 +1178,7 @@ export function WalletWorkspace(props: {
           if (defaultAlipayMethod) {
             setSelectedPaymentMethod((current) => current || defaultAlipayMethod)
           }
-          const defaultAmount = Number(nextTopupInfo.amount_options?.find((item) => Number(item) > 0 && Number(item) !== 50) || nextTopupInfo.min_topup || 0)
+          const defaultAmount = Number(nextTopupInfo.amount_options?.find((item) => Number(item) > 0) || nextTopupInfo.min_topup || 0)
           if (defaultAmount > 0) {
             setTopupAmount((current) => current || String(defaultAmount))
           }
@@ -1265,31 +1283,23 @@ export function WalletWorkspace(props: {
       const qrCode = String(result.qr_code || '').trim()
       const payForm = String(result.pay_form || '').trim()
       const payUrl = String(result.pay_url || result.checkout_url || '').trim()
-      if (!qrCode && (payForm || payUrl)) {
-        if (payForm) {
-          await getDesktopBridge()?.openHtml({
-            html: payForm,
-            suggestedName: 'alipay-payment.html',
+      if (!qrCode && !payForm && !payUrl) {
+        throw new Error('服务端未返回支付宝支付参数。')
+      }
+      const qrDataUrl = qrCode
+        ? await QRCode.toDataURL(qrCode, {
+            width: 220,
+            margin: 1,
+            errorCorrectionLevel: 'M',
           })
-        } else if (payUrl) {
-          await getDesktopBridge()?.openExternal(payUrl)
-        }
-        toast('已打开支付宝收银台，支付成功后余额会自动到账。')
-        await refreshWallet()
-        return
-      }
-      if (!qrCode) {
-        throw new Error('服务端未返回支付宝二维码。')
-      }
-      const qrDataUrl = await QRCode.toDataURL(qrCode, {
-        width: 220,
-        margin: 1,
-        errorCorrectionLevel: 'M',
-      })
+        : undefined
       setAlipayPayment({
         tradeNo: result.trade_no,
-        qrCode,
+        qrCode: qrCode || undefined,
         qrDataUrl,
+        payForm: payForm || undefined,
+        payUrl: String(result.pay_url || '').trim() || undefined,
+        checkoutUrl: String(result.checkout_url || '').trim() || undefined,
         amount: String(result.amount || Math.trunc(resolvedAmount)),
         expiresIn: Number(result.expires_in || 0),
         pollInterval: Number(result.poll_interval || 2),
@@ -1516,19 +1526,30 @@ export function WalletWorkspace(props: {
           <div className='modal-card alipay-pay-modal' role='dialog' aria-modal='true' aria-label='支付宝扫码支付'>
             <div className='panel-header compact'>
               <div>
-                <h2>支付宝扫码支付</h2>
-                <p>使用支付宝扫描二维码，支付成功后余额会自动到账。</p>
+                <h2>支付宝支付</h2>
+                <p>{alipayPayment.qrDataUrl ? '使用支付宝扫描二维码，支付成功后余额会自动到账。' : '打开支付宝收银台完成支付，本窗口会等待服务端确认结果。'}</p>
               </div>
               <button className='alipay-pay-close' type='button' onClick={() => closeAlipayPayment()} aria-label='关闭'>
                 <X size={18} />
               </button>
             </div>
             <div className='alipay-qr-body'>
-              <div className='alipay-qr-box'>
-                <img src={alipayPayment.qrDataUrl} alt='支付宝支付二维码' />
-              </div>
+              {alipayPayment.qrDataUrl ? (
+                <div className='alipay-qr-box'>
+                  <img src={alipayPayment.qrDataUrl} alt='支付宝支付二维码' />
+                </div>
+              ) : (
+                <div className='alipay-qr-box alipay-checkout-box'>
+                  <ExternalLink size={36} />
+                  <strong>支付宝收银台</strong>
+                  <span>当前订单由服务端返回页面支付参数，请在新窗口完成支付。</span>
+                  <button className='secondary-button' type='button' onClick={() => void openAlipayCheckout()}>
+                    打开支付宝收银台
+                  </button>
+                </div>
+              )}
               <div className='alipay-cashier-notice'>
-                <strong>请使用支付宝扫码完成支付</strong>
+                <strong>{alipayPayment.qrDataUrl ? '请使用支付宝扫码完成支付' : '请完成支付宝收银台支付'}</strong>
                 <span>支付状态由服务端每 {Math.max(1, Number(alipayPayment.pollInterval || 2))} 秒查询一次，本窗口仅展示服务器确认结果。</span>
               </div>
               <div className='alipay-pay-details'>
