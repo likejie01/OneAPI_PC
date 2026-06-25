@@ -170,10 +170,12 @@ test('wallet recharge area splits redemption and server-created payment entry', 
   assert.match(accountWorkspaceSource, /cancelAlipayTopupOrder\(tradeNo\)/)
   assert.match(accountWorkspaceSource, /const qrCode = String\(result\.qr_code \|\| ''\)\.trim\(\)/)
   assert.match(accountWorkspaceSource, /QRCode\.toDataURL\(qrCode/)
-  assert.match(accountWorkspaceSource, /amount: String\(Math\.trunc\(resolvedAmount\)\)/)
+  assert.match(accountWorkspaceSource, /openAlipayCheckout/)
+  assert.match(accountWorkspaceSource, /打开支付宝收银台/)
+  assert.match(accountWorkspaceSource, /payForm: payForm \|\| undefined/)
   assert.match(accountWorkspaceSource, /className='alipay-pay-close'/)
   assert.match(accountWorkspaceSource, /我已支付/)
-  assert.match(accountWorkspaceSource, /支付宝扫码支付/)
+  assert.match(accountWorkspaceSource, /支付宝支付/)
   assert.match(accountWorkspaceSource, /使用支付宝扫描二维码/)
   assert.match(accountWorkspaceSource, /alipayPayment\.qrDataUrl/)
   assert.match(walletDomainSource, /replace\(/)
@@ -193,10 +195,11 @@ test('wallet recharge area splits redemption and server-created payment entry', 
   assert.match(modalsStylesSource, /\.alipay-pay-actions\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/)
   assert.match(modalsStylesSource, /\.alipay-cashier-notice\s*\{[\s\S]*?border-radius:\s*8px/)
   assert.match(modalsStylesSource, /\.alipay-qr-box\s*\{[\s\S]*?width:\s*244px !important/)
+  assert.match(modalsStylesSource, /\.alipay-checkout-box\s*\{[\s\S]*?flex-direction:\s*column !important/)
   assert.match(modalsStylesSource, /:root\[data-theme='dark'\] \.wallet-topup-pane/)
 })
 
-test('desktop bridge opens server returned alipay payment forms through temporary html files', () => {
+test('desktop bridge supports explicit alipay checkout from the in-app payment dialog', () => {
   assert.match(electronPreloadSource, /openHtml: \(input: DesktopOpenHtmlRequest\) =>[\s\S]*?ipcRenderer\.invoke\('desktop:open-html', input\)/)
   assert.match(electronMainSource, /function sanitizeHtmlFileName\(value\?: string\)/)
   assert.match(electronMainSource, /if \(!html \|\| !\/<form\[\\s>\]\/i\.test\(html\)\)/)
@@ -204,6 +207,8 @@ test('desktop bridge opens server returned alipay payment forms through temporar
   assert.match(electronMainSource, /pathToFileURL\(filePath\)\.toString\(\)/)
   assert.match(electronMainSource, /ipcMain\.handle\('desktop:open-html'[\s\S]*?openHtmlInExternalBrowser\(input\)/)
   assert.match(electronMainSource, /ipcMain\.handle\('desktop:open-external'[\s\S]*?assertAllowedExternalUrl\(url\)/)
+  assert.match(accountWorkspaceSource, /await getDesktopBridge\(\)\?\.openHtml\(\{[\s\S]*?suggestedName: 'alipay-payment\.html'/)
+  assert.match(accountWorkspaceSource, /await getDesktopBridge\(\)\?\.openExternal\(payUrl\)/)
 })
 
 test('aichat history panels and ready environment notices use final transparent surfaces', () => {

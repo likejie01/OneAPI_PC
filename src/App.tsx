@@ -487,6 +487,7 @@ function CliWorkspace(props: {
   )
   const [historyVisibilityTab, setHistoryVisibilityTab] = useState<HistoryVisibilityTab>('visible')
   const [sessionContextMenu, setSessionContextMenu] = useState<SessionContextMenuState | null>(null)
+  const [safetyNoticePending, setSafetyNoticePending] = useState(false)
   const [translationState, setTranslationState] = useState<{
     sourceText: string
     translatedText: string
@@ -2167,6 +2168,18 @@ function CliWorkspace(props: {
     }
   }
 
+  function requestSafetyNoticeBeforeNewConversation() {
+    if (running) {
+      toast(`请先停止当前 ${client === 'codex' ? 'Codex' : 'Claude'} 回复。`)
+      return
+    }
+    if (!projectPath.trim()) {
+      toast('请选择项目目录后再新建会话。')
+      return
+    }
+    setSafetyNoticePending(true)
+  }
+
   function createCliSession() {
     const nextProjectPath = projectPath.trim()
     if (running) {
@@ -2208,6 +2221,11 @@ function CliWorkspace(props: {
       promptRef.current?.focus()
     }, 0)
     closeCliHistoryPanel()
+  }
+
+  function confirmSafetyNoticeAndCreateCliSession() {
+    setSafetyNoticePending(false)
+    createCliSession()
   }
 
   async function handleOpenHistory(item: CliHistoryEntry, activateProject = true) {
@@ -3539,7 +3557,7 @@ function CliWorkspace(props: {
                 <button
                   className='secondary-button tiny'
                   type='button'
-                  onClick={createCliSession}
+                  onClick={requestSafetyNoticeBeforeNewConversation}
                   disabled={effectiveRunning}
                   title='新建独立会话'
                 >
@@ -3676,6 +3694,37 @@ function CliWorkspace(props: {
           void copyText(translationState.translatedText)
         }}
       />
+      {safetyNoticePending && (
+        <div className='modal-mask' onClick={() => setSafetyNoticePending(false)}>
+          <div className='modal-card compliance-safety-modal' onClick={(event) => event.stopPropagation()}>
+            <div className='panel-header compact'>
+              <div>
+                <h2>安全与隐私提醒</h2>
+                <p>每个新的会话开始前，请确认以下使用规则。</p>
+              </div>
+            </div>
+            <div className='modal-copy compliance-safety-copy'>
+              <p>
+                你输入的文本、附件、图片、代码、会话上下文和执行日志可能会发送给第三方或境外模型服务商处理。请勿提交身份证号、银行卡号、密码、访问令牌、商业秘密、未授权个人信息或其他敏感信息。
+              </p>
+              <p>
+                不得使用本服务生成、协助、传播违法违规内容，包括危害国家安全、暴恐极端、违法犯罪指导、网络攻击、诈骗、侵犯隐私、色情低俗、仇恨歧视、自伤自杀诱导等内容。
+              </p>
+              <p>
+                如用于安全研究、合规分析、风险防范、教育科普，请保持高层次和防御性，不要请求可执行的违法步骤。
+              </p>
+            </div>
+            <div className='modal-actions'>
+              <button className='secondary-button' type='button' onClick={() => setSafetyNoticePending(false)}>
+                取消
+              </button>
+              <button className='primary-button' type='button' onClick={confirmSafetyNoticeAndCreateCliSession}>
+                已知晓，创建新会话
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <SessionContextMenu menu={sessionContextMenu} onClose={() => setSessionContextMenu(null)} />
     </section>
   )
