@@ -41,7 +41,7 @@ jobs:
           path: |
             release/*.exe
             release/*.zip
-            release/*.yml
+            release/latest.yml
             release/*.blockmap
           if-no-files-found: error
 
@@ -63,4 +63,4 @@ jobs:
             gh release create $tag --title "OneAPI PC $tag" --notes "Windows desktop release for OneAPI PC."
           }
 
-          gh release upload $tag release/*.exe release/*.zip release/*.yml release/*.blockmap --clobber
+          gh release upload $tag release/*.exe release/*.zip release/latest.yml release/*.blockmap --clobber
