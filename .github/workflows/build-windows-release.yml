@@ -5,6 +5,11 @@ on:
     tags:
       - "v*.*.*"
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Release tag to create or update, for example v0.1.9. Defaults to package.json version."
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -35,6 +40,7 @@ jobs:
           name: OneAPI-PC-Windows
           path: |
             release/*.exe
+            release/*.zip
             release/*.yml
             release/*.blockmap
           if-no-files-found: error
@@ -44,10 +50,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag = "${{ github.ref_name }}"
+          $tag = "${{ github.event.inputs.release_tag }}"
+          if ([string]::IsNullOrWhiteSpace($tag)) {
+            $tag = "${{ github.ref_name }}"
+          }
+          if ($tag -eq "main" -or $tag -eq "master") {
+            $version = node -p "require('./package.json').version"
+            $tag = "v$version"
+          }
           gh release view $tag 2>$null
           if ($LASTEXITCODE -ne 0) {
             gh release create $tag --title "OneAPI PC $tag" --notes "Windows desktop release for OneAPI PC."
           }
 
-          gh release upload $tag release/*.exe release/*.yml release/*.blockmap --clobber
+          gh release upload $tag release/*.exe release/*.zip release/*.yml release/*.blockmap --clobber

@@ -10,7 +10,7 @@
     "dev:electron": "concurrently -k \"npm:dev\" \"npm:electron\"",
     "electron": "wait-on tcp:5173 && electron .",
     "build": "tsc -b && vite build --configLoader native",
-    "build:win": "cross-env-shell ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ \"node scripts/prepare-win-icons.mjs && npm run build && electron-builder --win --x64 && node scripts/finalize-win-release.mjs\"",
+    "build:win": "cross-env-shell ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ \"node scripts/prepare-win-icons.mjs && npm run build && electron-builder --win --x64 --publish never && node scripts/finalize-win-release.mjs\"",
     "build:mac": "node scripts/prepare-mac-icons.mjs && npm run build && electron-builder --mac dmg zip --x64 --arm64 --publish never",
     "test": "node --test --experimental-strip-types \"src/**/*.test.ts\"",
     "lint": "eslint .",
@@ -77,7 +77,7 @@
     ],
     "extraResources": [
       {
-        "from": "../shared-cli-catalog",
+        "from": "shared-cli-catalog",
         "to": "cli-catalog"
       }
     ],

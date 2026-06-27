@@ -111,7 +111,7 @@ const __dirname = path.dirname(__filename)
 const APP_ICON_PATH = isDev
   ? path.join(path.dirname(__dirname), 'public', 'Icon.png')
   : path.join(path.dirname(__dirname), 'dist', 'Icon.png')
-const BUNDLED_CLI_CATALOG_DEV_ROOT = path.resolve(__dirname, '..', '..', 'shared-cli-catalog')
+const BUNDLED_CLI_CATALOG_DEV_ROOT = path.resolve(__dirname, '..', 'shared-cli-catalog')
 let mainWindow: BrowserWindow | null = null
 let appTray: Tray | null = null
 let isQuitting = false

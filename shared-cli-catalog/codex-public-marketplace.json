@@ -1,0 +1,3750 @@
+{
+  "name": "openai-curated",
+  "repoUrl": "https://github.com/openai/plugins.git",
+  "ref": "main",
+  "sha": "004da7246d90c695a0ea21e9df6760ecefdedb36",
+  "plugins": [
+    {
+      "name": "linear",
+      "displayName": "Linear",
+      "description": "Find and reference issues and projects.",
+      "official": true,
+      "subdir": "plugins/linear",
+      "source": {
+        "source": "local",
+        "path": "./plugins/linear"
+      },
+      "skills": [
+        {
+          "name": "linear",
+          "description": "Manage issues, projects & team workflows in Linear. Use when the user wants to read, create or updates tickets in Linear.",
+          "relativePath": "linear/SKILL.md"
+        }
+      ],
+      "commands": []
+    },
+    {
+      "name": "atlassian-rovo",
+      "displayName": "Atlassian Rovo",
+      "description": "Manage Jira and Confluence fast",
+      "official": false,
+      "subdir": "plugins/atlassian-rovo",
+      "source": {
+        "source": "local",
+        "path": "./plugins/atlassian-rovo"
+      },
+      "skills": [
+        {
+          "name": "capture-tasks-from-meeting-notes",
+          "description": "Analyze meeting notes to find action items and create Jira tasks for assigned work. When an agent needs to: (1) Create Jira tasks or tickets from meeting notes, (2) Extract or find action items from notes or Confluence pages, (3) Parse meeting notes for assigned tasks, or (4) Analyze notes and generate tasks for team members. Identifies assignees, looks up account IDs, and creates tasks with proper context.",
+          "relativePath": "capture-tasks-from-meeting-notes/SKILL.md"
+        },
+        {
+          "name": "generate-status-report",
+          "description": "Generate project status reports from Jira issues and publish to Confluence. When an agent needs to: (1) Create a status report for a project, (2) Summarize project progress or updates, (3) Generate weekly/daily reports from Jira, (4) Publish status summaries to Confluence, or (5) Analyze project blockers and completion. Queries Jira issues, categorizes by status/priority, and creates formatted reports for delivery managers and executives.",
+          "relativePath": "generate-status-report/SKILL.md"
+        },
+        {
+          "name": "search-company-knowledge",
+          "description": "Search across company knowledge bases (Confluence, Jira, internal docs) to find and explain internal concepts, processes, and technical details. When an agent needs to: (1) Find or search for information about systems, terminology, processes, deployment, authentication, infrastructure, architecture, or technical concepts, (2) Search internal documentation, knowledge base, company docs, or our docs, (3) Explain what something is, how it works, or look up information, or (4) Synthesize information from multiple sources. Searches in parallel and provides cited answers.",
+          "relativePath": "search-company-knowledge/SKILL.md"
+        },
+        {
+          "name": "spec-to-backlog",
+          "description": "Automatically convert Confluence specification documents into structured Jira backlogs with Epics and implementation tickets. When an agent needs to: (1) Create Jira tickets from a Confluence page, (2) Generate a backlog from a specification, (3) Break down a spec into implementation tasks, or (4) Convert requirements into Jira issues. Handles reading Confluence pages, analyzing specifications, creating Epics with proper structure, and generating detailed implementation tickets linked to the Epic.",
+          "relativePath": "spec-to-backlog/SKILL.md"
+        },
+        {
+          "name": "triage-issue",
+          "description": "Intelligently triage bug reports and error messages by searching for duplicates in Jira and offering to create new issues or add comments to existing ones. When an agent needs to: (1) Triage a bug report or error message, (2) Check if an issue is a duplicate, (3) Find similar past issues, (4) Create a new bug ticket with proper context, or (5) Add information to an existing ticket. Searches Jira for similar issues, identifies duplicates, checks fix history, and helps create well-structured bug reports.",
+          "relativePath": "triage-issue/SKILL.md"
+        }
+      ],
+      "commands": []
+    },
+    {
+      "name": "google-calendar",
+      "displayName": "Google Calendar",
+      "description": "Manage Google Calendar events and schedules",
+      "official": true,
+      "subdir": "plugins/google-calendar",
+      "source": {
+        "source": "local",
+        "path": "./plugins/google-calendar"
+      },
+      "skills": [
+        {
+          "name": "google-calendar",
+          "description": "Manage scheduling and conflicts in connected Google Calendar data. Use when the user wants to inspect calendars, compare availability, review conflicts, find a meeting room, review event notes or attachments, add or adjust reminders, place temporary holds, or draft exact create, update, reschedule, or cancel changes with timezone-aware details.",
+          "relativePath": "google-calendar/SKILL.md"
+        },
+        {
+          "name": "google-calendar-daily-brief",
+          "description": "Build polished one-day Google Calendar briefs. Use when the user asks for today, tomorrow, or a specific date summary with an agenda, conflict flags, free windows, remaining-meeting readouts, or a calendar brief, and the Google Calendar connector is available.",
+          "relativePath": "google-calendar-daily-brief/SKILL.md"
+        },
+        {
+          "name": "google-calendar-free-up-time",
+          "description": "Find ways to open up meaningful free time in a connected Google Calendar. Use when the user wants to clear up their day, make room for focus time, create a longer uninterrupted block, or see the smallest set of calendar changes that would give time back.",
+          "relativePath": "google-calendar-free-up-time/SKILL.md"
+        },
+        {
+          "name": "google-calendar-group-scheduler",
+          "description": "Find and rank good meeting times for multiple people using connected Google Calendar data. Use when the user wants to schedule a group meeting, compare candidate slots across several attendees, find the best compromise time, or add a room check after narrowing the attendee-compatible options.",
+          "relativePath": "google-calendar-group-scheduler/SKILL.md"
+        },
+        {
+          "name": "google-calendar-meeting-prep",
+          "description": "Build a practical meeting prep brief from a connected Google Calendar event and its nearby context. Use when the user wants to prepare for an upcoming meeting, understand what to read beforehand, pull in linked notes or docs, or get a concise brief on what the meeting appears to require.",
+          "relativePath": "google-calendar-meeting-prep/SKILL.md"
+        }
+      ],
+      "commands": []
+    },
+    {
+      "name": "gmail",
+      "displayName": "Gmail",
+      "description": "Read and manage Gmail",
+      "official": true,
+      "subdir": "plugins/gmail",
+      "source": {
+        "source": "local",
+        "path": "./plugins/gmail"
+      },
+      "skills": [
+        {
+          "name": "gmail",
+          "description": "Manage Gmail inbox triage, mailbox search, thread summaries, action extraction, reply drafting, and email forwarding through connected Gmail data. Use when the user wants to inspect a mailbox or thread, search email with Gmail query syntax, summarize messages, extract decisions and follow-ups, prepare replies or forwarded messages, or organize messages with explicit confirmation before send, archive, delete, or label actions.",
+          "relativePath": "gmail/SKILL.md"
+        },
+        {
+          "name": "gmail-inbox-triage",
+          "description": "Triage a Gmail inbox into actionable buckets such as urgent, needs reply soon, waiting, and FYI using connected Gmail data. Use when the user asks to triage the inbox, rank what needs attention, find what still needs a reply, or separate important mail from noise.",
+          "relativePath": "gmail-inbox-triage/SKILL.md"
+        }
+      ],
+      "commands": []
+    },
+    {
+      "name": "slack",
+      "displayName": "Slack",
+      "description": "Read and manage Slack",
+      "official": true,
+      "subdir": "plugins/slack",
+      "source": {
+        "source": "local",
+        "path": "./plugins/slack"
+      },
+      "skills": [
+        {
+          "name": "slack",
+          "description": "Read Slack context, route to the right Slack workflow, and prepare or perform Slack writes that match the user's intent.",
+          "relativePath": "slack/SKILL.md"
+        },
+        {
+          "name": "slack-channel-summarization",
+          "description": "Summarize activity from one Slack channel and return a concise recap, post-ready update, or summary doc.",
+          "relativePath": "slack-channel-summarization/SKILL.md"
+        },
+        {
+          "name": "slack-daily-digest",
+          "description": "Create a daily Slack digest from selected channels or topics. Use when the user asks for a daily Slack recap or summary of today's Slack activity.",
+          "relativePath": "slack-daily-digest/SKILL.md"
+        },
+        {
+          "name": "slack-notification-triage",
+          "description": "Triage recent Slack activity into a priority queue or task list for the user.",
+          "relativePath": "slack-notification-triage/SKILL.md"
+        },
+        {
+          "name": "slack-outgoing-message",
+          "description": "Primary skill for composing, drafting, or refining any outbound Slack content. Use this whenever the task will require using `slack_send_message`, `slack_send_message_draft`, or `slack_create_canvas`. Use `slack` to read or analyze Slack context; use this skill to produce the final outgoing message.",
+          "relativePath": "slack-outgoing-message/SKILL.md"
+        },
+        {
+          "name": "slack-reply-drafting",
+          "description": "Draft Slack replies from available context. Use when the user wants help finding messages that likely need a response and preparing reply drafts.",
+          "relativePath": "slack-reply-drafting/SKILL.md"
+        }
+      ],
+      "commands": []
+    },
+    {
+      "name": "teams",
+      "displayName": "Teams",
+      "description": "Summarize Teams and draft follow-ups",
+      "official": true,
+      "subdir": "plugins/teams",
+      "source": {
+        "source": "local",
+        "path": "./plugins/teams"
+      },
+      "skills": [
+        {
+          "name": "teams",
+          "description": "Summarize Microsoft Teams conversations, triage unread or recent activity, draft follow-ups, and manage Planner tasks through connected Teams data. Use when the user wants to review chats or channels, identify owners and next steps, prepare a safe reply or post, or turn Teams follow-ups into Microsoft Planner tasks.",
+          "relativePath": "teams/SKILL.md"
+        },
+        {
+          "name": "teams-channel-summarization",
+          "description": "Summarize activity from one Microsoft Teams channel or one scoped Teams conversation and return a concise recap or post-ready follow-up.",
+          "relativePath": "teams-channel-summarization/SKILL.md"
+        },
+        {
+          "name": "teams-daily-digest",
+          "description": "Create a daily Microsoft Teams digest from selected chats, channels, or workstreams. Use when the user asks for a daily Teams recap or summary of today's Teams activity.",
+          "relativePath": "teams-daily-digest/SKILL.md"
+        },
+        {
+          "name": "teams-messages",
+          "description": "Compose, route, draft, or send Microsoft Teams messages with exact destination resolution, real user mentions, and Teams-native DM or channel routing.",
+          "relativePath": "teams-messages/SKILL.md"
+        },
+        {
+          "name": "teams-notification-triage",
+          "description": "Triage recent Microsoft Teams activity into a priority queue or task list for the user.",
+          "relativePath": "teams-notification-triage/SKILL.md"
+        },
+        {
+          "name": "teams-planner-task-management",
+          "description": "Review and manage Microsoft Planner tasks from Teams workflows. Use when the user wants to inspect plans or buckets, create tasks from follow-ups, update task fields, or safely delete a Planner task.",
+          "relativePath": "teams-planner-task-management/SKILL.md"
+        },
+        {
+          "name": "teams-reply-drafting",
+          "description": "Draft Microsoft Teams replies from available context. Use when the user wants help finding messages that likely need a response and preparing reply drafts.",
+          "relativePath": "teams-reply-drafting/SKILL.md"
+        }
+      ],
+      "commands": []
+    },
+    {
+      "name": "sharepoint",
+      "displayName": "SharePoint",
+      "description": "Summarize SharePoint sites and files",
+      "official": true,
+      "subdir": "plugins/sharepoint",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sharepoint"
+      },
+      "skills": [
+        {
+          "name": "sharepoint",
+          "description": "Inspect Microsoft SharePoint context, discover the right site or library, and prepare safe changes. Use when the user wants site, page, or file review, ownership and status extraction, or change planning before editing content, navigation, or information architecture.",
+          "relativePath": "sharepoint/SKILL.md"
+        },
+        {
+          "name": "sharepoint-powerpoint",
+          "description": "Create, edit, restyle, and review PowerPoint `.pptx` files fetched from SharePoint, with emphasis on style preservation, slide cloning, theme-aware updates, and rendered visual QA. Use when the user wants reliable slide edits that should match an existing deck's design language.",
+          "relativePath": "sharepoint-powerpoint/SKILL.md"
+        },
+        {
+          "name": "sharepoint-shared-doc-maintenance",
+          "description": "Maintain shared SharePoint strategy, roadmap, planning, or status documents from changing source documents. Use when the user wants cross-document synthesis, source-of-truth propagation, or targeted updates to a maintained shared document.",
+          "relativePath": "sharepoint-shared-doc-maintenance/SKILL.md"
+        },
+        {
+          "name": "sharepoint-site-discovery",
+          "description": "Resolve the right SharePoint site, library, and folder before file work. Use when the user needs to find the right site context, browse a known site, inspect document libraries, or narrow the correct folder before fetching or editing a file.",
+          "relativePath": "sharepoint-site-discovery/SKILL.md"
+        },
+        {
+          "name": "sharepoint-spreadsheet-formula-builder",
+          "description": "Design, repair, and roll out formulas in SharePoint-hosted workbooks with connector-aware retrieval, validation, and upload discipline. Use when the user wants to add a formula column, fix a broken formula, choose between a fill-down formula and a spill formula, build a lookup or filter formula, or reuse workbook logic safely.",
+          "relativePath": "sharepoint-spreadsheet-formula-builder/SKILL.md"
+        },
+        {
+          "name": "sharepoint-spreadsheets",
+          "description": "Edit SharePoint-hosted spreadsheet files while preserving workbook structure, formulas, and formatting. Use when the user wants to update a real spreadsheet in SharePoint rather than summarize extracted sheet text.",
+          "relativePath": "sharepoint-spreadsheets/SKILL.md"
+        },
+        {
+          "name": "sharepoint-word-docs",
+          "description": "Edit SharePoint-hosted Word `.docx` files while preserving document structure and styling. Use when the user wants to update a real Word document in SharePoint rather than summarize it as plain text.",
+          "relativePath": "sharepoint-word-docs/SKILL.md"
+        }
+      ],
+      "commands": []
+    },
+    {
+      "name": "outlook-email",
+      "displayName": "Outlook Email",
+      "description": "Triage Outlook inboxes and draft replies",
+      "official": true,
+      "subdir": "plugins/outlook-email",
+      "source": {
+        "source": "local",
+        "path": "./plugins/outlook-email"
+      },
+      "skills": [
+        {
+          "name": "outlook-email",
+          "description": "Triage Outlook mail, extract tasks, clean up subscriptions, draft responses, and route shared mailbox work. Use when the user asks to inspect an Outlook inbox or thread, summarize open actions and deadlines, clean up newsletters, draft replies or forwards, organize mailbox follow-up work, or act on a delegated/shared Outlook mailbox.",
+          "relativePath": "outlook-email/SKILL.md"
+        },
+        {
+          "name": "outlook-email-inbox-triage",
+          "description": "Triage an Outlook inbox into actionable buckets such as urgent, needs reply soon, waiting, and FYI using connected Outlook data. Use when the user asks to triage the inbox, rank what needs attention, find what still needs a reply, or separate important mail from noise.",
+          "relativePath": "outlook-email-inbox-triage/SKILL.md"
+        },
+        {
+          "name": "outlook-email-reply-drafting",
+          "description": "Draft Outlook email replies safely from connected mailbox context. Use when the user wants to reply to a thread, decide whether to reply-all, prepare a draft before sending, or turn the latest Outlook message into a polished response.",
+          "relativePath": "outlook-email-reply-drafting/SKILL.md"
+        },
+        {
+          "name": "outlook-email-shared-mailboxes",
+          "description": "Work with delegated or shared Outlook Email mailboxes. Use when the user explicitly wants to read another mailbox, send from or on behalf of a shared mailbox, mark shared mail read or unread, move shared mail, or browse folders in a shared mailbox.",
+          "relativePath": "outlook-email-shared-mailboxes/SKILL.md"
+        },
+        {
+          "name": "outlook-email-subscription-cleanup",
+          "description": "Clean up Outlook newsletters and recurring subscription email safely. Use when the user wants to unsubscribe, separate newsletters from human mail, move recurring senders into folders, or organize low-signal subscription traffic without losing important messages.",
+          "relativePath": "outlook-email-subscription-cleanup/SKILL.md"
+        },
+        {
+          "name": "outlook-email-task-extraction",
+          "description": "Extract action items, deadlines, commitments, and owners from Outlook email threads and mailbox searches. Use when the user wants a task list from one thread, several related messages, or a mailbox slice, including who owes what and when.",
+          "relativePath": "outlook-email-task-extraction/SKILL.md"
+        }
+      ],
+      "commands": []
+    },
+    {
+      "name": "outlook-calendar",
+      "displayName": "Outlook Calendar",
+      "description": "Manage Outlook schedules and meeting changes",
+      "official": true,
+      "subdir": "plugins/outlook-calendar",
+      "source": {
+        "source": "local",
+        "path": "./plugins/outlook-calendar"
+      },
+      "skills": [
+        {
+          "name": "outlook-calendar",
+          "description": "Handle Outlook Calendar workflows, including delegated/shared calendar writes. Use when the user asks for schedule understanding, availability checks, meeting scheduling, intelligent rescheduling, meeting prep, reminder updates, RSVP responses, recurring maintenance, travel coordination, deadline planning, or safe create, update, reschedule, respond, attach, delete, or cancel changes with timezone-aware event times and attendee validation.",
+          "relativePath": "outlook-calendar/SKILL.md"
+        },
+        {
+          "name": "outlook-calendar-daily-brief",
+          "description": "Build polished one-day Outlook Calendar briefs. Use when the user asks for today, tomorrow, or a specific date summary with an agenda, conflict flags, free windows, remaining-meeting readouts, or a calendar brief, and Outlook Calendar is available.",
+          "relativePath": "outlook-calendar-daily-brief/SKILL.md"
+        },
+        {
+          "name": "outlook-calendar-free-up-time",
+          "description": "Find ways to open up meaningful free time in Outlook Calendar. Use when the user wants to clear part of their schedule, make room for focus time, create a longer uninterrupted block, or see the smallest set of calendar changes that would give time back.",
+          "relativePath": "outlook-calendar-free-up-time/SKILL.md"
+        },
+        {
+          "name": "outlook-calendar-group-scheduler",
+          "description": "Find and rank good meeting times for several people using Outlook Calendar data. Use when the user wants to schedule a meeting, compare candidate slots across attendees, find the best compromise time, or add a room/resource check after narrowing the attendee-compatible options.",
+          "relativePath": "outlook-calendar-group-scheduler/SKILL.md"
+        },
+        {
+          "name": "outlook-calendar-meeting-prep",
+          "description": "Build a practical meeting prep brief from an Outlook Calendar event and its nearby Microsoft context. Use when the user wants to prepare for an upcoming meeting, understand what to read beforehand, pull in linked notes or docs, or get a concise brief on what the meeting appears to require.",
+          "relativePath": "outlook-calendar-meeting-prep/SKILL.md"
+        },
+        {
+          "name": "outlook-calendar-shared-calendars",
+          "description": "Safely write to delegated or shared Outlook calendars. Use when the user explicitly wants to create, update, respond to, cancel, delete, or add a small attachment to an event on a shared or delegated Outlook Calendar.",
+          "relativePath": "outlook-calendar-shared-calendars/SKILL.md"
+        }
+      ],
+      "commands": []
+    },
+    {
+      "name": "canva",
+      "displayName": "Canva",
+      "description": "Search, create, edit designs",
+      "official": false,
+      "subdir": "plugins/canva",
+      "source": {
+        "source": "local",
+        "path": "./plugins/canva"
+      },
+      "skills": [
+        {
+          "name": "canva-branded-presentation",
+          "description": "Create on-brand Canva presentations from a brief, outline, existing Canva doc, or design link. Use when the user wants a branded slide deck, wants to turn notes into a presentation, or needs a presentation generated in Canva with the right brand kit and a clear slide plan.",
+          "relativePath": "canva-branded-presentation/SKILL.md"
+        },
+        {
+          "name": "canva-resize-for-all-social-media",
+          "description": "Resize a Canva design into standard social media formats and prepare export-ready results. Use when the user wants one Canva design adapted across multiple social platforms such as Facebook, Instagram, and LinkedIn, especially when they want all variants produced in one pass.",
+          "relativePath": "canva-resize-for-all-social-media/SKILL.md"
+        },
+        {
+          "name": "canva-translate-design",
+          "description": "Translate the text in a Canva design into another language while preserving the original layout as much as possible. Use when the user wants a localized or translated version of an existing Canva design and expects the original file to remain unchanged.",
+          "relativePath": "canva-translate-design/SKILL.md"
+        }
+      ],
+      "commands": []
+    },
+    {
+      "name": "figma",
+      "displayName": "Figma",
+      "description": "Design-to-code workflows powered by the Figma integration",
+      "official": false,
+      "subdir": "plugins/figma",
+      "source": {
+        "source": "local",
+        "path": "./plugins/figma"
+      },
+      "skills": [
+        {
+          "name": "figma-code-connect",
+          "description": "Creates and maintains Figma Code Connect template files that map Figma components to code snippets. Use when the user mentions Code Connect, Figma component mapping, design-to-code translation, or asks to create/update .figma.ts or .figma.js files.",
+          "relativePath": "figma-code-connect/SKILL.md"
+        },
+        {
+          "name": "figma-create-new-file",
+          "description": "**MANDATORY prerequisite** — you MUST invoke this skill BEFORE every `create_new_file` tool call. NEVER call `create_new_file` directly without loading this skill first. Trigger whenever the user wants a new blank Figma file — a new design, FigJam, or Slides file — or when you need a fresh file before calling `use_figma`. Usage — /figma-create-new-file [editorType] [fileName] (e.g. /figma-create-new-file figjam My Whiteboard, /figma-create-new-file slides Q3 Review)",
+          "relativePath": "figma-create-new-file/SKILL.md"
+        },
+        {
+          "name": "figma-generate-design",
+          "description": "Use this skill alongside figma-use when the task involves translating an application page, view, or multi-section layout into Figma. Triggers: 'write to Figma', 'create in Figma from code', 'push page to Figma', 'take this app/page and build it in Figma', 'create a screen', 'build a landing page in Figma', 'update the Figma screen to match code', 'convert this modal/dialog/drawer/panel to Figma'. This is the preferred workflow skill whenever the user wants to build or update a full page, modal, dialog, drawer, sidebar, panel, or any composed multi-section view in Figma from code or a description. Discovers design system components, variables, and styles from Code Connect files, existing screens, and library search, then imports them and assembles views incrementally section-by-section using design system tokens instead of hardcoded values.",
+          "relativePath": "figma-generate-design/SKILL.md"
+        },
+        {
+          "name": "figma-generate-diagram",
+          "description": "MANDATORY prerequisite — load this skill BEFORE every `generate_diagram` tool call. NEVER call `generate_diagram` directly without loading this skill first. Trigger whenever the user asks to create, generate, draw, render, sketch, or build a diagram — flowchart, architecture diagram, sequence diagram, ERD or entity-relationship diagram, state diagram or state machine, gantt chart, or timeline. Also trigger when the user mentions Mermaid syntax or wants a system architecture, decision tree, dependency graph, API call flow, auth handshake, schema, or pipeline visualized in FigJam. Routes to type-specific guidance, sets universal Mermaid constraints, and tells you when to use a different diagram type or skip the tool entirely (mindmaps, pie charts, class diagrams, etc.).",
+          "relativePath": "figma-generate-diagram/SKILL.md"
+        },
+        {
+          "name": "figma-generate-library",
+          "description": "Build or update a professional-grade design system in Figma from a codebase. Use when the user wants to create variables/tokens, build component libraries, create individual components with proper variant sets and variable bindings, set up theming (light/dark modes), document foundations, or reconcile gaps between code and Figma. Also use when the user asks to create or generate any component in Figma — even a single one — since components require proper variable foundations, variant states, and design token bindings to be production-quality. This skill teaches WHAT to build and in WHAT ORDER — it complements the `figma-use` skill which teaches HOW to call the Plugin API. Both skills should be loaded together.",
+          "relativePath": "figma-generate-library/SKILL.md"
+        },
+        {
+          "name": "figma-use",
+          "description": "**MANDATORY prerequisite** — you MUST invoke this skill BEFORE every `use_figma` tool call. NEVER call `use_figma` directly without loading this skill first. Skipping it causes common, hard-to-debug failures. Trigger whenever the user wants to perform a write action or a unique read action that requires JavaScript execution in the Figma file context — e.g. create/edit/delete nodes, set up variables or tokens, build components and variants, modify auto-layout or fills, bind variables to properties, or inspect file structure programmatically.",
+          "relativePath": "figma-use/SKILL.md"
+        },
+        {
+          "name": "figma-use-figjam",
+          "description": "This skill helps agents use Figma's use_figma MCP tool in the FigJam context. Can be used alongside figma-use which has foundational context for using the use_figma tool.",
+          "relativePath": "figma-use-figjam/SKILL.md"
+        },
+        {
+          "name": "figma-use-slides",
+          "description": "This skill helps agents use Figma's use_figma MCP tool in the Slides context. Can be used alongside figma-use which has foundational context for using the use_figma tool.",
+          "relativePath": "figma-use-slides/SKILL.md"
+        }
+      ],
+      "commands": []
+    },
+    {
+      "name": "hugging-face",
+      "displayName": "Hugging Face",
+      "description": "Inspect models, datasets, Spaces, and research",
+      "official": false,
+      "subdir": "plugins/hugging-face",
+      "source": {
+        "source": "local",
+        "path": "./plugins/hugging-face"
+      },
+      "skills": [
+        {
+          "name": "hf-cli",
+          "description": "Hugging Face Hub CLI (`hf`) for downloading, uploading, and managing repositories, models, datasets, and Spaces on the Hugging Face Hub. Replaces now deprecated `huggingface-cli` command.",
+          "relativePath": "cli/SKILL.md"
+        },
+        {
+          "name": "huggingface-community-evals",
+          "description": "Run evaluations for Hugging Face Hub models using inspect-ai and lighteval on local hardware. Use for backend selection, local GPU evals, and choosing between vLLM / Transformers / accelerate. Not for HF Jobs orchestration, model-card PRs, .eval_results publication, or community-evals automation.",
+          "relativePath": "community-evals/SKILL.md"
+        },
+        {
+          "name": "huggingface-datasets",
+          "description": "Use this skill for Hugging Face Dataset Viewer API workflows that fetch subset/split metadata, paginate rows, search text, apply filters, download parquet URLs, and read size or statistics.",
+          "relativePath": "datasets/SKILL.md"
+        },
+        {
+          "name": "huggingface-gradio",
+          "description": "Build Gradio web UIs and demos in Python. Use when creating or editing Gradio apps, components, event listeners, layouts, or chatbots.",
+          "relativePath": "gradio/SKILL.md"
+        },
+        {
+          "name": "huggingface-jobs",
+          "description": "This skill should be used when users want to run any workload on Hugging Face Jobs infrastructure. Covers UV scripts, Docker-based jobs, hardware selection, cost estimation, authentication with tokens, secrets management, timeout configuration, and result persistence. Designed for general-purpose compute workloads including data processing, inference, experiments, batch jobs, and any Python-based tasks. Should be invoked for tasks involving cloud compute, GPU workloads, or when users mention running jobs on Hugging Face infrastructure without local setup.",
+          "relativePath": "jobs/SKILL.md"
+        },
+        {
+          "name": "huggingface-llm-trainer",
+          "description": "This skill should be used when users want to train or fine-tune language models using TRL (Transformer Reinforcement Learning) on Hugging Face Jobs infrastructure. Covers SFT, DPO, GRPO and reward modeling training methods, plus GGUF conversion for local deployment. Includes guidance on the TRL Jobs package, UV scripts with PEP 723 format, dataset preparation and validation, hardware selection, cost estimation, Trackio monitoring, Hub authentication, and model persistence. Should be invoked for tasks involving cloud GPU training, GGUF conversion, or when users mention training on Hugging Face Jobs without local GPU setup.",
+          "relativePath": "llm-trainer/SKILL.md"
+        },
+        {
+          "name": "huggingface-paper-publisher",
+          "description": "Publish and manage research papers on Hugging Face Hub. Supports creating paper pages, linking papers to models/datasets, claiming authorship, and generating professional markdown-based research articles.",
+          "relativePath": "paper-publisher/SKILL.md"
+        },
+        {
+          "name": "huggingface-papers",
+          "description": "Look up and read Hugging Face paper pages in markdown, and use the papers API for structured metadata such as authors, linked models/datasets/spaces, Github repo and project page. Use when the user shares a Hugging Face paper page URL, an arXiv URL or ID, or asks to summarize, explain, or analyze an AI research paper.",
+          "relativePath": "papers/SKILL.md"
+        },
+        {
+          "name": "huggingface-trackio",
+          "description": "Track and visualize ML training experiments with Trackio. Use when logging metrics during training (Python API), firing alerts for training diagnostics, or retrieving/analyzing logged metrics (CLI). Supports real-time dashboard visualization, alerts with webhooks, HF Space syncing, and JSON output for automation.",
+          "relativePath": "trackio/SKILL.md"
+        },
+        {
+          "name": "huggingface-vision-trainer",
+          "description": "Trains and fine-tunes vision models for object detection (D-FINE, RT-DETR v2, DETR, YOLOS), image classification (timm models — MobileNetV3, MobileViT, ResNet, ViT/DINOv3 — plus any Transformers classifier), and SAM/SAM2 segmentation using Hugging Face Transformers on Hugging Face Jobs cloud GPUs. Covers COCO-format dataset preparation, Albumentations augmentation, mAP/mAR evaluation, accuracy metrics, SAM segmentation with bbox/point prompts, DiceCE loss, hardware selection, cost estimation, Trackio monitoring, and Hub persistence. Use when users mention training object detection, image classification, SAM, SAM2, segmentation, image matting, DETR, D-FINE, RT-DETR, ViT, timm, MobileNet, ResNet, bounding box models, or fine-tuning vision models on Hugging Face Jobs.",
+          "relativePath": "vision-trainer/SKILL.md"
+        },
+        {
+          "name": "transformers-js",
+          "description": "Use Transformers.js to run state-of-the-art machine learning models directly in JavaScript/TypeScript. Supports NLP (text classification, translation, summarization), computer vision (image classification, object detection), audio (speech recognition, audio classification), and multimodal tasks. Works in Node.js and browsers (with WebGPU/WASM) using pre-trained models from Hugging Face Hub.",
+          "relativePath": "transformers.js/SKILL.md"
+        }
+      ],
+      "commands": []
+    },
+    {
+      "name": "jam",
+      "displayName": "Jam",
+      "description": "Screen record with context",
+      "official": false,
+      "subdir": "plugins/jam",
+      "source": {
+        "source": "local",
+        "path": "./plugins/jam"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "netlify",
+      "displayName": "Netlify",
+      "description": "Deploy projects and manage releases",
+      "official": false,
+      "subdir": "plugins/netlify",
+      "source": {
+        "source": "local",
+        "path": "./plugins/netlify"
+      },
+      "skills": [
+        {
+          "name": "netlify-ai-gateway",
+          "description": "Guide for using Netlify AI Gateway to access AI models. Use when adding AI capabilities or selecting/changing AI models. Must be read before choosing a model. Covers supported providers (OpenAI, Anthropic, Google), SDK setup, environment variables, and the list of available models.",
+          "relativePath": "netlify-ai-gateway/SKILL.md"
+        },
+        {
+          "name": "netlify-blobs",
+          "description": "Guide for using Netlify Blobs object storage. Use when storing files, images, documents, or simple key-value data without a full database. Covers getStore(), CRUD operations, metadata, listing, deploy-scoped vs site-scoped stores, and local development.",
+          "relativePath": "netlify-blobs/SKILL.md"
+        },
+        {
+          "name": "netlify-caching",
+          "description": "Guide for controlling caching on Netlify's CDN. Use when configuring cache headers, setting up stale-while-revalidate, implementing on-demand cache purge, or understanding Netlify's CDN caching behavior. Covers Cache-Control, Netlify-CDN-Cache-Control, cache tags, durable cache, and framework-specific caching patterns.",
+          "relativePath": "netlify-caching/SKILL.md"
+        },
+        {
+          "name": "netlify-cli-and-deploy",
+          "description": "Guide for using the Netlify CLI and deploying sites. Use when installing the CLI, linking sites, deploying (Git-based or manual), managing environment variables, or running local development. Covers netlify dev, netlify deploy, Git vs non-Git workflows, and environment variable management.",
+          "relativePath": "netlify-cli-and-deploy/SKILL.md"
+        },
+        {
+          "name": "netlify-config",
+          "description": "Reference for netlify.toml configuration. Use when configuring build settings, redirects, rewrites, headers, deploy contexts, environment variables, or any site-level configuration. Covers the complete netlify.toml syntax including redirects with splats/conditions, headers, deploy contexts, functions config, and edge functions config.",
+          "relativePath": "netlify-config/SKILL.md"
+        },
+        {
+          "name": "netlify-deploy",
+          "description": "Deploy projects to Netlify with the Netlify CLI. Use when the user wants to link a repo, validate deploy settings, run a deploy, or choose between preview and production flows.",
+          "relativePath": "netlify-deploy/SKILL.md"
+        },
+        {
+          "name": "netlify-edge-functions",
+          "description": "Guide for writing Netlify Edge Functions. Use when building middleware, geolocation-based logic, request/response manipulation, authentication checks, A/B testing, or any low-latency edge compute. Covers Deno runtime, context.next() middleware pattern, geolocation, and when to choose edge vs serverless.",
+          "relativePath": "netlify-edge-functions/SKILL.md"
+        },
+        {
+          "name": "netlify-forms",
+          "description": "Guide for using Netlify Forms for HTML form handling. Use when adding contact forms, feedback forms, file upload forms, or any form that should be collected by Netlify. Covers the data-netlify attribute, spam filtering, AJAX submissions, file uploads, notifications, and the submissions API.",
+          "relativePath": "netlify-forms/SKILL.md"
+        },
+        {
+          "name": "netlify-frameworks",
+          "description": "Guide for deploying web frameworks on Netlify. Use when setting up a framework project (Vite/React, Astro, TanStack Start, Next.js, Nuxt, SvelteKit, Remix) for Netlify deployment, configuring adapters or plugins, or troubleshooting framework-specific Netlify integration. Covers what Netlify needs from each framework and how adapters handle server-side rendering.",
+          "relativePath": "netlify-frameworks/SKILL.md"
+        },
+        {
+          "name": "netlify-functions",
+          "description": "Guide for writing Netlify serverless functions. Use when creating API endpoints, background processing, scheduled tasks, or any server-side logic using Netlify Functions. Covers modern syntax (default export + Config), TypeScript, path routing, background functions, scheduled functions, streaming, and method routing.",
+          "relativePath": "netlify-functions/SKILL.md"
+        },
+        {
+          "name": "netlify-identity",
+          "description": "Use when the task involves authentication, user signups, logins, password recovery, OAuth providers, role-based access control, or protecting routes and functions. Always use `@netlify/identity`. Never use `netlify-identity-widget` or `gotrue-js` — they are deprecated.",
+          "relativePath": "netlify-identity/SKILL.md"
+        },
+        {
+          "name": "netlify-image-cdn",
+          "description": "Guide for using Netlify Image CDN for image optimization and transformation. Use when serving optimized images, creating responsive image markup, setting up user-uploaded image pipelines, or configuring image transformations. Covers the /.netlify/images endpoint, query parameters, remote image allowlisting, clean URL rewrites, and composing uploads with Functions + Blobs.",
+          "relativePath": "netlify-image-cdn/SKILL.md"
+        }
+      ],
+      "commands": []
+    },
+    {
+      "name": "stripe",
+      "displayName": "Stripe",
+      "description": "Payments and business tools",
+      "official": false,
+      "subdir": "plugins/stripe",
+      "source": {
+        "source": "local",
+        "path": "./plugins/stripe"
+      },
+      "skills": [
+        {
+          "name": "stripe-best-practices",
+          "description": "Guides Stripe integration decisions — API selection (Checkout Sessions vs PaymentIntents), Connect platform setup (Accounts v2, controller properties), billing/subscriptions, Treasury financial accounts, integration surfaces (Checkout, Payment Element), and migrating from deprecated Stripe APIs. Use when building, modifying, or reviewing any Stripe integration — including accepting payments, building marketplaces, integrating Stripe, processing payments, setting up subscriptions, or creating connected accounts.",
+          "relativePath": "stripe-best-practices/SKILL.md"
+        },
+        {
+          "name": "upgrade-stripe",
+          "description": "Guide for upgrading Stripe API versions and SDKs",
+          "relativePath": "upgrade-stripe/SKILL.md"
+        }
+      ],
+      "commands": []
+    },
+    {
+      "name": "vercel",
+      "displayName": "Vercel",
+      "description": "Build and deploy web apps and agents",
+      "official": false,
+      "subdir": "plugins/vercel",
+      "source": {
+        "source": "local",
+        "path": "./plugins/vercel"
+      },
+      "skills": [
+        {
+          "name": "agent-browser",
+          "description": "Browser automation CLI for AI agents. Use when the user needs to interact with websites, verify dev server output, test web apps, navigate pages, fill forms, click buttons, take screenshots, extract data, or automate any browser task. Also triggers when a dev server starts so you can verify it visually.",
+          "relativePath": "agent-browser/SKILL.md"
+        },
+        {
+          "name": "agent-browser-verify",
+          "description": "Automated browser verification for dev servers. Triggers when a dev server starts to run a visual gut-check with agent-browser — verifies the page loads, checks for console errors, validates key UI elements, and reports pass/fail before continuing.",
+          "relativePath": "agent-browser-verify/SKILL.md"
+        },
+        {
+          "name": "ai-elements",
+          "description": "AI Elements component library guidance — pre-built React components for AI interfaces built on shadcn/ui. Use when building chat UIs, message displays, tool call rendering, streaming responses, reasoning panels, or any AI-native interface with the AI SDK.",
+          "relativePath": "ai-elements/SKILL.md"
+        },
+        {
+          "name": "ai-gateway",
+          "description": "Vercel AI Gateway expert guidance. Use when configuring model routing, provider failover, cost tracking, or managing multiple AI providers through a unified API.",
+          "relativePath": "ai-gateway/SKILL.md"
+        },
+        {
+          "name": "ai-generation-persistence",
+          "description": "AI generation persistence patterns — unique IDs, addressable URLs, database storage, and cost tracking for every LLM generation",
+          "relativePath": "ai-generation-persistence/SKILL.md"
+        },
+        {
+          "name": "ai-sdk",
+          "description": "Vercel AI SDK expert guidance. Use when building AI-powered features — chat interfaces, text generation, structured output, tool calling, agents, MCP integration, streaming, embeddings, reranking, image generation, or working with any LLM provider.",
+          "relativePath": "ai-sdk/SKILL.md"
+        },
+        {
+          "name": "auth",
+          "description": "Authentication integration guidance — Clerk (native Vercel Marketplace), Descope, and Auth0 setup for Next.js applications. Covers middleware auth patterns, sign-in/sign-up flows, and Marketplace provisioning. Use when implementing user authentication.",
+          "relativePath": "auth/SKILL.md"
+        },
+        {
+          "name": "bootstrap",
+          "description": "Project bootstrapping orchestrator for repos that depend on Vercel-linked resources (databases, auth, and managed integrations). Use when setting up or repairing a repository so linking, environment provisioning, env pulls, and first-run db/dev commands happen in the correct safe order.",
+          "relativePath": "bootstrap/SKILL.md"
+        },
+        {
+          "name": "chat-sdk",
+          "description": "Vercel Chat SDK expert guidance. Use when building multi-platform chat bots — Slack, Telegram, Microsoft Teams, Discord, Google Chat, GitHub, Linear — with a single codebase. Covers the Chat class, adapters, threads, messages, cards, modals, streaming, state management, and webhook setup.",
+          "relativePath": "chat-sdk/SKILL.md"
+        },
+        {
+          "name": "cms",
+          "description": "Headless CMS integration guidance — Sanity (native Vercel Marketplace), Contentful, DatoCMS, Storyblok, and Builder.io. Covers studio setup, content modeling, preview mode, revalidation webhooks, and Visual Editing. Use when building content-driven sites with a headless CMS on Vercel.",
+          "relativePath": "cms/SKILL.md"
+        },
+        {
+          "name": "cron-jobs",
+          "description": "Vercel Cron Jobs configuration and best practices. Use when adding, editing, or debugging scheduled tasks in vercel.json.",
+          "relativePath": "cron-jobs/SKILL.md"
+        },
+        {
+          "name": "deployments-cicd",
+          "description": "Vercel deployment and CI/CD expert guidance. Use when deploying, promoting, rolling back, inspecting deployments, building with --prebuilt, or configuring CI workflow files for Vercel.",
+          "relativePath": "deployments-cicd/SKILL.md"
+        },
+        {
+          "name": "email",
+          "description": "Email sending integration guidance — Resend (native Vercel Marketplace) with React Email templates. Covers API setup, transactional emails, domain verification, and template patterns. Use when sending emails from a Vercel-deployed application.",
+          "relativePath": "email/SKILL.md"
+        },
+        {
+          "name": "env-vars",
+          "description": "Vercel environment variable expert guidance. Use when working with .env files, vercel env commands, OIDC tokens, or managing environment-specific configuration.",
+          "relativePath": "env-vars/SKILL.md"
+        },
+        {
+          "name": "geist",
+          "description": "Expert guidance for Geist, Vercel's default typography system and font family for precise Next.js interfaces. Use when configuring Geist Sans, Geist Mono, or Geist Pixel, setting up font imports, or applying Vercel typography and aesthetic guidance.",
+          "relativePath": "geist/SKILL.md"
+        },
+        {
+          "name": "geistdocs",
+          "description": "Expert guidance for Geistdocs, Vercel's documentation template built with Next.js and Fumadocs — MDX authoring, configuration, AI chat, i18n, feedback, deployment. Use when creating documentation sites, configuring geistdocs, writing MDX content, or setting up docs infrastructure.",
+          "relativePath": "geistdocs/SKILL.md"
+        },
+        {
+          "name": "investigation-mode",
+          "description": "Orchestrated debugging coordinator. Triggers on frustration signals (stuck, hung, broken, waiting) and systematically triages: runtime logs → workflow status → browser verify → deploy/env. Reports findings at every step.",
+          "relativePath": "investigation-mode/SKILL.md"
+        },
+        {
+          "name": "json-render",
+          "description": "AI chat response rendering guidance — handling UIMessage parts, tool call displays, streaming states, and structured data presentation. Use when building custom chat UIs, rendering tool results, or troubleshooting AI response display issues.",
+          "relativePath": "json-render/SKILL.md"
+        },
+        {
+          "name": "marketplace",
+          "description": "Vercel Marketplace expert guidance — discovering, installing, and building integrations, auto-provisioned environment variables, unified billing, and the vercel integration CLI. Use when consuming third-party services, building custom integrations, or managing marketplace resources on Vercel.",
+          "relativePath": "marketplace/SKILL.md"
+        },
+        {
+          "name": "micro",
+          "description": "Expert guidance for micro — asynchronous HTTP microservices framework by Vercel. Use when building lightweight HTTP servers, API endpoints, or microservices using the micro library.",
+          "relativePath": "micro/SKILL.md"
+        },
+        {
+          "name": "ncc",
+          "description": "Expert guidance for @vercel/ncc — a simple CLI for compiling Node.js modules into a single file with all dependencies included. Use when bundling serverless functions, CLI tools, or any Node.js project into a self-contained file.",
+          "relativePath": "ncc/SKILL.md"
+        },
+        {
+          "name": "next-forge",
+          "description": "next-forge expert guidance — production-grade Turborepo monorepo SaaS starter by Vercel. Use when working in a next-forge project, scaffolding with `npx next-forge init`, or editing @repo/* workspace packages.",
+          "relativePath": "next-forge/SKILL.md"
+        },
+        {
+          "name": "nextjs",
+          "description": "Next.js App Router expert guidance. Use when building, debugging, or architecting Next.js applications — routing, Server Components, Server Actions, Cache Components, layouts, middleware/proxy, data fetching, rendering strategies, and deployment on Vercel.",
+          "relativePath": "nextjs/SKILL.md"
+        },
+        {
+          "name": "observability",
+          "description": "Vercel Observability expert guidance — Drains (logs, traces, speed insights, web analytics), Web Analytics, Speed Insights, runtime logs, custom events, OpenTelemetry integration, and monitoring dashboards. Use when instrumenting, debugging, or optimizing application performance and user experience on Vercel.",
+          "relativePath": "observability/SKILL.md"
+        },
+        {
+          "name": "payments",
+          "description": "Stripe payments integration guidance — native Vercel Marketplace setup, checkout sessions, webhook handling, subscription billing, and the Stripe SDK. Use when implementing payments, subscriptions, or processing transactions.",
+          "relativePath": "payments/SKILL.md"
+        },
+        {
+          "name": "react-best-practices",
+          "description": "React best-practices reviewer for TSX files. Triggers after editing multiple TSX components to run a condensed quality checklist covering component structure, hooks usage, accessibility, performance, and TypeScript patterns.",
+          "relativePath": "react-best-practices/SKILL.md"
+        },
+        {
+          "name": "routing-middleware",
+          "description": "Vercel Routing Middleware guidance — request interception before cache, rewrites, redirects, personalization. Works with any framework. Supports Edge, Node.js, and Bun runtimes. Use when intercepting requests at the platform level.",
+          "relativePath": "routing-middleware/SKILL.md"
+        },
+        {
+          "name": "runtime-cache",
+          "description": "Vercel Runtime Cache API guidance — ephemeral per-region key-value cache with tag-based invalidation. Shared across Functions, Routing Middleware, and Builds. Use when implementing caching strategies beyond framework-level caching.",
+          "relativePath": "runtime-cache/SKILL.md"
+        },
+        {
+          "name": "satori",
+          "description": "Expert guidance for Satori — Vercel's library that converts HTML and CSS to SVG, commonly used to generate dynamic OG images for Next.js and other frameworks.",
+          "relativePath": "satori/SKILL.md"
+        },
+        {
+          "name": "shadcn",
+          "description": "shadcn/ui expert guidance — CLI, component installation, composition patterns, custom registries, theming, Tailwind CSS integration, and high-quality interface design. Use when initializing shadcn, adding components, composing product UI, building custom registries, configuring themes, or troubleshooting component issues.",
+          "relativePath": "shadcn/SKILL.md"
+        },
+        {
+          "name": "sign-in-with-vercel",
+          "description": "Sign in with Vercel guidance — OAuth 2.0/OIDC identity provider for user authentication via Vercel accounts. Use when implementing user login with Vercel as the identity provider.",
+          "relativePath": "sign-in-with-vercel/SKILL.md"
+        },
+        {
+          "name": "swr",
+          "description": "SWR data-fetching expert guidance. Use when building React apps with client-side data fetching, caching, revalidation, mutations, optimistic UI, pagination, or infinite loading using the SWR library.",
+          "relativePath": "swr/SKILL.md"
+        },
+        {
+          "name": "turbopack",
+          "description": "Turbopack expert guidance. Use when configuring the Next.js bundler, optimizing HMR, debugging build issues, or understanding the Turbopack vs Webpack differences.",
+          "relativePath": "turbopack/SKILL.md"
+        },
+        {
+          "name": "turborepo",
+          "description": "Turborepo expert guidance. Use when setting up or optimizing monorepo builds, configuring task caching, remote caching, parallel execution, or the --affected flag for incremental CI.",
+          "relativePath": "turborepo/SKILL.md"
+        },
+        {
+          "name": "v0-dev",
+          "description": "v0 by Vercel expert guidance. Use when discussing AI code generation, generating UI components from prompts, v0 CLI usage, v0 SDK/API integration, or integrating v0 into development workflows with GitHub and Vercel deployment.",
+          "relativePath": "v0-dev/SKILL.md"
+        },
+        {
+          "name": "vercel-agent",
+          "description": "Vercel Agent guidance — AI-powered code review, incident investigation, and SDK installation. Automates PR analysis and anomaly debugging. Use when configuring or understanding Vercel's AI development tools.",
+          "relativePath": "vercel-agent/SKILL.md"
+        },
+        {
+          "name": "vercel-api",
+          "description": "Vercel app and REST API expert guidance. Use when the agent needs live access to Vercel projects, deployments, environment variables, domains, logs, or documentation through the connected Vercel app or REST API.",
+          "relativePath": "vercel-api/SKILL.md"
+        },
+        {
+          "name": "vercel-cli",
+          "description": "Vercel CLI expert guidance. Use when deploying, managing environment variables, linking projects, viewing logs, managing domains, or interacting with the Vercel platform from the command line.",
+          "relativePath": "vercel-cli/SKILL.md"
+        },
+        {
+          "name": "vercel-firewall",
+          "description": "Vercel Firewall and security expert guidance. Use when configuring DDoS protection, WAF rules, rate limiting, bot filtering, IP allow/block lists, OWASP rulesets, Attack Challenge Mode, or any security configuration on the Vercel platform.",
+          "relativePath": "vercel-firewall/SKILL.md"
+        },
+        {
+          "name": "vercel-flags",
+          "description": "Vercel Flags guidance — feature flags platform with unified dashboard, Flags Explorer, gradual rollouts, A/B testing, and provider adapters. Use when implementing feature flags, experimentation, or staged rollouts.",
+          "relativePath": "vercel-flags/SKILL.md"
+        },
+        {
+          "name": "vercel-functions",
+          "description": "Vercel Functions expert guidance — Serverless Functions, Edge Functions, Fluid Compute, streaming, Cron Jobs, and runtime configuration. Use when configuring, debugging, or optimizing server-side code running on Vercel.",
+          "relativePath": "vercel-functions/SKILL.md"
+        },
+        {
+          "name": "vercel-queues",
+          "description": "Vercel Queues guidance (public beta) — durable event streaming with topics, consumer groups, retries, and delayed delivery. $0.60/1M ops. Powers Workflow DevKit. Use when building async processing, fan-out patterns, or event-driven architectures.",
+          "relativePath": "vercel-queues/SKILL.md"
+        },
+        {
+          "name": "vercel-sandbox",
+          "description": "Vercel Sandbox guidance — ephemeral Firecracker microVMs for running untrusted code safely. Supports AI agents, code generation, and experimentation. Use when executing user-generated or AI-generated code in isolation.",
+          "relativePath": "vercel-sandbox/SKILL.md"
+        },
+        {
+          "name": "vercel-services",
+          "description": "Vercel Services — deploy multiple services within a single Vercel project. Use for monorepo layouts or when combining a backend (Python, Go) with a frontend (Next.js, Vite) in one deployment.",
+          "relativePath": "vercel-services/SKILL.md"
+        },
+        {
+          "name": "vercel-storage",
+          "description": "Vercel storage expert guidance — Blob, Edge Config, and Marketplace storage (Neon Postgres, Upstash Redis). Use when choosing, configuring, or using data storage with Vercel applications.",
+          "relativePath": "vercel-storage/SKILL.md"
+        },
+        {
+          "name": "verification",
+          "description": "Full-story verification — infers what the user is building, then verifies the complete flow end-to-end: browser → API → data → response. Triggers on dev server start and 'why isn't this working' signals.",
+          "relativePath": "verification/SKILL.md"
+        },
+        {
+          "name": "workflow",
+          "description": "Vercel Workflow DevKit (WDK) expert guidance. Use when building durable workflows, long-running tasks, API routes or agents that need pause/resume, retries, step-based execution, or crash-safe orchestration with Vercel Workflow.",
+          "relativePath": "workflow/SKILL.md"
+        }
+      ],
+      "commands": []
+    },
+    {
+      "name": "game-studio",
+      "displayName": "Game Studio",
+      "description": "Design, prototype, and ship browser games",
+      "official": true,
+      "subdir": "plugins/game-studio",
+      "source": {
+        "source": "local",
+        "path": "./plugins/game-studio"
+      },
+      "skills": [
+        {
+          "name": "game-playtest",
+          "description": "Run browser-game playtests and frontend QA. Use when the user asks for smoke tests, screenshot-based verification, browser automation, HUD or overlay review, or structured issue-finding in a browser game.",
+          "relativePath": "game-playtest/SKILL.md"
+        },
+        {
+          "name": "game-studio",
+          "description": "Route early browser-game work. Use when the user needs stack selection and workflow planning across design, implementation, assets, and playtesting before moving to a specialist skill.",
+          "relativePath": "game-studio/SKILL.md"
+        },
+        {
+          "name": "game-ui-frontend",
+          "description": "Design UI surfaces for browser games. Use when the user asks for HUDs, menus, overlays, responsive layouts, or visual direction that must protect the playfield.",
+          "relativePath": "game-ui-frontend/SKILL.md"
+        },
+        {
+          "name": "phaser-2d-game",
+          "description": "Implement 2D browser games with Phaser. Use when the user wants a Phaser, TypeScript, and Vite stack for scenes, gameplay systems, cameras, sprite animation, and DOM-overlay HUD patterns.",
+          "relativePath": "phaser-2d-game/SKILL.md"
+        },
+        {
+          "name": "react-three-fiber-game",
+          "description": "Build React-hosted 3D browser games with React Three Fiber. Use when the user wants pmndrs-based scene composition, shared React state, and 3D HUD integration inside a React app.",
+          "relativePath": "react-three-fiber-game/SKILL.md"
+        },
+        {
+          "name": "sprite-pipeline",
+          "description": "Generate and normalize 2D sprite animations. Use when the user asks for full-strip generation from approved source frames, consistent anchor and scale normalization, or preview assets for browser-game animation.",
+          "relativePath": "sprite-pipeline/SKILL.md"
+        },
+        {
+          "name": "three-webgl-game",
+          "description": "Implement browser-game runtimes with plain Three.js. Use when the user wants imperative scene control in TypeScript or Vite with GLB assets, loaders, physics, and low-level WebGL debugging.",
+          "relativePath": "three-webgl-game/SKILL.md"
+        },
+        {
+          "name": "web-3d-asset-pipeline",
+          "description": "Prepare and optimize browser-game 3D assets. Use when the user asks for GLB or glTF shipping work, including Blender cleanup and export, collision or LOD setup, compression, texture packaging, and runtime validation.",
+          "relativePath": "web-3d-asset-pipeline/SKILL.md"
+        },
+        {
+          "name": "web-game-foundations",
+          "description": "Set browser-game architecture before implementation. Use when the user needs engine choice, simulation and render boundaries, input model, asset organization, or save/debug/performance strategy.",
+          "relativePath": "web-game-foundations/SKILL.md"
+        }
+      ],
+      "commands": []
+    },
+    {
+      "name": "superpowers",
+      "displayName": "Superpowers",
+      "description": "Planning, TDD, debugging, and delivery workflows for coding agents",
+      "official": false,
+      "subdir": "plugins/superpowers",
+      "source": {
+        "source": "local",
+        "path": "./plugins/superpowers"
+      },
+      "skills": [
+        {
+          "name": "brainstorming",
+          "description": "You MUST use this before any creative work - creating features, building components, adding functionality, or modifying behavior. Explores user intent, requirements and design before implementation.",
+          "relativePath": "brainstorming/SKILL.md"
+        },
+        {
+          "name": "dispatching-parallel-agents",
+          "description": "Use when facing 2+ independent tasks that can be worked on without shared state or sequential dependencies",
+          "relativePath": "dispatching-parallel-agents/SKILL.md"
+        },
+        {
+          "name": "executing-plans",
+          "description": "Use when you have a written implementation plan to execute in a separate session with review checkpoints",
+          "relativePath": "executing-plans/SKILL.md"
+        },
+        {
+          "name": "finishing-a-development-branch",
+          "description": "Use when implementation is complete, all tests pass, and you need to decide how to integrate the work - guides completion of development work by presenting structured options for merge, PR, or cleanup",
+          "relativePath": "finishing-a-development-branch/SKILL.md"
+        },
+        {
+          "name": "receiving-code-review",
+          "description": "Use when receiving code review feedback, before implementing suggestions, especially if feedback seems unclear or technically questionable - requires technical rigor and verification, not performative agreement or blind implementation",
+          "relativePath": "receiving-code-review/SKILL.md"
+        },
+        {
+          "name": "requesting-code-review",
+          "description": "Use when completing tasks, implementing major features, or before merging to verify work meets requirements",
+          "relativePath": "requesting-code-review/SKILL.md"
+        },
+        {
+          "name": "subagent-driven-development",
+          "description": "Use when executing implementation plans with independent tasks in the current session",
+          "relativePath": "subagent-driven-development/SKILL.md"
+        },
+        {
+          "name": "systematic-debugging",
+          "description": "Use when encountering any bug, test failure, or unexpected behavior, before proposing fixes",
+          "relativePath": "systematic-debugging/SKILL.md"
+        },
+        {
+          "name": "test-driven-development",
+          "description": "Use when implementing any feature or bugfix, before writing implementation code",
+          "relativePath": "test-driven-development/SKILL.md"
+        },
+        {
+          "name": "using-git-worktrees",
+          "description": "Use when starting feature work that needs isolation from current workspace or before executing implementation plans - ensures an isolated workspace exists via native tools or git worktree fallback",
+          "relativePath": "using-git-worktrees/SKILL.md"
+        },
+        {
+          "name": "using-superpowers",
+          "description": "Use when starting any conversation - establishes how to find and use skills, requiring Skill tool invocation before ANY response including clarifying questions",
+          "relativePath": "using-superpowers/SKILL.md"
+        },
+        {
+          "name": "verification-before-completion",
+          "description": "Use when about to claim work is complete, fixed, or passing, before committing or creating PRs - requires running verification commands and confirming output before making any success claims; evidence before assertions always",
+          "relativePath": "verification-before-completion/SKILL.md"
+        },
+        {
+          "name": "writing-plans",
+          "description": "Use when you have a spec or requirements for a multi-step task, before touching code",
+          "relativePath": "writing-plans/SKILL.md"
+        },
+        {
+          "name": "writing-skills",
+          "description": "Use when creating new skills, editing existing skills, or verifying skills work before deployment",
+          "relativePath": "writing-skills/SKILL.md"
+        }
+      ],
+      "commands": []
+    },
+    {
+      "name": "box",
+      "displayName": "Box",
+      "description": "Search and reference your documents",
+      "official": true,
+      "subdir": "plugins/box",
+      "source": {
+        "source": "local",
+        "path": "./plugins/box"
+      },
+      "skills": [
+        {
+          "name": "box-content-api",
+          "description": "Build and troubleshoot Box integrations for uploads, folders, folder listings, downloads and previews, shared links, collaborations, search, metadata, event-driven automations, and Box AI retrieval flows. Use when Codex needs to add Box APIs or SDKs to an app, wire Box-backed document workflows, organize or share content, react to new files, or fetch Box content for search, summarization, extraction, or question-answering.",
+          "relativePath": "box/SKILL.md"
+        }
+      ],
+      "commands": []
+    },
+    {
+      "name": "github",
+      "displayName": "GitHub",
+      "description": "Triage PRs, issues, CI, and publish flows",
+      "official": true,
+      "subdir": "plugins/github",
+      "source": {
+        "source": "local",
+        "path": "./plugins/github"
+      },
+      "skills": [
+        {
+          "name": "gh-address-comments",
+          "description": "Address actionable GitHub pull request review feedback. Use when the user wants to inspect unresolved review threads, requested changes, or inline review comments on a PR, then implement selected fixes. Use the GitHub app for PR metadata and flat comment reads, and use the bundled GraphQL script via `gh` whenever thread-level state, resolution status, or inline review context matters.",
+          "relativePath": "gh-address-comments/SKILL.md"
+        },
+        {
+          "name": "gh-fix-ci",
+          "description": "Use when a user asks to debug or fix failing GitHub PR checks that run in GitHub Actions. Use the GitHub app from this plugin for PR metadata and patch context, and use `gh` for Actions check and log inspection before implementing any approved fix.",
+          "relativePath": "gh-fix-ci/SKILL.md"
+        },
+        {
+          "name": "github",
+          "description": "Triage and orient GitHub repository, pull request, and issue work through the connected GitHub app. Use when the user asks for general GitHub help, wants PR or issue summaries, or needs repository context before choosing a more specific GitHub workflow.",
+          "relativePath": "github/SKILL.md"
+        },
+        {
+          "name": "yeet",
+          "description": "Publish local changes to GitHub by confirming scope, committing intentionally, pushing the branch, and opening a draft PR through the GitHub app from this plugin, with `gh` used only as a fallback where connector coverage is insufficient.",
+          "relativePath": "yeet/SKILL.md"
+        }
+      ],
+      "commands": []
+    },
+    {
+      "name": "circleci",
+      "displayName": "CircleCI",
+      "description": "Build, test, and deploy any application",
+      "official": false,
+      "subdir": "plugins/circleci",
+      "source": {
+        "source": "local",
+        "path": "./plugins/circleci"
+      },
+      "skills": [
+        {
+          "name": "chunk",
+          "description": "Use CircleCI Chunk for AI-assisted CI/CD work through either the Chunk web UI or the chunk-cli. Trigger this skill when users ask to set up Chunk, troubleshoot or fix failing builds with Chunk, configure Chunk environments, schedule/proactively run Chunk tasks, or use chunk-cli commands such as init, validate, build-prompt, auth, sandbox, task, and skill install.",
+          "relativePath": "chunk/SKILL.md"
+        },
+        {
+          "name": "circleci-builds",
+          "description": "Diagnose and fix failing CircleCI builds quickly and safely. Use when users ask to investigate failed CircleCI jobs, triage flaky pipelines, identify root causes from logs, and implement minimal fixes in configuration, test setup, or build-related code paths.",
+          "relativePath": "builds/SKILL.md"
+        },
+        {
+          "name": "circleci-cli",
+          "description": "Operate and troubleshoot CircleCI using the CircleCI CLI. Use when users ask to authenticate CLI access, inspect pipeline/workflow/job status, validate configuration locally, rerun pipelines/jobs, trigger pipelines, or gather actionable diagnostics from CLI outputs.",
+          "relativePath": "cli/SKILL.md"
+        },
+        {
+          "name": "circleci-config",
+          "description": "Optimize CircleCI configuration for speed, reliability, and maintainability. Use when users ask to improve `.circleci/config.yml`, reduce CI runtime, tune caching/workspaces/parallelism, remove pipeline waste, or fix flaky pipeline behavior caused by configuration choices.",
+          "relativePath": "config/SKILL.md"
+        }
+      ],
+      "commands": []
+    },
+    {
+      "name": "google-drive",
+      "displayName": "Google Drive",
+      "description": "Work across Drive, Docs, Sheets, and Slides",
+      "official": true,
+      "subdir": "plugins/google-drive",
+      "source": {
+        "source": "local",
+        "path": "./plugins/google-drive"
+      },
+      "skills": [
+        {
+          "name": "google-docs",
+          "description": "Documents-first net-new Google Docs creation plus connector-first Google Docs editing in local Codex plugin sessions, with target-document checks, connector-readback verification, and reference routing for formatting, citations, tables, and write-safety.",
+          "relativePath": "google-docs/SKILL.md"
+        },
+        {
+          "name": "google-drive",
+          "description": "Use connected Google Drive as the single entrypoint for Drive, Docs, Sheets, and Slides work. Use when the user wants to find, fetch, organize, share, export, copy, or delete Drive files, or summarize and edit Google Docs, Google Sheets, and Google Slides through one unified Google Drive plugin.",
+          "relativePath": "google-drive/SKILL.md"
+        },
+        {
+          "name": "google-drive-comments",
+          "description": "Write, reply to, and resolve Google Drive comments on Docs, Sheets, Slides, and Drive files with evidence-backed location context. Use when the user asks to leave comments, review a file with comments, respond to comment threads, or resolve Drive comments.",
+          "relativePath": "google-drive-comments/SKILL.md"
+        },
+        {
+          "name": "google-sheets",
+          "description": "Analyze and edit connected Google Sheets with range precision. Use when the user wants to create Google Sheets, find a spreadsheet, inspect tabs or ranges, search rows, plan formulas, create or repair charts, clean or restructure tables, write concise summaries, or make explicit cell-range updates.",
+          "relativePath": "google-sheets/SKILL.md"
+        },
+        {
+          "name": "google-slides",
+          "description": "Google Slides work for finding, reading, summarizing, creating, importing, visual cleanup, template migration, structural repair, and content edits in native Slides decks.",
+          "relativePath": "google-slides/SKILL.md"
+        }
+      ],
+      "commands": []
+    },
+    {
+      "name": "notion",
+      "displayName": "Notion",
+      "description": "Notion workflows for specs, research, meetings, and knowledge capture",
+      "official": true,
+      "subdir": "plugins/notion",
+      "source": {
+        "source": "local",
+        "path": "./plugins/notion"
+      },
+      "skills": [
+        {
+          "name": "notion-knowledge-capture",
+          "description": "Capture conversations and decisions into structured Notion pages; use when turning chats/notes into wiki entries, how-tos, decisions, or FAQs with proper linking.",
+          "relativePath": "notion-knowledge-capture/SKILL.md"
+        },
+        {
+          "name": "notion-meeting-intelligence",
+          "description": "Prepare meeting materials with Notion context and Codex research; use when gathering context, drafting agendas/pre-reads, and tailoring materials to attendees.",
+          "relativePath": "notion-meeting-intelligence/SKILL.md"
+        },
+        {
+          "name": "notion-research-documentation",
+          "description": "Research across Notion and synthesize into structured documentation; use when gathering info from multiple Notion sources to produce briefs, comparisons, or reports with citations.",
+          "relativePath": "notion-research-documentation/SKILL.md"
+        },
+        {
+          "name": "notion-spec-to-implementation",
+          "description": "Turn Notion specs into implementation plans, tasks, and progress tracking; use when implementing PRDs/feature specs and creating Notion plans + tasks from them.",
+          "relativePath": "notion-spec-to-implementation/SKILL.md"
+        }
+      ],
+      "commands": []
+    },
+    {
+      "name": "cloudflare",
+      "displayName": "Cloudflare",
+      "description": "Cloudflare platform guidance with official MCP",
+      "official": false,
+      "subdir": "plugins/cloudflare",
+      "source": {
+        "source": "local",
+        "path": "./plugins/cloudflare"
+      },
+      "skills": [
+        {
+          "name": "agents-sdk",
+          "description": "Build AI agents on Cloudflare Workers using the Agents SDK. Load when creating stateful agents, durable workflows, real-time WebSocket apps, scheduled tasks, MCP servers, or chat applications. Covers Agent class, state management, callable RPC, Workflows integration, and React hooks. Biases towards retrieval from Cloudflare docs over pre-trained knowledge.",
+          "relativePath": "agents-sdk/SKILL.md"
+        },
+        {
+          "name": "building-ai-agent-on-cloudflare",
+          "description": "|",
+          "relativePath": "building-ai-agent-on-cloudflare/SKILL.md"
+        },
+        {
+          "name": "building-mcp-server-on-cloudflare",
+          "description": "|",
+          "relativePath": "building-mcp-server-on-cloudflare/SKILL.md"
+        },
+        {
+          "name": "cloudflare",
+          "description": "Comprehensive Cloudflare platform skill covering Workers, Pages, storage (KV, D1, R2), AI (Workers AI, Vectorize, Agents SDK), networking (Tunnel, Spectrum), security (WAF, DDoS), and infrastructure-as-code (Terraform, Pulumi). Use for any Cloudflare development task. Biases towards retrieval from Cloudflare docs over pre-trained knowledge.",
+          "relativePath": "cloudflare/SKILL.md"
+        },
+        {
+          "name": "durable-objects",
+          "description": "Create and review Cloudflare Durable Objects. Use when building stateful coordination (chat rooms, multiplayer games, booking systems), implementing RPC methods, SQLite storage, alarms, WebSockets, or reviewing DO code for best practices. Covers Workers integration, wrangler config, and testing with Vitest. Biases towards retrieval from Cloudflare docs over pre-trained knowledge.",
+          "relativePath": "durable-objects/SKILL.md"
+        },
+        {
+          "name": "sandbox-sdk",
+          "description": "Build sandboxed applications for secure code execution. Load when building AI code execution, code interpreters, CI/CD systems, interactive dev environments, or executing untrusted code. Covers Sandbox SDK lifecycle, commands, files, code interpreter, and preview URLs. Biases towards retrieval from Cloudflare docs over pre-trained knowledge.",
+          "relativePath": "sandbox-sdk/SKILL.md"
+        },
+        {
+          "name": "web-perf",
+          "description": "Analyzes web performance using Chrome DevTools MCP. Measures Core Web Vitals (FCP, LCP, TBT, CLS, Speed Index), identifies render-blocking resources, network dependency chains, layout shifts, caching issues, and accessibility gaps. Use when asked to audit, profile, debug, or optimize page load performance, Lighthouse scores, or site speed. Biases towards retrieval from current documentation over pre-trained knowledge.",
+          "relativePath": "web-perf/SKILL.md"
+        },
+        {
+          "name": "workers-best-practices",
+          "description": "Reviews and authors Cloudflare Workers code against production best practices. Load when writing new Workers, reviewing Worker code, configuring wrangler.jsonc, or checking for common Workers anti-patterns (streaming, floating promises, global state, secrets, bindings, observability). Biases towards retrieval from Cloudflare docs over pre-trained knowledge.",
+          "relativePath": "workers-best-practices/SKILL.md"
+        },
+        {
+          "name": "wrangler",
+          "description": "Cloudflare Workers CLI for deploying, developing, and managing Workers, KV, R2, D1, Vectorize, Hyperdrive, Workers AI, Containers, Queues, Workflows, Pipelines, and Secrets Store. Load before running wrangler commands to ensure correct syntax and best practices. Biases towards retrieval from Cloudflare docs over pre-trained knowledge.",
+          "relativePath": "wrangler/SKILL.md"
+        }
+      ],
+      "commands": []
+    },
+    {
+      "name": "sentry",
+      "displayName": "Sentry",
+      "description": "Inspect recent Sentry issues and events",
+      "official": true,
+      "subdir": "plugins/sentry",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sentry"
+      },
+      "skills": [
+        {
+          "name": "sentry",
+          "description": "Use when the user asks to inspect Sentry issues or events, summarize recent production errors, or pull basic Sentry health data via the Sentry API; perform read-only queries with the bundled script and require `SENTRY_AUTH_TOKEN`.",
+          "relativePath": "sentry/SKILL.md"
+        }
+      ],
+      "commands": []
+    },
+    {
+      "name": "build-ios-apps",
+      "displayName": "Build iOS Apps",
+      "description": "Build, refine, and debug iOS apps with App Intents, SwiftUI, and Xcode workflows",
+      "official": true,
+      "subdir": "plugins/build-ios-apps",
+      "source": {
+        "source": "local",
+        "path": "./plugins/build-ios-apps"
+      },
+      "skills": [
+        {
+          "name": "ios-app-intents",
+          "description": "Design and implement App Intents, app entities, and App Shortcuts for iOS apps so useful actions and content are available to Shortcuts, Siri, Spotlight, widgets, controls, and other intent-driven system surfaces. Use when exposing app actions outside the UI, adding `AppEntity` and `EntityQuery` types, shaping shortcut phrases and display representations, or routing intent execution back into the main app.",
+          "relativePath": "ios-app-intents/SKILL.md"
+        },
+        {
+          "name": "ios-debugger-agent",
+          "description": "Use XcodeBuildMCP to build, run, launch, and debug the current iOS project on a booted simulator. Trigger when asked to run an iOS app, interact with the simulator UI, inspect on-screen state, capture logs/console output, or diagnose runtime behavior using XcodeBuildMCP tools.",
+          "relativePath": "ios-debugger-agent/SKILL.md"
+        },
+        {
+          "name": "ios-ettrace-performance",
+          "description": "Capture and interpret ETTrace profiles for iOS simulator apps, including symbolicated launch and runtime flamegraphs. Use when asked to profile an iOS app flow, gather simulator performance traces, identify CPU-heavy stacks, compare before/after traces, or produce flamegraph evidence for startup, scrolling, navigation, rendering, or other user-visible latency.",
+          "relativePath": "ios-ettrace-performance/SKILL.md"
+        },
+        {
+          "name": "ios-memgraph-leaks",
+          "description": "Capture, inspect, compare, and root-cause iOS memory graph leaks using Apple's leaks and memgraph tools. Use when debugging leaked iOS objects, simulator memgraphs, retain-cycle suspicions, memory growth after navigation/logout/account changes, or when asked to prove an iOS leak fix with before/after memgraph evidence.",
+          "relativePath": "ios-memgraph-leaks/SKILL.md"
+        },
+        {
+          "name": "swiftui-liquid-glass",
+          "description": "Implement, review, or improve SwiftUI features using the iOS 26+ Liquid Glass API. Use when asked to adopt Liquid Glass in new SwiftUI UI, refactor an existing feature to Liquid Glass, or review Liquid Glass usage for correctness, performance, and design alignment.",
+          "relativePath": "swiftui-liquid-glass/SKILL.md"
+        },
+        {
+          "name": "swiftui-performance-audit",
+          "description": "Audit and improve SwiftUI runtime performance from code review and architecture. Use for requests to diagnose slow rendering, janky scrolling, high CPU/memory usage, excessive view updates, or layout thrash in SwiftUI apps, and to provide guidance for user-run Instruments profiling when code review alone is insufficient.",
+          "relativePath": "swiftui-performance-audit/SKILL.md"
+        },
+        {
+          "name": "swiftui-ui-patterns",
+          "description": "Best practices and example-driven guidance for building SwiftUI views and components, including navigation hierarchies, custom view modifiers, and responsive layouts with stacks and grids. Use when creating or refactoring SwiftUI UI, designing tab architecture with TabView, composing screens with VStack/HStack, managing @State or @Binding, building declarative iOS interfaces, or needing component-specific patterns and examples.",
+          "relativePath": "swiftui-ui-patterns/SKILL.md"
+        },
+        {
+          "name": "swiftui-view-refactor",
+          "description": "Refactor and review SwiftUI view files with strong defaults for small dedicated subviews, MV-over-MVVM data flow, stable view trees, explicit dependency injection, and correct Observation usage. Use when cleaning up a SwiftUI view, splitting long bodies, removing inline actions or side effects, reducing computed `some View` helpers, or standardizing `@Observable` and view model initialization patterns.",
+          "relativePath": "swiftui-view-refactor/SKILL.md"
+        }
+      ],
+      "commands": []
+    },
+    {
+      "name": "build-macos-apps",
+      "displayName": "Build macOS Apps",
+      "description": "Build, debug, instrument, and implement macOS apps with SwiftUI and AppKit guidance",
+      "official": true,
+      "subdir": "plugins/build-macos-apps",
+      "source": {
+        "source": "local",
+        "path": "./plugins/build-macos-apps"
+      },
+      "skills": [
+        {
+          "name": "appkit-interop",
+          "description": "Decide when and how to bridge a macOS app from SwiftUI into AppKit. Use when implementing NSViewRepresentable or NSViewControllerRepresentable, accessing NSWindow or the responder chain, presenting panels, customizing menus, or handling desktop behaviors that SwiftUI does not model cleanly.",
+          "relativePath": "appkit-interop/SKILL.md"
+        },
+        {
+          "name": "build-run-debug",
+          "description": "Build, run, and debug local macOS apps and desktop executables using shell-first Xcode and Swift workflows. Use when asked to build a Mac app, launch it, diagnose compiler or linker failures, inspect startup problems, or debug desktop-only runtime issues.",
+          "relativePath": "build-run-debug/SKILL.md"
+        },
+        {
+          "name": "liquid-glass",
+          "description": "Implement, refactor, or review modern macOS SwiftUI UI for the new design system and Liquid Glass. Use when adopting Liquid Glass, updating NavigationSplitView, toolbars, search, sheets, and controls, removing custom backgrounds that fight system materials, or building custom glass surfaces with glassEffect, GlassEffectContainer, and glassEffectID.",
+          "relativePath": "liquid-glass/SKILL.md"
+        },
+        {
+          "name": "packaging-notarization",
+          "description": "Prepare and troubleshoot packaging, signing, and notarization workflows for macOS distribution. Use when asked to archive a Mac app, validate bundle structure, reason about notarization readiness, or explain distribution-only failures.",
+          "relativePath": "packaging-notarization/SKILL.md"
+        },
+        {
+          "name": "signing-entitlements",
+          "description": "Inspect signing, entitlements, hardened runtime, and Gatekeeper issues for macOS apps. Use when asked to diagnose code signing failures, missing entitlements, sandbox problems, notarization prerequisites, or trust-policy launch errors.",
+          "relativePath": "signing-entitlements/SKILL.md"
+        },
+        {
+          "name": "swiftpm-macos",
+          "description": "Build, run, and test pure SwiftPM-based macOS packages and executables. Use when the repo is package-first, when there is no Xcode project, or when Swift package workflows are the fastest path to diagnosis.",
+          "relativePath": "swiftpm-macos/SKILL.md"
+        },
+        {
+          "name": "swiftui-patterns",
+          "description": "Best practices and example-driven guidance for building native macOS SwiftUI scenes and components, including windows, commands, toolbars, settings, split views, inspectors, menu bar extras, and keyboard-driven workflows. Use when creating or refactoring macOS SwiftUI UI, choosing scene types, wiring menus or settings, or needing desktop-specific component patterns and examples.",
+          "relativePath": "swiftui-patterns/SKILL.md"
+        },
+        {
+          "name": "telemetry",
+          "description": "Add lightweight runtime telemetry and debug instrumentation to macOS apps, then verify those events after building and running. Use when wiring `Logger` / `os.Logger`, adding log points for window/sidebar/menu-bar actions, reading runtime logs from Console or `log stream`, or confirming that expected events fire after a local run.",
+          "relativePath": "telemetry/SKILL.md"
+        },
+        {
+          "name": "test-triage",
+          "description": "Triage failing macOS tests across Xcode and SwiftPM workflows. Use when asked to run macOS tests, narrow failing scopes, explain assertion or crash failures, or separate real test regressions from setup and environment problems.",
+          "relativePath": "test-triage/SKILL.md"
+        },
+        {
+          "name": "view-refactor",
+          "description": "Refactor macOS SwiftUI views and scenes with strong defaults for small dedicated subviews, stable sidebar and selection structure, explicit command and toolbar ownership, scene-aware state, and narrow AppKit escape hatches. Use when cleaning up a macOS view file, splitting oversized scene roots, removing iOS-centric patterns, or tightening mixed SwiftUI/AppKit architecture.",
+          "relativePath": "view-refactor/SKILL.md"
+        },
+        {
+          "name": "window-management",
+          "description": "Customize macOS 15+ SwiftUI windows and scene behavior using Window, WindowGroup, and macOS window modifiers. Use when styling or hiding window toolbars and titles, extending drag regions with WindowDragGesture, replacing window backgrounds with materials, disabling minimize or restoration for utility windows, setting default or ideal window placement from content/display size, creating borderless windows, or tuning default launch behavior.",
+          "relativePath": "window-management/SKILL.md"
+        }
+      ],
+      "commands": []
+    },
+    {
+      "name": "build-web-apps",
+      "displayName": "Build Web Apps",
+      "description": "Build frontend-focused web apps with generated assets, browser testing, payments, and databases",
+      "official": true,
+      "subdir": "plugins/build-web-apps",
+      "source": {
+        "source": "local",
+        "path": "./plugins/build-web-apps"
+      },
+      "skills": [
+        {
+          "name": "frontend-app-builder",
+          "description": "Use for new frontend applications, dashboards, games, creative websites, hero sections, and visually driven UI from scratch, or when the user explicitly asks for a redesign/restyle/modernization. Builds from clean, airy, high-taste, readable image-generated concept design with section-specific references, faithful implementation, and browser testing.",
+          "relativePath": "frontend-app-builder/SKILL.md"
+        },
+        {
+          "name": "frontend-testing-debugging",
+          "description": "Use when testing, debugging, or making targeted improvements to rendered frontend apps through the Build Web Apps or web dev plugin: local dev servers, UI regressions, interaction bugs, console errors, responsive layout, and visual QA. Check whether the Browser plugin is available and use it first when it is; otherwise use regular Playwright with the recorded reason.",
+          "relativePath": "frontend-testing-debugging/SKILL.md"
+        },
+        {
+          "name": "react-best-practices",
+          "description": "React and Next.js performance optimization guidelines from Vercel Engineering. This skill should be used when writing, reviewing, or refactoring React/Next.js code to ensure optimal performance patterns. Triggers on tasks involving React components, Next.js pages, data fetching, bundle optimization, or performance improvements.",
+          "relativePath": "react-best-practices/SKILL.md"
+        },
+        {
+          "name": "shadcn",
+          "description": "Manages shadcn components and projects — adding, searching, fixing, debugging, styling, and composing UI. Provides project context, component docs, and usage examples. Applies when working with shadcn/ui, component registries, presets, --preset codes, or any project with a components.json file. Also triggers for \"shadcn init\", \"create an app with --preset\", or \"switch to --preset\".",
+          "relativePath": "shadcn-best-practices/SKILL.md"
+        },
+        {
+          "name": "stripe-best-practices",
+          "description": "Guides Stripe integration decisions — API selection (Checkout Sessions vs PaymentIntents), Connect platform setup (Accounts v2, controller properties), billing/subscriptions, Treasury financial accounts, integration surfaces (Checkout, Payment Element), and migrating from deprecated Stripe APIs. Use when building, modifying, or reviewing any Stripe integration — including accepting payments, building marketplaces, integrating Stripe, processing payments, setting up subscriptions, or creating connected accounts.",
+          "relativePath": "stripe-best-practices/SKILL.md"
+        },
+        {
+          "name": "supabase-postgres-best-practices",
+          "description": "Postgres performance optimization and best practices from Supabase. Use this skill when writing, reviewing, or optimizing Postgres queries, schema designs, or database configurations.",
+          "relativePath": "supabase-best-practices/SKILL.md"
+        }
+      ],
+      "commands": []
+    },
+    {
+      "name": "test-android-apps",
+      "displayName": "Test Android Apps",
+      "description": "Reproduce issues, inspect UI, and capture performance evidence from Android emulators",
+      "official": true,
+      "subdir": "plugins/test-android-apps",
+      "source": {
+        "source": "local",
+        "path": "./plugins/test-android-apps"
+      },
+      "skills": [
+        {
+          "name": "android-emulator-qa",
+          "description": "Use when validating Android feature flows in an emulator with adb-driven launch, input, UI-tree inspection, screenshots, and logcat capture.",
+          "relativePath": "android-emulator-qa/SKILL.md"
+        },
+        {
+          "name": "android-performance",
+          "description": "Gather and interpret Android performance evidence on an adb target using Simpleperf CPU profiles, Perfetto or Compose traces, gfxinfo frame data, dumpsys meminfo snapshots, Java heap dumps, and native allocation traces. Use when asked to profile an Android app flow, find CPU-heavy functions, diagnose jank, capture startup or frame timing evidence, compare before/after performance, explain what code is taking time, or gather memory/leak profiling artifacts.",
+          "relativePath": "android-performance/SKILL.md"
+        }
+      ],
+      "commands": []
+    },
+    {
+      "name": "life-science-research",
+      "displayName": "Life Science Research",
+      "description": "General life-sciences research with routing, evidence synthesis, and optional parallel subagent analysis",
+      "official": true,
+      "subdir": "plugins/life-science-research",
+      "source": {
+        "source": "local",
+        "path": "./plugins/life-science-research"
+      },
+      "skills": [
+        {
+          "name": "alphafold-skill",
+          "description": "Submit compact AlphaFold Protein Structure Database API requests for prediction, UniProt summary, sequence summary, and annotation lookups. Use when a user wants AlphaFold metadata or concise structure summaries",
+          "relativePath": "alphafold-skill/SKILL.md"
+        },
+        {
+          "name": "bgee-skill",
+          "description": "Submit compact Bgee SPARQL requests for healthy wild-type expression metadata and ontology-aware lookup patterns. Use when a user wants concise Bgee summaries; save raw results only on request.",
+          "relativePath": "bgee-skill/SKILL.md"
+        },
+        {
+          "name": "bindingdb-skill",
+          "description": "Submit compact BindingDB REST API requests for ligand-target binding lookups by PDB, UniProt, or similarity search. Use when a user wants concise BindingDB summaries; save raw payloads only on request.",
+          "relativePath": "bindingdb-skill/SKILL.md"
+        },
+        {
+          "name": "biobankjapan-phewas-skill",
+          "description": "Fetch compact BioBank Japan PheWAS summaries for single variants by accepting rsID, GRCh38, or GRCh37 input and resolving to the required GRCh37 query. Use when a user wants concise BBJ association results for one variant",
+          "relativePath": "biobankjapan-phewas-skill/SKILL.md"
+        },
+        {
+          "name": "biorxiv-skill",
+          "description": "Submit compact bioRxiv and medRxiv API requests for details, publication-linkage, and DOI lookups. Use when a user wants concise preprint metadata summaries",
+          "relativePath": "biorxiv-skill/SKILL.md"
+        },
+        {
+          "name": "biostudies-arrayexpress-skill",
+          "description": "Submit compact BioStudies and ArrayExpress API requests for free-text search and accession-based study retrieval. Use when a user wants concise BioStudies summaries",
+          "relativePath": "biostudies-arrayexpress-skill/SKILL.md"
+        },
+        {
+          "name": "cbioportal-skill",
+          "description": "Submit compact cBioPortal API requests for studies, molecular profiles, mutations, clinical data, and samples. Use when a user wants concise cBioPortal summaries",
+          "relativePath": "cbioportal-skill/SKILL.md"
+        },
+        {
+          "name": "cellxgene-skill",
+          "description": "Submit compact CELLxGENE Discover API requests for public collection and dataset metadata. Use when a user wants concise single-cell collection summaries",
+          "relativePath": "cellxgene-skill/SKILL.md"
+        },
+        {
+          "name": "chebi-skill",
+          "description": "Submit compact ChEBI 2.0 API requests for chemical search, compound lookup, ontology traversal, and structure metadata. Use when a user wants concise ChEBI summaries",
+          "relativePath": "chebi-skill/SKILL.md"
+        },
+        {
+          "name": "chembl-skill",
+          "description": "Submit compact ChEMBL API requests for activity, molecule, target, mechanism, and text-search endpoints. Use when a user wants concise ChEMBL summaries",
+          "relativePath": "chembl-skill/SKILL.md"
+        },
+        {
+          "name": "civic-skill",
+          "description": "Submit compact CIViC GraphQL requests for cancer variant interpretation schema inspection and targeted evidence retrieval. Use when a user wants concise CIViC summaries",
+          "relativePath": "civic-skill/SKILL.md"
+        },
+        {
+          "name": "clinicaltrials-skill",
+          "description": "Submit compact ClinicalTrials.gov API v2 requests for study search, metadata, enums, search areas, and field statistics. Use when a user wants concise ClinicalTrials.gov summaries",
+          "relativePath": "clinicaltrials-skill/SKILL.md"
+        },
+        {
+          "name": "clinvar-variation-skill",
+          "description": "Submit compact ClinVar Clinical Tables and NCBI Variation requests for search, VCV, RCV, SCV, and RefSNP lookups. Use when a user wants variant-level summaries or identifier mapping",
+          "relativePath": "clinvar-variation-skill/SKILL.md"
+        },
+        {
+          "name": "efo-ontology-skill",
+          "description": "Submit compact EFO OLS4 requests for search, term lookup, children, and descendants. Use when a user wants concise EFO resolution or ontology-expansion summaries",
+          "relativePath": "efo-ontology-skill/SKILL.md"
+        },
+        {
+          "name": "encode-skill",
+          "description": "Submit compact ENCODE REST API requests for object lookups, portal-style search, and metadata retrieval. Use when a user wants concise ENCODE summaries",
+          "relativePath": "encode-skill/SKILL.md"
+        },
+        {
+          "name": "ensembl-skill",
+          "description": "Submit compact Ensembl REST API requests for lookup, overlap, cross-reference, and variation endpoints. Use when a user wants concise Ensembl summaries",
+          "relativePath": "ensembl-skill/SKILL.md"
+        },
+        {
+          "name": "epigraphdb-skill",
+          "description": "Submit compact EpiGraphDB API requests for ontology, literature, MR, gene-drug, and support-path evidence. Use when a user wants concise EpiGraphDB summaries",
+          "relativePath": "epigraphdb-skill/SKILL.md"
+        },
+        {
+          "name": "eqtl-catalogue-skill",
+          "description": "Submit compact eQTL Catalogue API requests for association retrieval and documented metadata endpoints. Use when a user wants concise public eQTL Catalogue summaries",
+          "relativePath": "eqtl-catalogue-skill/SKILL.md"
+        },
+        {
+          "name": "eva-skill",
+          "description": "Submit compact EVA REST requests for species metadata and archived variant lookups. Use when a user wants concise European Variation Archive summaries",
+          "relativePath": "eva-skill/SKILL.md"
+        },
+        {
+          "name": "finngen-phewas-skill",
+          "description": "Fetch compact FinnGen PheWAS summaries for single variants by accepting rsID, GRCh37, or GRCh38 input and resolving to the required GRCh38 query. Use when a user wants concise FinnGen association results for one variant",
+          "relativePath": "finngen-phewas-skill/SKILL.md"
+        },
+        {
+          "name": "genebass-gene-burden-skill",
+          "description": "Submit compact Genebass gene burden requests for one Ensembl gene ID and one burden set. Use when a user wants concise Genebass PheWAS summaries",
+          "relativePath": "genebass-gene-burden-skill/SKILL.md"
+        },
+        {
+          "name": "gnomad-graphql-skill",
+          "description": "Submit compact gnomAD GraphQL requests for frequency, gene constraint, and variant context queries. Use when a user wants concise gnomAD summaries",
+          "relativePath": "gnomad-graphql-skill/SKILL.md"
+        },
+        {
+          "name": "gtex-eqtl-skill",
+          "description": "Fetch GTEx single-tissue eQTL associations from one variant input by accepting rsID, GRCh37, or GRCh38 input and resolving to the required GRCh38 query for the GTEx v2 API. Use when a user wants eQTL associations returned as JSON.",
+          "relativePath": "gtex-eqtl-skill/SKILL.md"
+        },
+        {
+          "name": "gwas-catalog-skill",
+          "description": "Submit compact GWAS Catalog REST API v2 requests for studies, associations, SNPs, EFO traits, genes, publications, loci, and metadata. Use when a user wants concise GWAS Catalog summaries",
+          "relativePath": "gwas-catalog-skill/SKILL.md"
+        },
+        {
+          "name": "hmdb-skill",
+          "description": "Submit compact HMDB search requests for metabolites, proteins, diseases, and pathways. Use when a user wants concise HMDB summaries",
+          "relativePath": "hmdb-skill/SKILL.md"
+        },
+        {
+          "name": "human-protein-atlas-skill",
+          "description": "Submit compact Human Protein Atlas requests for gene JSON, search downloads, and page-level tissue or cell-line lookups. Use when a user wants concise Human Protein Atlas summaries; save raw JSON or HTML only on request.",
+          "relativePath": "human-protein-atlas-skill/SKILL.md"
+        },
+        {
+          "name": "ipd-skill",
+          "description": "Submit compact IPD REST requests for HLA allele and cell-level metadata using the public IPD query API. Use when a user wants concise IPD summaries; save raw JSON or text only on request.",
+          "relativePath": "ipd-skill/SKILL.md"
+        },
+        {
+          "name": "locus-to-gene-mapper-skill",
+          "description": "Map GWAS loci to ranked candidate genes using a deterministic multi-skill chain (EFO -> GWAS -> coordinates -> Open Targets L2G/coloc -> eQTL -> burden/coding context), with reproducible tables and optional figures. Use when a user provides a trait/EFO term and/or lead variants and needs locus-to-gene prioritization for downstream biology decisions.",
+          "relativePath": "locus-to-gene-mapper-skill/SKILL.md"
+        },
+        {
+          "name": "metabolights-skill",
+          "description": "Submit compact MetaboLights requests for study discovery and study-level metabolomics metadata. Use when a user wants concise MetaboLights summaries",
+          "relativePath": "metabolights-skill/SKILL.md"
+        },
+        {
+          "name": "mgnify-skill",
+          "description": "Submit compact MGnify API requests for microbiome studies, samples, and biome metadata. Use when a user wants concise MGnify summaries",
+          "relativePath": "mgnify-skill/SKILL.md"
+        },
+        {
+          "name": "ncbi-blast-skill",
+          "description": "Submit, poll, and summarize NCBI BLAST Common URL API jobs (Blast.cgi) for nucleotide or protein sequences. Use when a user wants RID status, BLAST results, or compact top-hit summaries; fetch raw Text/JSON2 only on request.",
+          "relativePath": "ncbi-blast-skill/SKILL.md"
+        },
+        {
+          "name": "ncbi-clinicaltables-skill",
+          "description": "Submit compact Clinical Tables NCBI Gene requests for human gene lookup, pagination, and field selection. Use when a user wants concise autocomplete-style human gene search results",
+          "relativePath": "ncbi-clinicaltables-skill/SKILL.md"
+        },
+        {
+          "name": "ncbi-datasets-skill",
+          "description": "Submit compact NCBI Datasets v2 requests for assembly, genome, taxonomy, and related metadata endpoints. Use when a user wants concise NCBI Datasets summaries; save raw JSON or text only on request.",
+          "relativePath": "ncbi-datasets-skill/SKILL.md"
+        },
+        {
+          "name": "ncbi-entrez-skill",
+          "description": "Submit compact NCBI Entrez E-Utilities requests for PubMed, Gene, Protein, Nucleotide, PMC metadata, and GEO metadata workflows. Use when a user wants concise Entrez search, fetch, summary, or link results; save raw JSON or XML only on request.",
+          "relativePath": "ncbi-entrez-skill/SKILL.md"
+        },
+        {
+          "name": "ncbi-pmc-skill",
+          "description": "Submit compact NCBI PMC Open Access requests for article/file availability metadata. Use when a user wants concise PMC Open Access summaries; save raw XML only on request.",
+          "relativePath": "ncbi-pmc-skill/SKILL.md"
+        },
+        {
+          "name": "opentargets-skill",
+          "description": "Submit compact Open Targets Platform GraphQL requests for target, disease, drug, variant, study, and search data, including associated-disease datasource heatmap matrices. Use when a user wants concise Open Targets summaries or per-datasource evidence context",
+          "relativePath": "opentargets-skill/SKILL.md"
+        },
+        {
+          "name": "pharmgkb-skill",
+          "description": "Submit compact PharmGKB API requests for genes, variants, clinical annotations, dosing guidelines, and search. Use when a user wants concise PharmGKB summaries",
+          "relativePath": "pharmgkb-skill/SKILL.md"
+        },
+        {
+          "name": "pride-skill",
+          "description": "Submit compact PRIDE Archive API requests for proteomics project discovery and project-level metadata. Use when a user wants concise PRIDE summaries",
+          "relativePath": "pride-skill/SKILL.md"
+        },
+        {
+          "name": "proteomexchange-skill",
+          "description": "Submit compact ProteomeXchange PROXI requests for datasets, libraries, peptidoforms, proteins, PSMs, spectra, and USI examples. Use when a user wants concise PROXI summaries",
+          "relativePath": "proteomexchange-skill/SKILL.md"
+        },
+        {
+          "name": "pubchem-pug-skill",
+          "description": "Submit compact PubChem PUG REST requests for compound properties, descriptions, assay summaries, and substance metadata. Use when a user wants concise PubChem summaries",
+          "relativePath": "pubchem-pug-skill/SKILL.md"
+        },
+        {
+          "name": "quickgo-skill",
+          "description": "Submit compact QuickGO requests for GO terms, annotations, and ontology traversal. Use when a user wants concise QuickGO summaries",
+          "relativePath": "quickgo-skill/SKILL.md"
+        },
+        {
+          "name": "rcsb-pdb-skill",
+          "description": "Submit compact RCSB PDB requests for core metadata, Search API queries, and FASTA downloads. Use when a user wants concise RCSB summaries; save raw JSON or FASTA only on request.",
+          "relativePath": "rcsb-pdb-skill/SKILL.md"
+        },
+        {
+          "name": "reactome-skill",
+          "description": "Submit compact Reactome ContentService requests for pathway, event, participant, search, and diagram-related data. Use when a user wants concise Reactome summaries",
+          "relativePath": "reactome-skill/SKILL.md"
+        },
+        {
+          "name": "research-router-skill",
+          "description": "Route broad or ambiguous life-sciences research requests to the right skills, normalize core entities, optionally parallelize independent evidence gathering with subagents when available, and synthesize a concise evidence-backed answer. Use when a user asks a general life-sciences question that could span multiple sources or analysis types.",
+          "relativePath": "research-router-skill/SKILL.md"
+        },
+        {
+          "name": "rhea-skill",
+          "description": "Submit compact Rhea reaction search requests for biochemical reactions and reaction IDs. Use when a user wants concise Rhea summaries",
+          "relativePath": "rhea-skill/SKILL.md"
+        },
+        {
+          "name": "rnacentral-skill",
+          "description": "Submit compact RNAcentral API requests for RNA entry browsing, single-entry lookup, and cross-reference retrieval. Use when a user wants concise RNAcentral summaries",
+          "relativePath": "rnacentral-skill/SKILL.md"
+        },
+        {
+          "name": "string-skill",
+          "description": "Submit compact STRING API requests for network, interaction partner, and enrichment endpoints. Use when a user wants concise STRING summaries",
+          "relativePath": "string-skill/SKILL.md"
+        },
+        {
+          "name": "tpmi-phewas-skill",
+          "description": "Fetch compact TPMI PheWAS summaries for single variants by accepting rsID, GRCh37, or GRCh38 input and resolving to the required GRCh38 query. Use when a user wants concise TPMI association results for one variant",
+          "relativePath": "tpmi-phewas-skill/SKILL.md"
+        },
+        {
+          "name": "ukb-topmed-phewas-skill",
+          "description": "Fetch compact UKB-TOPMed PheWAS summaries for single variants by accepting rsID, GRCh37, or GRCh38 input and resolving to the required GRCh38 query. Use when a user wants concise UKB-TOPMed association results for one variant",
+          "relativePath": "ukb-topmed-phewas-skill/SKILL.md"
+        },
+        {
+          "name": "uniprot-skill",
+          "description": "Submit compact UniProt REST API requests for UniProtKB, UniRef, UniParc, and FASTA stream endpoints. Use when a user wants concise UniProt summaries; save raw JSON or FASTA only on request.",
+          "relativePath": "uniprot-skill/SKILL.md"
+        }
+      ],
+      "commands": []
+    },
+    {
+      "name": "zotero",
+      "displayName": "Zotero",
+      "description": "Find papers and add citations from Zotero",
+      "official": true,
+      "subdir": "plugins/zotero",
+      "source": {
+        "source": "local",
+        "path": "./plugins/zotero"
+      },
+      "skills": [
+        {
+          "name": "Zotero",
+          "description": "Use Zotero Desktop from Codex to enable/probe the local API, search a local Zotero library, list items/collections/tags, export BibTeX, insert citation keys into LaTeX or Markdown drafts, read indexed full text when requested, and import BibTeX/RIS records into Zotero through the connector server. Use when the user mentions Zotero, citations, references.bib, BibTeX export, local Zotero API, localhost:23119, or adding citations from a Zotero library.",
+          "relativePath": "zotero/SKILL.md"
+        }
+      ],
+      "commands": []
+    },
+    {
+      "name": "expo",
+      "displayName": "Expo",
+      "description": "Build, deploy, upgrade, and debug Expo and React Native apps",
+      "official": false,
+      "subdir": "plugins/expo",
+      "source": {
+        "source": "local",
+        "path": "./plugins/expo"
+      },
+      "skills": [
+        {
+          "name": "building-native-ui",
+          "description": "Complete guide for building beautiful apps with Expo Router. Covers fundamentals, styling, components, navigation, animations, patterns, and native tabs.",
+          "relativePath": "building-native-ui/SKILL.md"
+        },
+        {
+          "name": "codex-expo-run-actions",
+          "description": "Wire Expo projects into the Codex app with project-local run scripts and .codex/environments/environment.toml actions. Use when the user wants the Codex app Run button, build/run actions, action buttons, or a stable Expo start/run workflow from Codex.",
+          "relativePath": "codex-expo-run-actions/SKILL.md"
+        },
+        {
+          "name": "expo-api-routes",
+          "description": "Guidelines for creating API routes in Expo Router with EAS Hosting",
+          "relativePath": "expo-api-routes/SKILL.md"
+        },
+        {
+          "name": "expo-cicd-workflows",
+          "description": "Helps understand and write EAS workflow YAML files for Expo projects. Use this skill when the user asks about CI/CD or workflows in an Expo or EAS context, mentions .eas/workflows/, or wants help with EAS build pipelines or deployment automation.",
+          "relativePath": "expo-cicd-workflows/SKILL.md"
+        },
+        {
+          "name": "expo-deployment",
+          "description": "Deploying Expo apps to iOS App Store, Android Play Store, web hosting, and API routes",
+          "relativePath": "expo-deployment/SKILL.md"
+        },
+        {
+          "name": "expo-dev-client",
+          "description": "Build and distribute Expo development clients locally or via TestFlight",
+          "relativePath": "expo-dev-client/SKILL.md"
+        },
+        {
+          "name": "expo-module",
+          "description": "Guide for writing Expo native modules and views using the Expo Modules API (Swift, Kotlin, TypeScript). Covers module definition DSL, native views, shared objects, config plugins, lifecycle hooks, autolinking, and type system. Use when building or modifying native modules for Expo.",
+          "relativePath": "expo-module/SKILL.md"
+        },
+        {
+          "name": "expo-tailwind-setup",
+          "description": "Set up Tailwind CSS v4 in Expo with react-native-css and NativeWind v5 for universal styling",
+          "relativePath": "expo-tailwind-setup/SKILL.md"
+        },
+        {
+          "name": "expo-ui-jetpack-compose",
+          "description": "`@expo/ui/jetpack-compose` package lets you use Jetpack Compose Views and modifiers in your app.",
+          "relativePath": "expo-ui-jetpack-compose/SKILL.md"
+        },
+        {
+          "name": "expo-ui-swift-ui",
+          "description": "`@expo/ui/swift-ui` package lets you use SwiftUI Views and modifiers in your app.",
+          "relativePath": "expo-ui-swift-ui/SKILL.md"
+        },
+        {
+          "name": "native-data-fetching",
+          "description": "Use when implementing or debugging ANY network request, API call, or data fetching. Covers fetch API, React Query, SWR, error handling, caching, offline support, and Expo Router data loaders (`useLoaderData`).",
+          "relativePath": "native-data-fetching/SKILL.md"
+        },
+        {
+          "name": "upgrading-expo",
+          "description": "Guidelines for upgrading Expo SDK versions and fixing dependency issues",
+          "relativePath": "upgrading-expo/SKILL.md"
+        },
+        {
+          "name": "use-dom",
+          "description": "Use Expo DOM components to run web code in a webview on native and as-is on web. Migrate web code to native incrementally.",
+          "relativePath": "use-dom/SKILL.md"
+        }
+      ],
+      "commands": []
+    },
+    {
+      "name": "coderabbit",
+      "displayName": "CodeRabbit",
+      "description": "Run AI-powered code review for your current changes",
+      "official": false,
+      "subdir": "plugins/coderabbit",
+      "source": {
+        "source": "local",
+        "path": "./plugins/coderabbit"
+      },
+      "skills": [
+        {
+          "name": "code-review",
+          "description": "Reviews code changes using CodeRabbit AI. Use when user asks for code review, PR feedback, code quality checks, security issues, or requests fix-review cycles.",
+          "relativePath": "coderabbit-review/SKILL.md"
+        }
+      ],
+      "commands": []
+    },
+    {
+      "name": "neon-postgres",
+      "displayName": "Neon Postgres",
+      "description": "Manage Neon Serverless Postgres projects and databases",
+      "official": false,
+      "subdir": "plugins/neon-postgres",
+      "source": {
+        "source": "local",
+        "path": "./plugins/neon-postgres"
+      },
+      "skills": [
+        {
+          "name": "neon-postgres",
+          "description": "Guides and best practices for working with Neon Serverless Postgres. Covers getting started, local development with Neon, choosing a connection method, Neon features, authentication (@neondatabase/auth), PostgREST-style data API (@neondatabase/neon-js), Neon CLI, and Neon's Platform API/SDKs. Use for any Neon-related questions.",
+          "relativePath": "neon-postgres/SKILL.md"
+        },
+        {
+          "name": "neon-postgres-egress-optimizer",
+          "description": ">-",
+          "relativePath": "neon-postgres-egress-optimizer/SKILL.md"
+        }
+      ],
+      "commands": []
+    },
+    {
+      "name": "remotion",
+      "displayName": "Remotion",
+      "description": "Create motion graphics from prompts",
+      "official": false,
+      "subdir": "plugins/remotion",
+      "source": {
+        "source": "local",
+        "path": "./plugins/remotion"
+      },
+      "skills": [
+        {
+          "name": "remotion-best-practices",
+          "description": "Best practices for Remotion - Video creation in React",
+          "relativePath": "remotion/SKILL.md"
+        }
+      ],
+      "commands": []
+    },
+    {
+      "name": "plugin-eval",
+      "displayName": "Plugin Eval",
+      "description": "Start from chat, then evaluate or benchmark locally",
+      "official": true,
+      "subdir": "plugins/plugin-eval",
+      "source": {
+        "source": "local",
+        "path": "./plugins/plugin-eval"
+      },
+      "skills": [
+        {
+          "name": "evaluate-plugin",
+          "description": "Evaluate a local Codex plugin in engineer-friendly language. Use when the user says \"evaluate this plugin\", \"audit this plugin\", \"why did this score that way\", \"what should I fix first\", \"help me benchmark this plugin\", or asks for a plugin-wide report before comparing versions.",
+          "relativePath": "evaluate-plugin/SKILL.md"
+        },
+        {
+          "name": "evaluate-skill",
+          "description": "Evaluate a local Codex skill in engineer-friendly terms. Use when the user says \"evaluate this skill\", \"give me an analysis of the game dev skill\", \"audit this skill\", \"why did this score that way\", \"what should I fix first\", or asks for a skill-specific report before benchmarking it.",
+          "relativePath": "evaluate-skill/SKILL.md"
+        },
+        {
+          "name": "improve-skill",
+          "description": "Turn plugin-eval findings into a concrete rewrite brief for a Codex skill. Use when the user already evaluated a skill and now wants Codex to improve it, especially after asking what to fix first.",
+          "relativePath": "improve-skill/SKILL.md"
+        },
+        {
+          "name": "metric-pack-designer",
+          "description": "Design custom metric packs for plugin-eval so teams can add local evaluation rubrics that emit schema-compatible checks and metrics. Use when the user wants their own evaluation criteria or visualizations.",
+          "relativePath": "metric-pack-designer/SKILL.md"
+        },
+        {
+          "name": "plugin-eval",
+          "description": "Help engineers evaluate a local skill or plugin, explain why it scored that way, show what to fix first, measure real token usage, benchmark starter scenarios, or decide what to run next. Use when the user says things like \"evaluate this skill\", \"give me an analysis of the game dev skill\", \"why did this score that way\", \"what should I fix first\", \"measure the real token usage of this skill\", or \"what should I run next?\".",
+          "relativePath": "plugin-eval/SKILL.md"
+        }
+      ],
+      "commands": []
+    },
+    {
+      "name": "alpaca",
+      "displayName": "Alpaca",
+      "description": "Stop watching the markets.",
+      "official": false,
+      "subdir": "plugins/alpaca",
+      "source": {
+        "source": "local",
+        "path": "./plugins/alpaca"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "amplitude",
+      "displayName": "Amplitude",
+      "description": "Product analytics and funnels",
+      "official": false,
+      "subdir": "plugins/amplitude",
+      "source": {
+        "source": "local",
+        "path": "./plugins/amplitude"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "attio",
+      "displayName": "Attio",
+      "description": "Attio connects Codex directly to your CRM workspace, letting you manage customer relationships through na...",
+      "official": false,
+      "subdir": "plugins/attio",
+      "source": {
+        "source": "local",
+        "path": "./plugins/attio"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "binance",
+      "displayName": "Binance",
+      "description": "Binance for Codex lets you access and explore Binance public, read-only market data using natural language.",
+      "official": false,
+      "subdir": "plugins/binance",
+      "source": {
+        "source": "local",
+        "path": "./plugins/binance"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "biorender",
+      "displayName": "BioRender",
+      "description": "BioRender helps scientists create professional figures in minutes.",
+      "official": false,
+      "subdir": "plugins/biorender",
+      "source": {
+        "source": "local",
+        "path": "./plugins/biorender"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "brand24",
+      "displayName": "Brand24",
+      "description": "The Brand24 app in Codex lets marketing and PR teams instantly explore brand mentions, sentiment, and med...",
+      "official": false,
+      "subdir": "plugins/brand24",
+      "source": {
+        "source": "local",
+        "path": "./plugins/brand24"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "brex",
+      "displayName": "Brex",
+      "description": "Connect Brex to Codex and review your company finances through natural conversation — at Codex speed.",
+      "official": false,
+      "subdir": "plugins/brex",
+      "source": {
+        "source": "local",
+        "path": "./plugins/brex"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "carta-crm",
+      "displayName": "Carta CRM",
+      "description": "Carta CRM helps investment teams stay on top of deal flow by keeping deals, companies, and relationships in...",
+      "official": false,
+      "subdir": "plugins/carta-crm",
+      "source": {
+        "source": "local",
+        "path": "./plugins/carta-crm"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "cb-insights",
+      "displayName": "CB Insights",
+      "description": "Unleash Codex as your private markets research agent.",
+      "official": false,
+      "subdir": "plugins/cb-insights",
+      "source": {
+        "source": "local",
+        "path": "./plugins/cb-insights"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "channel99",
+      "displayName": "Channel99",
+      "description": "Channel99 real time go to market intelligence connects Codex directly to Channel99’s performance marketin...",
+      "official": false,
+      "subdir": "plugins/channel99",
+      "source": {
+        "source": "local",
+        "path": "./plugins/channel99"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "circleback",
+      "displayName": "Circleback",
+      "description": "Circleback helps teams get the most out of every conversation with AI-powered meeting notes, action items,...",
+      "official": false,
+      "subdir": "plugins/circleback",
+      "source": {
+        "source": "local",
+        "path": "./plugins/circleback"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "clickup",
+      "displayName": "ClickUp",
+      "description": "Turn Codex into your ClickUp command center.",
+      "official": false,
+      "subdir": "plugins/clickup",
+      "source": {
+        "source": "local",
+        "path": "./plugins/clickup"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "cloudinary",
+      "displayName": "Cloudinary",
+      "description": "Manage, search, and transform your Cloudinary media library — directly from Codex.",
+      "official": false,
+      "subdir": "plugins/cloudinary",
+      "source": {
+        "source": "local",
+        "path": "./plugins/cloudinary"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "cogedim",
+      "displayName": "Cogedim",
+      "description": "Cogedim is one of France's leading real estate developers.",
+      "official": false,
+      "subdir": "plugins/cogedim",
+      "source": {
+        "source": "local",
+        "path": "./plugins/cogedim"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "common-room",
+      "displayName": "Common Room",
+      "description": "Embed complete buyer intelligence directly within Codex.",
+      "official": false,
+      "subdir": "plugins/common-room",
+      "source": {
+        "source": "local",
+        "path": "./plugins/common-room"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "conductor",
+      "displayName": "Conductor",
+      "description": "The Conductor MCP server retrieves proprietary performance metrics regarding a brand's visibility, sentimen...",
+      "official": false,
+      "subdir": "plugins/conductor",
+      "source": {
+        "source": "local",
+        "path": "./plugins/conductor"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "coupler-io",
+      "displayName": "Coupler.io",
+      "description": "Analyze multi-channel marketing, financial, sales, e-commerce, and other business data within Codex by co...",
+      "official": false,
+      "subdir": "plugins/coupler-io",
+      "source": {
+        "source": "local",
+        "path": "./plugins/coupler-io"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "coveo",
+      "displayName": "Coveo",
+      "description": "Search your enterprise content",
+      "official": false,
+      "subdir": "plugins/coveo",
+      "source": {
+        "source": "local",
+        "path": "./plugins/coveo"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "cube",
+      "displayName": "Cube",
+      "description": "With the Cube MCP Server, you can: - Query live Cube data from actuals, budgets, forecasts, variances, and...",
+      "official": false,
+      "subdir": "plugins/cube",
+      "source": {
+        "source": "local",
+        "path": "./plugins/cube"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "daloopa",
+      "displayName": "Daloopa",
+      "description": "Daloopa supplies high quality fundamental data sourced from SEC Filings, investor presentations and any pub...",
+      "official": false,
+      "subdir": "plugins/daloopa",
+      "source": {
+        "source": "local",
+        "path": "./plugins/daloopa"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "demandbase",
+      "displayName": "Demandbase",
+      "description": "Demandbase integration with Codex gives sales, marketing, and GTM teams seamless access to rich B2B data...",
+      "official": false,
+      "subdir": "plugins/demandbase",
+      "source": {
+        "source": "local",
+        "path": "./plugins/demandbase"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "docket",
+      "displayName": "Docket",
+      "description": "Docket AI makes your sales knowledge your instant superpower.",
+      "official": false,
+      "subdir": "plugins/docket",
+      "source": {
+        "source": "local",
+        "path": "./plugins/docket"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "domotz-preview",
+      "displayName": "Domotz (Preview)",
+      "description": "Monitor and manage your network infrastructure through natural language.",
+      "official": false,
+      "subdir": "plugins/domotz-preview",
+      "source": {
+        "source": "local",
+        "path": "./plugins/domotz-preview"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "dovetail",
+      "displayName": "Dovetail",
+      "description": "Connect Dovetail inside Codex to turn customer feedback into decisions without leaving your conversation.",
+      "official": false,
+      "subdir": "plugins/dovetail",
+      "source": {
+        "source": "local",
+        "path": "./plugins/dovetail"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "dow-jones-factiva",
+      "displayName": "Dow Jones Factiva",
+      "description": "The Factiva Connector, enables authorized users to search Factiva’s global news archive, including premium...",
+      "official": false,
+      "subdir": "plugins/dow-jones-factiva",
+      "source": {
+        "source": "local",
+        "path": "./plugins/dow-jones-factiva"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "egnyte",
+      "displayName": "Egnyte",
+      "description": "Work with documents and files stored in Egnyte directly from Codex.",
+      "official": false,
+      "subdir": "plugins/egnyte",
+      "source": {
+        "source": "local",
+        "path": "./plugins/egnyte"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "finn",
+      "displayName": "FINN",
+      "description": "A FINN car subscription is a flexible way to stay mobile anytime - without long-term commitments like buyin...",
+      "official": false,
+      "subdir": "plugins/finn",
+      "source": {
+        "source": "local",
+        "path": "./plugins/finn"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "fireflies",
+      "displayName": "Fireflies",
+      "description": "The Fireflies app brings your meetings and knowledge directly into Codex.",
+      "official": false,
+      "subdir": "plugins/fireflies",
+      "source": {
+        "source": "local",
+        "path": "./plugins/fireflies"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "fyxer",
+      "displayName": "Fyxer",
+      "description": "Fyxer for Codex lets you write emails that sound like you, right from the chat.",
+      "official": false,
+      "subdir": "plugins/fyxer",
+      "source": {
+        "source": "local",
+        "path": "./plugins/fyxer"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "govtribe",
+      "displayName": "GovTribe",
+      "description": "Search government contracts, awards, and vendors directly from Codex.",
+      "official": false,
+      "subdir": "plugins/govtribe",
+      "source": {
+        "source": "local",
+        "path": "./plugins/govtribe"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "granola",
+      "displayName": "Granola",
+      "description": "Granola MCP connects your meeting history to Codex so your assistant can pull real context from past conv...",
+      "official": false,
+      "subdir": "plugins/granola",
+      "source": {
+        "source": "local",
+        "path": "./plugins/granola"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "happenstance",
+      "displayName": "Happenstance",
+      "description": "Happenstance searches your professional network using natural language to find the right people.",
+      "official": false,
+      "subdir": "plugins/happenstance",
+      "source": {
+        "source": "local",
+        "path": "./plugins/happenstance"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "help-scout",
+      "displayName": "Help Scout",
+      "description": "Connect to sync Help Scout mailboxes and conversations for use in Codex.",
+      "official": true,
+      "subdir": "plugins/help-scout",
+      "source": {
+        "source": "local",
+        "path": "./plugins/help-scout"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "highlevel",
+      "displayName": "HighLevel",
+      "description": "HighLevel gives agencies a unified CRM, automation, and client communication platform.",
+      "official": false,
+      "subdir": "plugins/highlevel",
+      "source": {
+        "source": "local",
+        "path": "./plugins/highlevel"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "hostinger",
+      "displayName": "Hostinger",
+      "description": "Hostinger Horizons lets you build real websites and apps just by describing what you want.",
+      "official": false,
+      "subdir": "plugins/hostinger",
+      "source": {
+        "source": "local",
+        "path": "./plugins/hostinger"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "hubspot",
+      "displayName": "HubSpot",
+      "description": "Work with your HubSpot data to analyze patterns, create and update records, and manage your CRM operations.",
+      "official": false,
+      "subdir": "plugins/hubspot",
+      "source": {
+        "source": "local",
+        "path": "./plugins/hubspot"
+      },
+      "skills": [
+        {
+          "name": "hubspot",
+          "description": "Use when working with HubSpot CRM records to search, summarize, create, update, associate, or analyze objects and properties.",
+          "relativePath": "hubspot/SKILL.md"
+        },
+        {
+          "name": "hubspot-crm-data-hygiene",
+          "description": "Use when auditing HubSpot data quality for missing fields, stale records, duplicates, associations, owners, or cleanup tasks.",
+          "relativePath": "hubspot-crm-data-hygiene/SKILL.md"
+        },
+        {
+          "name": "hubspot-customer-prep",
+          "description": "Use when preparing HubSpot customer briefs for meetings, renewals, QBRs, sales calls, escalations, handoffs, or follow-ups.",
+          "relativePath": "hubspot-customer-prep/SKILL.md"
+        },
+        {
+          "name": "hubspot-pipeline-health",
+          "description": "Use when reviewing HubSpot pipeline health, forecasts, stale deals, slipping close dates, or open deal risks.",
+          "relativePath": "hubspot-pipeline-health/SKILL.md"
+        }
+      ],
+      "commands": []
+    },
+    {
+      "name": "keybid-puls",
+      "displayName": "KeyBid Puls",
+      "description": "Unlock the profitability of short-term rental investments with our ROI Calculator app, tailored for platfor...",
+      "official": false,
+      "subdir": "plugins/keybid-puls",
+      "source": {
+        "source": "local",
+        "path": "./plugins/keybid-puls"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "marcopolo",
+      "displayName": "MarcoPolo",
+      "description": "MarcoPolo spins up a secure container where Codex can work with your actual data.",
+      "official": false,
+      "subdir": "plugins/marcopolo",
+      "source": {
+        "source": "local",
+        "path": "./plugins/marcopolo"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "mem",
+      "displayName": "Mem",
+      "description": "Give Codex the full context of your second brain by connecting your Mem knowledge base.",
+      "official": false,
+      "subdir": "plugins/mem",
+      "source": {
+        "source": "local",
+        "path": "./plugins/mem"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "monday-com",
+      "displayName": "Monday.com",
+      "description": "A powerful MCP connector enabling AI agents to seamlessly interact with monday.com.",
+      "official": false,
+      "subdir": "plugins/monday-com",
+      "source": {
+        "source": "local",
+        "path": "./plugins/monday-com"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "moody-s",
+      "displayName": "Moody's",
+      "description": "Credit and risk intelligence",
+      "official": false,
+      "subdir": "plugins/moody-s",
+      "source": {
+        "source": "local",
+        "path": "./plugins/moody-s"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "morningstar",
+      "displayName": "Morningstar",
+      "description": "Investment and fund research",
+      "official": false,
+      "subdir": "plugins/morningstar",
+      "source": {
+        "source": "local",
+        "path": "./plugins/morningstar"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "motherduck",
+      "displayName": "MotherDuck",
+      "description": "Connect AI assistants to your MotherDuck data warehouse.",
+      "official": false,
+      "subdir": "plugins/motherduck",
+      "source": {
+        "source": "local",
+        "path": "./plugins/motherduck"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "mt-newswires",
+      "displayName": "MT Newswires",
+      "description": "MT Newswires brings real-time global financial news directly into Codex — providing original, unbiased an...",
+      "official": false,
+      "subdir": "plugins/mt-newswires",
+      "source": {
+        "source": "local",
+        "path": "./plugins/mt-newswires"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "myregistry-com",
+      "displayName": "MyRegistry.com",
+      "description": "MyRegistry.com helps make gift-giving easy for friends & family to get you the gifts you really want!",
+      "official": false,
+      "subdir": "plugins/myregistry-com",
+      "source": {
+        "source": "local",
+        "path": "./plugins/myregistry-com"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "network-solutions",
+      "displayName": "Network Solutions",
+      "description": "The Network Solutions Domain Search Assistant makes finding an available domain fast, simple, and conversat...",
+      "official": false,
+      "subdir": "plugins/network-solutions",
+      "source": {
+        "source": "local",
+        "path": "./plugins/network-solutions"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "omni-analytics",
+      "displayName": "Omni Analytics",
+      "description": "Query Omni using the same semantic model, permissions, and logic defined by your data team directly from Codex.",
+      "official": false,
+      "subdir": "plugins/omni-analytics",
+      "source": {
+        "source": "local",
+        "path": "./plugins/omni-analytics"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "otter-ai",
+      "displayName": "Otter.ai",
+      "description": "The Otter.ai MCP server connects Codex to your meeting intelligence, enabling search and retrieval of tra...",
+      "official": false,
+      "subdir": "plugins/otter-ai",
+      "source": {
+        "source": "local",
+        "path": "./plugins/otter-ai"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "particl-market-research",
+      "displayName": "Particl Market Research",
+      "description": "Particl Market Research helps teams answer ecommerce research questions directly in Codex.",
+      "official": false,
+      "subdir": "plugins/particl-market-research",
+      "source": {
+        "source": "local",
+        "path": "./plugins/particl-market-research"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "pipedrive",
+      "displayName": "Pipedrive",
+      "description": "Connect to sync Pipedrive deals and contacts for use in Codex.",
+      "official": true,
+      "subdir": "plugins/pipedrive",
+      "source": {
+        "source": "local",
+        "path": "./plugins/pipedrive"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "pitchbook",
+      "displayName": "PitchBook",
+      "description": "PitchBook provides structured access to private capital market data across  companies, investors, funds, de...",
+      "official": false,
+      "subdir": "plugins/pitchbook",
+      "source": {
+        "source": "local",
+        "path": "./plugins/pitchbook"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "policynote",
+      "displayName": "PolicyNote",
+      "description": "Use the PolicyNote app to access structured policy and regulatory intelligence from around the world.",
+      "official": false,
+      "subdir": "plugins/policynote",
+      "source": {
+        "source": "local",
+        "path": "./plugins/policynote"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "pylon",
+      "displayName": "Pylon",
+      "description": "Access Pylon's customer support platform directly from Codex to search, manage, and resolve customer issues.",
+      "official": false,
+      "subdir": "plugins/pylon",
+      "source": {
+        "source": "local",
+        "path": "./plugins/pylon"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "quartr",
+      "displayName": "Quartr",
+      "description": "Access structured first-party IR data from over 14,500+ public companies across 65 markets Quartr delivers...",
+      "official": false,
+      "subdir": "plugins/quartr",
+      "source": {
+        "source": "local",
+        "path": "./plugins/quartr"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "quicknode",
+      "displayName": "Quicknode",
+      "description": "Manage your Quicknode infrastructure directly in OpenAI.",
+      "official": false,
+      "subdir": "plugins/quicknode",
+      "source": {
+        "source": "local",
+        "path": "./plugins/quicknode"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "ranked-ai",
+      "displayName": "Ranked AI",
+      "description": "Ranked AI provides industry leading AI SEO & PPC software, with a fully managed service integrated into it.",
+      "official": false,
+      "subdir": "plugins/ranked-ai",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ranked-ai"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "razorpay",
+      "displayName": "Razorpay",
+      "description": "Connect your Razorpay account to access your payment data through conversation.",
+      "official": false,
+      "subdir": "plugins/razorpay",
+      "source": {
+        "source": "local",
+        "path": "./plugins/razorpay"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "read-ai",
+      "displayName": "Read AI",
+      "description": "Read AI brings your meeting intelligence directly into your AI workflows.",
+      "official": false,
+      "subdir": "plugins/read-ai",
+      "source": {
+        "source": "local",
+        "path": "./plugins/read-ai"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "readwise",
+      "displayName": "Readwise",
+      "description": "The official app for Readwise and Reader.",
+      "official": false,
+      "subdir": "plugins/readwise",
+      "source": {
+        "source": "local",
+        "path": "./plugins/readwise"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "responsive",
+      "displayName": "Responsive",
+      "description": "The Responsive App makes it easy to work with your organization’s data inside Codex.",
+      "official": false,
+      "subdir": "plugins/responsive",
+      "source": {
+        "source": "local",
+        "path": "./plugins/responsive"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "scite",
+      "displayName": "Scite",
+      "description": "Scite delivers answers grounded in peer-reviewed research you can verify.",
+      "official": false,
+      "subdir": "plugins/scite",
+      "source": {
+        "source": "local",
+        "path": "./plugins/scite"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "semrush",
+      "displayName": "Semrush",
+      "description": "The Semrush MCP provides structured, quantitative SEO and traffic data for domains, keywords, backlinks, an...",
+      "official": false,
+      "subdir": "plugins/semrush",
+      "source": {
+        "source": "local",
+        "path": "./plugins/semrush"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "sendgrid",
+      "displayName": "SendGrid",
+      "description": "Connector for interacting with the SendGrid email API.",
+      "official": true,
+      "subdir": "plugins/sendgrid",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sendgrid"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "setu-bharat-connect-billpay",
+      "displayName": "Setu Bharat Connect BillPay",
+      "description": "This app helps you pay your utility bills through simple conversation.",
+      "official": false,
+      "subdir": "plugins/setu-bharat-connect-billpay",
+      "source": {
+        "source": "local",
+        "path": "./plugins/setu-bharat-connect-billpay"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "signnow",
+      "displayName": "SignNow",
+      "description": "Get documents signed faster without switching between tools.",
+      "official": false,
+      "subdir": "plugins/signnow",
+      "source": {
+        "source": "local",
+        "path": "./plugins/signnow"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "skywatch",
+      "displayName": "SkyWatch",
+      "description": "Search and explore satellite imagery from top providers including Vantor, Planet, Airbus, and more, all in...",
+      "official": false,
+      "subdir": "plugins/skywatch",
+      "source": {
+        "source": "local",
+        "path": "./plugins/skywatch"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "statsig",
+      "displayName": "Statsig",
+      "description": "Bring your Statsig workspace into Codex.",
+      "official": false,
+      "subdir": "plugins/statsig",
+      "source": {
+        "source": "local",
+        "path": "./plugins/statsig"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "streak",
+      "displayName": "Streak",
+      "description": "Streak is a CRM built directly into Gmail, so you can track deals, contacts, and workflows from your inbox.",
+      "official": false,
+      "subdir": "plugins/streak",
+      "source": {
+        "source": "local",
+        "path": "./plugins/streak"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "taxdown",
+      "displayName": "Taxdown",
+      "description": "TaxDown te ayuda a resolver dudas fiscales en España, tanto para particulares como autónomos: deducciones,...",
+      "official": false,
+      "subdir": "plugins/taxdown",
+      "source": {
+        "source": "local",
+        "path": "./plugins/taxdown"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "teamwork-com",
+      "displayName": "Teamwork.com",
+      "description": "Connect to sync Teamwork projects and tasks for use in Codex.",
+      "official": true,
+      "subdir": "plugins/teamwork-com",
+      "source": {
+        "source": "local",
+        "path": "./plugins/teamwork-com"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "third-bridge",
+      "displayName": "Third Bridge",
+      "description": "Seamlessly incorporate critical context and trusted insights from industry experts as part of your financia...",
+      "official": false,
+      "subdir": "plugins/third-bridge",
+      "source": {
+        "source": "local",
+        "path": "./plugins/third-bridge"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "tinman-ai",
+      "displayName": "Tinman AI",
+      "description": "Tinman AI helps loan officers and underwriters quickly underwrite home financing scenarios and answer compl...",
+      "official": false,
+      "subdir": "plugins/tinman-ai",
+      "source": {
+        "source": "local",
+        "path": "./plugins/tinman-ai"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "united-rentals",
+      "displayName": "United Rentals",
+      "description": "Get the right equipment for the job without guesswork.",
+      "official": false,
+      "subdir": "plugins/united-rentals",
+      "source": {
+        "source": "local",
+        "path": "./plugins/united-rentals"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "vantage",
+      "displayName": "Vantage",
+      "description": "Vantage is a cloud observability and optimization platform that aggregates cloud infrastructure costs acros...",
+      "official": false,
+      "subdir": "plugins/vantage",
+      "source": {
+        "source": "local",
+        "path": "./plugins/vantage"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "waldo",
+      "displayName": "Waldo",
+      "description": "Waldo is an AI-powered strategy platform for agencies and brands.",
+      "official": false,
+      "subdir": "plugins/waldo",
+      "source": {
+        "source": "local",
+        "path": "./plugins/waldo"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "weatherpromise",
+      "displayName": "WeatherPromise",
+      "description": "Protect your trip with WeatherPromise and get back the full cost if it rains more than promised during your...",
+      "official": false,
+      "subdir": "plugins/weatherpromise",
+      "source": {
+        "source": "local",
+        "path": "./plugins/weatherpromise"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "windsor-ai",
+      "displayName": "Windsor.ai",
+      "description": "Windsor.ai connects your marketing and business data sources to Codex so you can ask questions in natural...",
+      "official": false,
+      "subdir": "plugins/windsor-ai",
+      "source": {
+        "source": "local",
+        "path": "./plugins/windsor-ai"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "yepcode",
+      "displayName": "YepCode",
+      "description": "YepCode lets you build custom AI tools using your own code with JSON Schema-defined inputs, executed in an...",
+      "official": false,
+      "subdir": "plugins/yepcode",
+      "source": {
+        "source": "local",
+        "path": "./plugins/yepcode"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "render",
+      "displayName": "Render",
+      "description": "Deploy, debug, monitor, and migrate apps on Render.",
+      "official": false,
+      "subdir": "plugins/render",
+      "source": {
+        "source": "local",
+        "path": "./plugins/render"
+      },
+      "skills": [
+        {
+          "name": "render-debug",
+          "description": "Debug failed Render deployments by analyzing logs, metrics, and database state. Identifies errors (missing env vars, port binding, OOM, etc.) and suggests fixes. Use when deployments fail, services won't start, or users mention errors, logs, or debugging.",
+          "relativePath": "render-debug/SKILL.md"
+        },
+        {
+          "name": "render-deploy",
+          "description": "Deploy applications to Render by analyzing codebases, generating render.yaml Blueprints, and providing Dashboard deeplinks. Use when the user wants to deploy, host, publish, or set up their application on Render's cloud platform.",
+          "relativePath": "render-deploy/SKILL.md"
+        },
+        {
+          "name": "render-migrate-from-heroku",
+          "description": "Migrate from Heroku to Render by reading local project files and generating equivalent Render services. Triggers: any mention of migrating from Heroku, moving off Heroku, Heroku to Render migration, or switching from Heroku. Reads Procfile, dependency files, and app config from the local repo. Optionally uses Heroku MCP to enrich with live config vars, add-on details, and dyno sizes. Uses Render MCP or Blueprint YAML to create services.",
+          "relativePath": "render-migrate-from-heroku/SKILL.md"
+        },
+        {
+          "name": "render-monitor",
+          "description": "Monitor Render services in real-time. Check health, performance metrics, logs, and resource usage. Use when users want to check service status, view metrics, monitor performance, or verify deployments are healthy.",
+          "relativePath": "render-monitor/SKILL.md"
+        },
+        {
+          "name": "render-workflows",
+          "description": "Sets up, develops, tests, and deploys Render Workflows. Covers first-time scaffolding (via CLI or manual), SDK installation (Python or TypeScript), task patterns (retries, subtasks, fan-out), local development, Dashboard deployment, and troubleshooting. Use when a user wants to set up Render Workflows for the first time, scaffold a workflow service, add or modify workflow tasks, test workflows locally, or deploy workflows to Render.",
+          "relativePath": "render-workflows/SKILL.md"
+        }
+      ],
+      "commands": []
+    },
+    {
+      "name": "temporal",
+      "displayName": "Temporal",
+      "description": "Develop, run, and manage Temporal applications across the entire platform lifecycle",
+      "official": false,
+      "subdir": "plugins/temporal",
+      "source": {
+        "source": "local",
+        "path": "./plugins/temporal"
+      },
+      "skills": [
+        {
+          "name": "temporal-developer",
+          "description": "Develop, debug, and manage Temporal applications across Python, TypeScript, Go, and Java. Use when the user is building workflows, activities, or workers with a Temporal SDK, debugging issues like non-determinism errors, stuck workflows, or activity retries, using Temporal CLI, Temporal Server, or Temporal Cloud, or working with durable execution concepts like signals, queries, heartbeats, versioning, continue-as-new, child workflows, or saga patterns.",
+          "relativePath": "temporal-developer/SKILL.md"
+        }
+      ],
+      "commands": []
+    },
+    {
+      "name": "hyperframes",
+      "displayName": "HyperFrames by HeyGen",
+      "description": "Write HTML, render video",
+      "official": false,
+      "subdir": "plugins/hyperframes",
+      "source": {
+        "source": "local",
+        "path": "./plugins/hyperframes"
+      },
+      "skills": [
+        {
+          "name": "gsap",
+          "description": "GSAP animation reference for HyperFrames. Covers gsap.to(), from(), fromTo(), easing, stagger, defaults, timelines (gsap.timeline(), position parameter, labels, nesting, playback), and performance (transforms, will-change, quickTo). Use when writing GSAP animations in HyperFrames compositions.",
+          "relativePath": "gsap/SKILL.md"
+        },
+        {
+          "name": "hyperframes",
+          "description": "Create video compositions, animations, title cards, overlays, captions, voiceovers, audio-reactive visuals, and scene transitions in HyperFrames HTML. Use when asked to build any HTML-based video content, add captions or subtitles synced to audio, generate text-to-speech narration, create audio-reactive animation (beat sync, glow, pulse driven by music), add animated text highlighting (marker sweeps, hand-drawn circles, burst lines, scribble, sketchout), or add transitions between scenes (crossfades, wipes, reveals, shader transitions). Covers composition authoring, timing, media, and the full video production workflow. For CLI commands (init, lint, preview, render, transcribe, tts) see the hyperframes-cli skill.",
+          "relativePath": "hyperframes/SKILL.md"
+        },
+        {
+          "name": "hyperframes-cli",
+          "description": "HyperFrames CLI tool — hyperframes init, lint, inspect, preview, render, transcribe, tts, doctor, browser, info, upgrade, compositions, docs, benchmark. Use when scaffolding a project, linting, validating, inspecting visual layout in compositions, previewing in the studio, rendering to video, transcribing audio, generating TTS, or troubleshooting the HyperFrames environment.",
+          "relativePath": "hyperframes-cli/SKILL.md"
+        },
+        {
+          "name": "hyperframes-registry",
+          "description": "Install and wire registry blocks and components into HyperFrames compositions. Use when running hyperframes add, installing a block or component, wiring an installed item into index.html, or working with hyperframes.json. Covers the add command, install locations, block sub-composition wiring, component snippet merging, and registry discovery.",
+          "relativePath": "hyperframes-registry/SKILL.md"
+        },
+        {
+          "name": "website-to-hyperframes",
+          "description": "|",
+          "relativePath": "website-to-hyperframes/SKILL.md"
+        }
+      ],
+      "commands": []
+    },
+    {
+      "name": "heygen",
+      "displayName": "HeyGen",
+      "description": "Avatar videos and personalized video messages",
+      "official": false,
+      "subdir": "plugins/heygen",
+      "source": {
+        "source": "local",
+        "path": "./plugins/heygen"
+      },
+      "skills": [
+        {
+          "name": "heygen-avatar",
+          "description": "|",
+          "relativePath": "heygen-avatar/SKILL.md"
+        },
+        {
+          "name": "heygen-video",
+          "description": "|",
+          "relativePath": "heygen-video/SKILL.md"
+        }
+      ],
+      "commands": []
+    },
+    {
+      "name": "supabase",
+      "displayName": "Supabase",
+      "description": "Supabase skills and MCP tools for Codex",
+      "official": false,
+      "subdir": "plugins/supabase",
+      "source": {
+        "source": "local",
+        "path": "./plugins/supabase"
+      },
+      "skills": [
+        {
+          "name": "supabase",
+          "description": "Use when doing ANY task involving Supabase. Triggers: Supabase products (Database, Auth, Edge Functions, Realtime, Storage, Vectors, Cron, Queues); client libraries and SSR integrations (supabase-js, @supabase/ssr) in Next.js, React, SvelteKit, Astro, Remix; auth issues (login, logout, sessions, JWT, cookies, getSession, getUser, getClaims, RLS); Supabase CLI or MCP server; schema changes, migrations, security audits, Postgres extensions (pg_graphql, pg_cron, pg_vector).",
+          "relativePath": "supabase/SKILL.md"
+        },
+        {
+          "name": "supabase-postgres-best-practices",
+          "description": "Postgres performance optimization and best practices from Supabase. Use this skill when writing, reviewing, or optimizing Postgres queries, schema designs, or database configurations.",
+          "relativePath": "supabase-postgres-best-practices/SKILL.md"
+        }
+      ],
+      "commands": []
+    },
+    {
+      "name": "codex-security",
+      "displayName": "Codex Security",
+      "description": "Security scanning for your codebase",
+      "official": true,
+      "subdir": "plugins/codex-security",
+      "source": {
+        "source": "local",
+        "path": "./plugins/codex-security"
+      },
+      "skills": [
+        {
+          "name": "attack-path-analysis",
+          "description": "Use when Codex is already in the attack-path-analysis phase of a security scan or the user explicitly asks to trace a security finding from source to sink and calibrate severity. Do not use as the primary trigger for full PR, commit, branch, patch, or repository scans.",
+          "relativePath": "attack-path-analysis/SKILL.md"
+        },
+        {
+          "name": "finding-discovery",
+          "description": "Use when Codex is already in the finding-discovery phase of a security scan or the user explicitly asks to discover candidate security findings in a repository or code change. Do not use as the primary trigger for full PR, commit, branch, patch, or repository scans.",
+          "relativePath": "finding-discovery/SKILL.md"
+        },
+        {
+          "name": "fix-finding",
+          "description": "Use when the user explicitly asks to fix and verify a validated or plausible security finding. Do not use as the primary trigger for full PR, commit, branch, patch, or repository scans.",
+          "relativePath": "fix-finding/SKILL.md"
+        },
+        {
+          "name": "security-scan",
+          "description": "Use when the user asks for a full security scan or security code review of a pull request, commit, branch, patch, working-tree diff, or repository. Run distinct phases: threat modeling, finding discovery, validation, attack-path analysis, and final markdown output.",
+          "relativePath": "security-scan/SKILL.md"
+        },
+        {
+          "name": "threat-model",
+          "description": "Use when Codex is already in the threat-modeling phase of a security scan, the user explicitly invokes $threat-model, or the user explicitly asks to create, update, or persist a repository threat model. Do not use as the primary trigger for full PR, commit, branch, patch, or repository scans.",
+          "relativePath": "threat-model/SKILL.md"
+        },
+        {
+          "name": "validation",
+          "description": "Use when Codex is already in the validation phase of a security scan or the user explicitly asks to determine whether one or more candidate security findings are valid. Do not use as the primary trigger for full PR, commit, branch, patch, or repository scans.",
+          "relativePath": "validation/SKILL.md"
+        }
+      ],
+      "commands": []
+    },
+    {
+      "name": "twilio-developer-kit",
+      "displayName": "Twilio Developer Kit",
+      "description": "Twilio Skills for building, debugging, and shipping on Twilio",
+      "official": false,
+      "subdir": "plugins/twilio-developer-kit",
+      "source": {
+        "source": "local",
+        "path": "./plugins/twilio-developer-kit"
+      },
+      "skills": [
+        {
+          "name": "conversation-intelligence",
+          "description": "Twilio Conversation Intelligence development guide. Use when building real-time or post-call conversation analysis, language operator pipelines, sentiment analysis, agent assist, cross-channel analytics, or querying aggregated conversation insights (sentiment trends, escalation rates, dashboards).",
+          "relativePath": "twilio-conversation-intelligence/SKILL.md"
+        },
+        {
+          "name": "twilio-account-setup",
+          "description": ">",
+          "relativePath": "twilio-account-setup/SKILL.md"
+        },
+        {
+          "name": "twilio-agent-augmentation-architect",
+          "description": ">",
+          "relativePath": "twilio-agent-augmentation-architect/SKILL.md"
+        },
+        {
+          "name": "twilio-agent-connect",
+          "description": ">",
+          "relativePath": "twilio-agent-connect/SKILL.md"
+        },
+        {
+          "name": "twilio-ai-agent-architect",
+          "description": ">",
+          "relativePath": "twilio-ai-agent-architect/SKILL.md"
+        },
+        {
+          "name": "twilio-call-recordings",
+          "description": ">",
+          "relativePath": "twilio-call-recordings/SKILL.md"
+        },
+        {
+          "name": "twilio-cli-reference",
+          "description": ">",
+          "relativePath": "twilio-cli-reference/SKILL.md"
+        },
+        {
+          "name": "twilio-compliance-onboarding",
+          "description": ">",
+          "relativePath": "twilio-compliance-onboarding/SKILL.md"
+        },
+        {
+          "name": "twilio-compliance-traffic",
+          "description": ">",
+          "relativePath": "twilio-compliance-traffic/SKILL.md"
+        },
+        {
+          "name": "twilio-conference-calls",
+          "description": ">",
+          "relativePath": "twilio-conference-calls/SKILL.md"
+        },
+        {
+          "name": "twilio-content-template-builder",
+          "description": ">",
+          "relativePath": "twilio-content-template-builder/SKILL.md"
+        },
+        {
+          "name": "twilio-conversation-orchestrator",
+          "description": ">",
+          "relativePath": "twilio-conversation-orchestrator/SKILL.md"
+        },
+        {
+          "name": "twilio-conversations-classic-api",
+          "description": ">",
+          "relativePath": "twilio-conversations-classic-api/SKILL.md"
+        },
+        {
+          "name": "twilio-customer-memory",
+          "description": ">",
+          "relativePath": "twilio-customer-memory/SKILL.md"
+        },
+        {
+          "name": "twilio-customer-support-architect",
+          "description": ">",
+          "relativePath": "twilio-customer-support-architect/SKILL.md"
+        },
+        {
+          "name": "twilio-debugging-observability",
+          "description": ">",
+          "relativePath": "twilio-debugging-observability/SKILL.md"
+        },
+        {
+          "name": "twilio-email-deliverability-advisor",
+          "description": ">",
+          "relativePath": "twilio-email-deliverability-advisor/SKILL.md"
+        },
+        {
+          "name": "twilio-email-send",
+          "description": ">",
+          "relativePath": "twilio-email-send/SKILL.md"
+        },
+        {
+          "name": "twilio-enterprise-knowledge",
+          "description": ">",
+          "relativePath": "twilio-enterprise-knowledge/SKILL.md"
+        },
+        {
+          "name": "twilio-iam-auth-setup",
+          "description": ">",
+          "relativePath": "twilio-iam-auth-setup/SKILL.md"
+        },
+        {
+          "name": "twilio-identity-verification-advisor",
+          "description": ">",
+          "relativePath": "twilio-identity-verification-advisor/SKILL.md"
+        },
+        {
+          "name": "twilio-isv-sms-best-practices",
+          "description": ">",
+          "relativePath": "twilio-sms-isv-setup/SKILL.md"
+        },
+        {
+          "name": "twilio-lookup-phone-intelligence",
+          "description": ">",
+          "relativePath": "twilio-lookup-phone-intelligence/SKILL.md"
+        },
+        {
+          "name": "twilio-marketing-promotions-advisor",
+          "description": ">",
+          "relativePath": "twilio-marketing-promotions-advisor/SKILL.md"
+        },
+        {
+          "name": "twilio-messaging-channel-advisor",
+          "description": ">",
+          "relativePath": "twilio-messaging-channel-advisor/SKILL.md"
+        },
+        {
+          "name": "twilio-messaging-overview",
+          "description": ">",
+          "relativePath": "twilio-messaging-overview/SKILL.md"
+        },
+        {
+          "name": "twilio-messaging-services",
+          "description": ">",
+          "relativePath": "twilio-messaging-services/SKILL.md"
+        },
+        {
+          "name": "twilio-messaging-webhooks",
+          "description": ">",
+          "relativePath": "twilio-messaging-webhooks/SKILL.md"
+        },
+        {
+          "name": "twilio-notifications-alerts-advisor",
+          "description": ">",
+          "relativePath": "twilio-notifications-alerts-advisor/SKILL.md"
+        },
+        {
+          "name": "twilio-numbers-senders",
+          "description": ">",
+          "relativePath": "twilio-numbers-senders/SKILL.md"
+        },
+        {
+          "name": "twilio-organizations-setup",
+          "description": ">",
+          "relativePath": "twilio-organizations-setup/SKILL.md"
+        },
+        {
+          "name": "twilio-rcs-messaging",
+          "description": ">",
+          "relativePath": "twilio-rcs-messaging/SKILL.md"
+        },
+        {
+          "name": "twilio-regulatory-compliance-bundles",
+          "description": ">",
+          "relativePath": "twilio-regulatory-compliance-bundles/SKILL.md"
+        },
+        {
+          "name": "twilio-reliability-patterns",
+          "description": ">",
+          "relativePath": "twilio-reliability-patterns/SKILL.md"
+        },
+        {
+          "name": "twilio-security-api-auth",
+          "description": ">",
+          "relativePath": "twilio-security-api-auth/SKILL.md"
+        },
+        {
+          "name": "twilio-security-compliance-hipaa",
+          "description": ">",
+          "relativePath": "twilio-security-compliance-hipaa/SKILL.md"
+        },
+        {
+          "name": "twilio-security-hardening",
+          "description": ">",
+          "relativePath": "twilio-security-hardening/SKILL.md"
+        },
+        {
+          "name": "twilio-send-message",
+          "description": ">",
+          "relativePath": "twilio-send-message/SKILL.md"
+        },
+        {
+          "name": "twilio-sendgrid-account-setup",
+          "description": ">",
+          "relativePath": "twilio-sendgrid-account-setup/SKILL.md"
+        },
+        {
+          "name": "twilio-sendgrid-deliverability-advisor",
+          "description": ">",
+          "relativePath": "twilio-sendgrid-deliverability-advisor/SKILL.md"
+        },
+        {
+          "name": "twilio-sendgrid-email-send",
+          "description": ">",
+          "relativePath": "twilio-sendgrid-email-send/SKILL.md"
+        },
+        {
+          "name": "twilio-sendgrid-email-settings",
+          "description": ">",
+          "relativePath": "twilio-sendgrid-email-settings/SKILL.md"
+        },
+        {
+          "name": "twilio-sendgrid-engagement-quality",
+          "description": ">",
+          "relativePath": "twilio-sendgrid-engagement-quality/SKILL.md"
+        },
+        {
+          "name": "twilio-sendgrid-inbound-parse",
+          "description": ">",
+          "relativePath": "twilio-sendgrid-inbound-parse/SKILL.md"
+        },
+        {
+          "name": "twilio-sendgrid-suppressions",
+          "description": ">",
+          "relativePath": "twilio-sendgrid-suppressions/SKILL.md"
+        },
+        {
+          "name": "twilio-sendgrid-webhooks",
+          "description": ">",
+          "relativePath": "twilio-sendgrid-webhooks/SKILL.md"
+        },
+        {
+          "name": "twilio-sms-send-message",
+          "description": ">",
+          "relativePath": "twilio-sms-send-message/SKILL.md"
+        },
+        {
+          "name": "twilio-taskrouter-routing",
+          "description": ">",
+          "relativePath": "twilio-taskrouter-routing/SKILL.md"
+        },
+        {
+          "name": "twilio-verify-send-otp",
+          "description": ">",
+          "relativePath": "twilio-verify-send-otp/SKILL.md"
+        },
+        {
+          "name": "twilio-voice-conversation-relay",
+          "description": ">",
+          "relativePath": "twilio-voice-conversation-relay/SKILL.md"
+        },
+        {
+          "name": "twilio-voice-outbound-calls",
+          "description": ">",
+          "relativePath": "twilio-voice-outbound-calls/SKILL.md"
+        },
+        {
+          "name": "twilio-voice-twiml",
+          "description": ">",
+          "relativePath": "twilio-voice-twiml/SKILL.md"
+        },
+        {
+          "name": "twilio-webhook-architecture",
+          "description": ">",
+          "relativePath": "twilio-webhook-architecture/SKILL.md"
+        },
+        {
+          "name": "twilio-whatsapp-manage-senders",
+          "description": ">",
+          "relativePath": "twilio-whatsapp-manage-senders/SKILL.md"
+        },
+        {
+          "name": "twilio-whatsapp-send-message",
+          "description": ">",
+          "relativePath": "twilio-whatsapp-send-message/SKILL.md"
+        }
+      ],
+      "commands": []
+    },
+    {
+      "name": "openai-developers",
+      "displayName": "OpenAI Developers",
+      "description": "Develop AI apps, agents, and ChatGPT Apps with OpenAI best practices",
+      "official": true,
+      "subdir": "plugins/openai-developers",
+      "source": {
+        "source": "local",
+        "path": "./plugins/openai-developers"
+      },
+      "skills": [
+        {
+          "name": "agents-sdk",
+          "description": "Build, run, deploy, and evaluate OpenAI Agents SDK apps from Codex. Use when the user asks to create or adapt an Agents SDK app, build from a prompt or Codex thread, prepare a runnable agent prototype, add a focused eval harness, or deploy locally through the Agents SDK Deployment Manager.",
+          "relativePath": "agents-sdk/SKILL.md"
+        },
+        {
+          "name": "build-chatgpt-app",
+          "description": "Build, scaffold, refactor, and troubleshoot ChatGPT Apps SDK applications that combine an MCP server and widget UI. Use when Codex needs to design tools, register UI resources, wire the MCP Apps bridge or ChatGPT compatibility APIs, apply Apps SDK metadata or CSP or domain settings, or produce a docs-aligned project scaffold. Prefer a docs-first workflow by invoking the openai-docs skill or OpenAI developer docs MCP tools before generating code.",
+          "relativePath": "build-chatgpt-app/SKILL.md"
+        },
+        {
+          "name": "chatgpt-app-submission",
+          "description": "Inspect a ChatGPT Apps MCP server codebase and generate chatgpt-app-submission.json with app info suggestions, tool hint justifications, test cases, and negative test cases, then report review-check findings and outputSchema warnings for submission review.",
+          "relativePath": "chatgpt-app-submission/SKILL.md"
+        },
+        {
+          "name": "openai-api-troubleshooting",
+          "description": "Use when an OpenAI API request fails and Codex needs to classify the likely cause, explain the next step, and route to the right follow-up. Covers common runtime failures such as blocked outbound network access, invalid credentials, exhausted API quota or credits, rate limits, and model, project, or organization access issues; delegate key provisioning to openai-platform-api-key and current documentation lookups to openai-docs.",
+          "relativePath": "openai-api-troubleshooting/SKILL.md"
+        },
+        {
+          "name": "openai-platform-api-key",
+          "description": "Use for building, running, testing, debugging, or configuring apps, UIs, scripts, CLIs, generators, and tools that use AI, including AI-powered apps, apps that generate output with AI, and user-input-driven AI features. Treat unspecified AI in build requests as OpenAI API usage unless the user names another provider or says not to use OpenAI. First inspect credentials safely, then ask whether to reuse an existing key or create one before API-dependent implementation. Also use for OPENAI_API_KEY or sk-proj setup requests. Never expose plaintext.",
+          "relativePath": "openai-platform-api-key/SKILL.md"
+        }
+      ],
+      "commands": []
+    },
+    {
+      "name": "asana",
+      "displayName": "Asana",
+      "description": "Read and manage Asana",
+      "official": false,
+      "subdir": "plugins/asana",
+      "source": {
+        "source": "local",
+        "path": "./plugins/asana"
+      },
+      "skills": [],
+      "commands": []
+    },
+    {
+      "name": "zoom",
+      "displayName": "Zoom",
+      "description": "Use Zoom meeting context and build Zoom integrations.",
+      "official": false,
+      "subdir": "plugins/zoom",
+      "source": {
+        "source": "local",
+        "path": "./plugins/zoom"
+      },
+      "skills": [
+        {
+          "name": "build-zoom-bot",
+          "description": "Use when building bots.",
+          "relativePath": "build-zoom-bot/SKILL.md"
+        },
+        {
+          "name": "build-zoom-contact-center-app",
+          "description": "Use when using Contact Center.",
+          "relativePath": "contact-center/SKILL.md"
+        },
+        {
+          "name": "build-zoom-meeting-app",
+          "description": "Use when embedding meetings.",
+          "relativePath": "build-zoom-meeting-app/SKILL.md"
+        },
+        {
+          "name": "build-zoom-meeting-sdk-app",
+          "description": "Use when using Meeting SDK.",
+          "relativePath": "meeting-sdk/SKILL.md"
+        },
+        {
+          "name": "build-zoom-phone-integration",
+          "description": "Use when building Phone.",
+          "relativePath": "phone/SKILL.md"
+        },
+        {
+          "name": "build-zoom-rest-api-app",
+          "description": "Use when calling REST APIs.",
+          "relativePath": "rest-api/SKILL.md"
+        },
+        {
+          "name": "build-zoom-team-chat-app",
+          "description": "Use when building Team Chat.",
+          "relativePath": "team-chat/SKILL.md"
+        },
+        {
+          "name": "build-zoom-video-sdk-app",
+          "description": "Use when using Video SDK.",
+          "relativePath": "video-sdk/SKILL.md"
+        },
+        {
+          "name": "build-zoom-virtual-agent",
+          "description": "Use when using Virtual Agent.",
+          "relativePath": "virtual-agent/SKILL.md"
+        },
+        {
+          "name": "choose-zoom-approach",
+          "description": "Use when choosing architecture.",
+          "relativePath": "choose-zoom-approach/SKILL.md"
+        },
+        {
+          "name": "debug-zoom",
+          "description": "Use when debugging issues.",
+          "relativePath": "debug-zoom/SKILL.md"
+        },
+        {
+          "name": "debug-zoom-integration",
+          "description": "Use when isolating failures.",
+          "relativePath": "debug-zoom-integration/SKILL.md"
+        },
+        {
+          "name": "plan-zoom-integration",
+          "description": "Use when planning Zoom integrations.",
+          "relativePath": "plan-zoom-integration/SKILL.md"
+        },
+        {
+          "name": "plan-zoom-product",
+          "description": "Use when choosing products.",
+          "relativePath": "plan-zoom-product/SKILL.md"
+        },
+        {
+          "name": "probe-sdk",
+          "description": "Use when using Probe SDK.",
+          "relativePath": "probe-sdk/SKILL.md"
+        },
+        {
+          "name": "rivet-sdk",
+          "description": "Use when using Rivet SDK.",
+          "relativePath": "rivet-sdk/SKILL.md"
+        },
+        {
+          "name": "scribe",
+          "description": "Use when using Scribe.",
+          "relativePath": "scribe/SKILL.md"
+        },
+        {
+          "name": "setup-zoom-oauth",
+          "description": "Use when setting up OAuth.",
+          "relativePath": "setup-zoom-oauth/SKILL.md"
+        },
+        {
+          "name": "setup-zoom-webhooks",
+          "description": "Use when building Zoom webhooks.",
+          "relativePath": "webhooks/SKILL.md"
+        },
+        {
+          "name": "setup-zoom-websockets",
+          "description": "Use when building Zoom WebSockets.",
+          "relativePath": "websockets/SKILL.md"
+        },
+        {
+          "name": "start",
+          "description": "Use when starting Zoom work.",
+          "relativePath": "start/SKILL.md"
+        },
+        {
+          "name": "ui-toolkit",
+          "description": "Use when using Zoom UI Toolkit.",
+          "relativePath": "ui-toolkit/SKILL.md"
+        },
+        {
+          "name": "zoom-apps-sdk",
+          "description": "Use when using Apps SDK.",
+          "relativePath": "zoom-apps-sdk/SKILL.md"
+        },
+        {
+          "name": "zoom-cobrowse-sdk",
+          "description": "Use when using Cobrowse.",
+          "relativePath": "cobrowse-sdk/SKILL.md"
+        },
+        {
+          "name": "zoom-contact-center-android",
+          "description": "Zoom Contact Center SDK for Android. Use for native Android chat/video/ZVA/scheduled callback integrations, campaign mode, service lifecycle, and rejoin handling.",
+          "relativePath": "contact-center/android/SKILL.md"
+        },
+        {
+          "name": "zoom-contact-center-ios",
+          "description": "Zoom Contact Center SDK for iOS. Use for native iOS chat/video/ZVA/scheduled callback integrations, app lifecycle bridging, rejoin flow, and callback handling.",
+          "relativePath": "contact-center/ios/SKILL.md"
+        },
+        {
+          "name": "zoom-contact-center-web",
+          "description": "Zoom Contact Center SDK for Web. Use for web chat/video/campaign embeds, engagement event handling, app-context integrations, and Smart Embed postMessage workflows.",
+          "relativePath": "contact-center/web/SKILL.md"
+        },
+        {
+          "name": "zoom-general",
+          "description": "Use when comparing products.",
+          "relativePath": "general/SKILL.md"
+        },
+        {
+          "name": "zoom-meeting-sdk-android",
+          "description": "|",
+          "relativePath": "meeting-sdk/android/SKILL.md"
+        },
+        {
+          "name": "zoom-meeting-sdk-electron",
+          "description": "|",
+          "relativePath": "meeting-sdk/electron/SKILL.md"
+        },
+        {
+          "name": "zoom-meeting-sdk-ios",
+          "description": "|",
+          "relativePath": "meeting-sdk/ios/SKILL.md"
+        },
+        {
+          "name": "zoom-meeting-sdk-linux",
+          "description": "Zoom Meeting SDK for Linux - C++ headless meeting bots with raw audio/video access, transcription, recording, and AI integration for server-side automation",
+          "relativePath": "meeting-sdk/linux/SKILL.md"
+        },
+        {
+          "name": "zoom-meeting-sdk-macos",
+          "description": "|",
+          "relativePath": "meeting-sdk/macos/SKILL.md"
+        },
+        {
+          "name": "zoom-meeting-sdk-react-native",
+          "description": "Zoom Meeting SDK for React Native. Use when embedding Zoom meetings in React Native iOS/Android apps with @zoom/meetingsdk-react-native, JWT auth, join/start flows, platform setup, and native bridge troubleshooting.",
+          "relativePath": "meeting-sdk/react-native/SKILL.md"
+        },
+        {
+          "name": "zoom-meeting-sdk-unreal",
+          "description": "|",
+          "relativePath": "meeting-sdk/unreal/SKILL.md"
+        },
+        {
+          "name": "zoom-meeting-sdk-web",
+          "description": "|",
+          "relativePath": "meeting-sdk/web/SKILL.md"
+        },
+        {
+          "name": "zoom-meeting-sdk-web-client-view",
+          "description": "|",
+          "relativePath": "meeting-sdk/web/client-view/SKILL.md"
+        },
+        {
+          "name": "zoom-meeting-sdk-web-component-view",
+          "description": "|",
+          "relativePath": "meeting-sdk/web/component-view/SKILL.md"
+        },
+        {
+          "name": "zoom-meeting-sdk-windows",
+          "description": "|",
+          "relativePath": "meeting-sdk/windows/SKILL.md"
+        },
+        {
+          "name": "zoom-oauth",
+          "description": "Use when implementing OAuth.",
+          "relativePath": "oauth/SKILL.md"
+        },
+        {
+          "name": "zoom-rtms",
+          "description": "Use when using RTMS.",
+          "relativePath": "rtms/SKILL.md"
+        },
+        {
+          "name": "zoom-video-sdk-android",
+          "description": "|",
+          "relativePath": "video-sdk/android/SKILL.md"
+        },
+        {
+          "name": "zoom-video-sdk-flutter",
+          "description": "|",
+          "relativePath": "video-sdk/flutter/SKILL.md"
+        },
+        {
+          "name": "zoom-video-sdk-ios",
+          "description": "|",
+          "relativePath": "video-sdk/ios/SKILL.md"
+        },
+        {
+          "name": "zoom-video-sdk-linux",
+          "description": "Zoom Video SDK for Linux - C++ headless bots, raw audio/video capture/injection, Qt/GTK integration, Docker support",
+          "relativePath": "video-sdk/linux/SKILL.md"
+        },
+        {
+          "name": "zoom-video-sdk-macos",
+          "description": "|",
+          "relativePath": "video-sdk/macos/SKILL.md"
+        },
+        {
+          "name": "zoom-video-sdk-react-native",
+          "description": "|",
+          "relativePath": "video-sdk/react-native/SKILL.md"
+        },
+        {
+          "name": "zoom-video-sdk-unity",
+          "description": "|",
+          "relativePath": "video-sdk/unity/SKILL.md"
+        },
+        {
+          "name": "zoom-video-sdk-web",
+          "description": "Zoom Video SDK for Web - JavaScript/TypeScript integration for browser-based video sessions, real-time communication, screen sharing, recording, and live transcription",
+          "relativePath": "video-sdk/web/SKILL.md"
+        },
+        {
+          "name": "zoom-video-sdk-windows",
+          "description": "Zoom Video SDK for Windows - C++ integration for video sessions, raw audio/video capture, screen sharing, recording, and real-time communication",
+          "relativePath": "video-sdk/windows/SKILL.md"
+        },
+        {
+          "name": "zoom-virtual-agent-android",
+          "description": "Zoom Virtual Agent Android integration via WebView. Use for Java/Kotlin bridge callbacks, native URL handling, support_handoff relay, and lifecycle-safe embedding.",
+          "relativePath": "virtual-agent/android/SKILL.md"
+        },
+        {
+          "name": "zoom-virtual-agent-ios",
+          "description": "Zoom Virtual Agent iOS integration via WKWebView. Use for Swift/Objective-C script injection, message handlers, support_handoff relay, and URL routing policies.",
+          "relativePath": "virtual-agent/ios/SKILL.md"
+        },
+        {
+          "name": "zoom-virtual-agent-web",
+          "description": "Zoom Virtual Agent SDK for web embeds. Use for campaign or entry ID chat launch, event-driven controls, user context updates, and CSP-safe deployment.",
+          "relativePath": "virtual-agent/web/SKILL.md"
+        }
+      ],
+      "commands": []
+    }
+  ]
+}
