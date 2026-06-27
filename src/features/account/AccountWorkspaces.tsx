@@ -17,6 +17,8 @@ import type { BillingHistoryData, PlanRecord, SubscriptionPaymentInfo, Subscript
 
 const SERVICE_STATUS_CACHE_KEY = 'oneapi-desktop-service-status'
 const PUBLIC_SUBSCRIPTION_PLANS_CACHE_KEY = 'oneapi-desktop-public-subscription-plans'
+const SUBSCRIPTION_WORKSPACE_CACHE_KEY = 'oneapi-desktop-subscription-workspace'
+const WALLET_WORKSPACE_CACHE_KEY = 'oneapi-desktop-wallet-workspace'
 const SERVICE_STATUS_REFRESH_INTERVAL_MS = 5 * 60 * 1000
 const PUBLIC_SUBSCRIPTION_PLAN_FALLBACKS: PlanRecord[] = [
   {
@@ -148,6 +150,52 @@ function readPublicSubscriptionPlansCache() {
 
 function writePublicSubscriptionPlansCache(value: PlanRecord[]) {
   writeJsonStorage(PUBLIC_SUBSCRIPTION_PLANS_CACHE_KEY, value)
+}
+
+function readSubscriptionWorkspaceCache() {
+  return readJsonStorage<{
+    plans: PlanRecord[]
+    subscriptionSelf: SubscriptionSelfData | null
+    paymentInfo: SubscriptionPaymentInfo | null
+    quotaPerUnit: number
+    updatedAt: number
+  }>(SUBSCRIPTION_WORKSPACE_CACHE_KEY, {
+    plans: [],
+    subscriptionSelf: null,
+    paymentInfo: null,
+    quotaPerUnit: 500_000,
+    updatedAt: 0,
+  })
+}
+
+function writeSubscriptionWorkspaceCache(value: ReturnType<typeof readSubscriptionWorkspaceCache>) {
+  writeJsonStorage(SUBSCRIPTION_WORKSPACE_CACHE_KEY, value)
+}
+
+function readWalletWorkspaceCache() {
+  return readJsonStorage<{
+    billing: BillingHistoryData | null
+    topupInfo: TopupInfo | null
+    plans: PlanRecord[]
+    subscriptionSelf: SubscriptionSelfData | null
+    usageData: UsageData | null
+    perfMetrics: { requestCount24h: number; avgLatencyMs: number } | null
+    quotaPerUnit: number
+    updatedAt: number
+  }>(WALLET_WORKSPACE_CACHE_KEY, {
+    billing: null,
+    topupInfo: null,
+    plans: [],
+    subscriptionSelf: null,
+    usageData: null,
+    perfMetrics: null,
+    quotaPerUnit: 500_000,
+    updatedAt: 0,
+  })
+}
+
+function writeWalletWorkspaceCache(value: ReturnType<typeof readWalletWorkspaceCache>) {
+  writeJsonStorage(WALLET_WORKSPACE_CACHE_KEY, value)
 }
 
 function countPlanPurchases(records: SubscriptionSelfData['all_subscriptions'], planId: number) {
@@ -565,12 +613,17 @@ export function SubscriptionsWorkspace(props: {
 }) {
   const { toast, user, onRequestLogin } = props
   const initialPublicPlanCache = useMemo(() => readPublicSubscriptionPlansCache(), [])
+  const initialSubscriptionWorkspaceCache = useMemo(() => readSubscriptionWorkspaceCache(), [])
   const [plans, setPlans] = useState<PlanRecord[]>(
-    initialPublicPlanCache.length ? initialPublicPlanCache : PUBLIC_SUBSCRIPTION_PLAN_FALLBACKS
+    initialSubscriptionWorkspaceCache.plans.length
+      ? initialSubscriptionWorkspaceCache.plans
+      : initialPublicPlanCache.length
+        ? initialPublicPlanCache
+        : PUBLIC_SUBSCRIPTION_PLAN_FALLBACKS
   )
-  const [subscriptionSelf, setSubscriptionSelf] = useState<SubscriptionSelfData | null>(null)
-  const [paymentInfo, setPaymentInfo] = useState<SubscriptionPaymentInfo | null>(null)
-  const [quotaPerUnit, setQuotaPerUnit] = useState(500_000)
+  const [subscriptionSelf, setSubscriptionSelf] = useState<SubscriptionSelfData | null>(initialSubscriptionWorkspaceCache.subscriptionSelf)
+  const [paymentInfo, setPaymentInfo] = useState<SubscriptionPaymentInfo | null>(initialSubscriptionWorkspaceCache.paymentInfo)
+  const [quotaPerUnit, setQuotaPerUnit] = useState(initialSubscriptionWorkspaceCache.quotaPerUnit || 500_000)
   const [buyingPlanId, setBuyingPlanId] = useState(0)
   const activeSubscriptions = (subscriptionSelf?.subscriptions || []).filter(
     (item) => !isSubscriptionExhausted(item.subscription) && !isSubscriptionExpired(item.subscription)
@@ -660,45 +713,33 @@ export function SubscriptionsWorkspace(props: {
     if (resolvedQuotaPerUnit > 0) {
       setQuotaPerUnit(resolvedQuotaPerUnit)
     }
-  }, [])
+    writeSubscriptionWorkspaceCache({
+      plans: (nextPlans || []).filter((item) => item.plan.enabled),
+      subscriptionSelf: nextSelf ?? null,
+      paymentInfo: nextPaymentInfo ?? null,
+      quotaPerUnit: resolvedQuotaPerUnit > 0 ? resolvedQuotaPerUnit : 500_000,
+      updatedAt: Date.now(),
+    })
+  }, [applyPlans, loadPublicPlansForSubscriptionWorkspace, user])
 
   useEffect(() => {
     let disposed = false
 
-    void (async () => {
-      try {
-        const nextPlans = await loadPublicPlansForSubscriptionWorkspace()
-        const [nextSelf, nextPaymentInfo, nextStatus] = await Promise.all([
-          user ? getSelfSubscriptions().catch(() => null) : Promise.resolve(null),
-          user ? getSubscriptionPaymentInfo().catch(() => null) : Promise.resolve(null),
-          unwrapEnvelope(getAuthStatus()).catch(() => null),
-        ])
-
+    void refreshSubscriptions()
+      .catch((error) => {
         if (disposed) {
           return
         }
-
-        applyPlans(nextPlans)
-        setSubscriptionSelf(nextSelf ?? null)
-        setPaymentInfo(nextPaymentInfo ?? null)
-        const resolvedQuotaPerUnit = Number(nextStatus?.quota_per_unit || 0)
-        if (resolvedQuotaPerUnit > 0) {
-          setQuotaPerUnit(resolvedQuotaPerUnit)
+        const message = error instanceof Error ? error.message : '加载订阅信息失败'
+        if (!isAuthRequiredErrorMessage(message)) {
+          toast(message)
         }
-      } catch (error) {
-        if (!disposed) {
-          const message = error instanceof Error ? error.message : '加载订阅信息失败'
-          if (!isAuthRequiredErrorMessage(message)) {
-            toast(message)
-          }
-        }
-      }
-    })()
+      })
 
     return () => {
       disposed = true
     }
-  }, [applyPlans, loadPublicPlansForSubscriptionWorkspace, toast, user])
+  }, [refreshSubscriptions, toast])
 
   async function handleBuyPlan(planId: number, paymentMethod: string) {
     if (!user) {
@@ -915,12 +956,13 @@ export function WalletWorkspace(props: {
   onUserRefresh?: (user: UserProfile) => void
 }) {
   const { user, toast, onUserRefresh } = props
-  const [quotaPerUnit, setQuotaPerUnit] = useState(500_000)
-  const [billing, setBilling] = useState<BillingHistoryData | null>(null)
-  const [walletPlans, setWalletPlans] = useState<PlanRecord[]>([])
-  const [walletSubscriptionSelf, setWalletSubscriptionSelf] = useState<SubscriptionSelfData | null>(null)
+  const initialWalletWorkspaceCache = useMemo(() => readWalletWorkspaceCache(), [])
+  const [quotaPerUnit, setQuotaPerUnit] = useState(initialWalletWorkspaceCache.quotaPerUnit || 500_000)
+  const [billing, setBilling] = useState<BillingHistoryData | null>(initialWalletWorkspaceCache.billing)
+  const [walletPlans, setWalletPlans] = useState<PlanRecord[]>(initialWalletWorkspaceCache.plans)
+  const [walletSubscriptionSelf, setWalletSubscriptionSelf] = useState<SubscriptionSelfData | null>(initialWalletWorkspaceCache.subscriptionSelf)
   const [redeemCode, setRedeemCode] = useState('')
-  const [topupInfo, setTopupInfo] = useState<TopupInfo | null>(null)
+  const [topupInfo, setTopupInfo] = useState<TopupInfo | null>(initialWalletWorkspaceCache.topupInfo)
   const [topupAmount, setTopupAmount] = useState('')
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState('')
   const [payingTopup, setPayingTopup] = useState(false)
@@ -936,8 +978,8 @@ export function WalletWorkspace(props: {
     pollInterval: number
   } | null>(null)
   const [checkingAlipay, setCheckingAlipay] = useState(false)
-  const [usageData, setUsageData] = useState<UsageData | null>(null)
-  const [perfMetrics, setPerfMetrics] = useState<{ requestCount24h: number; avgLatencyMs: number } | null>(null)
+  const [usageData, setUsageData] = useState<UsageData | null>(initialWalletWorkspaceCache.usageData)
+  const [perfMetrics, setPerfMetrics] = useState<{ requestCount24h: number; avgLatencyMs: number } | null>(initialWalletWorkspaceCache.perfMetrics)
   const [usageDistributionPage, setUsageDistributionPage] = useState(0)
 
   const recentBills = useMemo(
@@ -977,6 +1019,8 @@ export function WalletWorkspace(props: {
   }, [totalQuota, usageData?.items])
   const avgLatency = perfMetrics?.avgLatencyMs ?? 0
   const alipayPollingRef = useRef<number | null>(null)
+  const alipayPollIntervalRef = useRef(2)
+  const alipayStatusCheckerRef = useRef<(tradeNo: string) => void>(() => undefined)
   const enabledPaymentMethods = useMemo(() => getAlipayTopupMethods(topupInfo), [topupInfo])
   const minTopupAmount = useMemo(() => {
     const methodMin = enabledPaymentMethods
@@ -1050,23 +1094,60 @@ export function WalletWorkspace(props: {
   }
 
   const refreshWallet = useCallback(async () => {
-    const [nextBilling, nextTopupInfo, nextPlans, nextSelf, nextStatus] = await Promise.all([
+    const [nextBilling, nextTopupInfo, nextUsageData, nextPerfMetrics, nextPlans, nextSelf, nextStatus] = await Promise.all([
       getBillingHistory(1, 3),
       getTopupInfo().catch(() => null),
+      getUserUsageLogs(1, 200),
+      getPerfMetricsSummary(24).catch(() => null),
       getPublicPlans().catch(() => []),
       getSelfSubscriptions().catch(() => null),
       unwrapEnvelope(getAuthStatus()).catch(() => null),
     ])
+    const enabledPlans = (nextPlans || []).filter((item) => item.plan.enabled)
+    let resolvedPerfMetrics: { requestCount24h: number; avgLatencyMs: number } | null = null
+    if (nextPerfMetrics?.models?.length) {
+      const requestCount = nextPerfMetrics.models.reduce((sum, item) => sum + Number(item.request_count || 0), 0)
+      const latencyTotal = nextPerfMetrics.models.reduce((sum, item) => {
+        const requestCount = Number(item.request_count || 0)
+        const latency = Number(item.avg_latency_ms || 0)
+        return sum + latency * requestCount
+      }, 0)
+      resolvedPerfMetrics = {
+        requestCount24h: requestCount,
+        avgLatencyMs: requestCount > 0 ? Math.round(latencyTotal / requestCount) : 0,
+      }
+    }
     setBilling(nextBilling ?? null)
     if (nextTopupInfo) {
       setTopupInfo(nextTopupInfo)
+      const defaultMethod = nextTopupInfo.pay_methods?.find((item) => item.type?.trim())?.type?.trim() || ''
+      const defaultAlipayMethod = getAlipayTopupMethods(nextTopupInfo)[0]?.type || defaultMethod
+      if (defaultAlipayMethod) {
+        setSelectedPaymentMethod((current) => current || defaultAlipayMethod)
+      }
+      const defaultAmount = Number(nextTopupInfo.amount_options?.find((item) => Number(item) > 0) || nextTopupInfo.min_topup || 0)
+      if (defaultAmount > 0) {
+        setTopupAmount((current) => current || String(defaultAmount))
+      }
     }
-    setWalletPlans((nextPlans || []).filter((item) => item.plan.enabled))
+    setUsageData(nextUsageData ?? null)
+    setPerfMetrics(resolvedPerfMetrics)
+    setWalletPlans(enabledPlans)
     setWalletSubscriptionSelf(nextSelf)
     const resolvedQuotaPerUnit = Number(nextStatus?.quota_per_unit || 0)
     if (resolvedQuotaPerUnit > 0) {
       setQuotaPerUnit(resolvedQuotaPerUnit)
     }
+    writeWalletWorkspaceCache({
+      billing: nextBilling ?? null,
+      topupInfo: nextTopupInfo ?? readWalletWorkspaceCache().topupInfo,
+      plans: enabledPlans,
+      subscriptionSelf: nextSelf,
+      usageData: nextUsageData ?? null,
+      perfMetrics: resolvedPerfMetrics,
+      quotaPerUnit: resolvedQuotaPerUnit > 0 ? resolvedQuotaPerUnit : 500_000,
+      updatedAt: Date.now(),
+    })
   }, [])
 
   const refreshUser = useCallback(async () => {
@@ -1083,7 +1164,7 @@ export function WalletWorkspace(props: {
     if (!alipayPollingRef.current) {
       return
     }
-    window.clearInterval(alipayPollingRef.current)
+    window.clearTimeout(alipayPollingRef.current)
     alipayPollingRef.current = null
   }, [])
 
@@ -1106,6 +1187,15 @@ export function WalletWorkspace(props: {
     await refreshUser()
   }, [refreshUser, refreshWallet, stopAlipayPolling, toast])
 
+  const scheduleAlipayPolling = useCallback((tradeNo: string, pollInterval: number) => {
+    stopAlipayPolling()
+    const safeInterval = Math.min(30, Math.max(1, Number(pollInterval || 2)))
+    alipayPollIntervalRef.current = safeInterval
+    alipayPollingRef.current = window.setTimeout(() => {
+      alipayStatusCheckerRef.current(tradeNo)
+    }, safeInterval * 1000)
+  }, [stopAlipayPolling])
+
   const checkAlipayPaymentStatus = useCallback(async (tradeNo: string, manual = false) => {
     if (!tradeNo) {
       return
@@ -1119,10 +1209,18 @@ export function WalletWorkspace(props: {
         await completeAlipayPayment()
         return
       }
+      const nextPollInterval = Math.min(30, Math.max(1, Number(result?.poll_interval || alipayPayment?.pollInterval || alipayPollIntervalRef.current || 2)))
+      if (!manual && alipayPayment?.tradeNo === tradeNo) {
+        scheduleAlipayPolling(tradeNo, nextPollInterval)
+      }
       if (manual) {
         toast('暂未确认支付，请稍后刷新。')
       }
     } catch (error) {
+      const nextPollInterval = Math.min(30, Math.max(1, Number(alipayPollIntervalRef.current || alipayPayment?.pollInterval || 2)) * 1.8)
+      if (!manual && alipayPayment?.tradeNo === tradeNo) {
+        scheduleAlipayPolling(tradeNo, nextPollInterval)
+      }
       if (manual) {
         toast(error instanceof Error ? error.message : '暂未确认支付，请稍后刷新。')
       }
@@ -1131,7 +1229,13 @@ export function WalletWorkspace(props: {
         setCheckingAlipay(false)
       }
     }
-  }, [completeAlipayPayment, toast])
+  }, [alipayPayment?.pollInterval, alipayPayment?.tradeNo, completeAlipayPayment, scheduleAlipayPolling, toast])
+
+  useEffect(() => {
+    alipayStatusCheckerRef.current = (tradeNo: string) => {
+      void checkAlipayPaymentStatus(tradeNo)
+    }
+  }, [checkAlipayPaymentStatus])
 
   const openAlipayCheckout = useCallback(async () => {
     if (!alipayPayment) {
@@ -1154,65 +1258,17 @@ export function WalletWorkspace(props: {
   useEffect(() => {
     let disposed = false
 
-    void (async () => {
-      try {
-        const [nextBilling, nextTopupInfo, nextUsageData, nextPerfMetrics, nextPlans, nextSelf, nextStatus] = await Promise.all([
-          getBillingHistory(1, 3),
-          getTopupInfo().catch(() => null),
-          getUserUsageLogs(1, 200),
-          getPerfMetricsSummary(24).catch(() => null),
-          getPublicPlans().catch(() => []),
-          getSelfSubscriptions().catch(() => null),
-          unwrapEnvelope(getAuthStatus()).catch(() => null),
-        ])
-
-        if (disposed) {
-          return
-        }
-
-        setBilling(nextBilling ?? null)
-        if (nextTopupInfo) {
-          setTopupInfo(nextTopupInfo)
-          const defaultMethod = nextTopupInfo.pay_methods?.find((item) => item.type?.trim())?.type?.trim() || ''
-          const defaultAlipayMethod = getAlipayTopupMethods(nextTopupInfo)[0]?.type || defaultMethod
-          if (defaultAlipayMethod) {
-            setSelectedPaymentMethod((current) => current || defaultAlipayMethod)
-          }
-          const defaultAmount = Number(nextTopupInfo.amount_options?.find((item) => Number(item) > 0) || nextTopupInfo.min_topup || 0)
-          if (defaultAmount > 0) {
-            setTopupAmount((current) => current || String(defaultAmount))
-          }
-        }
-        setUsageData(nextUsageData ?? null)
-        setWalletPlans((nextPlans || []).filter((item) => item.plan.enabled))
-        setWalletSubscriptionSelf(nextSelf)
-        const resolvedQuotaPerUnit = Number(nextStatus?.quota_per_unit || 0)
-        if (resolvedQuotaPerUnit > 0) {
-          setQuotaPerUnit(resolvedQuotaPerUnit)
-        }
-        if (nextPerfMetrics?.models?.length) {
-          const requestCount = nextPerfMetrics.models.reduce((sum, item) => sum + Number(item.request_count || 0), 0)
-          const latencyTotal = nextPerfMetrics.models.reduce((sum, item) => {
-            const requestCount = Number(item.request_count || 0)
-            const latency = Number(item.avg_latency_ms || 0)
-            return sum + latency * requestCount
-          }, 0)
-          setPerfMetrics({
-            requestCount24h: requestCount,
-            avgLatencyMs: requestCount > 0 ? Math.round(latencyTotal / requestCount) : 0,
-          })
-        }
-      } catch (error) {
+    void refreshWallet()
+      .catch((error) => {
         if (!disposed) {
           toast(error instanceof Error ? error.message : '加载钱包信息失败')
         }
-      }
-    })()
+      })
 
     return () => {
       disposed = true
     }
-  }, [toast])
+  }, [refreshWallet, toast])
 
   useEffect(() => {
     setUsageDistributionPage((current) => Math.min(current, usageDistributionPageCount - 1))
@@ -1227,22 +1283,6 @@ export function WalletWorkspace(props: {
       setTopupAmount(String(amountOptions[0]))
     }
   }, [amountOptions, topupAmount])
-
-  useEffect(() => {
-    stopAlipayPolling()
-    const tradeNo = alipayPayment?.tradeNo
-    if (!tradeNo) {
-      return undefined
-    }
-
-    alipayPollingRef.current = window.setInterval(() => {
-      void checkAlipayPaymentStatus(tradeNo)
-    }, Math.max(1, Number(alipayPayment?.pollInterval || 2)) * 1000)
-
-    return () => {
-      stopAlipayPolling()
-    }
-  }, [alipayPayment?.pollInterval, alipayPayment?.tradeNo, checkAlipayPaymentStatus, stopAlipayPolling])
 
   async function handleRedeem() {
     if (!redeemCode.trim()) {
@@ -1304,6 +1344,7 @@ export function WalletWorkspace(props: {
         expiresIn: Number(result.expires_in || 0),
         pollInterval: Number(result.poll_interval || 2),
       })
+      scheduleAlipayPolling(result.trade_no, Math.min(30, Math.max(1, Number(result.poll_interval || 2))))
     } catch (error) {
       toast(error instanceof Error ? error.message : '创建支付宝订单失败')
     } finally {
@@ -1316,7 +1357,7 @@ export function WalletWorkspace(props: {
       <article className='panel scroll-panel page-surface'>
         <div className='panel-header compact'>
           <div>
-            <h2>用量账单</h2>
+            <h2>钱包用量</h2>
           </div>
         </div>
 

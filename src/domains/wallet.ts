@@ -31,6 +31,16 @@ function normalizeAlipayTopupOrder(order: AlipayTopupOrder) {
   }
 }
 
+export function createPaymentIdempotencyKey(scope: string, value = '') {
+  const randomPart =
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`
+  const cleanScope = scope.replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'payment'
+  const cleanValue = value.replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '')
+  return [cleanScope, cleanValue, randomPart].filter(Boolean).join('-')
+}
+
 export async function getTopupInfo() {
   const response = await desktopEnvelope<TopupInfo>({
     method: 'GET',
@@ -72,10 +82,13 @@ export async function requestWalletPayment(amount: number, paymentMethod: string
   return response.data
 }
 
-async function requestAlipayTopupOrder(path: string, amount: number) {
+async function requestAlipayTopupOrder(path: string, amount: number, idempotencyKey = createPaymentIdempotencyKey('alipay-create', String(amount))) {
   const response = await desktopEnvelope<AlipayTopupOrder>({
     method: 'POST',
     path,
+    headers: {
+      'Idempotency-Key': idempotencyKey,
+    },
     body: {
       amount,
       platform: 'pc',
@@ -112,6 +125,9 @@ async function requestAlipayTopupStatus(path: string, tradeNo: string) {
   const response = await desktopEnvelope<AlipayTopupStatus>({
     method: 'GET',
     path,
+    headers: {
+      'Idempotency-Key': createPaymentIdempotencyKey('alipay-query', tradeNo),
+    },
     query: {
       trade_no: tradeNo,
     },
@@ -137,6 +153,9 @@ export async function cancelAlipayTopupOrder(tradeNo: string) {
     const response = await desktopEnvelope<AlipayTopupCancel>({
       method: 'POST',
       path: '/api/user/alipay/cancel',
+      headers: {
+        'Idempotency-Key': createPaymentIdempotencyKey('alipay-cancel', tradeNo),
+      },
       body: {
         trade_no: tradeNo,
       },

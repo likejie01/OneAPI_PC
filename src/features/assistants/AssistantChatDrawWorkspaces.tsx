@@ -337,7 +337,7 @@ export function AssistantsChatWorkspace(props: {
           ...chatModelVendorFilterOptions.map((item) => item.label),
           '切换当前对话所用模型',
         ],
-        { min: 260, max: 460, padding: 112, itemCount: chatModeModels.length, rowHeight: 42, maxListHeight: 260 }
+        { min: 320, max: 420, padding: 96, itemCount: chatModeModels.length, rowHeight: 42, maxListHeight: 260 }
       ),
     [chatModeModels, chatModelVendorFilterOptions]
   )

@@ -225,7 +225,7 @@ export function MeAnonymousWorkspace(props: {
       <article className='panel scroll-panel page-surface'>
         <div className='panel-header compact'>
           <div>
-            <h2>环境部署</h2>
+            <h2>系统设置</h2>
           </div>
           <div className='inline-actions'>
             <button
@@ -461,13 +461,11 @@ export function MeAuthenticatedWorkspace(props: {
 
   useEffect(() => {
     setSelectedApiKeyId((current) => {
-      const resolved = resolveSelectedDesktopApiKeyId(apiKeys, current)
-      if (resolved) {
-        writeSelectedDesktopApiKeyId(user.id, resolved, writeJsonStorage)
-      } else {
-        clearSelectedDesktopApiKeyId(user.id, removeStorage)
+      const persisted = readSelectedDesktopApiKeyId(user.id, readJsonStorage)
+      if (persisted) {
+        return persisted
       }
-      return resolved
+      return resolveSelectedDesktopApiKeyId(apiKeys, current)
     })
   }, [apiKeys, user.id])
 

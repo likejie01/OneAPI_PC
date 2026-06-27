@@ -3666,3 +3666,236 @@ body:has(.cli-extension-floating-tooltip)::after {
   line-height: 1.7;
 }
 
+.compliance-safety-actions {
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.desktop-notice-section-privacy {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+  margin-top: 12px;
+}
+
+.desktop-privacy-menu-button {
+  width: 100%;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  padding: 10px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.desktop-privacy-menu-button:hover,
+.desktop-privacy-menu-button:focus-visible {
+  border-color: var(--border);
+  background: var(--surface-strong);
+}
+
+.desktop-privacy-menu-copy {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.desktop-privacy-menu-copy small {
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.legal-compliance-modal {
+  width: min(900px, calc(100vw - 48px)) !important;
+  max-height: min(86vh, 760px) !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 16px !important;
+}
+
+.legal-compliance-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.legal-compliance-head h2,
+.legal-compliance-panel-head h3 {
+  margin: 0;
+}
+
+.legal-compliance-head p,
+.legal-compliance-panel-head p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.legal-compliance-layout {
+  display: grid;
+  grid-template-columns: 210px minmax(0, 1fr);
+  gap: 14px;
+  min-height: 0;
+}
+
+.legal-compliance-tabs {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+}
+
+.legal-compliance-tab {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.54);
+  color: var(--text);
+  min-height: 42px;
+  padding: 9px 11px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.legal-compliance-tab.active {
+  border-color: rgba(56, 121, 255, 0.45);
+  background: rgba(56, 121, 255, 0.12);
+}
+
+.legal-compliance-panel {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.42);
+  overflow: hidden;
+}
+
+.legal-compliance-panel-head {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.legal-compliance-document {
+  max-height: min(58vh, 520px);
+  overflow-y: auto;
+  padding: 16px;
+}
+
+.legal-compliance-actions {
+  margin-top: 0 !important;
+}
+
+.secondary-button.danger {
+  color: #c2313e;
+  border-color: rgba(194, 49, 62, 0.28);
+}
+
+.cli-extension-filter-tabs {
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px !important;
+  flex: 0 0 auto;
+  min-width: 168px;
+}
+
+.cli-extension-filter-tabs .picker-filter-chip {
+  justify-content: center;
+  min-width: 0;
+}
+
+.cli-extension-filter-tabs .picker-filter-chip:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.cli-extension-filter-row {
+  align-items: center !important;
+  flex-wrap: nowrap !important;
+}
+
+.cli-extension-toolbar {
+  min-width: 0;
+  flex: 1 1 auto !important;
+}
+
+.cli-extension-search {
+  min-width: 0;
+}
+
+.modal-mask,
+.image-preview-modal-mask {
+  background: rgba(17, 28, 41, 0.18) !important;
+  backdrop-filter: blur(28px) saturate(145%) !important;
+  -webkit-backdrop-filter: blur(28px) saturate(145%) !important;
+}
+
+:root[data-theme='dark'] .modal-mask,
+:root[data-theme='dark'] .image-preview-modal-mask {
+  background: rgba(5, 8, 12, 0.28) !important;
+  backdrop-filter: blur(30px) saturate(125%) !important;
+  -webkit-backdrop-filter: blur(30px) saturate(125%) !important;
+}
+
+body:has(.modal-card)::after,
+body:has(.announcement-modal-card)::after,
+body:has(.translation-modal-card)::after,
+body:has(.image-preview-modal)::after,
+body:has(.attachment-preview-modal)::after,
+body:has(.desktop-update-popover)::after,
+body:has(.session-context-menu)::after,
+body:has(.picker-menu)::after,
+body:has(.assistant-menu)::after,
+body:has(.model-menu)::after,
+body:has(.cli-extension-menu)::after {
+  content: '' !important;
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 35 !important;
+  pointer-events: none !important;
+  background: rgba(246, 250, 255, 0.035) !important;
+  backdrop-filter: blur(24px) saturate(135%) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(135%) !important;
+}
+
+:root[data-theme='dark'] body:has(.modal-card)::after,
+:root[data-theme='dark'] body:has(.announcement-modal-card)::after,
+:root[data-theme='dark'] body:has(.translation-modal-card)::after,
+:root[data-theme='dark'] body:has(.image-preview-modal)::after,
+:root[data-theme='dark'] body:has(.attachment-preview-modal)::after,
+:root[data-theme='dark'] body:has(.desktop-update-popover)::after,
+:root[data-theme='dark'] body:has(.session-context-menu)::after,
+:root[data-theme='dark'] body:has(.picker-menu)::after,
+:root[data-theme='dark'] body:has(.assistant-menu)::after,
+:root[data-theme='dark'] body:has(.model-menu)::after,
+:root[data-theme='dark'] body:has(.cli-extension-menu)::after {
+  background: rgba(7, 10, 15, 0.08) !important;
+  backdrop-filter: blur(28px) saturate(118%) !important;
+  -webkit-backdrop-filter: blur(28px) saturate(118%) !important;
+}
+
+:root[data-theme='dark'] .legal-compliance-tab,
+:root[data-theme='dark'] .legal-compliance-panel {
+  background: rgba(0, 0, 0, 0.28);
+}
+
+:root[data-theme='dark'] .legal-compliance-tab.active {
+  background: rgba(126, 166, 255, 0.16);
+}
+
+@media (max-width: 760px) {
+  .legal-compliance-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .legal-compliance-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+

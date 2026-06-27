@@ -218,6 +218,27 @@ function stripConsumedAssistantChunks(
   }
 }
 
+function collapseRepeatedAdjacentAssistantParagraphs(content: string) {
+  const paragraphs = content
+    .replace(/\r\n/g, '\n')
+    .split(/\n{2,}/)
+  const collapsed: string[] = []
+
+  for (const paragraph of paragraphs) {
+    const normalized = normalizeMessageContent(paragraph)
+    if (!normalized) {
+      continue
+    }
+    const previous = collapsed.at(-1)
+    if (previous && normalizeMessageContent(previous) === normalized) {
+      continue
+    }
+    collapsed.push(paragraph.trim())
+  }
+
+  return collapsed.join('\n\n')
+}
+
 export function isCodexModel(model: ChatModelOption | string) {
   const normalized = normalizeProviderModelValue(typeof model === 'string' ? model : model.value)
   if (normalized.startsWith('deepseek')) {
@@ -504,6 +525,9 @@ export function buildCliTimeline(input: {
           requestAssistantChunkCursor.set(item.requestId, stripped.nextIndex)
         }
       }
+      if (item.role === 'assistant') {
+        content = collapseRepeatedAdjacentAssistantParagraphs(content)
+      }
 
       return {
         id: item.id,
@@ -532,10 +556,10 @@ export function buildCliTimeline(input: {
     .sort((left, right) => left.createdAt - right.createdAt)
 
   const sortedLogs = [...groupedLogs].sort((left, right) => left.startedAt - right.startedAt)
-  const requestUserIds = new Set<string>()
+  const requestUserTimes = new Map<string, number>()
   for (const item of entries) {
     if (item.kind === 'message' && item.role === 'user' && item.requestId) {
-      requestUserIds.add(item.requestId)
+      requestUserTimes.set(item.requestId, item.createdAt)
     }
   }
   const requestLogs = sortedLogs.reduce<Map<string, typeof sortedLogs>>((map, item) => {
@@ -557,19 +581,26 @@ export function buildCliTimeline(input: {
     timeline.push(item)
     pushedLogIds.add(item.id)
   }
-  const pushRequestLogs = (requestId?: string) => {
+  const pushRequestLogsBefore = (requestId: string | undefined, createdAt: number) => {
     if (!requestId) {
       return
     }
     for (const item of requestLogs.get(requestId) || []) {
-      pushLog(item)
+      if (item.startedAt <= createdAt) {
+        pushLog(item)
+      }
     }
   }
   const pushChronologicalLogsBefore = (createdAt: number) => {
     while (logIndex < sortedLogs.length && sortedLogs[logIndex].startedAt <= createdAt) {
       const log = sortedLogs[logIndex]
       logIndex += 1
-      if (log.requestId && requestUserIds.has(log.requestId) && !pushedLogIds.has(log.id)) {
+      const requestUserTime = log.requestId ? requestUserTimes.get(log.requestId) : undefined
+      if (
+        requestUserTime !== undefined &&
+        log.startedAt < requestUserTime &&
+        !pushedLogIds.has(log.id)
+      ) {
         continue
       }
       pushLog(log)
@@ -578,12 +609,16 @@ export function buildCliTimeline(input: {
 
   for (const entry of entries.sort((left, right) => left.createdAt - right.createdAt)) {
     if (entry.kind === 'message' && entry.role === 'assistant') {
-      pushRequestLogs(entry.requestId)
+      pushRequestLogsBefore(entry.requestId, entry.createdAt)
       pushChronologicalLogsBefore(entry.createdAt)
     }
     timeline.push(entry)
-    if (entry.kind === 'message' && entry.role === 'user') {
-      pushRequestLogs(entry.requestId)
+    if (entry.kind === 'message' && entry.role === 'user' && entry.requestId) {
+      for (const item of requestLogs.get(entry.requestId) || []) {
+        if (item.startedAt < entry.createdAt) {
+          pushLog(item)
+        }
+      }
     }
   }
 

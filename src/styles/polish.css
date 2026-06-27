@@ -2405,6 +2405,69 @@ input:checked + .toggle-track {
   }
 }
 
+/* Final popup blur pass: apply the same background separation to every dialog and picker. */
+.modal-mask,
+.image-preview-modal-mask {
+  background: rgba(17, 28, 41, 0.18) !important;
+  background-color: rgba(17, 28, 41, 0.18) !important;
+  backdrop-filter: blur(28px) saturate(145%) !important;
+  -webkit-backdrop-filter: blur(28px) saturate(145%) !important;
+}
+
+:root[data-theme='dark'] .modal-mask,
+:root[data-theme='dark'] .image-preview-modal-mask {
+  background: rgba(5, 8, 12, 0.28) !important;
+  background-color: rgba(5, 8, 12, 0.28) !important;
+  backdrop-filter: blur(30px) saturate(125%) !important;
+  -webkit-backdrop-filter: blur(30px) saturate(125%) !important;
+}
+
+body:has(.picker-menu)::after,
+body:has(.assistant-menu)::after,
+body:has(.model-menu)::after,
+body:has(.image-style-menu)::after,
+body:has(.image-config-menu)::after,
+body:has(.cli-extension-menu)::after,
+body:has(.session-context-menu)::after,
+body:has(.chat-history-panel)::after,
+body:has(.cli-history-panel)::after,
+body:has(.cli-plan-floating-panel)::after,
+body:has(.desktop-update-popover)::after,
+body:has(.markdown-code-action-menu)::after,
+body:has(.cli-extension-floating-tooltip)::after {
+  display: block !important;
+  content: '' !important;
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 45 !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  pointer-events: none !important;
+  background: rgba(246, 250, 255, 0.035) !important;
+  background-color: rgba(246, 250, 255, 0.035) !important;
+  backdrop-filter: blur(24px) saturate(135%) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(135%) !important;
+}
+
+:root[data-theme='dark'] body:has(.picker-menu)::after,
+:root[data-theme='dark'] body:has(.assistant-menu)::after,
+:root[data-theme='dark'] body:has(.model-menu)::after,
+:root[data-theme='dark'] body:has(.image-style-menu)::after,
+:root[data-theme='dark'] body:has(.image-config-menu)::after,
+:root[data-theme='dark'] body:has(.cli-extension-menu)::after,
+:root[data-theme='dark'] body:has(.session-context-menu)::after,
+:root[data-theme='dark'] body:has(.chat-history-panel)::after,
+:root[data-theme='dark'] body:has(.cli-history-panel)::after,
+:root[data-theme='dark'] body:has(.cli-plan-floating-panel)::after,
+:root[data-theme='dark'] body:has(.desktop-update-popover)::after,
+:root[data-theme='dark'] body:has(.markdown-code-action-menu)::after,
+:root[data-theme='dark'] body:has(.cli-extension-floating-tooltip)::after {
+  background: rgba(7, 10, 15, 0.08) !important;
+  background-color: rgba(7, 10, 15, 0.08) !important;
+  backdrop-filter: blur(28px) saturate(118%) !important;
+  -webkit-backdrop-filter: blur(28px) saturate(118%) !important;
+}
+
 /* Final performance pass: keep efficiency mode above later glass refinements. */
 :root[data-performance-mode='efficiency'] {
   --aurora-opacity: 0;
@@ -2594,4 +2657,14 @@ input:checked + .toggle-track {
   white-space: pre-wrap !important;
   overflow-wrap: anywhere !important;
   word-break: break-word !important;
+}
+
+.cli-page .cli-log-detail-window.code-like,
+.cli-page .cli-log-detail-window.compact.code-like {
+  white-space: pre !important;
+  overflow-x: auto !important;
+  overflow-y: auto !important;
+  word-break: normal !important;
+  overflow-wrap: normal !important;
+  font-family: 'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace !important;
 }

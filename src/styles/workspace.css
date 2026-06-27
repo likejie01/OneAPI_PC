@@ -417,6 +417,16 @@
   max-height: calc(1.5em * 10 + 20px);
 }
 
+.cli-log-detail-window.code-like {
+  white-space: pre;
+  overflow-x: auto;
+  overflow-y: auto;
+  word-break: normal;
+  overflow-wrap: normal;
+  font-family: 'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+  tab-size: 2;
+}
+
 .cli-log-detail-window.compact {
   max-height: none;
   padding: 8px 10px;

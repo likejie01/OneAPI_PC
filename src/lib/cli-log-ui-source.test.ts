@@ -15,9 +15,10 @@ const cliStylesSource = readFileSync(resolve(dirname(fileURLToPath(import.meta.u
 const modalsStylesSource = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '..', 'styles', 'modals.css'), 'utf8')
 const polishStylesSource = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '..', 'styles', 'polish.css'), 'utf8')
 
-test('cli log bubbles collapse as Thinking after an assistant reply', () => {
-  assert.match(appSource, /<CliLogBubble[\s\S]*?expanded=\{false\}/)
-  assert.match(appSource, /expanded=\{!hasAssistantReply\}/)
+test('cli log bubbles stay expanded after assistant replies so process history remains visible', () => {
+  assert.match(appSource, /<CliLogBubble[\s\S]*?expanded=\{true\}/)
+  assert.doesNotMatch(appSource, /expanded=\{!hasAssistantReply\}/)
+  assert.doesNotMatch(appSource, /expanded=\{false\}/)
   assert.match(assistantSupportSource, /label='Thinking'/)
   assert.doesNotMatch(appSource, /点击收起/)
 })
@@ -61,7 +62,19 @@ test('cli new session keeps an empty draft instead of auto hydrating the latest 
 test('cli assistant replies are persisted in message overlays', () => {
   assert.match(appSource, /persistCliMessageOverlay\(nextSessionId, assistantMessage\)/)
   assert.match(appSource, /persistCliMessageOverlay\(targetSessionId, assistantMessage\)/)
+  assert.match(appSource, /const alreadyPersisted = previous\.some/)
   assert.doesNotMatch(appSource, /message\.role !== 'user'/)
+})
+
+test('cli final fallback only appends when hydrated transcript has not already supplied the reply', () => {
+  assert.match(appSource, /shouldAppendCliAssistantFallback\(\{[\s\S]*?responseSessionId: response\.sessionId[\s\S]*?hydratedSessionId: hydratedResponseSessionId/)
+  assert.match(appSource, /details\.messages\.some\(\(message\) => message\.role === 'assistant'\)/)
+})
+
+test('cli project selection creates an empty draft instead of auto opening old project history', () => {
+  assert.match(appSource, /async function ensureProjectSession/)
+  assert.doesNotMatch(appSource, /const matched = history[\s\S]*?await handleOpenHistory\(matched, false\)/)
+  assert.match(appSource, /emptyDraftSessionIdsRef\.current\.add\(nextSessionId\)[\s\S]*?bindProjectSession\(nextPath, nextSessionId\)/)
 })
 
 test('cli plan panel remains mounted and ignores undefined plan payloads', () => {
@@ -199,6 +212,27 @@ test('wallet recharge area splits redemption and server-created payment entry', 
   assert.match(modalsStylesSource, /:root\[data-theme='dark'\] \.wallet-topup-pane/)
 })
 
+test('account data domains use stale while revalidate cache instead of raw desktop envelopes', () => {
+  assert.match(accountWorkspaceSource, /readSubscriptionWorkspaceCache\(\)/)
+  assert.match(accountWorkspaceSource, /writeSubscriptionWorkspaceCache\(/)
+  assert.match(accountWorkspaceSource, /readWalletWorkspaceCache\(\)/)
+  assert.match(accountWorkspaceSource, /writeWalletWorkspaceCache\(/)
+  assert.match(accountWorkspaceSource, /readServiceStatusCache\(\)/)
+  assert.match(accountWorkspaceSource, /void refreshSubscriptions\(\)/)
+  assert.match(accountWorkspaceSource, /void refreshWallet\(\)/)
+  assert.match(accountWorkspaceSource, /void refreshServiceStatus\(\)/)
+})
+
+test('payment requests use idempotency and adaptive polling instead of fixed interval hammering', () => {
+  assert.match(walletDomainSource, /createPaymentIdempotencyKey\(/)
+  assert.match(walletDomainSource, /Idempotency-Key/)
+  assert.match(accountWorkspaceSource, /scheduleAlipayPolling/)
+  assert.match(accountWorkspaceSource, /window\.setTimeout/)
+  assert.doesNotMatch(accountWorkspaceSource, /alipayPollingRef\.current = window\.setInterval/)
+  assert.match(accountWorkspaceSource, /Math\.min\(30, Math\.max\(1, Number\(.*pollInterval/)
+  assert.match(accountWorkspaceSource, /nextPollInterval/)
+})
+
 test('desktop bridge supports explicit alipay checkout from the in-app payment dialog', () => {
   assert.match(electronPreloadSource, /openHtml: \(input: DesktopOpenHtmlRequest\) =>[\s\S]*?ipcRenderer\.invoke\('desktop:open-html', input\)/)
   assert.match(electronMainSource, /function sanitizeHtmlFileName\(value\?: string\)/)
@@ -234,6 +268,18 @@ test('toast notifications are anchored above the composer at the right edge', ()
 test('context menus and side navigation use restrained radius', () => {
   assert.match(modalsStylesSource, /\.session-context-menu,[\s\S]*?\.markdown-code-action-menu\s*\{[\s\S]*?border-radius:\s*8px !important/)
   assert.match(modalsStylesSource, /\.side-nav-item\.active,[\s\S]*?\.sidebar\.collapsed \.side-nav-item\.active\s*\{[\s\S]*?border-radius:\s*8px !important/)
+})
+
+test('chat model picker uses the same fixed popup width calculation as other model menus', () => {
+  const assistantChatDrawSource = readFileSync(
+    resolve(dirname(fileURLToPath(import.meta.url)), '..', 'features', 'assistants', 'AssistantChatDrawWorkspaces.tsx'),
+    'utf8'
+  )
+  assert.match(
+    assistantChatDrawSource,
+    /const chatModelMenuWidthStyle = useMemo\([\s\S]*?createPickerMenuWidthStyle\([\s\S]*?\{ min: 320, max: 420, padding: 96, itemCount: chatModeModels\.length, rowHeight: 42, maxListHeight: 260 \}/
+  )
+  assert.match(modalsStylesSource, /\.model-menu\.fixed-width-menu,[\s\S]*?width:\s*var\(--picker-menu-safe-width/)
 })
 
 test('anonymous deploy note has no outer panel frame and dark deploy outlines are subdued', () => {

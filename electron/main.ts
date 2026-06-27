@@ -95,9 +95,14 @@ const DEFAULT_CODEX_BASE_URL = 'https://ai.oneapi.center/v1'
 const DEFAULT_CLAUDE_BASE_URL = 'https://ai.oneapi.center'
 const DEFAULT_CODEX_MODEL = 'gpt-5.4'
 const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-4-6'
-const MOBILE_BRIDGE_LOOP_INTERVAL_MS = 5000
+const MOBILE_BRIDGE_PENDING_JOB_ACTIVE_INTERVAL_MS = 1000
+const MOBILE_BRIDGE_PENDING_JOB_IDLE_INTERVAL_MS = 2000
 const MOBILE_BRIDGE_HEARTBEAT_INTERVAL_MS = 30000
-const MOBILE_BRIDGE_SESSION_SNAPSHOT_INTERVAL_MS = 30000
+const MOBILE_BRIDGE_AUX_SNAPSHOT_FALLBACK_INTERVAL_MS = 5 * 60 * 1000
+const MOBILE_BRIDGE_SNAPSHOT_FALLBACK_INTERVAL_MS = 10 * 60 * 1000
+const MOBILE_BRIDGE_MAX_SESSION_SNAPSHOTS = 20
+const MOBILE_BRIDGE_MAX_SESSION_MESSAGES = 5
+const MOBILE_BRIDGE_MAX_SESSION_LOGS = 5
 const WINDOW_CHROME_HEIGHT = 25
 const DESKTOP_PARTITION = 'persist:oneapi-desktop'
 const isDev = !!process.env.VITE_DEV_SERVER_URL
@@ -155,12 +160,13 @@ let mobileBridgeStarted = false
 let mobileBridgeRunning = false
 let mobileBridgeDeviceId = ''
 let mobileBridgeLastHeartbeatAt = 0
-let mobileBridgeLastSnapshotSignature = ''
+const mobileBridgeAuxSnapshotState = new Map<string, { signature: string; uploadedAt: number }>()
 let mobileBridgeLastSessionsSnapshotSignature = ''
 let mobileBridgeLastSessionsSnapshotAt = 0
 let mobileBridgeLastModelSelectionErrorAt = 0
 const assistantHistoryWriteSignatures = new Map<string, string>()
 const cliAccessDirectories = createCliAccessDirectoryResolver(getDesktopAttachmentDirectory)
+const activeMobileBridgeJobIds = new Set<string>()
 
 function rememberCliAuthorizedDirectory(targetPath: string) {
   cliAccessDirectories.rememberDirectory(targetPath)
@@ -418,7 +424,7 @@ async function getMobileBridgeLocalDevice() {
 async function resetMobileBridgeDeviceId() {
   mobileBridgeDeviceId = randomUUID()
   mobileBridgeLastHeartbeatAt = 0
-  mobileBridgeLastSnapshotSignature = ''
+  mobileBridgeAuxSnapshotState.clear()
   mobileBridgeLastSessionsSnapshotSignature = ''
   mobileBridgeLastSessionsSnapshotAt = 0
   await fs.mkdir(path.dirname(getMobileBridgeConfigPath()), { recursive: true })
@@ -1815,6 +1821,10 @@ interface MobileBridgeSessionSnapshot {
     timestamp: number
   }>
   logs: Array<Record<string, unknown>>
+  lastUploadedVersion?: string
+  sessionUpdatedAt?: number
+  messageCount?: number
+  logCount?: number
 }
 
 async function requestApi(input: DesktopApiRequest): Promise<DesktopApiResponse> {
@@ -1933,6 +1943,19 @@ async function heartbeatMobileBridgeDevice(status = 'online', lastError = '') {
   })
 }
 
+function shouldUploadMobileBridgeAuxSnapshot(kind: string, signature: string) {
+  const now = Date.now()
+  const state = mobileBridgeAuxSnapshotState.get(kind)
+  if (state?.signature === signature && now - state.uploadedAt < MOBILE_BRIDGE_AUX_SNAPSHOT_FALLBACK_INTERVAL_MS) {
+    return false
+  }
+  mobileBridgeAuxSnapshotState.set(kind, {
+    signature,
+    uploadedAt: now,
+  })
+  return true
+}
+
 async function syncMobileBridgeExtensionsSnapshot() {
   const deviceId = await getMobileBridgeDeviceId()
   const [codexExtensions, claudeExtensions] = await Promise.all([
@@ -1947,10 +1970,9 @@ async function syncMobileBridgeExtensionsSnapshot() {
     client: item.client,
   }))
   const signature = JSON.stringify(entries)
-  if (signature === mobileBridgeLastSnapshotSignature) {
+  if (!shouldUploadMobileBridgeAuxSnapshot('extensions', signature)) {
     return
   }
-  mobileBridgeLastSnapshotSignature = signature
   await requestMobileBridgeJson({
     method: 'POST',
     path: '/api/mobile/desktop-extensions/snapshot',
@@ -1981,6 +2003,10 @@ async function syncMobileBridgeAssistantsSnapshot() {
       model: String(item.model || ''),
       temperature: typeof item.temperature === 'number' ? item.temperature : 0.35,
     }))
+  const signature = JSON.stringify(assistants)
+  if (!shouldUploadMobileBridgeAuxSnapshot('assistants', signature)) {
+    return
+  }
   await requestMobileBridgeJson({
     method: 'POST',
     path: '/api/mobile/desktop-assistants/snapshot',
@@ -2023,6 +2049,47 @@ function activeCliSnapshotForSession(client: CliClient, sessionId: string) {
   return null
 }
 
+function limitMobileBridgeSessionPayload(session: MobileBridgeSessionSnapshot): MobileBridgeSessionSnapshot {
+  const messages = session.messages.slice(-MOBILE_BRIDGE_MAX_SESSION_MESSAGES)
+  const logs = session.logs.slice(-MOBILE_BRIDGE_MAX_SESSION_LOGS)
+  const sessionUpdatedAt = Number(session.updatedAt || Date.now())
+  const messageCount = session.messages.length
+  const logCount = session.logs.length
+  const lastUploadedVersion = JSON.stringify({
+    id: session.id,
+    client: session.client,
+    sessionId: session.sessionId,
+    sessionUpdatedAt,
+    messageCount,
+    logCount,
+    lastMessage: messages.at(-1)?.id || messages.at(-1)?.timestamp || '',
+    lastLog: JSON.stringify(logs.at(-1) || {}).slice(0, 240),
+    status: session.status,
+    model: session.model || '',
+    projectPath: session.projectPath,
+  })
+  return {
+    ...session,
+    updatedAt: sessionUpdatedAt,
+    messages,
+    logs,
+    sessionUpdatedAt,
+    messageCount,
+    logCount,
+    lastUploadedVersion,
+  }
+}
+
+function shouldUploadMobileBridgeSessionsSnapshot(signature: string, force: boolean) {
+  const now = Date.now()
+  if (!force && signature === mobileBridgeLastSessionsSnapshotSignature && now - mobileBridgeLastSessionsSnapshotAt < MOBILE_BRIDGE_SNAPSHOT_FALLBACK_INTERVAL_MS) {
+    return false
+  }
+  mobileBridgeLastSessionsSnapshotSignature = signature
+  mobileBridgeLastSessionsSnapshotAt = now
+  return true
+}
+
 function buildActiveMobileBridgeSessionSnapshot(requestId: string, state: NonNullable<ReturnType<typeof activeCliSnapshotForSession>>['state']): MobileBridgeSessionSnapshot {
   const projectPath = state.projectPath.trim()
   const projectName = projectPath ? path.basename(projectPath) || projectPath : '本机项目'
@@ -2046,7 +2113,7 @@ function buildActiveMobileBridgeSessionSnapshot(requestId: string, state: NonNul
       text: prompt,
       timestamp: state.startedAt,
     }] : [],
-    logs: state.mobileBridgeLogs.slice(-80),
+    logs: state.mobileBridgeLogs.slice(-MOBILE_BRIDGE_MAX_SESSION_LOGS),
   }
 }
 
@@ -2115,16 +2182,10 @@ async function buildMobileBridgeSessionSnapshot(client: CliClient, entry: CliHis
 }
 
 async function syncMobileBridgeSessionsSnapshot(force = false) {
-  const now = Date.now()
-  if (!force && now - mobileBridgeLastSessionsSnapshotAt < MOBILE_BRIDGE_SESSION_SNAPSHOT_INTERVAL_MS) {
-    return
-  }
-  mobileBridgeLastSessionsSnapshotAt = now
-
   const deviceId = await getMobileBridgeDeviceId()
   const [codexHistory, claudeHistory] = await Promise.all([
-    listCodexHistory(0).catch(() => [] as CliHistoryEntry[]),
-    listClaudeHistory(0).catch(() => [] as CliHistoryEntry[]),
+    listCodexHistory(MOBILE_BRIDGE_MAX_SESSION_SNAPSHOTS).catch(() => [] as CliHistoryEntry[]),
+    listClaudeHistory(MOBILE_BRIDGE_MAX_SESSION_SNAPSHOTS).catch(() => [] as CliHistoryEntry[]),
   ])
   const entries = await Promise.all([
     ...codexHistory.map((item) => buildMobileBridgeSessionSnapshot('codex', item)),
@@ -2145,22 +2206,22 @@ async function syncMobileBridgeSessionsSnapshot(force = false) {
     existingKeys.add(`${snapshot.client}\n${snapshot.sessionId}`)
   }
 
-  const signature = JSON.stringify(sessions.map((item) => ({
+  const boundedSessions = sessions
+    .sort((left, right) => right.updatedAt - left.updatedAt)
+    .slice(0, MOBILE_BRIDGE_MAX_SESSION_SNAPSHOTS)
+    .map(limitMobileBridgeSessionPayload)
+
+  const signature = JSON.stringify(boundedSessions.map((item) => ({
     id: item.id,
     client: item.client,
-    updatedAt: item.updatedAt,
-    model: item.model || '',
-    projectPath: item.projectPath,
-    status: item.status,
-    preview: item.preview.slice(0, 200),
-    messageCount: item.messages.length,
-    logCount: item.logs.length,
-    lastLog: JSON.stringify(item.logs.at(-1) || {}).slice(0, 200),
+    lastUploadedVersion: item.lastUploadedVersion,
+    sessionUpdatedAt: item.sessionUpdatedAt,
+    messageCount: item.messageCount,
+    logCount: item.logCount,
   })))
-  if (!force && signature === mobileBridgeLastSessionsSnapshotSignature) {
+  if (!shouldUploadMobileBridgeSessionsSnapshot(signature, force)) {
     return
   }
-  mobileBridgeLastSessionsSnapshotSignature = signature
 
   await requestMobileBridgeJson({
     method: 'POST',
@@ -2168,7 +2229,7 @@ async function syncMobileBridgeSessionsSnapshot(force = false) {
     query: {
       device_id: deviceId,
     },
-    body: sessions,
+    body: boundedSessions,
   })
 }
 
@@ -2408,6 +2469,8 @@ async function executeMobileBridgeJob(rawJob: MobileBridgeJob) {
         level: 2,
         title: '执行失败',
         body: result.error || 'CLI 执行未返回成功结果。',
+        source: 'mobile',
+        origin: 'mobile',
         createdAt: Date.now(),
       })
     } else {
@@ -2613,15 +2676,18 @@ async function startMobileBridgeLoop() {
   mobileBridgeStarted = true
   while (!isQuitting) {
     if (mobileBridgeRunning) {
-      await wait(MOBILE_BRIDGE_LOOP_INTERVAL_MS)
+      await wait(MOBILE_BRIDGE_PENDING_JOB_ACTIVE_INTERVAL_MS)
       continue
     }
+    let loopDelay = activeMobileBridgeJobIds.size > 0
+      ? MOBILE_BRIDGE_PENDING_JOB_ACTIVE_INTERVAL_MS
+      : MOBILE_BRIDGE_PENDING_JOB_IDLE_INTERVAL_MS
     mobileBridgeRunning = true
     try {
       const userId = await getDesktopUserHeaderValue()
       if (!userId) {
         setMobileBridgePowerSaveBlocker(false)
-        await wait(MOBILE_BRIDGE_LOOP_INTERVAL_MS)
+        await wait(MOBILE_BRIDGE_PENDING_JOB_IDLE_INTERVAL_MS)
         continue
       }
 
@@ -2639,9 +2705,25 @@ async function startMobileBridgeLoop() {
           device_id: await getMobileBridgeDeviceId(),
         },
       })
+      const nextLoopDelay = jobs.length > 0 || activeMobileBridgeJobIds.size > 0
+        ? MOBILE_BRIDGE_PENDING_JOB_ACTIVE_INTERVAL_MS
+        : MOBILE_BRIDGE_PENDING_JOB_IDLE_INTERVAL_MS
+      loopDelay = nextLoopDelay
 
       for (const job of jobs) {
-        await executeMobileBridgeJob(job)
+        const jobId = readMobileBridgeJobId(job)
+        if (!jobId || activeMobileBridgeJobIds.has(jobId)) {
+          continue
+        }
+        activeMobileBridgeJobIds.add(jobId)
+        void executeMobileBridgeJob(job)
+          .catch((error) => {
+            const message = error instanceof Error ? error.message : String(error)
+            void heartbeatMobileBridgeDevice('degraded', `desktop job ${jobId} failed: ${message}`).catch(() => undefined)
+          })
+          .finally(() => {
+            activeMobileBridgeJobIds.delete(jobId)
+          })
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -2649,7 +2731,8 @@ async function startMobileBridgeLoop() {
     } finally {
       mobileBridgeRunning = false
     }
-    await wait(MOBILE_BRIDGE_LOOP_INTERVAL_MS)
+    const nextLoopDelay = loopDelay
+    await wait(nextLoopDelay)
   }
 }
 

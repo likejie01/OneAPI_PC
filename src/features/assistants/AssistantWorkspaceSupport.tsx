@@ -12,7 +12,11 @@ import { filterAssistantModels, isImageGenerationModel as isImageGenerationModel
 import { buildCliExtensionDisplayName, canUseCliExtension, collectCliToolNames, translateCliExtensionDescription, type CliExtensionViewItem, type CliMessageOverlay } from '../../lib/cli-extensions'
 import { type CliBuiltinCommand } from '../../lib/cli-commands'
 import { type ImageStylePreset } from '../../lib/image-style-presets'
-import { shouldRenderCliLogEventRow, shouldRenderCliLogOutputEntry } from '../../lib/cli-log-rendering'
+import {
+  shouldRenderCliLogCommandBlock,
+  shouldRenderCliLogEventRow,
+  shouldRenderCliLogOutputEntry,
+} from '../../lib/cli-log-rendering'
 import { deriveDesktopChatDisplayState, normalizeStoredDesktopChatMessage } from '../../lib/chat-reasoning'
 import { normalizeCliProjectKey } from '../../lib/cli-project-state'
 import { clipText, formatDateTime } from '../../lib/format'
@@ -1475,6 +1479,18 @@ export function getCliBuiltinCommandKindLabel() {
   return '命令'
 }
 
+export function getCliPaletteTabLabel(tab: CliPaletteTab) {
+  if (tab === 'command') {
+    return '命令'
+  }
+  if (tab === 'skill') {
+    return '技能'
+  }
+  return '插件'
+}
+
+const CLI_PALETTE_TAB_ORDER: CliPaletteTab[] = ['command', 'skill', 'plugin']
+
 export type CliPaletteItem =
   | {
       id: string
@@ -1635,20 +1651,24 @@ export function CliExtensionPalette(props: {
     >
       <div className='picker-filter-row cli-extension-filter-row'>
         <div className='cli-extension-filter-tabs'>
-          {availableTabs.length > 1 ? (
-            <>
-          {availableTabs.map((tab) => (
-            <button
-              key={tab}
-              className={`picker-filter-chip ${activeTab === tab ? 'active' : ''}`}
-              type='button'
-              onClick={() => onChangeTab(tab)}
-            >
-              <span>{tab}</span>
-            </button>
-          ))}
-            </>
-          ) : null}
+          {CLI_PALETTE_TAB_ORDER.map((tab) => {
+            const disabled = !availableTabs.includes(tab)
+            return (
+              <button
+                key={tab}
+                className={`picker-filter-chip ${activeTab === tab ? 'active' : ''}`}
+                type='button'
+                disabled={disabled}
+                onClick={() => {
+                  if (!disabled) {
+                    onChangeTab(tab)
+                  }
+                }}
+              >
+                <span>{getCliPaletteTabLabel(tab)}</span>
+              </button>
+            )
+          })}
         </div>
         <div className='cli-extension-toolbar'>
           <input
@@ -2310,6 +2330,24 @@ export function CliLogBubble(props: {
 
   const normalizeComparable = (value?: string) => (value || '').trim().replace(/\s+/g, ' ')
   const isPlainStatusSourceKind = (sourceKind?: string) => isCliMetaIntentSourceKind(sourceKind)
+  const formatDetailText = (value: string) => {
+    const trimmed = value.trim()
+    if (!trimmed) {
+      return ''
+    }
+    try {
+      return JSON.stringify(JSON.parse(trimmed), null, 2)
+    } catch {
+      return trimmed
+    }
+  }
+  const resolveDetailWindowClassName = (value: string, compact = false) => {
+    const trimmed = value.trim()
+    const codeLike = /^[{[]/.test(trimmed) || /<\/?[a-z][\s\S]*>/i.test(trimmed) || /(?:powershell|cmd|bash|npm|node|python)\b/i.test(trimmed)
+    return ['cli-log-detail-window', compact ? 'compact' : '', codeLike ? 'code-like' : '']
+      .filter(Boolean)
+      .join(' ')
+  }
 
   const renderInteraction = (interaction: CliInteractionPrompt) => {
     const interactionPending = interaction.status === 'pending'
@@ -2375,7 +2413,7 @@ export function CliLogBubble(props: {
     const uniqueEventFiles = Array.from(new Map((files || []).map((file) => [file.path, file])).values())
     return (
       <div className='cli-log-event-details'>
-        {command?.trim() ? (
+        {shouldRenderCliLogCommandBlock({ command, detail }) ? (
           <div className='cli-log-detail-block'>
             <span className='cli-log-detail-label'>执行命令</span>
             <pre className='cli-log-detail-window'>{command}</pre>
@@ -2383,7 +2421,7 @@ export function CliLogBubble(props: {
         ) : null}
         {detail?.trim() ? (
           <div className='cli-log-detail-block'>
-            <pre className='cli-log-detail-window'>{detail}</pre>
+            <pre className={resolveDetailWindowClassName(detail)}>{formatDetailText(detail)}</pre>
           </div>
         ) : null}
         {uniqueEventFiles.length > 0 ? (
@@ -2551,7 +2589,11 @@ export function CliLogBubble(props: {
                                       <span className='cli-log-child-dot' />
                                       <div className='cli-log-output-inline-copy'>
                                         {!duplicatedPrimary ? <strong>{entry.headline}</strong> : null}
-                                        {entry.detail ? <pre className='cli-log-detail-window compact'>{entry.detail}</pre> : null}
+                                        {entry.detail ? (
+                                          <pre className={resolveDetailWindowClassName(entry.detail, true)}>
+                                            {formatDetailText(entry.detail)}
+                                          </pre>
+                                        ) : null}
                                       </div>
                                     </div>
                                   )

@@ -57,6 +57,7 @@ test('stopped cli runs return aborted result before waiting for session persiste
   assert.match(mainSource, /ipcMain\.handle\('desktop:stop-cli'[\s\S]*?stoppedCliRequests\.add\(requestId\)[\s\S]*?stopChildProcess\(activeCliProcesses\.get\(requestId\)\)/)
   assert.match(cliServicesSource, /const aborted = stoppedCliRequests\.delete\(input\.requestId\)[\s\S]*?if \(aborted\) \{[\s\S]*?sourceKind: 'request\.aborted'[\s\S]*?metadata: \{[\s\S]*?aborted: true/)
   assert.match(cliServicesSource, /if \(aborted\) \{[\s\S]*?return \{[\s\S]*?error: '用户已停止当前回复'/)
+  assert.doesNotMatch(cliServicesSource, /activeCliRequestStates\.delete\(input\.requestId\)[\s\S]{0,220}?void syncMobileBridgeSessionsSnapshot\(true\)/)
 })
 
 test('cli runs resolve when terminal json events arrive', () => {
@@ -83,8 +84,49 @@ test('mobile bridge marks cli jobs as running before cli output arrives', () => 
 test('mobile bridge active session snapshots include running logs', () => {
   assert.match(mainSource, /mobileBridgeLogs: Array<Record<string, unknown>>/)
   assert.match(cliServicesSource, /state\.mobileBridgeLogs\.push\(/)
-  assert.match(mainSource, /logs: state\.mobileBridgeLogs\.slice\(-80\)/)
-  assert.match(mainSource, /logCount: item\.logs\.length/)
+  assert.match(mainSource, /logs: state\.mobileBridgeLogs\.slice\(-MOBILE_BRIDGE_MAX_SESSION_LOGS\)/)
+  assert.match(mainSource, /const logCount = session\.logs\.length/)
+  assert.match(mainSource, /async finish\(result: CliRunResponse\)[\s\S]*?postMobileBridgeJobEvent\(jobId, result\.success \?[\s\S]*?await syncMobileBridgeSessionsSnapshot\(true\)/)
+})
+
+test('mobile bridge executes desktop jobs in background so polling and heartbeat are not blocked', () => {
+  assert.match(mainSource, /const activeMobileBridgeJobIds = new Set<string>\(\)/)
+  assert.match(mainSource, /if \(!jobId \|\| activeMobileBridgeJobIds\.has\(jobId\)\)/)
+  assert.match(mainSource, /activeMobileBridgeJobIds\.add\(jobId\)/)
+  assert.match(mainSource, /void executeMobileBridgeJob\(job\)[\s\S]*?\.finally\(\(\) => \{[\s\S]*?activeMobileBridgeJobIds\.delete\(jobId\)/)
+  assert.doesNotMatch(mainSource, /for \(const job of jobs\) \{\s*await executeMobileBridgeJob\(job\)/)
+})
+
+test('mobile bridge prioritizes fast job polling while throttling snapshots', () => {
+  assert.match(mainSource, /const MOBILE_BRIDGE_PENDING_JOB_IDLE_INTERVAL_MS = 2000/)
+  assert.match(mainSource, /const MOBILE_BRIDGE_PENDING_JOB_ACTIVE_INTERVAL_MS = 1000/)
+  assert.match(mainSource, /const MOBILE_BRIDGE_HEARTBEAT_INTERVAL_MS = 30000/)
+  assert.match(mainSource, /const MOBILE_BRIDGE_SNAPSHOT_FALLBACK_INTERVAL_MS = 10 \* 60 \* 1000/)
+  assert.doesNotMatch(mainSource, /const MOBILE_BRIDGE_LOOP_INTERVAL_MS = 5000/)
+  assert.match(mainSource, /const nextLoopDelay = jobs\.length > 0 \|\| activeMobileBridgeJobIds\.size > 0[\s\S]*?MOBILE_BRIDGE_PENDING_JOB_ACTIVE_INTERVAL_MS[\s\S]*?MOBILE_BRIDGE_PENDING_JOB_IDLE_INTERVAL_MS/)
+  assert.match(mainSource, /await wait\(nextLoopDelay\)/)
+})
+
+test('mobile bridge uploads extensions assistants and sessions only when changed or on sparse fallback', () => {
+  assert.match(mainSource, /const MOBILE_BRIDGE_AUX_SNAPSHOT_FALLBACK_INTERVAL_MS = 5 \* 60 \* 1000/)
+  assert.match(mainSource, /shouldUploadMobileBridgeAuxSnapshot\('extensions', signature\)/)
+  assert.match(mainSource, /shouldUploadMobileBridgeAuxSnapshot\('assistants', signature\)/)
+  assert.match(mainSource, /shouldUploadMobileBridgeSessionsSnapshot\(signature, force\)/)
+  assert.match(mainSource, /const MOBILE_BRIDGE_MAX_SESSION_SNAPSHOTS = 20/)
+  assert.match(mainSource, /const MOBILE_BRIDGE_MAX_SESSION_MESSAGES = 5/)
+  assert.match(mainSource, /const MOBILE_BRIDGE_MAX_SESSION_LOGS = 5/)
+  assert.match(mainSource, /lastUploadedVersion/)
+  assert.match(mainSource, /sessionUpdatedAt/)
+  assert.match(mainSource, /messageCount/)
+  assert.match(mainSource, /logCount/)
+  assert.match(mainSource, /\.slice\(0, MOBILE_BRIDGE_MAX_SESSION_SNAPSHOTS\)/)
+})
+
+test('cli runtime emits keepalive progress while long codex and claude runs are silent', () => {
+  assert.match(cliServicesSource, /codexKeepAliveTimer = setInterval\(\(\) => \{[\s\S]*?Codex 仍在执行，正在等待新的输出。[\s\S]*?sourceKind: 'runtime\.keepalive'/)
+  assert.match(cliServicesSource, /claudeKeepAliveTimer = setInterval\(\(\) => \{[\s\S]*?Claude 仍在执行，正在等待新的输出。[\s\S]*?sourceKind: 'runtime\.keepalive'/)
+  assert.match(cliServicesSource, /clearCodexKeepAliveTimer\(\)/)
+  assert.match(cliServicesSource, /clearClaudeKeepAliveTimer\(\)/)
 })
 
 test('split cli services receive mobile bridge snapshot synchronizer from main process', () => {
@@ -114,7 +156,7 @@ test('split cli services import shared cli history parsing helpers', () => {
   )
 })
 
-test('cli deploy and runtime use only the active enabled desktop api key', () => {
+test('cli deploy and runtime use the explicitly selected desktop api key', () => {
   assert.match(rendererRuntimeSources, /activeApiKey: ActiveDesktopApiKeySummary/)
   assert.match(appSource, /const authenticatedUserId = auth\.user\.id/)
   assert.match(appSource, /readSelectedDesktopApiKeyId\(authenticatedUserId, readJsonStorage\)/)
@@ -282,4 +324,10 @@ test('settings persists explicit desktop api key selection per user', () => {
   assert.match(settingsSource, /writeSelectedDesktopApiKeyId\(user\.id, nextId, writeJsonStorage\)/)
   assert.match(settingsSource, /clearSelectedDesktopApiKeyId\(user\.id, removeStorage\)/)
   assert.match(settingsSource, /oneapi:desktop-api-key-selection/)
+  const automaticApiKeyRefreshEffect =
+    settingsSource.match(/useEffect\(\(\) => \{\s*setSelectedApiKeyId\(\(current\) => \{[\s\S]*?\}\)\s*\}, \[apiKeys, user\.id\]\)/)?.[0] || ''
+  assert.match(automaticApiKeyRefreshEffect, /readSelectedDesktopApiKeyId\(user\.id, readJsonStorage\)/)
+  assert.match(automaticApiKeyRefreshEffect, /return resolveSelectedDesktopApiKeyId\(apiKeys, current\)/)
+  assert.doesNotMatch(automaticApiKeyRefreshEffect, /writeSelectedDesktopApiKeyId/)
+  assert.doesNotMatch(automaticApiKeyRefreshEffect, /clearSelectedDesktopApiKeyId/)
 })

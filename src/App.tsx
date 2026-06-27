@@ -23,6 +23,7 @@ import {
   Plus,
   RotateCcw,
   Send,
+  ShieldCheck,
   Square,
   Sparkles,
   Star,
@@ -92,11 +93,13 @@ import {
 import {
   getCliResumeSessionId,
   isDraftCliSessionId,
+  shouldAppendCliAssistantFallback,
 } from './lib/cli-session'
 import { SubscriptionsWorkspace, WalletWorkspace, ServiceStatusWorkspace } from './features/account/AccountWorkspaces'
 import { MeWorkspace } from './features/settings/SettingsWorkspaces'
 import { DesktopWindowFrame } from './components/DesktopWindowFrame'
 import { LoginScreen } from './features/auth/LoginScreen'
+import { ComplianceLegalModal, type DesktopLegalDocuments } from './features/compliance/ComplianceLegalModal'
 import { AssistantsChatWorkspace, DrawWorkspace } from './features/assistants/AssistantChatDrawWorkspaces'
 import {
   AttachmentPreviewModal,
@@ -242,6 +245,14 @@ import {
   type AiChatProviderConfig,
   type AiChatProviderState,
 } from './lib/aichat-provider'
+import {
+  acknowledgeCompliance,
+  DESKTOP_COMPLIANCE_SECTION_IDS,
+  fetchComplianceStatus,
+  fetchPrivacyPolicy,
+  fetchUserAgreement,
+  type DesktopComplianceStatus,
+} from './domains/compliance'
 import type {
   ChatModelOption,
   UserProfile,
@@ -269,6 +280,7 @@ type AssistantMode = 'chat' | 'draw' | 'codex' | 'claude'
 type SideTab = 'assistants' | 'subscriptions' | 'wallet' | 'service-status' | 'me'
 type HistoryVisibilityTab = 'visible' | 'hidden'
 type ThemeMode = 'light' | 'dark'
+type SafetyNoticeIntent = 'new-session' | 'pick-project'
 type CliRunningState = {
   running: boolean
   requestId: string
@@ -281,6 +293,8 @@ const AURORA_OPACITY_STORAGE_KEY = 'oneapi-desktop-aurora-opacity'
 const DEFAULT_AURORA_OPACITY = 100
 const DESKTOP_UPDATE_AUTO_CHECK_DAY_KEY = 'oneapi-desktop-update-auto-check-day'
 const DESKTOP_ANNOUNCEMENT_READ_IDS_KEY = 'oneapi-desktop-announcement-read-ids'
+const DESKTOP_LEGAL_ACCEPTANCE_FALLBACK_VERSION = '2026-06-25'
+const DESKTOP_SAFETY_NOTICE_DISMISSED_KEY = 'oneapi-desktop-safety-notice-dismissed'
 
 function getCliPromptHistoryStorageKey(client: CliClient) {
   return `oneapi-desktop-${client}-prompt-history`
@@ -318,9 +332,9 @@ const primarySideTabs: Array<{
 }> = [
   { key: 'assistants', label: 'AIChat', icon: Sparkles, desc: '提示词助手与聊天形态' },
   { key: 'subscriptions', label: '套餐订阅', icon: CreditCard, desc: '套餐购买、订阅状态和额度' },
-  { key: 'wallet', label: '用量账单', icon: Wallet, desc: '余额、充值记录与消耗趋势' },
+  { key: 'wallet', label: '钱包用量', icon: Wallet, desc: '余额、充值记录与消耗趋势' },
   { key: 'service-status', label: '服务状态', icon: Activity, desc: '渠道运行状态与历史心跳' },
-  { key: 'me', label: '环境部署', icon: KeyRound, desc: '个人信息、Key 与安全操作' },
+  { key: 'me', label: '系统设置', icon: KeyRound, desc: '个人信息、Key 与安全操作' },
 ]
 
 function getDesktopBridge() {
@@ -328,6 +342,46 @@ function getDesktopBridge() {
     throw new Error('桌面桥接未初始化')
   }
   return window.desktopBridge
+}
+
+function getDesktopLegalAcceptanceStorageKey(userId: number | string) {
+  return `oneapi-desktop-legal-accepted-${userId}`
+}
+
+function readDesktopLegalAcceptanceVersion(userId: number | string) {
+  try {
+    return window.localStorage.getItem(getDesktopLegalAcceptanceStorageKey(userId)) || ''
+  } catch {
+    return ''
+  }
+}
+
+function writeDesktopLegalAcceptanceVersion(userId: number | string, version: string) {
+  try {
+    window.localStorage.setItem(getDesktopLegalAcceptanceStorageKey(userId), version)
+  } catch {
+    /* empty */
+  }
+}
+
+function getDesktopSafetyNoticeDismissedStorageKey(client: CliClient) {
+  return `${DESKTOP_SAFETY_NOTICE_DISMISSED_KEY}-${client}`
+}
+
+function readDesktopSafetyNoticeDismissed(client: CliClient) {
+  try {
+    return window.localStorage.getItem(getDesktopSafetyNoticeDismissedStorageKey(client)) === '1'
+  } catch {
+    return false
+  }
+}
+
+function writeDesktopSafetyNoticeDismissed(client: CliClient) {
+  try {
+    window.localStorage.setItem(getDesktopSafetyNoticeDismissedStorageKey(client), '1')
+  } catch {
+    /* empty */
+  }
 }
 
 function saveDesktopAttachment(input: DesktopAttachmentSaveRequest): Promise<DesktopAttachmentSaveResult> {
@@ -487,7 +541,7 @@ function CliWorkspace(props: {
   )
   const [historyVisibilityTab, setHistoryVisibilityTab] = useState<HistoryVisibilityTab>('visible')
   const [sessionContextMenu, setSessionContextMenu] = useState<SessionContextMenuState | null>(null)
-  const [safetyNoticePending, setSafetyNoticePending] = useState(false)
+  const [safetyNoticeIntent, setSafetyNoticeIntent] = useState<SafetyNoticeIntent | null>(null)
   const [translationState, setTranslationState] = useState<{
     sourceText: string
     translatedText: string
@@ -1075,9 +1129,28 @@ function CliWorkspace(props: {
       files: message.files,
     }
     setCliMessageOverlays((current) => {
+      const previous = current[sessionId] || []
+      const normalizedContent = nextOverlay.content.trim().replace(/\s+/g, ' ')
+      const alreadyPersisted = previous.some((item) => {
+        if (item.id === nextOverlay.id) {
+          return true
+        }
+        if (
+          nextOverlay.requestId &&
+          item.requestId === nextOverlay.requestId &&
+          item.role === nextOverlay.role
+        ) {
+          return true
+        }
+        return item.role === nextOverlay.role &&
+          item.content.trim().replace(/\s+/g, ' ') === normalizedContent
+      })
+      if (alreadyPersisted) {
+        return current
+      }
       const next = {
         ...current,
-        [sessionId]: [...(current[sessionId] || []), nextOverlay],
+        [sessionId]: [...previous, nextOverlay],
       }
       cliMessageOverlaysRef.current = next
       writeJsonStorage(`oneapi-desktop-${client}-message-overlays`, next)
@@ -2147,25 +2220,46 @@ function CliWorkspace(props: {
       return
     }
 
-    const matched = history
-      .filter((item) => normalizeProjectKey(item.projectPath) === nextProjectKey)
-      .sort((left, right) => right.updatedAt - left.updatedAt)[0]
-
-    if (matched) {
-      await handleOpenHistory(matched, false)
-      return
-    }
-
-    bindProjectSession(nextPath, `draft-${client}-${Date.now()}`)
+    const nextSessionId = `draft-${client}-${Date.now()}`
+    emptyDraftSessionIdsRef.current.add(nextSessionId)
+    bindProjectSession(nextPath, nextSessionId)
+    setSessionMessagesMap((current) => ({
+      ...current,
+      [nextSessionId]: [],
+    }))
+    setSessionLogsMap((current) => ({
+      ...current,
+      [nextSessionId]: [],
+    }))
+    setSessionPartialMap((current) => ({
+      ...current,
+      [nextSessionId]: '',
+    }))
+    setSessionPlansMap((current) => ({
+      ...current,
+      [nextSessionId]: null,
+    }))
   }
 
-  async function handlePickProject() {
+  async function pickAndCreateProjectSession() {
     const selected = await pickProjectDirectory()
     if (selected) {
       applyProjectPath(selected)
       await ensureProjectSession(selected)
       toast(`已切换到项目：${resolveProjectNameFromPath(selected) || selected}`)
     }
+  }
+
+  function requestSafetyNoticeBeforeProjectSelection() {
+    if (running) {
+      toast(`请先停止当前 ${client === 'codex' ? 'Codex' : 'Claude'} 回复。`)
+      return
+    }
+    if (readDesktopSafetyNoticeDismissed(client)) {
+      void pickAndCreateProjectSession()
+      return
+    }
+    setSafetyNoticeIntent('pick-project')
   }
 
   function requestSafetyNoticeBeforeNewConversation() {
@@ -2177,7 +2271,11 @@ function CliWorkspace(props: {
       toast('请选择项目目录后再新建会话。')
       return
     }
-    setSafetyNoticePending(true)
+    if (readDesktopSafetyNoticeDismissed(client)) {
+      createCliSession()
+      return
+    }
+    setSafetyNoticeIntent('new-session')
   }
 
   function createCliSession() {
@@ -2223,9 +2321,19 @@ function CliWorkspace(props: {
     closeCliHistoryPanel()
   }
 
-  function confirmSafetyNoticeAndCreateCliSession() {
-    setSafetyNoticePending(false)
+  async function confirmSafetyNoticeAndContinue() {
+    if (safetyNoticeIntent === 'pick-project') {
+      setSafetyNoticeIntent(null)
+      await pickAndCreateProjectSession()
+      return
+    }
+    setSafetyNoticeIntent(null)
     createCliSession()
+  }
+
+  async function dismissSafetyNoticeAndContinue() {
+    writeDesktopSafetyNoticeDismissed(client)
+    await confirmSafetyNoticeAndContinue()
   }
 
   async function handleOpenHistory(item: CliHistoryEntry, activateProject = true) {
@@ -2779,6 +2887,7 @@ function CliWorkspace(props: {
     let finalSessionKey = currentSessionKey
     let finalRequestSourceKind = 'result'
     let finalRequestMessage = `${client === 'codex' ? 'Codex' : 'Claude'} 已完成本次回复。`
+    let hydratedResponseSessionId: string | null = null
 
     try {
       const response = await runCliPrompt({
@@ -2827,6 +2936,9 @@ function CliWorkspace(props: {
         if (response.sessionId) {
           const details = await getCliSession(client, response.sessionId)
           if (details) {
+            if (details.messages.some((message) => message.role === 'assistant')) {
+              hydratedResponseSessionId = details.id
+            }
             hydrateCliSession(details, { activateProject: false })
           }
         }
@@ -2834,7 +2946,14 @@ function CliWorkspace(props: {
         /* ignore session hydration errors and keep fallback transcript */
       }
 
-      if (response.output.trim() && response.metadata?.aborted !== true) {
+      if (
+        response.output.trim() &&
+        shouldAppendCliAssistantFallback({
+          responseSessionId: response.sessionId,
+          responseAborted: response.metadata?.aborted === true,
+          hydratedSessionId: hydratedResponseSessionId,
+        })
+      ) {
         const responseFileChanges = Array.isArray(response.metadata?.fileChanges)
           ? response.metadata.fileChanges as CliSessionMessage['fileChanges']
           : undefined
@@ -3231,7 +3350,7 @@ function CliWorkspace(props: {
                       <div key={item.id} className='cli-turn-group'>
                         <CliLogBubble
                           item={item}
-                          expanded={false}
+                          expanded={true}
                           expandedEventIds={expandedLogEventMap[item.id] || []}
                           onToggleEvent={(eventId) => toggleLogEvent(item.id, eventId)}
                           onOpenFile={(ownerId, path) => void handlePreviewFile(ownerId, path)}
@@ -3250,7 +3369,7 @@ function CliWorkspace(props: {
                     <Fragment key={item.id}>
                     <CliLogBubble
                       item={item}
-                      expanded={!hasAssistantReply}
+                      expanded={true}
                       expandedEventIds={expandedLogEventMap[item.id] || []}
                       onToggleEvent={(eventId) => toggleLogEvent(item.id, eventId)}
                       onOpenFile={(ownerId, path) => void handlePreviewFile(ownerId, path)}
@@ -3361,7 +3480,7 @@ function CliWorkspace(props: {
                   <button
                     className='ghost-button tiny icon-pill-trigger'
                     type='button'
-                    onClick={() => void handlePickProject()}
+                    onClick={() => requestSafetyNoticeBeforeProjectSelection()}
                     title={projectPath || '选择目录'}
                   >
                     <FolderOpen size={16} />
@@ -3694,8 +3813,8 @@ function CliWorkspace(props: {
           void copyText(translationState.translatedText)
         }}
       />
-      {safetyNoticePending && (
-        <div className='modal-mask' onClick={() => setSafetyNoticePending(false)}>
+      {safetyNoticeIntent && (
+        <div className='modal-mask' onClick={() => setSafetyNoticeIntent(null)}>
           <div className='modal-card compliance-safety-modal' onClick={(event) => event.stopPropagation()}>
             <div className='panel-header compact'>
               <div>
@@ -3714,12 +3833,15 @@ function CliWorkspace(props: {
                 如用于安全研究、合规分析、风险防范、教育科普，请保持高层次和防御性，不要请求可执行的违法步骤。
               </p>
             </div>
-            <div className='modal-actions'>
-              <button className='secondary-button' type='button' onClick={() => setSafetyNoticePending(false)}>
+            <div className='modal-actions compliance-safety-actions'>
+              <button className='secondary-button' type='button' onClick={() => setSafetyNoticeIntent(null)}>
                 取消
               </button>
-              <button className='primary-button' type='button' onClick={confirmSafetyNoticeAndCreateCliSession}>
-                已知晓，创建新会话
+              <button className='primary-button' type='button' onClick={() => void confirmSafetyNoticeAndContinue()}>
+                已知晓
+              </button>
+              <button className='secondary-button' type='button' onClick={() => void dismissSafetyNoticeAndContinue()}>
+                不再提示
               </button>
             </div>
           </div>
@@ -3879,6 +4001,11 @@ export function App() {
   const { message, setMessage } = useToastState()
   const [cliStatus, setCliStatus] = useState<{ codex: CliStatus; claude: CliStatus } | null>(null)
   const [activeDesktopApiKey, setActiveDesktopApiKey] = useState<ActiveDesktopApiKeySummary>(null)
+  const [legalModalOpen, setLegalModalOpen] = useState(false)
+  const [legalModalRequired, setLegalModalRequired] = useState(false)
+  const [legalModalLoading, setLegalModalLoading] = useState(false)
+  const [legalDocuments, setLegalDocuments] = useState<DesktopLegalDocuments>({})
+  const [legalStatus, setLegalStatus] = useState<DesktopComplianceStatus | null>(null)
   const enabledAssistantModes = useMemo(() => {
     const next: AssistantMode[] = ['chat', 'draw']
     if (cliStatus?.codex && isCliStatusInstalled(cliStatus.codex)) {
@@ -3900,6 +4027,99 @@ export function App() {
   const handleActiveDesktopApiKeyChange = useCallback((apiKey: ActiveDesktopApiKeySummary) => {
     setActiveDesktopApiKey((current) => sameActiveDesktopApiKeySummary(current, apiKey) ? current : apiKey)
   }, [])
+
+  async function refreshLegalDocuments() {
+    const [userAgreement, privacyPolicy] = await Promise.all([
+      fetchUserAgreement().catch(() => ''),
+      fetchPrivacyPolicy().catch(() => ''),
+    ])
+    setLegalDocuments((current) => ({
+      ...current,
+      ...(userAgreement ? { 'user-agreement': userAgreement } : {}),
+      ...(privacyPolicy ? { 'privacy-policy': privacyPolicy } : {}),
+    }))
+  }
+
+  async function queueLegalAcceptanceCheck(user: UserProfile) {
+    const userId = user.id
+    if (!userId) {
+      return
+    }
+    setLegalModalLoading(true)
+    try {
+      const envelope = await fetchComplianceStatus()
+      if (!envelope.success || !envelope.data) {
+        throw new Error(envelope.message || '合规状态读取失败')
+      }
+      const status = envelope.data
+      setLegalStatus(status)
+      if (status.ban?.active) {
+        setMessage('账号因内容安全规则被限制使用，请联系管理员复核。')
+        return
+      }
+      const version = status.version || DESKTOP_LEGAL_ACCEPTANCE_FALLBACK_VERSION
+      const locallyAccepted = readDesktopLegalAcceptanceVersion(userId) === version
+      if (!status.accepted || !locallyAccepted) {
+        setLegalModalRequired(true)
+        setLegalModalOpen(true)
+        void refreshLegalDocuments()
+      }
+    } catch {
+      const locallyAccepted = readDesktopLegalAcceptanceVersion(userId) === DESKTOP_LEGAL_ACCEPTANCE_FALLBACK_VERSION
+      if (!locallyAccepted) {
+        setLegalStatus({
+          version: DESKTOP_LEGAL_ACCEPTANCE_FALLBACK_VERSION,
+          accepted: false,
+          required_sections: [...DESKTOP_COMPLIANCE_SECTION_IDS],
+        })
+        setLegalModalRequired(true)
+        setLegalModalOpen(true)
+        void refreshLegalDocuments()
+      }
+    } finally {
+      setLegalModalLoading(false)
+    }
+  }
+
+  function showLegalCenterFromUserMenu() {
+    setLegalModalRequired(false)
+    setLegalModalOpen(true)
+    void refreshLegalDocuments()
+  }
+
+  function closeOptionalLegalModal() {
+    if (legalModalRequired) {
+      return
+    }
+    setLegalModalOpen(false)
+  }
+
+  async function handleAcceptLegalCompliance() {
+    const userId = auth.user?.id
+    if (!userId) {
+      setLegalModalOpen(false)
+      return
+    }
+    const version = legalStatus?.version || DESKTOP_LEGAL_ACCEPTANCE_FALLBACK_VERSION
+    setLegalModalLoading(true)
+    try {
+      const envelope = await acknowledgeCompliance({
+        version,
+        sections: legalStatus?.required_sections?.length ? legalStatus.required_sections : [...DESKTOP_COMPLIANCE_SECTION_IDS],
+      })
+      if (!envelope.success) {
+        throw new Error(envelope.message || '协议确认失败')
+      }
+      writeDesktopLegalAcceptanceVersion(userId, version)
+      setLegalModalRequired(false)
+      setLegalModalOpen(false)
+      setMessage('已确认协议与隐私政策。')
+    } catch (error) {
+      setMessage(error instanceof Error ? `协议确认失败：${error.message}` : '协议确认失败，请稍后重试。')
+    } finally {
+      setLegalModalLoading(false)
+    }
+  }
 
   const updateAiChatProviderConfig = useCallback((
     updater: (current: AiChatProviderConfig) => AiChatProviderConfig
@@ -3958,6 +4178,7 @@ export function App() {
         const nextUser = profile as UserProfile
         saveStoredDesktopUserId(nextUser.id)
         setUser(nextUser)
+        void queueLegalAcceptanceCheck(nextUser)
       })
       .catch(() => {
         clearStoredDesktopUserId()
@@ -4329,7 +4550,15 @@ export function App() {
     clearStoredDesktopAccessToken()
     auth.reset()
     auth.setUser(null)
+    setLegalModalOpen(false)
+    setLegalModalRequired(false)
+    setLegalStatus(null)
     setMessage('已退出登录。')
+  }
+
+  function handleRejectLegalAcceptance() {
+    void handleLogout()
+    setMessage('未同意协议，已退出登录。')
   }
 
   if (auth.bootstrapping) {
@@ -4388,7 +4617,7 @@ export function App() {
                     title='打开 OneAPI 官网'
                   >
                     <div className='brand-name'>OneAPI Center</div>
-                    <div className='brand-sub'>Windows 客户端</div>
+                    <div className='brand-sub'>{platformLabel} 客户端</div>
                   </button>
                 )}
               </div>
@@ -4418,7 +4647,7 @@ export function App() {
                     onClick={() => {
                       if (!auth.user && item.key === 'wallet') {
                         setLoginDialogOpen(true)
-                        setMessage('请先登录 OneAPI 后使用用量账单。')
+                        setMessage('请先登录 OneAPI 后使用钱包用量。')
                         return
                       }
                       setSideTab(item.key)
@@ -4547,6 +4776,22 @@ export function App() {
                             </div>
                           ) : null}
                         </div>
+                        <div className='desktop-notice-section desktop-notice-section-privacy'>
+                          <button
+                            className='desktop-privacy-menu-button'
+                            type='button'
+                            onClick={() => {
+                              setUpdatePopoverOpen(false)
+                              showLegalCenterFromUserMenu()
+                            }}
+                          >
+                            <span className='desktop-privacy-menu-copy'>
+                              <strong>关于隐私</strong>
+                              <small>查看协议、隐私政策和内容安全规则</small>
+                            </span>
+                            <ShieldCheck size={16} />
+                          </button>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -4637,6 +4882,7 @@ export function App() {
               onLoginSuccess={(user) => {
                 auth.setUser(user)
                 setLoginDialogOpen(false)
+                void queueLegalAcceptanceCheck(user)
               }}
               toast={setMessage}
             />
@@ -4670,6 +4916,17 @@ export function App() {
           </div>
         </div>
       )}
+
+      {legalModalOpen ? (
+        <ComplianceLegalModal
+          required={legalModalRequired}
+          loading={legalModalLoading}
+          documents={legalDocuments}
+          onClose={closeOptionalLegalModal}
+          onReject={handleRejectLegalAcceptance}
+          onAccept={() => void handleAcceptLegalCompliance()}
+        />
+      ) : null}
 
       {activeAnnouncement && (
         <div className='modal-mask' onClick={() => setActiveAnnouncement(null)}>

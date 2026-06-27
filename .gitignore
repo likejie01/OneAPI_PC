@@ -6,14 +6,17 @@ dist/
 dist-electron/
 dist-ssr/
 release/
+release-*/
 out/
 
 # Local caches and generated metadata
 .cache/
+.tmp/
 .vite/
 .turbo/
 .eslintcache
 *.tsbuildinfo
+coverage/
 
 # Logs
 logs/
@@ -25,6 +28,9 @@ pnpm-debug.log*
 lerna-debug.log*
 electron-builder-debug.yml
 electron-builder.env
+tmp-*
+*.tmp
+*.bak
 
 # Local environment and secrets
 server.env
