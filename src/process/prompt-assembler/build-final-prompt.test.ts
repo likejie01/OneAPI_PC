@@ -26,7 +26,7 @@ test('extractUserTaskFromFinalPrompt preserves multiline original demand', () =>
   )
 })
 
-test('direct command stays as one prompt without execution policy', () => {
+test('slash direct command stays as one prompt without execution policy', () => {
   const result = buildFinalPrompt({
     prompt: '/resume',
     client: 'codex',

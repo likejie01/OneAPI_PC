@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { shouldRenderCliLogEventRow, shouldRenderCliLogOutputEntry } from './cli-log-rendering.ts'
+import {
+  shouldRenderCliLogCommandBlock,
+  shouldRenderCliLogEventRow,
+  shouldRenderCliLogOutputEntry,
+} from './cli-log-rendering.ts'
 
 test('shouldRenderCliLogEventRow hides duplicated status rows with no visible content', () => {
   assert.equal(
@@ -68,6 +72,26 @@ test('shouldRenderCliLogOutputEntry keeps non-duplicated output and duplicated r
       entryHeadline: 'Output:',
       entryDetail: 'fatal: not a git repository',
       groupHeadline: 'Output:',
+    }),
+    true
+  )
+})
+
+test('shouldRenderCliLogCommandBlock hides command block when JSON detail already contains the same command', () => {
+  assert.equal(
+    shouldRenderCliLogCommandBlock({
+      command: 'powershell.exe -Command "New-Item -ItemType Directory"',
+      detail: '{\n  "command": "powershell.exe -Command \\"New-Item -ItemType Directory\\""\n}',
+    }),
+    false
+  )
+})
+
+test('shouldRenderCliLogCommandBlock keeps command block when detail does not include it', () => {
+  assert.equal(
+    shouldRenderCliLogCommandBlock({
+      command: 'npm test',
+      detail: '退出码：0',
     }),
     true
   )

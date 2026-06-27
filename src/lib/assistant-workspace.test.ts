@@ -455,6 +455,24 @@ test('buildCliTimeline anchors each request log group after its own user message
       { id: 'user-2', role: 'user', content: 'second', createdAt: 120, requestId: 'req-2' },
     ],
     logs: [
+      { id: 'log-1', requestId: 'req-1', level: 'status', content: 'first log', createdAt: 90 },
+      { id: 'log-2', requestId: 'req-2', level: 'status', content: 'second log', createdAt: 95 },
+    ],
+  })
+
+  assert.deepEqual(
+    timeline.map((item) => item.id),
+    ['user-1', 'log-1', 'user-2', 'log-2']
+  )
+})
+
+test('buildCliTimeline preserves chronology when a request log is newer than the next user message', () => {
+  const timeline = buildCliTimeline({
+    messages: [
+      { id: 'user-1', role: 'user', content: 'first', createdAt: 100, requestId: 'req-1' },
+      { id: 'user-2', role: 'user', content: 'second', createdAt: 120, requestId: 'req-2' },
+    ],
+    logs: [
       { id: 'log-1', requestId: 'req-1', level: 'status', content: 'first log', createdAt: 200 },
       { id: 'log-2', requestId: 'req-2', level: 'status', content: 'second log', createdAt: 210 },
     ],
@@ -462,7 +480,29 @@ test('buildCliTimeline anchors each request log group after its own user message
 
   assert.deepEqual(
     timeline.map((item) => item.id),
-    ['user-1', 'log-1', 'user-2', 'log-2']
+    ['user-1', 'user-2', 'log-1', 'log-2']
+  )
+})
+
+test('buildCliTimeline collapses repeated adjacent assistant paragraphs from streamed codex deltas', () => {
+  const repeated = 'Let me write the JavaScript in a few batches. Good, now I need to add the JavaScript section.'
+  const timeline = buildCliTimeline({
+    messages: [
+      {
+        id: 'assistant-1',
+        role: 'assistant',
+        content: [repeated, repeated, repeated, '最终改用 Python 写入文件。'].join('\n\n'),
+        createdAt: 100,
+        modelLabel: 'Codex',
+        requestId: 'req-1',
+      },
+    ],
+    logs: [],
+  })
+
+  assert.equal(
+    timeline.find((item) => item.id === 'assistant-1' && item.kind === 'message')?.content,
+    [repeated, '最终改用 Python 写入文件。'].join('\n\n')
   )
 })
 

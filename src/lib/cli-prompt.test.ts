@@ -1,9 +1,12 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { buildFinalPrompt } from '../process/prompt-assembler/build-final-prompt.ts'
 import { buildCliExecutionPrompt, CLI_EXECUTION_POLICY, extractCliUserTask } from './cli-prompt.ts'
 
 test('CLI execution policy defaults CLI replies to simplified Chinese', () => {
-  assert.match(CLI_EXECUTION_POLICY, /默认使用简体中文回复/)
+  assert.match(CLI_EXECUTION_POLICY, /必须使用简体中文/)
+  assert.match(CLI_EXECUTION_POLICY, /所有过程说明/)
+  assert.match(CLI_EXECUTION_POLICY, /三方模型/)
   assert.doesNotMatch(CLI_EXECUTION_POLICY, /不要请求提升权限/)
   assert.match(CLI_EXECUTION_POLICY, /OutputEncoding/)
   assert.match(CLI_EXECUTION_POLICY, /ENOTCACHED/)
@@ -25,6 +28,17 @@ test('buildCliExecutionPrompt always describes full-access permissions', () => {
   assert.match(prompt, /电脑中的所有文件夹都可按用户需求读取、修改和新建文件/)
   assert.match(prompt, /当前项目目录：D:\\WorkSpace\\Demo/)
   assert.match(prompt, /禁止在未实际尝试写入或读取错误信息前声称当前环境只读/)
+})
+
+test('buildFinalPrompt preserves slash command passthrough without wrapping it as a task prompt', () => {
+  const prompt = buildFinalPrompt({
+    prompt: '/resume',
+    client: 'codex',
+    directCommand: true,
+    projectPath: 'D:\\WorkSpace\\Demo',
+  }).finalPrompt
+
+  assert.equal(prompt, '/resume')
 })
 
 test('extractCliUserTask supports the new task-first wrapper', () => {

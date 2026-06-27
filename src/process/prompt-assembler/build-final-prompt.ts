@@ -7,12 +7,13 @@ export const CLI_EXECUTION_POLICY = [
   '3. 将替代方案按“最小修改量、最高有效性、最低风险”的顺序排序后继续尝试。',
   '4. 只有在问题解决，或已穷尽所有合理方案仍无法解决时，才结束任务。',
   '5. 回复中要明确写出失败原因、尝试顺序、最终采用的方案或无法解决的结论。',
-  '6. 除非用户明确指定其他语言，否则默认使用简体中文回复。',
-  '7. 文件读写范围以“权限上下文”为准；如果命令失败，先读取错误信息并按真实失败原因处理。',
-  '8. 优先使用当前项目目录内的相对路径；不要无理由扫描用户主目录、密钥目录、缓存目录或系统目录。',
-  '9. 在 Windows PowerShell 受限语言模式下，不要执行 [Console]::OutputEncoding=[System.Text.Encoding]::UTF8 或类似 .NET 属性设置；如需处理编码，优先使用 chcp 65001 或直接执行原命令。',
-  '10. 在 Windows PowerShell 中读取或写入文件时，路径包含空格、括号、方括号、中文或通配符字符必须使用单引号和 -LiteralPath，例如 Get-Content -LiteralPath \'D:\\\\WorkSpace\\\\Demo\\\\src\\\\app\\\\(main)\\\\page.tsx\'；不要把 $null 作为参数传给 PowerShell 命令，参数没有值时应直接省略。',
-  '11. 需要 npm/npx 安装依赖时必须允许在线拉取；如果出现 ENOTCACHED、only-if-cached 或 offline 缓存错误，改用在线模式重试，例如 npm_config_offline=false npm_config_prefer_online=true，并优先使用当前 npm registry。',
+  '6. 除非用户明确指定其他语言，否则所有最终回复、所有过程说明、工具调用前的意图/目的说明都必须使用简体中文；即使三方模型或底层模型默认英文，也不要输出英文过程段落。',
+  '7. 代码、命令、文件名、库名、错误原文可保留英文；除此之外的解释性文本必须中文。',
+  '8. 文件读写范围以“权限上下文”为准；如果命令失败，先读取错误信息并按真实失败原因处理。',
+  '9. 优先使用当前项目目录内的相对路径；不要无理由扫描用户主目录、密钥目录、缓存目录或系统目录。',
+  '10. 在 Windows PowerShell 受限语言模式下，不要执行 [Console]::OutputEncoding=[System.Text.Encoding]::UTF8 或类似 .NET 属性设置；如需处理编码，优先使用 chcp 65001 或直接执行原命令。',
+  '11. 在 Windows PowerShell 中读取或写入文件时，路径包含空格、括号、方括号、中文或通配符字符必须使用单引号和 -LiteralPath，例如 Get-Content -LiteralPath \'D:\\\\WorkSpace\\\\Demo\\\\src\\\\app\\\\(main)\\\\page.tsx\'；不要把 $null 作为参数传给 PowerShell 命令，参数没有值时应直接省略。',
+  '12. 需要 npm/npx 安装依赖时必须允许在线拉取；如果出现 ENOTCACHED、only-if-cached 或 offline 缓存错误，改用在线模式重试，例如 npm_config_offline=false npm_config_prefer_online=true，并优先使用当前 npm registry。',
 ].join('\n')
 
 export const EXTENSION_CONSTRAINT_MARKER = '以下内容是 OneAPI 客户端附加的扩展调用要求'

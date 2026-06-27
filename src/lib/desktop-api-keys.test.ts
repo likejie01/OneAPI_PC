@@ -1,8 +1,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  API_KEY_STATUS_DISABLED,
+  API_KEY_STATUS_ENABLED,
   clearSelectedDesktopApiKeyId,
   readSelectedDesktopApiKeyId,
+  resolveSelectedDesktopApiKeyId,
   SELECTED_DESKTOP_API_KEY_FALLBACK_STORAGE_KEY,
   writeSelectedDesktopApiKeyId,
 } from './desktop-api-keys.ts'
@@ -33,4 +36,17 @@ test('selected desktop api key writes and clears user scoped and fallback storag
 
   clearSelectedDesktopApiKeyId(7, removeStorage)
   assert.equal(readSelectedDesktopApiKeyId(7, readJsonStorage), null)
+})
+
+test('selected desktop api key keeps the explicit selection when a newer key is enabled', () => {
+  assert.equal(
+    resolveSelectedDesktopApiKeyId(
+      [
+        { id: 1, status: API_KEY_STATUS_DISABLED },
+        { id: 2, status: API_KEY_STATUS_ENABLED },
+      ],
+      1
+    ),
+    1
+  )
 })

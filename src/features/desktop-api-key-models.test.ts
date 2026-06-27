@@ -24,14 +24,15 @@ function key(input: Partial<ActiveDesktopApiKeyRecord>): ActiveDesktopApiKeyReco
   }
 }
 
-test('resolveActiveDesktopApiKeySummary keeps selected enabled key and falls back to active key', () => {
+test('resolveActiveDesktopApiKeySummary keeps explicit selected key and falls back to active key', () => {
   const keys = [
     key({ id: 1, status: 2 }),
     key({ id: 2, name: 'enabled', status: 1 }),
   ]
 
   assert.equal(resolveActiveDesktopApiKeySummary(keys, 2)?.id, 2)
-  assert.equal(resolveActiveDesktopApiKeySummary(keys, 1)?.id, 2)
+  assert.equal(resolveActiveDesktopApiKeySummary(keys, 1)?.id, 1)
+  assert.equal(resolveActiveDesktopApiKeySummary(keys, 999)?.id, 2)
 })
 
 test('sameActiveDesktopApiKeySummary detects group and model limit changes', () => {

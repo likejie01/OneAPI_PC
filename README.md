@@ -2,18 +2,35 @@
 
 [中文](#中文) | [English](#english)
 
+![OneAPI PC desktop settings](images/Snipaste_2026-06-27_18-27-25.png)
+
 ## 中文
 
-OneAPI PC 是一个基于 Electron、React、TypeScript 和 Vite 的桌面客户端。项目面向 Windows 桌面环境，提供 OneAPI 账号登录、订阅与用量展示、AI Chat、Codex/Claude 执行日志、插件与技能选择、Markdown 渲染以及本地桌面能力集成。
+OneAPI PC 是面向 Windows 的 OneAPI 桌面客户端。它把 [ai.oneapi.center](https://ai.oneapi.center) 的账号、订阅、钱包、模型服务和 Codex / Claude 开发工作流整合到一个本地桌面应用中，让用户可以在同一个界面完成 AI 对话、绘图、CLI 项目开发、模型切换、插件/技能调用、设备互联和客户端更新。
 
-### 功能概览
+### ai.oneapi.center 平台
 
-- OneAPI 账号登录、订阅套餐展示和用量进度展示
-- AI Chat 对话界面，支持 Markdown、代码块和附件预览
-- Codex 与 Claude 工作流界面，展示运行日志、工具调用和执行状态
-- 助手、skill、plugin 等扩展选择入口
-- 明亮/暗黑主题下的桌面端 UI 适配
-- Electron 打包，支持 Windows 安装包和便携版构建
+[ai.oneapi.center](https://ai.oneapi.center) 是 OneAPI 的统一 AI 服务平台，提供多模型聚合、订阅套餐、钱包用量、API Key 管理、模型广场、服务状态、隐私合规与客户端分发能力。桌面客户端是平台能力的本地入口，适合需要稳定桌面体验、长期项目会话、Codex / Claude CLI 工作流和本地文件操作的用户。
+
+### 产品亮点
+
+- **统一账号体系**：登录 OneAPI 后同步订阅、钱包余额、API Key、模型权限和公告更新。
+- **AIChat 与图像工作区**：支持 Markdown、代码块、附件预览、模型收藏、推理强度和图像生成/编辑。
+- **Codex / Claude 工作流**：支持项目目录、全权限/受限模式、执行日志、计划面板、会话持久化和停止控制。
+- **技能与插件**：通过按钮或输入框 `/` 呼出命令、技能、插件选择器，支持安装、收藏、备注、翻译和插入。
+- **系统设置**：管理自定义 API 中转、Claude / Codex 部署状态、设备绑定和桌面端专用 Key。
+- **隐私合规**：首次登录和新建开发会话时提供安全与隐私提醒，内置协议、隐私政策和内容安全说明。
+- **自动更新**：通过桌面更新清单和发布产物支持安装包、便携包下载与版本提示。
+
+### 界面预览
+
+| 系统设置与部署 | Codex 项目日志与模型选择 |
+| --- | --- |
+| ![Settings and deployment](images/Snipaste_2026-06-27_18-27-25.png) | ![Codex workflow](images/Snipaste_2026-06-27_18-29-39.png) |
+
+| 隐私合规弹窗 |
+| --- |
+| ![Privacy compliance](images/Snipaste_2026-06-27_18-33-32.png) |
 
 ### 技术栈
 
@@ -29,9 +46,10 @@ OneAPI PC 是一个基于 Electron、React、TypeScript 和 Vite 的桌面客户
 ```text
 .
 ├── build/                 # 应用图标和安装器资源
-├── electron/              # Electron 主进程相关源码
+├── electron/              # Electron 主进程源码
+├── images/                # README 与发布说明截图
 ├── public/                # 静态资源
-├── scripts/               # 打包与图标处理脚本
+├── scripts/               # 打包、图标和发布辅助脚本
 ├── src/                   # React 渲染进程源码
 ├── docs/                  # 项目文档与安全检查清单
 ├── package.json           # 脚本、依赖和 electron-builder 配置
@@ -40,15 +58,8 @@ OneAPI PC 是一个基于 Electron、React、TypeScript 和 Vite 的桌面客户
 
 ### 本地开发
 
-安装依赖：
-
 ```powershell
 npm install
-```
-
-启动 Vite 开发服务器：
-
-```powershell
 npm run dev
 ```
 
@@ -58,33 +69,27 @@ npm run dev
 npm run dev:electron
 ```
 
-### 测试和构建
-
-运行测试：
+### 测试与构建
 
 ```powershell
 npm test
-```
-
-运行生产构建：
-
-```powershell
 npm run build
-```
-
-打包 Windows 安装包和便携版：
-
-```powershell
 npm run build:win
 ```
 
-构建产物会生成到 `release/`，该目录不会提交到 Git。
+Windows 发布产物生成到 `release/`，主要包括：
+
+- `OneAPI_PC_Setup-1-0.exe`：Windows 安装包
+- `OneAPI_PC-1-0.exe`：便携版
+- `OneAPI_PC-1-0.zip`：便携压缩包
+- `latest.yml`：自动更新清单
 
 ### 环境与安全
 
-- 不要提交 `server.env`、`.env*`、密钥、令牌、私有服务器地址或任何本地凭据。
-- `release/`、`dist/`、`dist-electron/`、`.cache/` 和 `node_modules/` 均为本地生成内容，不应进入仓库。
-- 发布前建议阅读 [docs/open-source-security-checklist.md](docs/open-source-security-checklist.md)，并执行其中的源码扫描命令。
+- 不要提交 `server.env`、`.env*`、密钥、令牌、私有服务器地址或本地凭据。
+- `release/`、`dist/`、`dist-electron/`、`.cache/` 和 `node_modules/` 是本地生成内容，不应进入仓库。
+- 发布前阅读 [docs/open-source-security-checklist.md](docs/open-source-security-checklist.md)，并执行其中的源码扫描命令。
+- 使用第三方模型或 API Key 时，用户输入、附件、代码、日志和会话上下文可能会发送给对应服务商处理，请遵守平台隐私政策和内容安全规则。
 
 ### 许可与来源
 
@@ -94,16 +99,31 @@ npm run build:win
 
 ## English
 
-OneAPI PC is a desktop client built with Electron, React, TypeScript, and Vite. It targets Windows desktop usage and includes OneAPI account login, subscription and usage views, AI Chat, Codex/Claude execution logs, plugin and skill pickers, Markdown rendering, and local desktop integration.
+OneAPI PC is the Windows desktop client for OneAPI. It brings the [ai.oneapi.center](https://ai.oneapi.center) account system, subscriptions, wallet usage, model access, and Codex / Claude development workflows into a native desktop experience for AI chat, image work, project automation, model switching, skills/plugins, device linking, and desktop updates.
 
-### Features
+### ai.oneapi.center
 
-- OneAPI account login, subscription plan display, and usage progress
-- AI Chat interface with Markdown, code blocks, and attachment previews
-- Codex and Claude workflow screens with execution logs, tool calls, and status output
-- Assistant, skill, plugin, and extension selection
-- Light and dark desktop UI support
-- Electron packaging for Windows installer and portable builds
+[ai.oneapi.center](https://ai.oneapi.center) is the unified OneAPI AI service platform. It provides multi-model access, subscription plans, wallet and usage tracking, API key management, model discovery, service status, privacy compliance, and official client distribution. The desktop client is the local entry point for users who need persistent project sessions, CLI-based development workflows, and access to local files.
+
+### Highlights
+
+- **Unified account**: sync subscriptions, wallet balance, API keys, model permissions, announcements, and updates after login.
+- **AIChat and image workspace**: Markdown, code blocks, attachments, model favorites, reasoning controls, and image generation/editing.
+- **Codex / Claude workflows**: project folders, full-access or restricted mode, execution logs, plan panel, persistent sessions, and stop control.
+- **Skills and plugins**: open command/skill/plugin pickers from the toolbar or with `/`, with install, favorite, note, translate, and insert actions.
+- **System settings**: manage custom API relay, Claude / Codex deployment state, device binding, and desktop API keys.
+- **Privacy and compliance**: first-login legal confirmation plus safety reminders before new development sessions.
+- **Desktop updates**: installer, portable package, ZIP package, and update manifest support.
+
+### Screenshots
+
+| Settings and deployment | Codex workflow and model picker |
+| --- | --- |
+| ![Settings and deployment](images/Snipaste_2026-06-27_18-27-25.png) | ![Codex workflow](images/Snipaste_2026-06-27_18-29-39.png) |
+
+| Privacy compliance |
+| --- |
+| ![Privacy compliance](images/Snipaste_2026-06-27_18-33-32.png) |
 
 ### Tech Stack
 
@@ -120,8 +140,9 @@ OneAPI PC is a desktop client built with Electron, React, TypeScript, and Vite. 
 .
 ├── build/                 # App icons and installer assets
 ├── electron/              # Electron main-process source
+├── images/                # README and release screenshots
 ├── public/                # Static assets
-├── scripts/               # Packaging and icon scripts
+├── scripts/               # Packaging, icon, and release helper scripts
 ├── src/                   # React renderer source
 ├── docs/                  # Project docs and security checklist
 ├── package.json           # Scripts, dependencies, and electron-builder config
@@ -130,15 +151,8 @@ OneAPI PC is a desktop client built with Electron, React, TypeScript, and Vite. 
 
 ### Local Development
 
-Install dependencies:
-
 ```powershell
 npm install
-```
-
-Start the Vite dev server:
-
-```powershell
 npm run dev
 ```
 
@@ -150,31 +164,25 @@ npm run dev:electron
 
 ### Test and Build
 
-Run tests:
-
 ```powershell
 npm test
-```
-
-Run a production build:
-
-```powershell
 npm run build
-```
-
-Build the Windows installer and portable executable:
-
-```powershell
 npm run build:win
 ```
 
-Build artifacts are written to `release/`, which is intentionally excluded from Git.
+Windows release artifacts are written to `release/`:
+
+- `OneAPI_PC_Setup-1-0.exe`: Windows installer
+- `OneAPI_PC-1-0.exe`: portable executable
+- `OneAPI_PC-1-0.zip`: portable ZIP package
+- `latest.yml`: update manifest
 
 ### Environment and Security
 
 - Do not commit `server.env`, `.env*`, keys, tokens, private server addresses, or local credentials.
 - `release/`, `dist/`, `dist-electron/`, `.cache/`, and `node_modules/` are generated locally and should not be committed.
 - Before publishing, review [docs/open-source-security-checklist.md](docs/open-source-security-checklist.md) and run the source scan listed there.
+- When using third-party models or API keys, prompts, attachments, code, logs, and conversation context may be processed by the selected provider. Follow the platform privacy policy and content safety rules.
 
 ### License and Attribution
 

@@ -4425,6 +4425,7 @@ async function runCodexPrompt(
   const seenToolOutputEvents = new Set<string>()
   let activeCodexChild: ChildProcess | null = null
   let codexCompletionStopTimer: NodeJS.Timeout | null = null
+  let codexKeepAliveTimer: NodeJS.Timeout | null = null
   const runtimeDiagnostics: CliRuntimeDiagnostics = {}
   const executablePath = await locateExecutable('codex')
   const managedRuntime = await readManagedNodeRuntime()
@@ -4470,6 +4471,12 @@ async function runCodexPrompt(
     if (codexCompletionStopTimer) {
       clearTimeout(codexCompletionStopTimer)
       codexCompletionStopTimer = null
+    }
+  }
+  const clearCodexKeepAliveTimer = () => {
+    if (codexKeepAliveTimer) {
+      clearInterval(codexKeepAliveTimer)
+      codexKeepAliveTimer = null
     }
   }
   const stopCodexAfterCompletion = () => {
@@ -4621,6 +4628,12 @@ async function runCodexPrompt(
         interactionKeys: new Set(),
         mobileBridgeLogs: [],
       })
+      codexKeepAliveTimer = setInterval(() => {
+        progress.status('Codex 仍在执行，正在等待新的输出。', sessionId, false, undefined, {
+          logKind: 'status',
+          sourceKind: 'runtime.keepalive',
+        })
+      }, 30_000)
       void syncMobileBridgeSessionsSnapshot(true).catch(() => undefined)
     },
     onStdoutLine: (line) => {
@@ -4673,9 +4686,7 @@ async function runCodexPrompt(
         partialText = streamedAssistantText
         sawCodexVisibleProgress = true
         progress.partial(partialText, sessionId, false, planState)
-      }
-
-      if (parsed.type === 'response_item' && payload?.type === 'message' && payload.role === 'assistant') {
+      } else if (parsed.type === 'response_item' && payload?.type === 'message' && payload.role === 'assistant') {
         const assistantText = contentPartsToText(payload.content)
         if (assistantText.trim() && !shouldIgnoreCodexMessage(assistantText)) {
           partialText = assistantText
@@ -4759,6 +4770,7 @@ async function runCodexPrompt(
   })
   let result = await runCodexOnce()
   clearCodexCompletionStopTimer()
+  clearCodexKeepAliveTimer()
   let attempt = 0
   if (
     resumeSessionId &&
@@ -4785,10 +4797,12 @@ async function runCodexPrompt(
     stoppedAfterCodexCompletion = false
     activeCodexChild = null
     clearCodexCompletionStopTimer()
+    clearCodexKeepAliveTimer()
     args = buildCodexExecArgs(input, undefined, supportsAskForApproval, codexRuntimeConfig)
     attempt += 1
     result = await runCodexOnce()
     clearCodexCompletionStopTimer()
+    clearCodexKeepAliveTimer()
   }
   let retryDiagnostics = summarizeCliFailure(result.stdout, result.stderr)
   if (
@@ -4817,15 +4831,17 @@ async function runCodexPrompt(
     stoppedAfterCodexCompletion = false
     activeCodexChild = null
     clearCodexCompletionStopTimer()
+    clearCodexKeepAliveTimer()
     result = await runCodexOnce()
     clearCodexCompletionStopTimer()
+    clearCodexKeepAliveTimer()
     retryDiagnostics = summarizeCliFailure(result.stdout, result.stderr)
   }
+  clearCodexKeepAliveTimer()
   activeCliProcesses.delete(input.requestId)
   activeCliRequestStates.delete(input.requestId)
   await codexProxy?.close().catch(() => undefined)
   stopCliPowerSaveBlocker(input.requestId)
-  void syncMobileBridgeSessionsSnapshot(true).catch(() => undefined)
   const aborted = stoppedCliRequests.delete(input.requestId)
   if (aborted) {
     progress.status('Codex 已停止本次回复。', sessionId, true, undefined, { logKind: 'status', sourceKind: 'request.aborted', plan: planState })
@@ -4979,6 +4995,7 @@ async function runClaudePrompt(
   let stoppedAfterClaudeResult = false
   let activeClaudeChild: ChildProcess | null = null
   let claudeResultStopTimer: NodeJS.Timeout | null = null
+  let claudeKeepAliveTimer: NodeJS.Timeout | null = null
   const runtimeDiagnostics: CliRuntimeDiagnostics = {}
   const executablePath = await locateExecutable('claude')
   const managedRuntime = await readManagedNodeRuntime()
@@ -5016,6 +5033,12 @@ async function runClaudePrompt(
     if (claudeResultStopTimer) {
       clearTimeout(claudeResultStopTimer)
       claudeResultStopTimer = null
+    }
+  }
+  const clearClaudeKeepAliveTimer = () => {
+    if (claudeKeepAliveTimer) {
+      clearInterval(claudeKeepAliveTimer)
+      claudeKeepAliveTimer = null
     }
   }
   const stopClaudeAfterResult = () => {
@@ -5184,6 +5207,12 @@ async function runClaudePrompt(
         interactionKeys: new Set(),
         mobileBridgeLogs: [],
       })
+      claudeKeepAliveTimer = setInterval(() => {
+        progress.status('Claude 仍在执行，正在等待新的输出。', sessionId, false, undefined, {
+          logKind: 'status',
+          sourceKind: 'runtime.keepalive',
+        })
+      }, 30_000)
       void syncMobileBridgeSessionsSnapshot(true).catch(() => undefined)
     },
     onStdoutLine: (line) => {
@@ -5374,6 +5403,7 @@ async function runClaudePrompt(
   }
   let result = await runClaudeOnce()
   clearClaudeResultStopTimer()
+  clearClaudeKeepAliveTimer()
   let attempt = 0
   if (
     resumeSessionId &&
@@ -5402,10 +5432,12 @@ async function runClaudePrompt(
     stoppedAfterClaudeResult = false
     activeClaudeChild = null
     clearClaudeResultStopTimer()
+    clearClaudeKeepAliveTimer()
     args = buildClaudePromptArgs(input)
     attempt += 1
     result = await runClaudeOnce()
     clearClaudeResultStopTimer()
+    clearClaudeKeepAliveTimer()
   }
   let retryDiagnostics = summarizeCliFailure(result.stdout, result.stderr)
   if (
@@ -5438,15 +5470,17 @@ async function runClaudePrompt(
     stoppedAfterClaudeResult = false
     activeClaudeChild = null
     clearClaudeResultStopTimer()
+    clearClaudeKeepAliveTimer()
     result = await runClaudeOnce()
     clearClaudeResultStopTimer()
+    clearClaudeKeepAliveTimer()
     retryDiagnostics = summarizeCliFailure(result.stdout, result.stderr)
   }
+  clearClaudeKeepAliveTimer()
   activeCliProcesses.delete(input.requestId)
   activeCliRequestStates.delete(input.requestId)
   await claudeProxy?.close().catch(() => undefined)
   stopCliPowerSaveBlocker(input.requestId)
-  void syncMobileBridgeSessionsSnapshot(true).catch(() => undefined)
   const aborted = stoppedCliRequests.delete(input.requestId)
   if (aborted) {
     progress.status('Claude 已停止本次回复。', sessionId, true, undefined, { logKind: 'status', sourceKind: 'request.aborted', plan: planState })

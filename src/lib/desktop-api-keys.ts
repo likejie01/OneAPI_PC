@@ -61,7 +61,7 @@ export function resolveSelectedDesktopApiKeyId<T extends DesktopApiKeyItem>(
   selectedId: number | null
 ) {
   const selected = selectedId ? items.find((item) => item.id === selectedId) || null : null
-  if (selected?.status === API_KEY_STATUS_ENABLED) {
+  if (selected) {
     return selected.id
   }
 

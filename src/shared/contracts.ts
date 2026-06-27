@@ -279,6 +279,7 @@ export interface AlipayTopupStatus {
   status: 'pending' | 'success' | 'failed' | 'expired' | string
   trade_status?: string
   trade_no: string
+  poll_interval?: number
 }
 
 export interface AlipayTopupCancel {
