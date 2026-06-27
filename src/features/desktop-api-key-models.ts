@@ -47,6 +47,9 @@ export function resolveOneApiRequestGroupForActiveKey(
   if (activeKeyGroup && !isAllChannelGroupsDesktopApiKeyGroup(activeKeyGroup)) {
     return activeKeyGroup
   }
+  if (activeApiKey?.id) {
+    return ''
+  }
   return selectedGroup?.trim() || ''
 }
 

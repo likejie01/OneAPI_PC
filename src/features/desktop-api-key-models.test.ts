@@ -94,9 +94,16 @@ test('resolveOneApiRequestGroupForActiveKey prefers the active key group over st
   )
 })
 
-test('resolveOneApiRequestGroupForActiveKey keeps selected group for all-channel keys', () => {
+test('resolveOneApiRequestGroupForActiveKey clears stale selected group for all-channel keys', () => {
   assert.equal(
     resolveOneApiRequestGroupForActiveKey(key({ group: 'default' }), 'Anthropic官方'),
+    ''
+  )
+})
+
+test('resolveOneApiRequestGroupForActiveKey keeps selected group before an active key is resolved', () => {
+  assert.equal(
+    resolveOneApiRequestGroupForActiveKey(null, 'Anthropic官方'),
     'Anthropic官方'
   )
 })
