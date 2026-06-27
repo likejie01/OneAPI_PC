@@ -1,0 +1,53 @@
+name: Build Windows Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Windows installer
+        run: npm run build:win
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OneAPI-PC-Windows
+          path: |
+            release/*.exe
+            release/*.yml
+            release/*.blockmap
+          if-no-files-found: error
+
+      - name: Create GitHub Release and upload assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          gh release view $tag 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --title "OneAPI PC $tag" --notes "Windows desktop release for OneAPI PC."
+          }
+
+          gh release upload $tag release/*.exe release/*.yml release/*.blockmap --clobber
