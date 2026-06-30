@@ -13,6 +13,11 @@ import { buildCliExtensionDisplayName, canUseCliExtension, collectCliToolNames, 
 import { type CliBuiltinCommand } from '../../lib/cli-commands'
 import { type ImageStylePreset } from '../../lib/image-style-presets'
 import {
+  formatCliLogRunTitle,
+  formatCliLogStatusSummary,
+  formatCliNarrativeTitle,
+  formatCliProcessHeadline,
+  formatCliToolDisplayName,
   shouldRenderCliLogCommandBlock,
   shouldRenderCliLogEventRow,
   shouldRenderCliLogOutputEntry,
@@ -2238,17 +2243,27 @@ export function CliLogBubble(props: {
   const uniqueFiles = Array.from(new Map(item.files.map((file) => [file.path, file])).values())
   const executedToolNames = collectCliToolNames(item.events.map((eventItem) => eventItem.sourceKind))
   const logStatus = resolveCliLogGroupStatus(item.events)
-  const commandCount = item.events.filter((eventItem) => eventItem.kind === 'command').length
-  const statusSummary = [
-    commandCount > 0 ? `命令 ${commandCount}` : '',
-    `步骤 ${item.events.length}`,
-    `最后更新 ${formatCliLogTime(item.createdAt)}`,
-  ].filter(Boolean).join(' · ')
   const visibleEvents = expanded ? item.events : item.events.slice(0, 1)
   const visualBlocks = buildCliVisualLogBlocks(visibleEvents)
   const [collapsedSectionIds, setCollapsedSectionIds] = useState<string[]>([])
   const [collapsedTimeGroupIds, setCollapsedTimeGroupIds] = useState<string[]>([])
   const eventTotals = useMemo(() => summarizeCliEventTotals(item.events), [item.events])
+  const logRunTitle = formatCliLogRunTitle({
+    eventCount: item.events.length,
+    statusTone: logStatus.tone,
+    commandCount: eventTotals.commandCount,
+    toolCount: eventTotals.toolCount,
+    diagnosticCount: eventTotals.diagnosticCount,
+    interactionCount: eventTotals.interactionCount,
+  })
+  const statusSummary = formatCliLogStatusSummary({
+    eventCount: item.events.length,
+    commandCount: eventTotals.commandCount,
+    toolCount: eventTotals.toolCount,
+    diagnosticCount: eventTotals.diagnosticCount,
+    interactionCount: eventTotals.interactionCount,
+    updatedAt: formatCliLogTime(item.createdAt),
+  })
   const renderedBlocks = useMemo(() => visualBlocks.map((block) => {
     const rows: Array<
       | { type: 'event'; id: string; event: typeof block.items[number] }
@@ -2299,7 +2314,9 @@ export function CliLogBubble(props: {
       }>>((groups, row) => {
         const createdAt = row.type === 'output' ? row.items[0]?.createdAt || item.createdAt : row.event.createdAt
         const timeLabel = formatCliLogTime(createdAt)
-        const summary = row.type === 'output' ? resolveCliOutputGroupHeadline(row.items) || row.summary : row.event.message
+        const summary = row.type === 'output'
+          ? resolveCliOutputGroupHeadline(row.items) || row.summary
+          : formatCliProcessHeadline(row.event)
         const previous = groups.at(-1)
         if (previous && previous.timeLabel === timeLabel) {
           previous.rows.push(row)
@@ -2457,15 +2474,15 @@ export function CliLogBubble(props: {
     <div className={`cli-log-entry ${logStatus.tone === 'error' ? 'error' : ''}`}>
       <div className='cli-log-card-head'>
         <div className='cli-log-card-title'>
-          <span className='message-role'>{logStatus.tone === 'error' ? '运行异常' : '运行日志'}</span>
-          <strong>{`已执行 ${item.events.length} 步`}</strong>
+          <span className='message-role'>{logStatus.tone === 'error' ? '运行异常' : 'AI 执行过程'}</span>
+          <strong>{logRunTitle}</strong>
         </div>
         {executedToolNames.length > 0 ? (
           <div className='cli-log-header-tools'>
             {executedToolNames.map((itemName) => (
               <div key={itemName} className='message-extension-chip subtle'>
                 <span className='message-extension-kind'>工具</span>
-                <strong>{itemName}</strong>
+                <strong>{formatCliToolDisplayName(itemName)}</strong>
               </div>
             ))}
           </div>
@@ -2549,6 +2566,7 @@ export function CliLogBubble(props: {
                                 .filter(Boolean)
                               const entryHeadline =
                                 resolveCliOutputGroupHeadline([eventItem]) ||
+                                formatCliProcessHeadline(eventItem) ||
                                 detailLines[0] ||
                                 eventItem.message
                               const detailBody = detailLines.join('\n')
@@ -2574,7 +2592,10 @@ export function CliLogBubble(props: {
                                 {outputEntries.map((entry, outputIndex) => {
                                   const duplicatedPrimary =
                                     outputIndex === 0 &&
-                                    normalizeComparable(entry.headline) === normalizeComparable(effectiveHeadline || entry.headline)
+                                    (
+                                      normalizeComparable(entry.headline) === normalizeComparable(effectiveHeadline || '') ||
+                                      normalizeComparable(entry.headline) === normalizeComparable(headline)
+                                    )
                                   if (!shouldRenderCliLogOutputEntry({
                                     outputIndex,
                                     entryHeadline: entry.headline,
@@ -2646,10 +2667,10 @@ export function CliLogBubble(props: {
                                           }}
                                         >
                                           {eventExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                                          <strong>{eventItem.message}</strong>
+                                          <strong>{formatCliProcessHeadline(eventItem)}</strong>
                                         </button>
                                       ) : (
-                                        <strong>{eventItem.message}</strong>
+                                        <strong>{formatCliProcessHeadline(eventItem)}</strong>
                                       )}
                                     </div>
                                   </div>
@@ -2753,12 +2774,15 @@ export function CliLogCompletionFooter(props: {
 }) {
   const { item } = props
   const logStatus = resolveCliLogGroupStatus(item.events)
-  const commandCount = item.events.filter((eventItem) => eventItem.kind === 'command').length
-  const summary = [
-    commandCount > 0 ? `命令 ${commandCount}` : '',
-    `步骤 ${item.events.length}`,
-    `最后更新 ${formatCliLogTime(item.createdAt)}`,
-  ].filter(Boolean).join(' · ')
+  const eventTotals = summarizeCliEventTotals(item.events)
+  const summary = formatCliLogStatusSummary({
+    eventCount: item.events.length,
+    commandCount: eventTotals.commandCount,
+    toolCount: eventTotals.toolCount,
+    diagnosticCount: eventTotals.diagnosticCount,
+    interactionCount: eventTotals.interactionCount,
+    updatedAt: formatCliLogTime(item.createdAt),
+  })
   return <CliLogStatusFooter logStatus={logStatus} summary={summary} />
 }
 
@@ -3148,16 +3172,16 @@ export function resolveCliVisualBlockTitle<T extends {
   }
   label: string
 }>(block: T, index: number) {
-  const assistantChunk = block.intent?.assistantChunk?.trim()
-  if (assistantChunk) {
-    return assistantChunk
-  }
-  const detail = block.intent?.detail?.trim()
-  if (detail && detail !== (block.intent?.sourceKind || '').trim()) {
-    return detail
-  }
+  const detail = block.intent?.detail?.trim() || ''
+  const sourceKind = block.intent?.sourceKind?.trim() || ''
+  const meaningfulDetail = detail && detail !== sourceKind ? detail : ''
   if (block.intent && !isCliMetaIntentSourceKind(block.intent.sourceKind)) {
-    return block.intent.message.trim() || `${block.label} ${index + 1}`
+    return formatCliNarrativeTitle({
+      assistantChunk: block.intent.assistantChunk,
+      detail: meaningfulDetail,
+      message: block.intent.message,
+      fallback: `${block.label} ${index + 1}`,
+    })
   }
   return ''
 }
@@ -3218,12 +3242,12 @@ export function resolveCliOutputGroupTitle(items: Array<{
 }>) {
   const family = resolveCliOutputFamily(items[0] || {})
   if (family === 'stderr') {
-    return `同类 stderr ${items.length} 条`
+    return items.length > 1 ? `执行诊断 ${items.length} 条` : '执行诊断'
   }
   if (family === 'stdout') {
-    return `同类 stdout ${items.length} 条`
+    return items.length > 1 ? `命令输出 ${items.length} 条` : '命令输出'
   }
-  return `同类输出 ${items.length} 条`
+  return items.length > 1 ? `执行输出 ${items.length} 条` : '执行输出'
 }
 
 export function resolveCliOutputGroupSummary(items: Array<{
@@ -3262,6 +3286,7 @@ export function resolveCliDiagnosticSummary(items: Array<{
 }
 
 export function resolveCliOutputGroupHeadline(items: Array<{
+  kind?: CliLogKind
   sourceKind?: string
   detail?: string
   command?: string
@@ -3276,7 +3301,10 @@ export function resolveCliOutputGroupHeadline(items: Array<{
   if (firstErrorLine) {
     return firstErrorLine
   }
-  return detailLines[0] || resolveCliDiagnosticSummary(items)
+  const processHeadline = items
+    .map((item) => formatCliProcessHeadline(item))
+    .find((headline) => headline && headline !== '执行进度')
+  return processHeadline || resolveCliDiagnosticSummary(items)
 }
 
 export function summarizeCliBlockRows(rows: Array<
@@ -3316,8 +3344,8 @@ export function summarizeCliBlockRows(rows: Array<
   return [
     commandCount > 0 ? `命令 ${commandCount}` : '',
     toolCount > 0 ? `工具 ${toolCount}` : '',
-    stdoutGroupCount > 0 ? `stdout ${stdoutGroupCount} 组/${stdoutItemCount} 条` : '',
-    stderrGroupCount > 0 ? `stderr ${stderrGroupCount} 组/${stderrItemCount} 条` : '',
+    stdoutGroupCount > 0 ? `输出 ${stdoutGroupCount} 组/${stdoutItemCount} 条` : '',
+    stderrGroupCount > 0 ? `诊断 ${stderrGroupCount} 组/${stderrItemCount} 条` : '',
     interactionCount > 0 ? `确认 ${interactionCount}` : '',
   ].filter(Boolean).join(' · ')
 }
@@ -3448,15 +3476,24 @@ export function formatUsageSummary(usage?: ChatMessage['usage']) {
       : 0
   const cacheHitSummary =
     cacheHitTokens > 0
-      ? `???? ${cacheHitRatio.toFixed(cacheHitRatio >= 10 ? 0 : 1)}%`
+      ? `缓存 ${cacheHitRatio.toFixed(cacheHitRatio >= 10 ? 0 : 1)}%`
       : ''
 
   if (total > 0) {
-    return `Tokens ${total}${prompt || completion ? ` ? ?? ${prompt} ? ?? ${completion}` : ''}${cacheHitSummary ? ` ? ${cacheHitSummary}` : ''}`
+    return [
+      `总计 ${total}`,
+      prompt || completion ? `输入 ${prompt}` : '',
+      prompt || completion ? `输出 ${completion}` : '',
+      cacheHitSummary,
+    ].filter(Boolean).join(' · ')
   }
 
   if (prompt > 0 || completion > 0 || cacheHitTokens > 0) {
-    return `?? ${prompt} ? ?? ${completion}${cacheHitSummary ? ` ? ${cacheHitSummary}` : ''}`
+    return [
+      `输入 ${prompt}`,
+      `输出 ${completion}`,
+      cacheHitSummary,
+    ].filter(Boolean).join(' · ')
   }
 
   return ''

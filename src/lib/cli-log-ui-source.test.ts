@@ -91,8 +91,11 @@ test('slash plan command enables plan mode instead of direct command passthrough
 
 test('cli log tools are rendered in the log header without the old tool-call label', () => {
   assert.doesNotMatch(appSource, /实际工具调用/)
-  assert.match(assistantSupportSource, /<div className='cli-log-card-head'>[\s\S]*?<strong>\{`已执行 \$\{item\.events\.length\} 步`\}<\/strong>[\s\S]*?executedToolNames\.length > 0/)
+  assert.match(assistantSupportSource, /formatCliLogRunTitle\(\{[\s\S]*?eventCount: item\.events\.length[\s\S]*?diagnosticCount: eventTotals\.diagnosticCount/)
+  assert.match(assistantSupportSource, /<span className='message-role'>\{logStatus\.tone === 'error' \? '运行异常' : 'AI 执行过程'\}<\/span>[\s\S]*?<strong>\{logRunTitle\}<\/strong>/)
+  assert.doesNotMatch(assistantSupportSource, /已执行 \$\{item\.events\.length\} 步/)
   assert.match(assistantSupportSource, /<div className='cli-log-header-tools'>[\s\S]*?executedToolNames\.map/)
+  assert.match(assistantSupportSource, /<strong>\{formatCliToolDisplayName\(itemName\)\}<\/strong>/)
 })
 
 test('cli log entries remove the outer bubble surface and spacing authority', () => {
@@ -172,6 +175,48 @@ test('cli log process text wraps fully and assistant replies omit model labels',
   assert.match(polishStylesSource, /\.cli-page \.message-bubble\.assistant > \.message-role\s*\{[\s\S]*?display:\s*none !important/)
   assert.match(polishStylesSource, /\.cli-page \.cli-log-card-head,[\s\S]*?\.cli-page \.cli-log-output-inline-copy\s*\{[\s\S]*?white-space:\s*normal !important/)
   assert.match(polishStylesSource, /\.cli-page \.cli-log-card-title strong,[\s\S]*?\.cli-page \.cli-log-output-inline-copy strong\s*\{[\s\S]*?white-space:\s*pre-wrap !important[\s\S]*?overflow-wrap:\s*anywhere !important/)
+  assert.match(assistantSupportSource, /formatCliNarrativeTitle\(\{[\s\S]*?assistantChunk: block\.intent\.assistantChunk[\s\S]*?fallback: `\$\{block\.label\} \$\{index \+ 1\}`/)
+  assert.match(assistantSupportSource, /resolveCliOutputGroupHeadline\(items[\s\S]*?formatCliProcessHeadline\(item\)[\s\S]*?resolveCliDiagnosticSummary\(items\)/)
+  assert.doesNotMatch(assistantSupportSource, /同类 stdout/)
+  assert.doesNotMatch(assistantSupportSource, /同类 stderr/)
+  assert.match(assistantSupportSource, /return items\.length > 1 \? `命令输出 \$\{items\.length\} 条` : '命令输出'/)
+  assert.match(assistantSupportSource, /return items\.length > 1 \? `执行诊断 \$\{items\.length\} 条` : '执行诊断'/)
+  assert.match(assistantSupportSource, /formatCliLogStatusSummary\(\{[\s\S]*?eventCount: item\.events\.length[\s\S]*?updatedAt: formatCliLogTime\(item\.createdAt\)/)
+  assert.match(assistantSupportSource, /normalizeComparable\(entry\.headline\) === normalizeComparable\(headline\)/)
+})
+
+test('aichat usage summary uses readable Chinese labels without placeholder mojibake', () => {
+  assert.doesNotMatch(assistantSupportSource, /\?\?\?\?/)
+  assert.doesNotMatch(assistantSupportSource, /\? \?\?/)
+  assert.match(assistantSupportSource, /总计 \$\{total\}/)
+  assert.match(assistantSupportSource, /输入 \$\{prompt\}/)
+  assert.match(assistantSupportSource, /输出 \$\{completion\}/)
+  assert.match(assistantSupportSource, /缓存 \$\{cacheHitRatio\.toFixed/)
+})
+
+test('professional client and cli transcript skin uses restrained timeline and terminal surfaces', () => {
+  assert.match(polishStylesSource, /\/\* Final professional client shell and CLI transcript skin\. \*\//)
+  assert.match(polishStylesSource, /--bg:\s*#eef1f4 !important/)
+  assert.match(polishStylesSource, /--accent:\s*#4f6f7a !important/)
+  assert.match(polishStylesSource, /:root\[data-theme='dark'\]\s*\{[\s\S]*?--bg:\s*#222831 !important[\s\S]*?--accent:\s*#9caab6 !important/)
+  assert.match(polishStylesSource, /\.cli-page \.cli-log-entry\s*\{[\s\S]*?padding-left:\s*18px !important[\s\S]*?border-left:\s*1px solid/)
+  assert.match(polishStylesSource, /\.cli-page \.cli-log-time-dot,[\s\S]*?\.cli-page \.cli-log-event-dot,[\s\S]*?\.cli-page \.cli-log-child-dot\s*\{[\s\S]*?background:\s*var\(--accent\) !important/)
+  assert.match(polishStylesSource, /\.cli-page \.cli-log-detail-window,[\s\S]*?\.cli-page \.inline-file-preview-content\s*\{[\s\S]*?background:\s*#2b3038 !important[\s\S]*?font-family:\s*var\(--font-mono\) !important/)
+  assert.match(polishStylesSource, /\.cli-page \.message-bubble\.assistant\s*\{[\s\S]*?padding:\s*2px 4px 4px !important[\s\S]*?background:\s*transparent !important/)
+  assert.match(polishStylesSource, /\.cli-page \.cli-log-header-tools \.message-extension-chip\.subtle\s*\{[\s\S]*?border-radius:\s*999px !important[\s\S]*?background:\s*transparent !important/)
+  assert.match(polishStylesSource, /\.cli-page \.reasoning-card\s*\{[\s\S]*?padding-left:\s*18px !important[\s\S]*?background:\s*transparent !important/)
+  assert.match(polishStylesSource, /\/\* Final AIChat transcript flow authority\. \*\//)
+  assert.match(polishStylesSource, /\.desktop-window-shell \.cli-page \.cli-turn-group,[\s\S]*?:root\[data-theme='dark'\] \.desktop-window-shell \.cli-page \.cli-turn-group\s*\{[\s\S]*?background:\s*transparent !important[\s\S]*?box-shadow:\s*none !important/)
+  assert.match(polishStylesSource, /\/\* Final AIChat narrow viewport authority\. \*\//)
+  assert.match(polishStylesSource, /\.cli-page \.cli-log-detail-window,[\s\S]*?\.cli-page \.inline-file-preview-content\s*\{[\s\S]*?box-sizing:\s*border-box !important[\s\S]*?max-width:\s*100% !important/)
+  assert.match(polishStylesSource, /\.cli-page \.cli-log-header-tools \.message-extension-chip\.subtle,[\s\S]*?\.cli-page \.cli-log-header-tools \.message-extension-chip strong\s*\{[\s\S]*?white-space:\s*nowrap !important/)
+  assert.match(polishStylesSource, /@media \(max-width: 640px\)\s*\{[\s\S]*?\.cli-page \.cli-log-card-head\s*\{[\s\S]*?flex-direction:\s*column !important[\s\S]*?\.cli-page \.cli-log-header-tools\s*\{[\s\S]*?flex-wrap:\s*wrap !important/)
+})
+
+test('professional cli transcript final authority beats older dark theme detail surfaces', () => {
+  assert.match(polishStylesSource, /\/\* Final professional CLI specificity authority\. \*\//)
+  assert.match(polishStylesSource, /\.desktop-window-shell \.cli-page \.cli-log-entry,[\s\S]*?:root\[data-theme='dark'\] \.desktop-window-shell \.cli-page \.cli-log-entry\.error\s*\{[\s\S]*?padding:\s*0 0 0 18px !important[\s\S]*?border-left:\s*1px solid/)
+  assert.match(polishStylesSource, /:root\[data-theme='dark'\] \.desktop-window-shell \.cli-page \.cli-log-detail-window,[\s\S]*?:root\[data-theme='dark'\] \.desktop-window-shell \.cli-page \.inline-file-preview-content\s*\{[\s\S]*?background:\s*#2b3038 !important[\s\S]*?background-color:\s*#2b3038 !important/)
 })
 
 test('wallet recharge area splits redemption and server-created payment entry', () => {

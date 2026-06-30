@@ -2668,3 +2668,601 @@ body:has(.cli-extension-floating-tooltip)::after {
   overflow-wrap: normal !important;
   font-family: 'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace !important;
 }
+
+/* Final professional client shell and CLI transcript skin. */
+:root {
+  --bg: #eef1f4 !important;
+  --bg-rgb: 238 241 244 !important;
+  --window-bg: rgba(238, 241, 244, 0.96) !important;
+  --window-bg-rgb: 238 241 244 !important;
+  --panel-bg: rgba(255, 255, 255, 0.72) !important;
+  --card-bg: rgba(255, 255, 255, 0.82) !important;
+  --card-bg-strong: rgba(255, 255, 255, 0.94) !important;
+  --popover-bg: rgba(255, 255, 255, 0.96) !important;
+  --sidebar-bg: rgba(248, 250, 252, 0.86) !important;
+  --panel: rgba(255, 255, 255, 0.72) !important;
+  --panel-rgb: 255 255 255 !important;
+  --panel-strong: rgba(255, 255, 255, 0.94) !important;
+  --panel-strong-rgb: 255 255 255 !important;
+  --surface: rgba(248, 250, 252, 0.76) !important;
+  --surface-rgb: 248 250 252 !important;
+  --surface-strong: rgba(255, 255, 255, 0.9) !important;
+  --surface-strong-rgb: 255 255 255 !important;
+  --text-primary: #18212b !important;
+  --text-secondary: #5c6672 !important;
+  --text-tertiary: #8a95a3 !important;
+  --text: #18212b !important;
+  --muted: #66727f !important;
+  --line: rgba(33, 45, 58, 0.1) !important;
+  --line-strong: rgba(33, 45, 58, 0.18) !important;
+  --border-subtle: rgba(33, 45, 58, 0.1) !important;
+  --border-strong: rgba(33, 45, 58, 0.18) !important;
+  --accent: #4f6f7a !important;
+  --accent-rgb: 79 111 122 !important;
+  --accent-soft: rgba(79, 111, 122, 0.12) !important;
+  --accent-softer: rgba(79, 111, 122, 0.07) !important;
+  --accent-strong: #344d59 !important;
+  --accent-2: #6f7f8f !important;
+  --success: #507765 !important;
+  --warning: #9a7a44 !important;
+  --warn: #9a7a44 !important;
+  --danger: #9b665c !important;
+  --bubble-user: rgba(255, 255, 255, 0.92) !important;
+  --bubble-ai: transparent !important;
+  --bubble-log: transparent !important;
+  --shadow-soft: 0 14px 36px rgba(29, 43, 58, 0.09) !important;
+  --shadow-floating: 0 24px 58px rgba(20, 31, 44, 0.16) !important;
+  --shadow: 0 14px 36px rgba(29, 43, 58, 0.09) !important;
+  --glass-shadow: 0 14px 36px rgba(29, 43, 58, 0.08) !important;
+  --glass-shadow-strong: 0 24px 58px rgba(20, 31, 44, 0.16) !important;
+  --font-mono: 'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace !important;
+}
+
+:root[data-theme='dark'] {
+  --bg: #222831 !important;
+  --bg-rgb: 34 40 49 !important;
+  --window-bg: rgba(34, 40, 49, 0.98) !important;
+  --window-bg-rgb: 34 40 49 !important;
+  --panel-bg: rgba(40, 46, 56, 0.9) !important;
+  --card-bg: rgba(45, 52, 63, 0.92) !important;
+  --card-bg-strong: rgba(50, 58, 70, 0.96) !important;
+  --popover-bg: rgba(43, 50, 61, 0.98) !important;
+  --sidebar-bg: rgba(37, 43, 52, 0.96) !important;
+  --panel: rgba(40, 46, 56, 0.9) !important;
+  --panel-rgb: 40 46 56 !important;
+  --panel-strong: rgba(50, 58, 70, 0.96) !important;
+  --panel-strong-rgb: 50 58 70 !important;
+  --surface: rgba(43, 50, 61, 0.86) !important;
+  --surface-rgb: 43 50 61 !important;
+  --surface-strong: rgba(53, 61, 74, 0.92) !important;
+  --surface-strong-rgb: 53 61 74 !important;
+  --text-primary: #e6edf3 !important;
+  --text-secondary: #aeb8c4 !important;
+  --text-tertiary: #7d8794 !important;
+  --text: #e6edf3 !important;
+  --muted: #aeb8c4 !important;
+  --line: rgba(214, 224, 235, 0.1) !important;
+  --line-strong: rgba(214, 224, 235, 0.18) !important;
+  --border-subtle: rgba(214, 224, 235, 0.1) !important;
+  --border-strong: rgba(214, 224, 235, 0.18) !important;
+  --accent: #9caab6 !important;
+  --accent-rgb: 156 170 182 !important;
+  --accent-soft: rgba(156, 170, 182, 0.14) !important;
+  --accent-softer: rgba(156, 170, 182, 0.08) !important;
+  --accent-strong: #c3ccd5 !important;
+  --accent-2: #b5a37f !important;
+  --success: #9eb8aa !important;
+  --warning: #c5ad7a !important;
+  --warn: #c5ad7a !important;
+  --danger: #d19a90 !important;
+  --bubble-user: rgba(53, 61, 74, 0.82) !important;
+  --bubble-ai: transparent !important;
+  --bubble-log: transparent !important;
+  --shadow-soft: 0 18px 42px rgba(0, 0, 0, 0.28) !important;
+  --shadow-floating: 0 28px 66px rgba(0, 0, 0, 0.44) !important;
+  --shadow: 0 18px 42px rgba(0, 0, 0, 0.28) !important;
+  --glass-shadow: 0 18px 42px rgba(0, 0, 0, 0.24) !important;
+  --glass-shadow-strong: 0 28px 66px rgba(0, 0, 0, 0.44) !important;
+}
+
+body,
+.desktop-window-shell,
+.main-panel {
+  background: var(--bg) !important;
+  color: var(--text-primary) !important;
+}
+
+.desktop-window-shell {
+  background:
+    linear-gradient(180deg, rgb(var(--bg-rgb) / 0.98), rgb(var(--bg-rgb) / 1)),
+    var(--bg) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.workspace-aurora,
+.workspace-aurora::before,
+.workspace-aurora::after,
+.workspace-aurora-veil,
+.workspace-aurora-blob {
+  opacity: 0 !important;
+  display: none !important;
+}
+
+.sidebar,
+.panel,
+.modal-card,
+.login-card,
+.panel-block,
+.pricing-card,
+.mini-stat,
+.status-card,
+.service-status-card,
+.empty-card,
+.key-reveal,
+.result-block,
+.settings-card,
+.settings-intro-card,
+.billing-card,
+.wallet-overview-card,
+.record-row {
+  border-radius: 10px !important;
+  border-color: var(--line) !important;
+  background: var(--panel-strong) !important;
+  box-shadow: var(--shadow-soft) !important;
+}
+
+.side-nav-item,
+.ghost-button,
+.secondary-button,
+.primary-button,
+.theme-toggle-button,
+.picker-trigger,
+.icon-picker-trigger,
+.icon-pill-trigger,
+input,
+select,
+textarea {
+  border-radius: 8px !important;
+}
+
+.primary-button,
+.send-button {
+  background: linear-gradient(135deg, var(--accent-strong), var(--accent)) !important;
+  border-color: color-mix(in srgb, var(--accent-strong) 50%, transparent) !important;
+}
+
+.workspace-page.cli-page {
+  color: var(--text-primary) !important;
+}
+
+.cli-page .cli-thread {
+  gap: 12px !important;
+  padding: 10px 14px 18px 2px !important;
+}
+
+.cli-page .cli-turn-group {
+  width: min(100%, 940px) !important;
+  max-width: min(100%, 940px) !important;
+  gap: 10px !important;
+  margin: 0 0 12px !important;
+  padding: 0 !important;
+}
+
+.cli-page .cli-log-entry {
+  position: relative !important;
+  width: min(100%, 940px) !important;
+  max-width: min(100%, 940px) !important;
+  padding-left: 18px !important;
+  border-left: 1px solid color-mix(in srgb, var(--accent) 24%, transparent) !important;
+  color: var(--text-secondary) !important;
+}
+
+.cli-page .cli-log-entry::before {
+  content: '' !important;
+  position: absolute !important;
+  left: -4px !important;
+  top: 9px !important;
+  width: 7px !important;
+  height: 7px !important;
+  border-radius: 999px !important;
+  background: var(--accent) !important;
+  box-shadow: 0 0 0 3px rgb(var(--bg-rgb) / 1) !important;
+}
+
+.cli-page .cli-log-card-head {
+  display: flex !important;
+  align-items: baseline !important;
+  justify-content: space-between !important;
+  gap: 12px !important;
+  margin-bottom: 8px !important;
+}
+
+.cli-page .cli-log-card-title {
+  display: inline-flex !important;
+  align-items: baseline !important;
+  gap: 8px !important;
+}
+
+.cli-page .cli-log-card-title .message-role,
+.cli-page .cli-log-status-bar small,
+.cli-page .cli-log-phase-head small,
+.cli-page .cli-log-time-copy small,
+.cli-page .cli-log-event-copy small,
+.cli-page .cli-log-detail-label {
+  color: var(--text-tertiary) !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  letter-spacing: 0 !important;
+  text-transform: none !important;
+  opacity: 1 !important;
+}
+
+.cli-page .cli-log-card-title strong,
+.cli-page .cli-log-phase-headline strong,
+.cli-page .cli-log-time-copy strong,
+.cli-page .cli-log-event-copy strong,
+.cli-page .cli-log-event-toggle strong,
+.cli-page .cli-log-event-toggle span,
+.cli-page .cli-log-output-stack-title strong,
+.cli-page .cli-log-output-inline-copy strong {
+  color: var(--text-secondary) !important;
+  font-size: 13px !important;
+  font-weight: 520 !important;
+  line-height: 1.65 !important;
+}
+
+.cli-page .cli-log-card-title strong {
+  color: var(--text-primary) !important;
+  font-weight: 560 !important;
+}
+
+.cli-page .cli-log-event-list,
+.cli-page .cli-log-phase-section,
+.cli-page .cli-log-time-group,
+.cli-page .cli-log-time-lines,
+.cli-page .cli-log-output-stack,
+.cli-page .cli-log-event-body,
+.cli-page .cli-log-output-inline-copy {
+  gap: 8px !important;
+}
+
+.cli-page .cli-log-time-lines {
+  padding-left: 16px !important;
+}
+
+.cli-page .cli-log-time-line,
+.cli-page .cli-log-event-row,
+.cli-page .cli-log-output-inline {
+  padding-left: 0 !important;
+}
+
+.cli-page .cli-log-time-dot,
+.cli-page .cli-log-event-dot,
+.cli-page .cli-log-child-dot {
+  width: 7px !important;
+  height: 7px !important;
+  margin-top: 8px !important;
+  background: var(--accent) !important;
+  opacity: 0.58 !important;
+  box-shadow: none !important;
+}
+
+.cli-page .cli-log-event-row.command .cli-log-event-dot,
+.cli-page .cli-log-event-row.tool .cli-log-event-dot,
+.cli-page .cli-log-event-row.intent .cli-log-event-dot {
+  opacity: 0.82 !important;
+}
+
+.cli-page .cli-log-event-row.stderr .cli-log-event-dot,
+.cli-page .cli-log-event-row.error .cli-log-event-dot {
+  background: var(--danger) !important;
+  opacity: 0.86 !important;
+}
+
+.cli-page .cli-log-detail-window,
+.cli-page .cli-log-detail-window.compact,
+.cli-page .timeline-code,
+.cli-page .timeline-detail,
+.cli-page .inline-file-preview,
+.cli-page .inline-file-preview-content {
+  margin: 4px 0 2px !important;
+  padding: 12px 14px !important;
+  border: 1px solid rgba(255, 255, 255, 0.06) !important;
+  border-radius: 8px !important;
+  background: #2b3038 !important;
+  color: #d7dde5 !important;
+  font-family: var(--font-mono) !important;
+  font-size: 12px !important;
+  line-height: 1.65 !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035) !important;
+}
+
+.cli-page .cli-log-detail-window.code-like,
+.cli-page .cli-log-detail-window.compact.code-like {
+  color: #d7dde5 !important;
+  background: #2b3038 !important;
+}
+
+.cli-page .message-bubble.assistant {
+  width: min(100%, 940px) !important;
+  max-width: min(100%, 940px) !important;
+  margin: 0 0 8px !important;
+  padding: 2px 4px 4px !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  color: var(--text-primary) !important;
+}
+
+.cli-page .message-bubble.assistant .markdown-body {
+  color: var(--text-primary) !important;
+  font-size: 14px !important;
+  line-height: 1.74 !important;
+}
+
+.cli-page .message-bubble.assistant .markdown-body p,
+.cli-page .message-bubble.assistant .markdown-body li {
+  color: var(--text-primary) !important;
+}
+
+.cli-page .message-bubble.user {
+  border-radius: 10px !important;
+  border-color: var(--line) !important;
+  background: var(--bubble-user) !important;
+  box-shadow: none !important;
+}
+
+.cli-page .cli-log-status-bar {
+  margin: 2px 0 14px !important;
+  padding: 4px 0 0 !important;
+  background: transparent !important;
+  border: 0 !important;
+}
+
+.cli-page .cli-log-status-pill {
+  min-height: 20px !important;
+  height: 20px !important;
+  padding: 0 8px !important;
+  border-radius: 999px !important;
+  background: color-mix(in srgb, var(--accent) 12%, transparent) !important;
+  color: var(--text-secondary) !important;
+  font-size: 11px !important;
+  font-weight: 520 !important;
+}
+
+.cli-page .cli-log-status-pill.success {
+  background: color-mix(in srgb, var(--success) 16%, transparent) !important;
+  color: var(--success) !important;
+}
+
+.cli-page .cli-log-status-pill.warning {
+  background: color-mix(in srgb, var(--warning) 16%, transparent) !important;
+  color: var(--warning) !important;
+}
+
+.cli-page .cli-log-status-pill.error {
+  background: color-mix(in srgb, var(--danger) 16%, transparent) !important;
+  color: var(--danger) !important;
+}
+
+.reasoning-card {
+  border-radius: 8px !important;
+  border-color: var(--line) !important;
+  background: color-mix(in srgb, var(--surface-strong) 86%, transparent) !important;
+  box-shadow: none !important;
+}
+
+/* Final professional CLI specificity authority. */
+.desktop-window-shell .cli-page .cli-log-entry,
+.desktop-window-shell .cli-page .cli-log-entry.error,
+:root[data-theme='dark'] .desktop-window-shell .cli-page .cli-log-entry,
+:root[data-theme='dark'] .desktop-window-shell .cli-page .cli-log-entry.error {
+  padding: 0 0 0 18px !important;
+  border: 0 !important;
+  border-left: 1px solid color-mix(in srgb, var(--accent) 24%, transparent) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
+.desktop-window-shell .cli-page .cli-log-entry::before,
+:root[data-theme='dark'] .desktop-window-shell .cli-page .cli-log-entry::before {
+  content: '' !important;
+  position: absolute !important;
+  left: -4px !important;
+  top: 9px !important;
+  width: 7px !important;
+  height: 7px !important;
+  border-radius: 999px !important;
+  background: var(--accent) !important;
+  box-shadow: 0 0 0 3px rgb(var(--bg-rgb) / 1) !important;
+}
+
+.desktop-window-shell .cli-page .cli-log-detail-window,
+.desktop-window-shell .cli-page .cli-log-detail-window.compact,
+.desktop-window-shell .cli-page .timeline-code,
+.desktop-window-shell .cli-page .timeline-detail,
+.desktop-window-shell .cli-page .inline-file-preview,
+.desktop-window-shell .cli-page .inline-file-preview-content,
+:root[data-theme='dark'] .desktop-window-shell .cli-page .cli-log-detail-window,
+:root[data-theme='dark'] .desktop-window-shell .cli-page .cli-log-detail-window.compact,
+:root[data-theme='dark'] .desktop-window-shell .cli-page .timeline-code,
+:root[data-theme='dark'] .desktop-window-shell .cli-page .timeline-detail,
+:root[data-theme='dark'] .desktop-window-shell .cli-page .inline-file-preview,
+:root[data-theme='dark'] .desktop-window-shell .cli-page .inline-file-preview-content {
+  border: 1px solid rgba(255, 255, 255, 0.06) !important;
+  background: #2b3038 !important;
+  background-color: #2b3038 !important;
+  background-image: none !important;
+  color: #d7dde5 !important;
+  font-family: var(--font-mono) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035) !important;
+}
+
+/* Final AIChat process narrative pass. */
+.cli-page .cli-log-card-head {
+  align-items: flex-start !important;
+  margin: 0 0 10px !important;
+  padding: 0 !important;
+}
+
+.cli-page .cli-log-card-title {
+  flex-direction: column !important;
+  align-items: flex-start !important;
+  gap: 2px !important;
+}
+
+.cli-page .cli-log-card-title .message-role {
+  font-size: 11px !important;
+  color: var(--text-tertiary) !important;
+}
+
+.cli-page .cli-log-card-title strong {
+  max-width: min(100%, 720px) !important;
+  color: var(--text-primary) !important;
+  font-size: 14px !important;
+  line-height: 1.55 !important;
+}
+
+.cli-page .cli-log-header-tools {
+  justify-content: flex-end !important;
+  gap: 4px !important;
+  max-width: min(42%, 360px) !important;
+  padding-top: 2px !important;
+}
+
+.cli-page .cli-log-header-tools .message-extension-chip.subtle {
+  min-height: 22px !important;
+  padding: 2px 7px !important;
+  border-radius: 999px !important;
+  border-color: color-mix(in srgb, var(--accent) 18%, transparent) !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: var(--text-secondary) !important;
+}
+
+.cli-page .cli-log-header-tools .message-extension-kind {
+  display: none !important;
+}
+
+.cli-page .cli-log-header-tools .message-extension-chip strong {
+  color: var(--text-tertiary) !important;
+  font-size: 11px !important;
+  font-weight: 520 !important;
+  line-height: 1.35 !important;
+}
+
+.cli-page .cli-log-overview-strip {
+  margin: 2px 0 10px !important;
+  gap: 6px !important;
+}
+
+.cli-page .cli-log-overview-strip span {
+  padding: 2px 7px !important;
+  border-radius: 999px !important;
+  border-color: color-mix(in srgb, var(--accent) 16%, transparent) !important;
+  background: transparent !important;
+  color: var(--text-tertiary) !important;
+  font-size: 11px !important;
+}
+
+.cli-page .reasoning-card {
+  margin: 0 0 8px !important;
+  padding-top: 0 !important;
+  padding-right: 0 !important;
+  padding-bottom: 0 !important;
+  padding-left: 18px !important;
+  border: 0 !important;
+  border-left: 1px solid color-mix(in srgb, var(--accent) 18%, transparent) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.cli-page .reasoning-card summary {
+  min-height: 24px !important;
+  padding: 0 !important;
+  color: var(--text-secondary) !important;
+  font-size: 12px !important;
+  font-weight: 520 !important;
+}
+
+.cli-page .reasoning-card-body,
+:root[data-theme='dark'] .cli-page .reasoning-card-body {
+  max-height: none !important;
+  padding: 4px 0 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.cli-page .reasoning-card .markdown-body {
+  color: var(--text-secondary) !important;
+  font-size: 13px !important;
+  line-height: 1.7 !important;
+}
+
+/* Final AIChat transcript flow authority. */
+.desktop-window-shell .cli-page .cli-turn-group,
+:root[data-theme='dark'] .desktop-window-shell .cli-page .cli-turn-group {
+  border: 0 !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
+/* Final AIChat narrow viewport authority. */
+.cli-page .cli-log-event-details,
+.cli-page .cli-log-detail-block,
+.cli-page .cli-log-output-inline-copy,
+.cli-page .cli-log-event-body {
+  min-width: 0 !important;
+  max-width: 100% !important;
+}
+
+.cli-page .cli-log-detail-window,
+.cli-page .cli-log-detail-window.compact,
+.cli-page .timeline-code,
+.cli-page .timeline-detail,
+.cli-page .inline-file-preview,
+.cli-page .inline-file-preview-content {
+  box-sizing: border-box !important;
+  max-width: 100% !important;
+}
+
+.cli-page .cli-log-header-tools .message-extension-chip.subtle,
+.cli-page .cli-log-header-tools .message-extension-chip strong {
+  white-space: nowrap !important;
+}
+
+@media (max-width: 640px) {
+  .desktop-window-shell .cli-page .cli-log-card-head,
+  .cli-page .cli-log-card-head {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 6px !important;
+  }
+
+  .cli-page .cli-log-header-tools {
+    justify-content: flex-start !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    flex-wrap: wrap !important;
+  }
+
+  .cli-page .cli-log-detail-window,
+  .cli-page .cli-log-detail-window.compact,
+  .cli-page .timeline-code,
+  .cli-page .timeline-detail,
+  .cli-page .inline-file-preview,
+  .cli-page .inline-file-preview-content {
+    width: 100% !important;
+  }
+}
