@@ -14,6 +14,7 @@ import type {
   DesktopAttachmentSaveRequest,
   DesktopAttachmentSaveResult,
   DesktopCopyImageRequest,
+  DesktopFileBase64,
   DesktopFilePreview,
   DesktopPathInfo,
   DesktopImageEditRequest,
@@ -101,6 +102,8 @@ contextBridge.exposeInMainWorld('desktopBridge', {
     ipcRenderer.invoke('desktop:open-html', input) as Promise<void>,
   openPath: (targetPath: string) =>
     ipcRenderer.invoke('desktop:open-path', targetPath) as Promise<void>,
+  openFile: (targetPath: string) =>
+    ipcRenderer.invoke('desktop:open-file', targetPath) as Promise<void>,
   openAssistantHistoryFolder: (scope: AssistantHistoryScope, sessionId: string) =>
     ipcRenderer.invoke('desktop:open-assistant-history-folder', {
       scope,
@@ -165,6 +168,8 @@ contextBridge.exposeInMainWorld('desktopBridge', {
     ipcRenderer.invoke('desktop:deploy-cli', input) as Promise<{ jobId: string }>,
   saveAttachment: (input: DesktopAttachmentSaveRequest) =>
     ipcRenderer.invoke('desktop:save-attachment', input) as Promise<DesktopAttachmentSaveResult>,
+  readFileBase64: (targetPath: string) =>
+    ipcRenderer.invoke('desktop:file-base64', targetPath) as Promise<DesktopFileBase64>,
   editImage: (input: DesktopImageEditRequest) =>
     ipcRenderer.invoke('desktop:image-edit', input) as Promise<ImageGenerationResponse>,
   saveImage: (input: DesktopSaveImageRequest) =>

@@ -24,7 +24,18 @@ test('codex session hydration keeps assistant messages without a final_answer ph
   )
 })
 
-test('codex history list is corrected from hydrated session metadata', () => {
+test('cli history lists stay lightweight and do not hydrate full sessions', () => {
+  const codexListBody = cliHistorySource.match(/async function listCodexHistory[\s\S]*?async function getCodexSession/)?.[0] ?? ''
+  const claudeListBody = cliHistorySource.match(/async function listClaudeHistory[\s\S]*?async function getClaudeSessionFile/)?.[0] ?? ''
+
+  assert.ok(codexListBody, 'listCodexHistory source should be found')
+  assert.ok(claudeListBody, 'listClaudeHistory source should be found')
   assert.match(cliHistorySource, /const previous = grouped\.get\(sessionId\)/)
-  assert.match(cliHistorySource, /details\?\.updatedAt \|\| Math\.floor\(metadata\.mtimeMs \/ 1000\) \|\| previous\?\.updatedAt/)
+  assert.match(cliHistorySource, /Math\.floor\(metadata\.mtimeMs \/ 1000\) \|\| previous\?\.updatedAt/)
+  assert.match(cliHistorySource, /readCodexSessionMetaLine\(file\.filePath\)/)
+  assert.match(cliHistorySource, /createReadStream\(filePath, \{ encoding: 'utf8', end: CODEX_SESSION_META_SCAN_BYTES - 1 \}\)/)
+  assert.doesNotMatch(codexListBody, /getCodexSession\(/)
+  assert.doesNotMatch(codexListBody, /readJsonLines\(file\.filePath\)/)
+  assert.doesNotMatch(claudeListBody, /getClaudeSession\(/)
+  assert.match(claudeListBody, /decodeClaudeProjectPathFromFilePath\(file\.filePath\)/)
 })

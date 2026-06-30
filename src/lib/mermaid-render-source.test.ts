@@ -10,6 +10,7 @@ const assistantChatSource = readFileSync(
   'utf8',
 )
 const markdownSource = readFileSync(resolve(sourceDir, 'components', 'MarkdownMessageContent.tsx'), 'utf8')
+const appSource = readFileSync(resolve(sourceDir, 'App.tsx'), 'utf8')
 const mermaidSource = readFileSync(resolve(sourceDir, 'components', 'MermaidDiagram.tsx'), 'utf8')
 const stylesSource = readFileSync(resolve(sourceDir, 'styles', 'workspace.css'), 'utf8')
 
@@ -46,4 +47,19 @@ test('streaming chat messages defer mermaid rendering until final content arrive
   assert.match(markdownSource, /renderMermaid\?: boolean/)
   assert.match(markdownSource, /if \(!renderMermaid\)/)
   assert.match(assistantChatSource, /renderMermaid=\{!item\.pending\}/)
+})
+
+test('cli markdown file links resolve against the active project and open local previews', () => {
+  assert.match(markdownSource, /appendMarkdownLinkSuffix\(target, flattenTextChildren\(children\)\)/)
+  assert.match(markdownSource, /resolveMarkdownLinkTarget\(suffixFixedTarget\.href, localPathBase\)/)
+  assert.match(markdownSource, /removeConsumedLinkSuffix\(children, suffixFixedTarget\.consumedChildren\)/)
+  assert.match(markdownSource, /splitBareFilePathLinks\(text, options\.localPathBase\)/)
+  assert.match(markdownSource, /linkifyMarkdownTextChildren\(children,/)
+  assert.match(markdownSource, /onLocalPathContextMenu\?\:/)
+  assert.match(markdownSource, /onOpenLocalPath\(resolvedTarget\.path\)/)
+  assert.match(markdownSource, /onOpenLocalPath\(part\.path\)/)
+  assert.match(appSource, /localPathBase=\{projectPath\}/)
+  assert.match(appSource, /onOpenLocalPath=\{\(targetPath\) => previewOrOpenDesktopFile\(targetPath\)\}/)
+  assert.match(appSource, /onLocalPathContextMenu=\{showLocalFileContextMenu\}/)
+  assert.match(appSource, /mode:\s*isMarkdownPreviewableFile\(normalized\) \? 'markdown' : 'text'/)
 })

@@ -19,12 +19,11 @@ import { buildImageEditRequest } from '../../process/image-editing/build-edit-re
 import { mapImageEditError } from '../../process/image-editing/map-edit-error'
 import { useAutoFollowScroll } from '../../hooks/use-auto-follow-scroll'
 import { useAutosizeTextarea } from '../../hooks/use-autosize-textarea'
-import { buildChatAttachmentContent, buildPersistedChatRequestContent, fileToBase64, resolveChatMessageRequestContent, toMessageAttachments, useComposerAttachments } from '../../hooks/use-composer-attachments'
-import { useDebouncedJsonStorage } from '../../hooks/use-debounced-json-storage'
+import { buildChatAttachmentContent, buildPersistedChatRequestContent, fileToBase64, hydrateAttachmentsDataBase64, resolveChatMessageRequestContent, toMessageAttachments, useComposerAttachments } from '../../hooks/use-composer-attachments'
 import { buildChatSessionExportMarkdown, buildDrawSessionExportMarkdown, buildSessionExportFileName } from '../../lib/session-history'
 import { readJsonStorage, writeJsonStorage } from '../../lib/storage'
 import { listCustomAiChatProviderModels, type AiChatProviderState } from '../../lib/aichat-provider'
-import { applyAssistantSelectionToEmptyChatSession, resolveChatSessionAssistant, shouldCreateAssistantSwitchChatSession } from '../../lib/chat-session'
+import { applyAssistantSelectionToEmptyChatSession, compactAssistantSessionsForStorage, persistInlineImageMessageToFileUrl, resolveChatSessionAssistant, shouldCreateAssistantSwitchChatSession, shouldFlushAssistantStreamUpdate } from '../../lib/chat-session'
 import { deriveDesktopChatDisplayState } from '../../lib/chat-reasoning'
 import { clipText, formatDateTime } from '../../lib/format'
 import { formatUserFacingMessage } from '../../lib/user-facing-message'
@@ -121,6 +120,14 @@ function saveDesktopAttachment(input: DesktopAttachmentSaveRequest): Promise<Des
   return getDesktopBridge().saveAttachment(input)
 }
 
+function readDesktopFileBase64(targetPath: string) {
+  return getDesktopBridge().readFileBase64(targetPath)
+}
+
+function hydrateChatAttachmentsDataBase64(attachments: ReturnType<typeof useComposerAttachments>['attachments']) {
+  return hydrateAttachmentsDataBase64(attachments, readDesktopFileBase64)
+}
+
 function loadInitialAssistantsState() {
   const assistants = decorateAssistants(loadAssistants(), [], '')
   return {
@@ -147,8 +154,9 @@ export function AssistantsChatWorkspace(props: {
   active: boolean
   providerState: AiChatProviderState
   activeApiKey: ActiveDesktopApiKeySummary
+  onRunningChange?: (running: boolean) => void
 }) {
-  const { toast, active, providerState, activeApiKey } = props
+  const { toast, active, providerState, activeApiKey, onRunningChange } = props
   const performanceMode = useAppPerformanceMode()
   const [models, setModels] = useState<ChatModelOption[]>([])
   const [favoriteModels, setFavoriteModels] = useState<string[]>(() => loadFavoriteModels('oneapi-desktop-chat-favorites'))
@@ -374,6 +382,10 @@ export function AssistantsChatWorkspace(props: {
   const historySessions = historyVisibilityTab === 'hidden' ? hiddenChatSessions : visibleChatSessions
 
   const scrollChatToLatest = useAutoFollowScroll(messageStreamRef, [messages, sending])
+
+  useEffect(() => {
+    onRunningChange?.(sending)
+  }, [onRunningChange, sending])
 
   const ensureChatSessionRemainder = useCallback((remaining: ChatSessionRecord[]) => {
     if (remaining.length) {
@@ -639,7 +651,8 @@ export function AssistantsChatWorkspace(props: {
     }
     const persistDelay = performanceMode === 'efficiency' ? (hasPending ? 900 : 450) : (hasPending ? 220 : 80)
     persistChatSessionsTimerRef.current = window.setTimeout(() => {
-      writeJsonStorage(CHAT_SESSIONS_STORAGE_KEY, chatSessions)
+      const compactedSessions = compactAssistantSessionsForStorage(chatSessions)
+      writeJsonStorage(CHAT_SESSIONS_STORAGE_KEY, compactedSessions)
       persistChatSessionsTimerRef.current = null
     }, persistDelay)
 
@@ -662,9 +675,10 @@ export function AssistantsChatWorkspace(props: {
     }
     const persistDelay = performanceMode === 'efficiency' ? (hasPending ? 1200 : 700) : (hasPending ? 360 : 120)
     persistChatHistoryTimerRef.current = window.setTimeout(() => {
+      const compactedSessions = compactAssistantSessionsForStorage(chatSessions)
       void syncAssistantHistory(
         'chat',
-        chatSessions.map((session) => ({
+        compactedSessions.map((session) => ({
           id: session.id,
           title: session.title,
           updatedAt: session.updatedAt,
@@ -932,14 +946,15 @@ export function AssistantsChatWorkspace(props: {
     const requestId = `chat-${createdAt}`
     const pendingAssistantId = `assistant-pending-${requestId}`
     const userMessageContent = normalizedDraft
-    const persistedRequestContent = buildPersistedChatRequestContent(userMessageContent, attachments)
+    const hydratedAttachments = await hydrateChatAttachmentsDataBase64(attachments)
+    const persistedRequestContent = buildPersistedChatRequestContent(userMessageContent, hydratedAttachments)
     const userMessage: ChatMessage = {
       id: `user-${createdAt}`,
       role: 'user',
       content: userMessageContent,
       requestContent: persistedRequestContent,
       createdAt,
-      attachments: toMessageAttachments(attachments),
+      attachments: toMessageAttachments(hydratedAttachments),
     }
     const pendingAssistantMessage: ChatBubbleMessage = {
       id: pendingAssistantId,
@@ -973,8 +988,11 @@ export function AssistantsChatWorkspace(props: {
     let streamedAssistantText = ''
     let streamedReasoningText = ''
     let streamedUsageData: ChatMessage['usage'] | undefined
+    let lastStreamUiFlushAt = 0
+    let streamUiFlushTimer: number | null = null
 
     const syncPendingAssistantMessage = (reasoningStreamComplete = false) => {
+      lastStreamUiFlushAt = Date.now()
       const displayState = resolvePendingReasoningState(
         streamedAssistantText,
         streamedReasoningText,
@@ -1003,6 +1021,27 @@ export function AssistantsChatWorkspace(props: {
         ),
       }))
     }
+    const flushPendingAssistantMessage = (reasoningStreamComplete = false) => {
+      if (streamUiFlushTimer !== null) {
+        window.clearTimeout(streamUiFlushTimer)
+        streamUiFlushTimer = null
+      }
+      syncPendingAssistantMessage(reasoningStreamComplete)
+    }
+    const schedulePendingAssistantMessageSync = () => {
+      const now = Date.now()
+      if (shouldFlushAssistantStreamUpdate({ now, lastFlushAt: lastStreamUiFlushAt })) {
+        flushPendingAssistantMessage()
+        return
+      }
+      if (streamUiFlushTimer !== null) {
+        return
+      }
+      streamUiFlushTimer = window.setTimeout(() => {
+        streamUiFlushTimer = null
+        syncPendingAssistantMessage()
+      }, Math.max(16, 80 - (now - lastStreamUiFlushAt)))
+    }
 
     try {
       if (isImageGenerationModel(resolvedModel)) {
@@ -1022,6 +1061,16 @@ export function AssistantsChatWorkspace(props: {
           throw new Error('图片生成失败')
         }
 
+        const resolvedAt = Date.now()
+        const resolvedMessage = await persistInlineImageMessageToFileUrl({
+          id: `assistant-${resolvedAt}`,
+          role: 'assistant',
+          content: resolvedImage.prompt,
+          createdAt: resolvedAt,
+          imageUrl: resolvedImage.imageUrl,
+          modelLabel: resolvedModelLabel,
+        }, saveDesktopAttachment)
+
         syncActiveSession((session) => ({
           ...session,
           assistantId: activeAssistant?.id || session.assistantId,
@@ -1030,20 +1079,13 @@ export function AssistantsChatWorkspace(props: {
           updatedAt: Date.now(),
           messages: session.messages.map((item) =>
             item.id === pendingAssistantId
-              ? {
-                  id: `assistant-${Date.now()}`,
-                  role: 'assistant',
-                  content: resolvedImage.prompt,
-                  createdAt: Date.now(),
-                  imageUrl: resolvedImage.imageUrl,
-                  modelLabel: resolvedModelLabel,
-                }
+              ? resolvedMessage
               : item
           ),
         }))
       } else {
         const systemMessage = toAssistantSystemMessage(activeAssistant)
-        const requestHasAttachments = attachments.some((item) => item.dataBase64)
+        const requestHasAttachments = hydratedAttachments.some((item) => item.dataBase64)
         const chatRequestPayload = {
           model: resolvedModel,
           group: providerState.mode === 'oneapi' ? requestGroup || undefined : undefined,
@@ -1058,7 +1100,7 @@ export function AssistantsChatWorkspace(props: {
               role: item.role,
               content:
                 item.id === userMessage.id
-                  ? buildChatAttachmentContent(item.content, attachments)
+                  ? buildChatAttachmentContent(item.content, hydratedAttachments)
                   : resolveChatMessageRequestContent(item),
             })),
           ],
@@ -1074,11 +1116,11 @@ export function AssistantsChatWorkspace(props: {
             signal: abortController.signal,
             onDelta: (text) => {
               streamedAssistantText += text
-              syncPendingAssistantMessage()
+              schedulePendingAssistantMessageSync()
             },
             onReasoningDelta: (text) => {
               streamedReasoningText += text
-              syncPendingAssistantMessage()
+              schedulePendingAssistantMessageSync()
             },
             onDone: (usage) => {
               streamedUsageData = usage
@@ -1173,6 +1215,10 @@ export function AssistantsChatWorkspace(props: {
         toast(error instanceof Error ? error.message : '聊天请求失败')
       }
     } finally {
+      if (streamUiFlushTimer !== null) {
+        window.clearTimeout(streamUiFlushTimer)
+        streamUiFlushTimer = null
+      }
       pendingRequestIdRef.current = ''
       pendingStreamAbortRef.current = null
       stoppingRef.current = false
@@ -2025,8 +2071,9 @@ export function DrawWorkspace(props: {
   active: boolean
   providerState: AiChatProviderState
   activeApiKey: ActiveDesktopApiKeySummary
+  onRunningChange?: (running: boolean) => void
 }) {
-  const { toast, active, providerState, activeApiKey } = props
+  const { toast, active, providerState, activeApiKey, onRunningChange } = props
   const performanceMode = useAppPerformanceMode()
   const [drawSessions, setDrawSessions] = useState<DrawSessionRecord[]>(() => {
     const storedSessions = loadStoredDrawSessions()
@@ -2095,6 +2142,7 @@ export function DrawWorkspace(props: {
   const { preview: attachmentPreview, setPreview: setAttachmentPreview, openPreview: openAttachmentPreview } = useAttachmentPreview(toast)
   const { ref: draftRef, resize: resizeDraft } = useAutosizeTextarea(draft)
   const retryingPendingDrawRef = useRef(false)
+  const persistDrawSessionsTimerRef = useRef<number | null>(null)
   const historyPanelRef = useRef<HTMLDivElement | null>(null)
   const messageStreamRef = useRef<HTMLDivElement | null>(null)
   const drawSizeMenuRef = useRef<HTMLDivElement | null>(null)
@@ -2233,7 +2281,27 @@ export function DrawWorkspace(props: {
 
   useAutoFollowScroll(messageStreamRef, [messages, sending])
 
-  useDebouncedJsonStorage(DRAW_SESSIONS_STORAGE_KEY, drawSessions, performanceMode === 'efficiency' ? 900 : 220)
+  useEffect(() => {
+    onRunningChange?.(sending)
+  }, [onRunningChange, sending])
+
+  useEffect(() => {
+    if (persistDrawSessionsTimerRef.current) {
+      window.clearTimeout(persistDrawSessionsTimerRef.current)
+    }
+    persistDrawSessionsTimerRef.current = window.setTimeout(() => {
+      const compactedSessions = compactAssistantSessionsForStorage(drawSessions)
+      writeJsonStorage(DRAW_SESSIONS_STORAGE_KEY, compactedSessions)
+      persistDrawSessionsTimerRef.current = null
+    }, performanceMode === 'efficiency' ? 900 : 220)
+
+    return () => {
+      if (persistDrawSessionsTimerRef.current) {
+        window.clearTimeout(persistDrawSessionsTimerRef.current)
+        persistDrawSessionsTimerRef.current = null
+      }
+    }
+  }, [drawSessions, performanceMode])
 
   useEffect(() => {
     writeJsonStorage(DRAW_ACTIVE_SESSION_STORAGE_KEY, resolvedActiveSessionId)
@@ -2241,9 +2309,10 @@ export function DrawWorkspace(props: {
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
+      const compactedSessions = compactAssistantSessionsForStorage(drawSessions)
       void syncAssistantHistory(
         'draw',
-        drawSessions.map((session) => ({
+        compactedSessions.map((session) => ({
           id: session.id,
           title: session.title,
           updatedAt: session.updatedAt,
@@ -2733,7 +2802,7 @@ export function DrawWorkspace(props: {
         size: file.size,
         kind: 'image',
         mimeType: file.type || 'image/png',
-        dataBase64,
+        dataBase64: '',
         previewUrl: URL.createObjectURL(file),
       }])
       if (!draft.trim() && message.imagePrompt?.trim()) {
@@ -2858,14 +2927,15 @@ export function DrawWorkspace(props: {
       }
 
       try {
+        const hydratedImage = await readDesktopFileBase64(request.filePath)
         const editRequest = buildImageEditRequest({
           apiKey: activeApiKeySecret,
           model: request.model,
           fallbackModel: DEFAULT_DRAW_MODEL,
           prompt: request.prompt,
           imageName: request.imageName,
-          mimeType: request.mimeType,
-          dataBase64: request.dataBase64,
+          mimeType: request.mimeType || hydratedImage.mimeType,
+          dataBase64: hydratedImage.dataBase64,
           size: request.size,
           quality: request.quality,
         })
@@ -2918,7 +2988,7 @@ export function DrawWorkspace(props: {
     }
 
     const resolvedAt = getCurrentTimestamp()
-    return {
+    return persistInlineImageMessageToFileUrl({
       id: `draw-assistant-${resolvedAt}`,
       role: 'assistant' as const,
       content: resolvedImage.prompt,
@@ -2927,7 +2997,7 @@ export function DrawWorkspace(props: {
       imagePrompt: resolvedImage.prompt,
       modelLabel: DEFAULT_DRAW_MODEL,
       usage: response.usage,
-    }
+    }, saveDesktopAttachment)
   }
 
   async function continuePendingDrawRequest(snapshot: PendingDrawRetryState) {
@@ -2940,7 +3010,7 @@ export function DrawWorkspace(props: {
       const response = await executeDrawRequest(snapshot.request)
       replacePendingDrawMessage(
         snapshot.sessionId,
-        buildResolvedDrawAssistantMessage(response, snapshot.request.prompt)
+        await buildResolvedDrawAssistantMessage(response, snapshot.request.prompt)
       )
       setPendingRetry(null)
       setSending(false)
@@ -3058,7 +3128,7 @@ export function DrawWorkspace(props: {
         imageAttachment,
       })
       const response = await executeDrawRequest(request)
-      replacePendingDrawMessage(nextSessionId, buildResolvedDrawAssistantMessage(response, nextPrompt))
+      replacePendingDrawMessage(nextSessionId, await buildResolvedDrawAssistantMessage(response, nextPrompt))
       setPendingRetry(null)
     } catch (error) {
       if (isRecoverableNetworkError(error)) {

@@ -72,6 +72,8 @@ import {
   buildCliAbortLogEntry,
   buildCliRecentSessions,
   buildCliTimeline,
+  compactCliLogEntry,
+  compactCliSessionLogsMap,
   type CliTimelineEntry,
   filterAssistantModels,
   filterModelsByVendor,
@@ -146,6 +148,7 @@ import {
   mergeCliLogs,
   normalizeProjectKey,
   normalizeTimestampMs,
+  openDesktopFile,
   openDesktopFolder,
   openDesktopTarget,
   orderGroupedEntries,
@@ -172,7 +175,6 @@ import {
   type CliExtensionTranslationCache,
   type CliLogEntry,
   type CliMessage,
-  type CliMessageOverlayStore,
   type CliPaletteItem,
   type SessionContextMenuState,
   type SessionRenameDraft,
@@ -188,11 +190,14 @@ import {
   buildCliExtensionDisplayName,
   buildCliExtensionInsertText,
   canUseCliExtension,
+  compactCliMessageOverlayStore,
+  compactCliPartialMap,
   decorateCliExtensions,
   resolveCliSlashTriggerState,
   translateCliExtensionDescription,
   type CliExtensionViewItem,
   type CliMessageOverlay,
+  type CliMessageOverlayStore,
 } from './lib/cli-extensions'
 import { listCliBuiltinCommands, matchCliBuiltinCommand } from './lib/cli-commands'
 import {
@@ -220,6 +225,7 @@ import {
 } from './hooks/use-autosize-textarea'
 import {
   isInlinePreviewableFile,
+  isMarkdownPreviewableFile,
   rehydrateCliComposerAttachments,
   toMessageAttachments,
   useComposerAttachments,
@@ -514,13 +520,13 @@ function CliWorkspace(props: {
   )
   const [sessionMessagesMap, setSessionMessagesMap] = useState<Record<string, CliMessage[]>>({})
   const [sessionLogsMap, setSessionLogsMap] = useState<Record<string, CliLogEntry[]>>(() =>
-    readJsonStorage<Record<string, CliLogEntry[]>>(`oneapi-desktop-${client}-session-logs`, {})
+    compactCliSessionLogsMap(readJsonStorage<Record<string, CliLogEntry[]>>(`oneapi-desktop-${client}-session-logs`, {}))
   )
   const [sessionPlansMap, setSessionPlansMap] = useState<Record<string, CliPlanState | null>>(() =>
     readJsonStorage<Record<string, CliPlanState | null>>(`oneapi-desktop-${client}-session-plans`, {})
   )
   const [sessionPartialMap, setSessionPartialMap] = useState<Record<string, string>>(() =>
-    readJsonStorage<Record<string, string>>(`oneapi-desktop-${client}-session-partials`, {})
+    compactCliPartialMap(readJsonStorage<Record<string, string>>(`oneapi-desktop-${client}-session-partials`, {}))
   )
   const [respondingInteractionIds, setRespondingInteractionIds] = useState<string[]>([])
   const [expandedLogEventMap, setExpandedLogEventMap] = useState<Record<string, string[]>>({})
@@ -572,7 +578,7 @@ function CliWorkspace(props: {
     readJsonStorage<CliExtensionPreferenceStore>(`oneapi-desktop-${client}-extension-preferences`, {})
   )
   const [cliMessageOverlays, setCliMessageOverlays] = useState<CliMessageOverlayStore>(() =>
-    readJsonStorage<CliMessageOverlayStore>(`oneapi-desktop-${client}-message-overlays`, {})
+    compactCliMessageOverlayStore(readJsonStorage<CliMessageOverlayStore>(`oneapi-desktop-${client}-message-overlays`, {}))
   )
   const {
     attachments,
@@ -630,6 +636,18 @@ function CliWorkspace(props: {
   const activeLogs = useMemo(
     () => (activeSessionId ? sessionLogsMap[activeSessionId] || [] : []),
     [activeSessionId, sessionLogsMap]
+  )
+  const compactedSessionLogsMap = useMemo(
+    () => compactCliSessionLogsMap(sessionLogsMap),
+    [sessionLogsMap]
+  )
+  const compactedCliMessageOverlays = useMemo(
+    () => compactCliMessageOverlayStore(cliMessageOverlays),
+    [cliMessageOverlays]
+  )
+  const compactedSessionPartialMap = useMemo(
+    () => compactCliPartialMap(sessionPartialMap),
+    [sessionPartialMap]
   )
   const activePartial = activeSessionId ? sessionPartialMap[activeSessionId] || '' : ''
   const activePlan = activeSessionId ? sessionPlansMap[activeSessionId] || null : null
@@ -1152,9 +1170,10 @@ function CliWorkspace(props: {
         ...current,
         [sessionId]: [...previous, nextOverlay],
       }
-      cliMessageOverlaysRef.current = next
-      writeJsonStorage(`oneapi-desktop-${client}-message-overlays`, next)
-      return next
+      const compactedNext = compactCliMessageOverlayStore(next)
+      cliMessageOverlaysRef.current = compactedNext
+      writeJsonStorage(`oneapi-desktop-${client}-message-overlays`, compactedNext)
+      return compactedNext
     })
   }, [client])
 
@@ -1189,18 +1208,18 @@ function CliWorkspace(props: {
           }
           continue
         }
-        sessionLogs = [...sessionLogs, entry]
+        sessionLogs = [...sessionLogs, compactCliLogEntry(entry)]
         changed = true
       }
-      next[sessionId] = sessionLogs
+      next[sessionId] = sessionLogs.slice(-160)
     }
 
     if (!changed) {
       return
     }
 
-    sessionLogsMapRef.current = next
-    writeJsonStorage(`oneapi-desktop-${client}-session-logs`, next)
+    const compactedNext = compactCliSessionLogsMap(next)
+    sessionLogsMapRef.current = compactedNext
     startTransition(() => {
       setSessionLogsMap((current) => {
         if (current === sessionLogsMapRef.current) {
@@ -1208,12 +1227,12 @@ function CliWorkspace(props: {
         }
         let hasNewerState = false
         for (const sessionId of sessionIds) {
-          if ((current[sessionId] || []).length > (next[sessionId] || []).length) {
+          if ((current[sessionId] || []).length > (compactedNext[sessionId] || []).length) {
             hasNewerState = true
             continue
           }
         }
-        return hasNewerState ? current : next
+        return hasNewerState ? current : compactedNext
       })
     })
   }, [client])
@@ -1240,10 +1259,9 @@ function CliWorkspace(props: {
       const next = typeof updater === 'function'
         ? (updater as (value: Record<string, string>) => Record<string, string>)(current)
         : updater
-      writeJsonStorage(`oneapi-desktop-${client}-session-partials`, next)
-      return next
+      return compactCliPartialMap(next)
     })
-  }, [client])
+  }, [])
 
   useEffect(() => {
     return () => {
@@ -1503,11 +1521,11 @@ function CliWorkspace(props: {
 
   const flushPersistentCliSessionState = useCallback(() => {
     flushPendingCliLogEntries()
-    writeJsonStorage(`oneapi-desktop-${client}-message-overlays`, cliMessageOverlaysRef.current)
-    writeJsonStorage(`oneapi-desktop-${client}-session-logs`, sessionLogsMapRef.current)
-    writeJsonStorage(`oneapi-desktop-${client}-session-partials`, sessionPartialMap)
+    writeJsonStorage(`oneapi-desktop-${client}-message-overlays`, compactCliMessageOverlayStore(cliMessageOverlaysRef.current))
+    writeJsonStorage(`oneapi-desktop-${client}-session-logs`, compactCliSessionLogsMap(sessionLogsMapRef.current))
+    writeJsonStorage(`oneapi-desktop-${client}-session-partials`, compactedSessionPartialMap)
     writeJsonStorage(`oneapi-desktop-${client}-session-plans`, sessionPlansMap)
-  }, [client, flushPendingCliLogEntries, sessionPartialMap, sessionPlansMap])
+  }, [client, compactedSessionPartialMap, flushPendingCliLogEntries, sessionPlansMap])
 
   useEffect(() => {
     window.addEventListener('beforeunload', flushPersistentCliSessionState)
@@ -1536,14 +1554,20 @@ function CliWorkspace(props: {
 
   useDebouncedJsonStorage(
     `oneapi-desktop-${client}-message-overlays`,
-    cliMessageOverlays,
+    compactedCliMessageOverlays,
     performanceMode === 'efficiency' ? 900 : 260
   )
 
   useDebouncedJsonStorage(
     `oneapi-desktop-${client}-session-logs`,
-    sessionLogsMap,
+    compactedSessionLogsMap,
     performanceMode === 'efficiency' ? 1200 : 360
+  )
+
+  useDebouncedJsonStorage(
+    `oneapi-desktop-${client}-session-partials`,
+    compactedSessionPartialMap,
+    performanceMode === 'efficiency' ? 900 : 260
   )
 
   useDebouncedJsonStorage(
@@ -1706,10 +1730,10 @@ function CliWorkspace(props: {
         setSessionLogsMap((current) => {
           const previous = current[tracked.sessionId] || []
           const incoming = current[nextSessionId] || []
-          const next = {
+          const next = compactCliSessionLogsMap({
             ...current,
             [nextSessionId]: mergeCliLogs(previous, incoming),
-          }
+          })
           delete next[tracked.sessionId]
           return next
         })
@@ -2150,10 +2174,10 @@ function CliWorkspace(props: {
             }
           : entry
       )
-      return {
+      return compactCliSessionLogsMap({
         ...current,
         [sessionId]: nextLogs,
-      }
+      })
     })
   }
 
@@ -2185,7 +2209,7 @@ function CliWorkspace(props: {
       ...current,
       [details.id]: mergeCliMessages(current[details.id] || [], normalizedMessages),
     }))
-    setSessionLogsMap((current) => ({
+    setSessionLogsMap((current) => compactCliSessionLogsMap({
       ...current,
       [details.id]:
         current[details.id]?.length
@@ -2689,6 +2713,60 @@ function CliWorkspace(props: {
     }
   }
 
+  async function previewOrOpenDesktopFile(targetPath: string) {
+    const normalized = targetPath.trim()
+    if (!normalized) {
+      return
+    }
+
+    try {
+      const details = await readDesktopFilePreview(normalized)
+      setAttachmentPreview({
+        mode: isMarkdownPreviewableFile(normalized) ? 'markdown' : 'text',
+        path: details.path,
+        name: details.name,
+        content: details.content,
+      })
+    } catch {
+      await openDesktopFile(normalized)
+    }
+  }
+
+  function showLocalFileContextMenu(event: MouseEvent<HTMLElement>, targetPath: string) {
+    const normalized = targetPath.trim()
+    if (!normalized) {
+      return
+    }
+    event.preventDefault()
+    setSessionContextMenu({
+      x: event.clientX,
+      y: event.clientY,
+      title: normalized.split(/[\\/]/).filter(Boolean).at(-1) || normalized,
+      items: [
+        {
+          key: 'preview',
+          label: '预览',
+          onSelect: () => previewOrOpenDesktopFile(normalized),
+        },
+        {
+          key: 'open-file',
+          label: '系统打开',
+          onSelect: () => openDesktopFile(normalized),
+        },
+        {
+          key: 'open-folder',
+          label: '打开文件夹',
+          onSelect: () => openDesktopFolder(normalized, true),
+        },
+        {
+          key: 'copy-path',
+          label: '复制路径',
+          onSelect: () => copyText(normalized),
+        },
+      ],
+    })
+  }
+
   function loadPromptForEdit(
     content: string,
     messageAttachments?: Array<{
@@ -2867,14 +2945,13 @@ function CliWorkspace(props: {
         interaction: event.interaction,
       }) satisfies CliLogEntry)
       const nextLogs = orchestrationLogs.length
-        ? {
+        ? compactCliSessionLogsMap({
             ...current,
             [currentSessionKey]: [...previous, ...orchestrationLogs],
-          }
+          })
         : current
       if (nextLogs !== current) {
         sessionLogsMapRef.current = nextLogs
-        writeJsonStorage(`oneapi-desktop-${client}-session-logs`, nextLogs)
       }
       return nextLogs
     })
@@ -2923,10 +3000,10 @@ function CliWorkspace(props: {
         setSessionLogsMap((current) => {
           const previous = current[currentSessionKey] || []
           const incoming = current[nextSessionId] || []
-          const next: Record<string, CliLogEntry[]> = {
+          const next: Record<string, CliLogEntry[]> = compactCliSessionLogsMap({
             ...current,
             [nextSessionId]: mergeCliLogs(previous, incoming),
-          }
+          })
           delete next[currentSessionKey]
           return next
         })
@@ -3011,7 +3088,7 @@ function CliWorkspace(props: {
       }
     } finally {
       const completedAt = Date.now()
-      setSessionLogsMap((current) => ({
+      setSessionLogsMap((current) => compactCliSessionLogsMap({
         ...current,
         [finalSessionKey]: [
           ...(current[finalSessionKey] || []),
@@ -3120,7 +3197,7 @@ function CliWorkspace(props: {
         requestId,
         sessionId: activeSessionId,
       })
-      setSessionLogsMap((current) => ({
+      setSessionLogsMap((current) => compactCliSessionLogsMap({
         ...current,
         [activeSessionId]: mergeCliLogs(current[activeSessionId] || [], [abortLog]),
       }))
@@ -3259,6 +3336,9 @@ function CliWorkspace(props: {
         ) : (
           <LazyMarkdownContent
             content={item.content}
+            localPathBase={projectPath}
+            onOpenLocalPath={(targetPath) => previewOrOpenDesktopFile(targetPath)}
+            onLocalPathContextMenu={showLocalFileContextMenu}
             onSelectionContextMenu={handleCliMessageSelectionContextMenu}
           />
         )}
@@ -3268,6 +3348,7 @@ function CliWorkspace(props: {
             files={item.fileChanges}
             previewFile={previewFile}
             onOpenFile={(ownerId, path) => void handlePreviewFile(ownerId, path)}
+            onFileContextMenu={showLocalFileContextMenu}
           />
         ) : null}
         <BubbleMeta
@@ -3354,6 +3435,7 @@ function CliWorkspace(props: {
                           expandedEventIds={expandedLogEventMap[item.id] || []}
                           onToggleEvent={(eventId) => toggleLogEvent(item.id, eventId)}
                           onOpenFile={(ownerId, path) => void handlePreviewFile(ownerId, path)}
+                          onFileContextMenu={showLocalFileContextMenu}
                           onCopy={() => void copyText(item.events.map((eventItem) => serializeCliLogEvent(eventItem)).join('\n\n'))}
                           onDelete={() => handleDeleteCliLogGroup(item)}
                           onRespondInteraction={handleRespondCliInteraction}
@@ -3373,6 +3455,7 @@ function CliWorkspace(props: {
                       expandedEventIds={expandedLogEventMap[item.id] || []}
                       onToggleEvent={(eventId) => toggleLogEvent(item.id, eventId)}
                       onOpenFile={(ownerId, path) => void handlePreviewFile(ownerId, path)}
+                      onFileContextMenu={showLocalFileContextMenu}
                       onCopy={() => void copyText(item.events.map((eventItem) => serializeCliLogEvent(eventItem)).join('\n\n'))}
                       onDelete={() => handleDeleteCliLogGroup(item)}
                       onRespondInteraction={handleRespondCliInteraction}
@@ -3868,6 +3951,8 @@ function AssistantWorkspace(props: {
     codex: { running: false, requestId: '' },
     claude: { running: false, requestId: '' },
   })
+  const [chatRunning, setChatRunning] = useState(false)
+  const [drawRunning, setDrawRunning] = useState(false)
   const updateCliRunningState = useCallback((client: CliClient, state: CliRunningState) => {
     setCliRunningState((current) => {
       const previous = current[client]
@@ -3880,6 +3965,11 @@ function AssistantWorkspace(props: {
       }
     })
   }, [])
+
+  const shouldMountChatWorkspace = mode === 'chat' || chatRunning
+  const shouldMountDrawWorkspace = mode === 'draw' || drawRunning
+  const shouldMountCodexWorkspace = mode === 'codex' || cliRunningState.codex.running
+  const shouldMountClaudeWorkspace = mode === 'claude' || cliRunningState.claude.running
 
   return (
     <section className={`workspace-page assistant-page ${visible ? '' : 'workspace-hidden'}`}>
@@ -3913,46 +4003,56 @@ function AssistantWorkspace(props: {
 
       <div className='workspace-host assistant-host'>
         <div className={mode === 'chat' ? 'workspace-shell active' : 'workspace-shell'}>
-          <AssistantsChatWorkspace
-            toast={toast}
-            active={visible && mode === 'chat'}
-            providerState={providerState}
-            activeApiKey={activeApiKey}
-          />
+          {shouldMountChatWorkspace ? (
+            <AssistantsChatWorkspace
+              toast={toast}
+              active={visible && mode === 'chat'}
+              providerState={providerState}
+              activeApiKey={activeApiKey}
+              onRunningChange={setChatRunning}
+            />
+          ) : null}
         </div>
         <div className={mode === 'draw' ? 'workspace-shell active' : 'workspace-shell'}>
-          <DrawWorkspace
-            toast={toast}
-            active={visible && mode === 'draw'}
-            providerState={providerState}
-            activeApiKey={activeApiKey}
-          />
+          {shouldMountDrawWorkspace ? (
+            <DrawWorkspace
+              toast={toast}
+              active={visible && mode === 'draw'}
+              providerState={providerState}
+              activeApiKey={activeApiKey}
+              onRunningChange={setDrawRunning}
+            />
+          ) : null}
         </div>
         <div className={mode === 'codex' ? 'workspace-shell active' : 'workspace-shell'}>
-          <CliWorkspace
-            client='codex'
-            toast={toast}
-            openSettings={openSettings}
-            active={visible && mode === 'codex'}
-            serverBaseUrl={serverBaseUrl}
-            providerState={providerState}
-            activeApiKey={activeApiKey}
-            runningState={cliRunningState.codex}
-            onRunningStateChange={updateCliRunningState}
-          />
+          {shouldMountCodexWorkspace ? (
+            <CliWorkspace
+              client='codex'
+              toast={toast}
+              openSettings={openSettings}
+              active={visible && mode === 'codex'}
+              serverBaseUrl={serverBaseUrl}
+              providerState={providerState}
+              activeApiKey={activeApiKey}
+              runningState={cliRunningState.codex}
+              onRunningStateChange={updateCliRunningState}
+            />
+          ) : null}
         </div>
         <div className={mode === 'claude' ? 'workspace-shell active' : 'workspace-shell'}>
-          <CliWorkspace
-            client='claude'
-            toast={toast}
-            openSettings={openSettings}
-            active={visible && mode === 'claude'}
-            serverBaseUrl={serverBaseUrl}
-            providerState={providerState}
-            activeApiKey={activeApiKey}
-            runningState={cliRunningState.claude}
-            onRunningStateChange={updateCliRunningState}
-          />
+          {shouldMountClaudeWorkspace ? (
+            <CliWorkspace
+              client='claude'
+              toast={toast}
+              openSettings={openSettings}
+              active={visible && mode === 'claude'}
+              serverBaseUrl={serverBaseUrl}
+              providerState={providerState}
+              activeApiKey={activeApiKey}
+              runningState={cliRunningState.claude}
+              onRunningStateChange={updateCliRunningState}
+            />
+          ) : null}
         </div>
       </div>
     </section>

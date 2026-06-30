@@ -65,7 +65,9 @@ import {
   assertAllowedExternalUrl,
   createCliAccessDirectoryResolver,
   pathExists,
+  readFileBase64,
   readFilePreview,
+  resolveOpenFileTarget,
   resolveOpenTarget,
 } from './desktop-boundaries.ts'
 import { parseDesktopChatStreamEventBlock, type DesktopChatStreamParsedLine } from '../src/lib/chat-reasoning.ts'
@@ -3939,6 +3941,15 @@ ipcMain.handle('desktop:open-path', async (_event, targetPath: string) => {
     throw new Error(error)
   }
 })
+ipcMain.handle('desktop:open-file', async (_event, targetPath: string) => {
+  const resolved = await resolveOpenFileTarget(targetPath)
+  await rememberCliAuthorizedOpenTarget(resolved)
+
+  const error = await shell.openPath(resolved)
+  if (error) {
+    throw new Error(error)
+  }
+})
 ipcMain.handle(
   'desktop:open-assistant-history-folder',
   async (_event, input: { scope: AssistantHistoryScope; sessionId: string }) => {
@@ -4098,6 +4109,9 @@ ipcMain.handle('desktop:install-cli-extension', async (_event, request: CliExten
 })
 ipcMain.handle('desktop:save-attachment', async (_event, input: DesktopAttachmentSaveRequest) => {
   return saveDesktopAttachment(input)
+})
+ipcMain.handle('desktop:file-base64', async (_event, targetPath: string) => {
+  return readFileBase64(targetPath)
 })
 ipcMain.handle('desktop:image-edit', async (_event, input: DesktopImageEditRequest) => {
   return requestImageEdit(input)

@@ -31,7 +31,19 @@ test('chat keeps parsed file attachment content available for later context turn
   assert.match(assistantChatDrawSource, /requestContent: persistedRequestContent/)
   assert.match(attachmentSource, /function resolveChatMessageRequestContent\(message: ChatMessage\)/)
   assert.match(assistantChatDrawSource, /resolveChatMessageRequestContent\(item\)/)
-  assert.match(assistantChatDrawSource, /buildChatAttachmentContent\(item\.content, attachments\)/)
+  assert.match(assistantChatDrawSource, /buildChatAttachmentContent\(item\.content, hydratedAttachments\)/)
+})
+
+test('composer attachments keep large base64 out of React state', () => {
+  assert.match(attachmentSource, /export async function hydrateAttachmentDataBase64/)
+  assert.match(attachmentSource, /MAX_COMPOSER_ATTACHMENT_BASE64_BYTES/)
+  assert.match(attachmentSource, /if \(file\.size > MAX_COMPOSER_ATTACHMENT_BASE64_BYTES\)[\s\S]*?file\.arrayBuffer\(\)/)
+  assert.match(attachmentSource, /dataBase64:\s*''/)
+  assert.doesNotMatch(attachmentSource, /dataBase64,\s*\n\s*previewUrl:/)
+  assert.match(assistantChatDrawSource, /const hydratedAttachments = await hydrateChatAttachmentsDataBase64\(attachments\)/)
+  assert.match(assistantChatDrawSource, /buildChatAttachmentContent\(item\.content, hydratedAttachments\)/)
+  assert.doesNotMatch(assistantChatDrawSource, /setPendingRetry\([\s\S]*?dataBase64/)
+  assert.match(assistantChatDrawSource, /const hydratedImage = await readDesktopFileBase64\(request\.filePath\)/)
 })
 
 test('performance mode is fixed without an account-page toggle', () => {

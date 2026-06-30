@@ -8,6 +8,10 @@ import {
   buildCliExtensionPromptBlock,
   canUseCliExtension,
   collectCliToolNames,
+  compactCliMessageOverlayStore,
+  compactCliPartialMap,
+  MAX_CLI_OVERLAY_TEXT_CHARS,
+  MAX_CLI_PARTIAL_CHARS,
   decorateCliExtensions,
   buildCliExtensionInsertText,
   resolveCliSlashTriggerState,
@@ -423,6 +427,64 @@ test('applyCliMessageOverlays restores persisted assistant replies when native h
       },
     ]
   )
+})
+
+test('compactCliMessageOverlayStore bounds long assistant text and file payloads for persistence', () => {
+  const largeText = 'x'.repeat(MAX_CLI_OVERLAY_TEXT_CHARS + 500)
+  const largeFileText = 'f'.repeat(120_000)
+  const compacted = compactCliMessageOverlayStore({
+    'session-1': [
+      {
+        id: 'assistant-1',
+        role: 'assistant',
+        content: largeText,
+        createdAt: 1,
+        requestId: 'req-1',
+        fileChanges: [
+          {
+            path: 'large.txt',
+            kind: 'modified',
+            content: largeFileText,
+            diff: largeFileText,
+          },
+        ],
+        files: [
+          {
+            path: 'large-again.txt',
+            kind: 'modified',
+            content: largeFileText,
+            diff: largeFileText,
+          },
+        ],
+      },
+    ],
+  })
+
+  const overlay = compacted['session-1']?.[0]
+
+  assert.ok(overlay)
+  assert.ok(overlay.content.length <= MAX_CLI_OVERLAY_TEXT_CHARS)
+  assert.ok((overlay.fileChanges?.[0]?.content || '').length < largeFileText.length)
+  assert.ok((overlay.fileChanges?.[0]?.diff || '').length < largeFileText.length)
+  assert.ok((overlay.files?.[0]?.content || '').length < largeFileText.length)
+  assert.ok(!JSON.stringify(compacted).includes('x'.repeat(50_000)))
+  assert.ok(!JSON.stringify(compacted).includes('f'.repeat(50_000)))
+})
+
+test('compactCliPartialMap bounds partial text and retained sessions', () => {
+  const partials: Record<string, string> = {}
+  for (let index = 0; index < 40; index += 1) {
+    partials[`session-${index}`] = `${index}:${'p'.repeat(MAX_CLI_PARTIAL_CHARS + 50)}`
+  }
+
+  const compacted = compactCliPartialMap(partials)
+  const keys = Object.keys(compacted)
+
+  assert.equal(keys.length, 24)
+  assert.ok(!keys.includes('session-0'))
+  assert.ok(keys.includes('session-39'))
+  assert.ok(Object.values(compacted).every((value) => value.length <= MAX_CLI_PARTIAL_CHARS))
+  assert.ok(!JSON.stringify(compacted).includes('p'.repeat(MAX_CLI_PARTIAL_CHARS + 1)))
 })
 
 test('collectCliToolNames extracts unique tool names from source kinds', () => {

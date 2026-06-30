@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
+  buildCliFileChangePreview,
   formatCliLogRunTitle,
   formatCliLogStatusSummary,
   formatCliNarrativeTitle,
@@ -252,4 +253,42 @@ test('formatCliToolDisplayName hides raw cli tool identifiers in visible chips',
   assert.equal(formatCliToolDisplayName('MultiEdit'), '编辑')
   assert.equal(formatCliToolDisplayName('Grep'), '搜索')
   assert.equal(formatCliToolDisplayName('todo_write'), '计划')
+})
+
+test('buildCliFileChangePreview counts additions and deletions from unified diff', () => {
+  const preview = buildCliFileChangePreview({
+    path: 'D:\\WorkSpace\\NewAPI\\OneAPI_PC\\src\\styles\\polish.css',
+    kind: 'modified',
+    diff: [
+      '--- a/src/styles/polish.css',
+      '+++ b/src/styles/polish.css',
+      '@@ -3148,4 +3148,4 @@',
+      '-  justify-content: flex-end !important;',
+      '+  justify-content: flex-start !important;',
+      '   gap: 4px !important;',
+      '-  max-width: min(42%, 360px) !important;',
+      '+  max-width: none !important;',
+    ].join('\n'),
+  })
+
+  assert.equal(preview.fileName, 'polish.css')
+  assert.equal(preview.added, 2)
+  assert.equal(preview.deleted, 2)
+  assert.deepEqual(
+    preview.lines.map((line) => line.type),
+    ['meta', 'meta', 'hunk', 'delete', 'add', 'context', 'delete', 'add']
+  )
+})
+
+test('buildCliFileChangePreview falls back to content for non-diff files', () => {
+  const preview = buildCliFileChangePreview({
+    path: 'index.html',
+    kind: 'created',
+    content: '<main>\n  Hello\n</main>',
+  })
+
+  assert.equal(preview.fileName, 'index.html')
+  assert.equal(preview.added, 3)
+  assert.equal(preview.deleted, 0)
+  assert.deepEqual(preview.lines.map((line) => line.type), ['add', 'add', 'add'])
 })

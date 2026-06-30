@@ -305,7 +305,7 @@ test('cli submit resumes the resolved current session instead of stale active se
 
 test('draw workspace also uses the active enabled desktop api key', () => {
   assert.match(assistantChatDrawSource, /function DrawWorkspace\(props: \{[\s\S]*?activeApiKey: ActiveDesktopApiKeySummary/)
-  assert.match(assistantChatDrawSource, /const \{ toast, active, providerState, activeApiKey \} = props/)
+  assert.match(assistantChatDrawSource, /const \{ toast, active, providerState, activeApiKey, onRunningChange \} = props/)
   const drawExecutor = assistantChatDrawSource.match(/async function executeDrawRequest[\s\S]*?\r?\n  }\r?\n\r?\n  function buildResolvedDrawAssistantMessage/)?.[0] || ''
   assert.match(drawExecutor, /if \(!activeApiKey\?\.id\) \{[\s\S]*?请先在已有 Key 中启用一个 Key/)
   assert.match(drawExecutor, /const activeApiKeySecret = await fetchApiKeySecret\(activeApiKey\.id\)/)

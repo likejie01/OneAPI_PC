@@ -1,10 +1,14 @@
 // @ts-nocheck
+import { createReadStream } from 'node:fs'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { buildClaudePlanStateFromRecords, buildCodexPlanStateFromRecords } from '../src/lib/cli-plan.ts'
 import { isClaudeAssistantTerminalMessage } from '../src/lib/cli-history-filter.ts'
 import { extractCliUserTask } from '../src/lib/cli-prompt.ts'
+
+const CODEX_SESSION_META_SCAN_BYTES = 64 * 1024
+const CODEX_SESSION_META_SCAN_LINES = 80
 
 function exportedContentPartsToText(content: unknown) {
   if (typeof content === 'string') {
@@ -200,6 +204,34 @@ export function mergeFileChanges(left: CliFileChange[], right: CliFileChange[]) 
 
 export function createCliHistoryServices(deps) {
   const { readJsonLines, walkFiles } = deps
+
+async function readCodexSessionMetaLine(filePath: string) {
+  let buffered = ''
+  let scannedLines = 0
+  const stream = createReadStream(filePath, { encoding: 'utf8', end: CODEX_SESSION_META_SCAN_BYTES - 1 })
+
+  try {
+    for await (const chunk of stream) {
+      buffered += chunk
+      const lines = buffered.split(/\r?\n/)
+      buffered = lines.pop() ?? ''
+
+      for (const line of lines) {
+        scannedLines += 1
+        if (line.includes('"type":"session_meta"')) {
+          return line
+        }
+        if (scannedLines >= CODEX_SESSION_META_SCAN_LINES) {
+          return ''
+        }
+      }
+    }
+  } catch {
+    return ''
+  }
+
+  return buffered.includes('"type":"session_meta"') ? buffered : ''
+}
 
 function normalizeWhitespace(value: string) {
   return value.replace(/\s+/g, ' ').trim()
@@ -520,8 +552,7 @@ async function buildCodexSessionMap() {
   const sessionMap = new Map<string, { projectPath: string; filePath: string; mtimeMs: number }>()
 
   for (const file of latestFiles) {
-    const lines = await readJsonLines(file.filePath)
-    const sessionMetaLine = lines.find((line) => line.includes('"type":"session_meta"'))
+    const sessionMetaLine = await readCodexSessionMetaLine(file.filePath)
     if (!sessionMetaLine) {
       continue
     }
@@ -683,17 +714,16 @@ async function listCodexHistory(limit = 0): Promise<CliHistoryEntry[]> {
 
       const previous = grouped.get(parsed.session_id)
       if (!previous || previous.updatedAt < parsed.ts) {
+        const metadata = sessionMap.get(parsed.session_id)
+        const projectPath = metadata?.projectPath ?? ''
+        const projectName = projectPath ? path.basename(projectPath) : '未命名项目'
         grouped.set(parsed.session_id, {
           id: parsed.session_id,
-          title: sessionMap.get(parsed.session_id)?.projectPath
-            ? path.basename(sessionMap.get(parsed.session_id)?.projectPath ?? '')
-            : `Codex 会话 ${parsed.session_id.slice(0, 8)}`,
+          title: projectPath ? path.basename(projectPath) : `Codex 会话 ${parsed.session_id.slice(0, 8)}`,
           preview: normalizeWhitespace(sanitizeCliUserPrompt(parsed.text)),
           updatedAt: parsed.ts,
-          projectName: sessionMap.get(parsed.session_id)?.projectPath
-            ? path.basename(sessionMap.get(parsed.session_id)?.projectPath ?? '')
-            : '未命名项目',
-          projectPath: sessionMap.get(parsed.session_id)?.projectPath,
+          projectName,
+          projectPath,
         })
       }
     } catch {
@@ -702,21 +732,14 @@ async function listCodexHistory(limit = 0): Promise<CliHistoryEntry[]> {
   }
 
   for (const [sessionId, metadata] of sessionMap.entries()) {
-    const details = await getCodexSession(sessionId)
-    if (!details?.messages.length && grouped.has(sessionId)) {
-      continue
-    }
-
     const previous = grouped.get(sessionId)
-    const lastUser = [...(details?.messages || [])].reverse().find((item) => item.role === 'user')
-    const preview = normalizeWhitespace(lastUser?.content || details?.preview || previous?.preview || '')
     grouped.set(sessionId, {
       id: sessionId,
       title: path.basename(metadata.projectPath || '') || previous?.title || `Codex 会话 ${sessionId.slice(0, 8)}`,
-      preview,
-      updatedAt: details?.updatedAt || Math.floor(metadata.mtimeMs / 1000) || previous?.updatedAt || 0,
-      projectName: path.basename(metadata.projectPath || '') || details?.projectName || previous?.projectName || '未命名项目',
-      projectPath: metadata.projectPath || details?.projectPath || previous?.projectPath,
+      preview: previous?.preview || '',
+      updatedAt: Math.floor(metadata.mtimeMs / 1000) || previous?.updatedAt || 0,
+      projectName: path.basename(metadata.projectPath || '') || previous?.projectName || '未命名项目',
+      projectPath: metadata.projectPath || previous?.projectPath,
     })
   }
 
@@ -817,19 +840,15 @@ async function listClaudeHistory(limit = 0): Promise<CliHistoryEntry[]> {
     if (grouped.has(sessionId)) {
       continue
     }
-    const details = await getClaudeSession(sessionId)
-    if (!details?.messages.length) {
-      continue
-    }
-    const lastUser = [...details.messages].reverse().find((item) => item.role === 'user')
-    const preview = normalizeWhitespace(lastUser?.content || details.preview || '')
+    const projectPath = decodeClaudeProjectPathFromFilePath(file.filePath)
+    const projectName = projectPath ? path.basename(projectPath) : '未命名项目'
     grouped.set(sessionId, {
       id: sessionId,
-      title: details.projectName || `Claude 会话 ${sessionId.slice(0, 8)}`,
-      preview,
-      updatedAt: details.updatedAt,
-      projectName: details.projectName || '未命名项目',
-      projectPath: details.projectPath,
+      title: projectName !== '未命名项目' ? projectName : `Claude 会话 ${sessionId.slice(0, 8)}`,
+      preview: '',
+      updatedAt: Math.floor(file.stat.mtimeMs / 1000),
+      projectName,
+      projectPath,
     })
   }
 

@@ -378,6 +378,14 @@ export interface DesktopAttachmentSaveResult {
   path: string
 }
 
+export interface DesktopFileBase64 {
+  path: string
+  name: string
+  mimeType: string
+  size: number
+  dataBase64: string
+}
+
 export interface DesktopImageEditRequest {
   userId?: string
   apiKey?: string

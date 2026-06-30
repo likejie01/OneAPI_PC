@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ChangeEvent, ClipboardEvent, DragEvent } from 'react'
 import type { ChatContentPart, ChatMessage } from '../shared/contracts'
 
+export const MAX_COMPOSER_ATTACHMENT_BASE64_BYTES = 32 * 1024 * 1024
+
 export type ComposerAttachment = {
   id: string
   name: string
@@ -19,7 +21,16 @@ type SaveAttachment = (input: {
   dataBase64: string
 }) => Promise<{ path: string }>
 
+type ReadAttachmentDataBase64 = (targetPath: string) => Promise<{
+  dataBase64: string
+  mimeType?: string
+  size?: number
+}>
+
 export function fileToBase64(file: File) {
+  if (file.size > MAX_COMPOSER_ATTACHMENT_BASE64_BYTES) {
+    return Promise.reject(new Error('文件超过 32MB，已阻止加载以避免客户端内存占用过高。'))
+  }
   return file.arrayBuffer().then((buffer) => {
     let binary = ''
     const bytes = new Uint8Array(buffer)
@@ -32,6 +43,29 @@ export function fileToBase64(file: File) {
 
     return window.btoa(binary)
   })
+}
+
+export async function hydrateAttachmentDataBase64(
+  attachment: ComposerAttachment,
+  readDataBase64: ReadAttachmentDataBase64,
+): Promise<ComposerAttachment> {
+  if (attachment.dataBase64 || !attachment.filePath) {
+    return attachment
+  }
+  const hydrated = await readDataBase64(attachment.filePath)
+  return {
+    ...attachment,
+    dataBase64: hydrated.dataBase64,
+    mimeType: attachment.mimeType || hydrated.mimeType,
+    size: attachment.size || hydrated.size || 0,
+  }
+}
+
+export function hydrateAttachmentsDataBase64(
+  attachments: ComposerAttachment[],
+  readDataBase64: ReadAttachmentDataBase64,
+) {
+  return Promise.all(attachments.map((attachment) => hydrateAttachmentDataBase64(attachment, readDataBase64)))
 }
 
 function guessAttachmentKind(file: File, filePath: string) {
@@ -277,14 +311,14 @@ export function useComposerAttachments(toast: (message: string) => void, saveAtt
       const nextAttachments = await Promise.all(
         incomingFiles.map(async (file) => {
           const fileWithPath = file as File & { path?: string }
-          const dataBase64 = await fileToBase64(file)
+          let dataBase64 = ''
           const filePath =
             fileWithPath.path?.trim() ||
             (
               await saveAttachment({
                 name: file.name || 'clipboard-file',
                 mimeType: file.type,
-                dataBase64,
+                dataBase64: dataBase64 || await fileToBase64(file),
               })
             ).path
 
@@ -295,7 +329,7 @@ export function useComposerAttachments(toast: (message: string) => void, saveAtt
             size: file.size,
             kind: guessAttachmentKind(file, filePath),
             mimeType: file.type || undefined,
-            dataBase64,
+            dataBase64: '',
             previewUrl: file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined,
           } satisfies ComposerAttachment
         }),

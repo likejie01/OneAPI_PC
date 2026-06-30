@@ -21,6 +21,71 @@ export type CliExtensionViewItem = CliExtensionEntry & {
   displayName: string
 }
 
+export type CliMessageOverlayStore = Record<string, CliMessageOverlay[]>
+
+export const MAX_CLI_OVERLAY_SESSIONS = 24
+export const MAX_CLI_OVERLAYS_PER_SESSION = 80
+export const MAX_CLI_OVERLAY_TEXT_CHARS = 40_000
+export const MAX_CLI_OVERLAY_FILE_TEXT_CHARS = 12_000
+export const MAX_CLI_PARTIAL_SESSIONS = 24
+export const MAX_CLI_PARTIAL_CHARS = 40_000
+
+function truncateCliPersistedText(value: string | undefined, maxLength: number) {
+  if (!value || value.length <= maxLength) {
+    return value
+  }
+  return `${value.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`
+}
+
+function compactCliPersistedFileChange<T extends NonNullable<CliSessionMessage['fileChanges']>[number]>(file: T): T {
+  return {
+    ...file,
+    content: truncateCliPersistedText(file.content, MAX_CLI_OVERLAY_FILE_TEXT_CHARS),
+    diff: truncateCliPersistedText(file.diff, MAX_CLI_OVERLAY_FILE_TEXT_CHARS),
+  }
+}
+
+export function compactCliMessageOverlay(overlay: CliMessageOverlay): CliMessageOverlay {
+  return {
+    ...overlay,
+    content: truncateCliPersistedText(overlay.content, MAX_CLI_OVERLAY_TEXT_CHARS) || '',
+    fileChanges: overlay.fileChanges?.map((file) => compactCliPersistedFileChange(file)),
+    files: overlay.files?.map((file) => compactCliPersistedFileChange(file)),
+  }
+}
+
+export function compactCliMessageOverlayStore(store: CliMessageOverlayStore): CliMessageOverlayStore {
+  const entries = Object.entries(store)
+    .filter(([, overlays]) => Array.isArray(overlays) && overlays.length > 0)
+    .map(([sessionId, overlays]) => {
+      const compactedOverlays = overlays
+        .slice(-MAX_CLI_OVERLAYS_PER_SESSION)
+        .map((overlay) => compactCliMessageOverlay(overlay))
+      const updatedAt = compactedOverlays.reduce(
+        (latest, overlay) => Math.max(latest, Number(overlay.createdAt || 0)),
+        0
+      )
+      return { sessionId, overlays: compactedOverlays, updatedAt }
+    })
+    .sort((left, right) => right.updatedAt - left.updatedAt)
+    .slice(0, MAX_CLI_OVERLAY_SESSIONS)
+
+  return entries.reduce<CliMessageOverlayStore>((next, item) => {
+    next[item.sessionId] = item.overlays
+    return next
+  }, {})
+}
+
+export function compactCliPartialMap(partials: Record<string, string>): Record<string, string> {
+  return Object.entries(partials)
+    .filter(([, partial]) => partial.trim().length > 0)
+    .slice(-MAX_CLI_PARTIAL_SESSIONS)
+    .reduce<Record<string, string>>((next, [sessionId, partial]) => {
+      next[sessionId] = truncateCliPersistedText(partial, MAX_CLI_PARTIAL_CHARS) || ''
+      return next
+    }, {})
+}
+
 export function canUseCliExtension(item: Pick<CliExtensionEntry, 'installed'>) {
   return item.installed !== false
 }

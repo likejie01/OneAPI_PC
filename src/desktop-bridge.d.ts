@@ -33,6 +33,7 @@ import type {
   DesktopDeleteCliSessionsResult,
   DesktopExportTextFileRequest,
   DesktopExportTextFileResult,
+  DesktopFileBase64,
   DesktopFilePreview,
   DesktopImageEditRequest,
   DesktopOpenHtmlRequest,
@@ -83,6 +84,7 @@ declare global {
       openExternal: (url: string) => Promise<void>
       openHtml: (input: DesktopOpenHtmlRequest) => Promise<void>
       openPath: (targetPath: string) => Promise<void>
+      openFile: (targetPath: string) => Promise<void>
       openAssistantHistoryFolder: (scope: AssistantHistoryScope, sessionId: string) => Promise<void>
       syncAssistantHistory: (scope: AssistantHistoryScope, entries: AssistantHistorySnapshotEntry[]) => Promise<void>
       pickProjectDirectory: () => Promise<string>
@@ -103,6 +105,7 @@ declare global {
       setThemeMode: (mode: 'light' | 'dark') => Promise<void>
       deployCli: (input: CliDeployRequest) => Promise<{ jobId: string }>
       saveAttachment: (input: DesktopAttachmentSaveRequest) => Promise<DesktopAttachmentSaveResult>
+      readFileBase64: (targetPath: string) => Promise<DesktopFileBase64>
       editImage: (input: DesktopImageEditRequest) => Promise<ImageGenerationResponse>
       saveImage: (input: DesktopSaveImageRequest) => Promise<DesktopSaveImageResult>
       copyImageToClipboard: (input: DesktopCopyImageRequest) => Promise<void>

@@ -13,6 +13,7 @@ import { buildCliExtensionDisplayName, canUseCliExtension, collectCliToolNames, 
 import { type CliBuiltinCommand } from '../../lib/cli-commands'
 import { type ImageStylePreset } from '../../lib/image-style-presets'
 import {
+  buildCliFileChangePreview,
   formatCliLogRunTitle,
   formatCliLogStatusSummary,
   formatCliNarrativeTitle,
@@ -23,6 +24,7 @@ import {
   shouldRenderCliLogOutputEntry,
 } from '../../lib/cli-log-rendering'
 import { deriveDesktopChatDisplayState, normalizeStoredDesktopChatMessage } from '../../lib/chat-reasoning'
+import { compactAssistantSessionsForStorage } from '../../lib/chat-session'
 import { normalizeCliProjectKey } from '../../lib/cli-project-state'
 import { clipText, formatDateTime } from '../../lib/format'
 import { createPromptHistoryState, commitPromptHistoryEntry, navigatePromptHistory, setPromptHistoryEditingState } from '../../lib/prompt-history'
@@ -60,6 +62,14 @@ export async function openDesktopTarget(targetPath: string) {
     /* fall through and try opening parent path */
   }
   await window.desktopBridge?.openPath(targetPath)
+}
+
+export async function openDesktopFile(targetPath: string) {
+  const normalized = targetPath.trim()
+  if (!normalized) {
+    return
+  }
+  await window.desktopBridge?.openFile(normalized)
 }
 
 export async function openDesktopFolder(targetPath: string, treatAsFile = false) {
@@ -1066,17 +1076,30 @@ export const LazyMarkdownContent = memo(function LazyMarkdownContent(props: {
   content: string
   className?: string
   onSelectionContextMenu?: (event: MouseEvent<HTMLDivElement>, selectedText: string) => void
+  onOpenLocalPath?: (targetPath: string) => void | Promise<void>
+  onLocalPathContextMenu?: (event: MouseEvent<HTMLElement>, targetPath: string) => void
+  localPathBase?: string
   renderMermaid?: boolean
 }) {
-  const { content, className, onSelectionContextMenu, renderMermaid = true } = props
+  const {
+    content,
+    className,
+    onOpenLocalPath = openDesktopTarget,
+    onLocalPathContextMenu,
+    onSelectionContextMenu,
+    localPathBase,
+    renderMermaid = true,
+  } = props
 
   return (
     <Suspense fallback={<div className={className || 'markdown-body'}>{content}</div>}>
       <MarkdownMessageContentLazy
         content={content}
-        onOpenLocalPath={openDesktopTarget}
+        onOpenLocalPath={onOpenLocalPath}
+        onLocalPathContextMenu={onLocalPathContextMenu}
         onOpenExternal={(target) => window.desktopBridge?.openExternal(target)}
         onSelectionContextMenu={onSelectionContextMenu}
+        localPathBase={localPathBase}
         renderMermaid={renderMermaid}
       />
     </Suspense>
@@ -2169,10 +2192,7 @@ export function MessageAttachmentGallery(props: {
 
 export function MessageFileChangeLinks(props: {
   ownerId: string
-  files?: Array<{
-    path: string
-    kind: 'created' | 'modified' | 'deleted' | 'renamed' | 'unknown'
-  }>
+  files?: CliFileChange[]
   previewFile?: {
     ownerId: string
     path: string
@@ -2180,8 +2200,9 @@ export function MessageFileChangeLinks(props: {
     content: string
   } | null
   onOpenFile: (ownerId: string, path: string) => void
+  onFileContextMenu?: (event: MouseEvent<HTMLButtonElement>, path: string) => void
 }) {
-  const { ownerId, files = [], previewFile, onOpenFile } = props
+  const { ownerId, files = [], previewFile, onFileContextMenu, onOpenFile } = props
   const uniqueFiles = Array.from(new Map(files.map((item) => [item.path, item])).values())
   if (!uniqueFiles.length) {
     return null
@@ -2195,6 +2216,7 @@ export function MessageFileChangeLinks(props: {
           type='button'
           className='ghost-button tiny cli-log-file'
           onClick={() => onOpenFile(ownerId, item.path)}
+          onContextMenu={(event) => onFileContextMenu?.(event, item.path)}
           title={item.path}
         >
           <FileText size={14} />
@@ -2202,10 +2224,48 @@ export function MessageFileChangeLinks(props: {
         </button>
       ))}
       {previewFile && previewFile.ownerId === ownerId && (
-        <div className='inline-file-preview'>
-          <code className='inline-file-preview-path'>{previewFile.path}</code>
-          <pre className='inline-file-preview-content'>{previewFile.content}</pre>
+        <InlineFileChangePreview
+          file={uniqueFiles.find((item) => item.path === previewFile.path) || {
+            path: previewFile.path,
+            kind: 'unknown',
+            content: previewFile.content,
+          }}
+          fallbackContent={previewFile.content}
+        />
+      )}
+    </div>
+  )
+}
+
+function InlineFileChangePreview(props: {
+  file: CliFileChange
+  fallbackContent?: string
+}) {
+  const { file, fallbackContent = '' } = props
+  const preview = buildCliFileChangePreview({
+    path: file.path,
+    kind: file.kind,
+    content: file.content || fallbackContent,
+    diff: file.diff,
+  })
+
+  return (
+    <div className='inline-file-preview'>
+      <div className='inline-file-preview-head'>
+        <code className='inline-file-preview-path' title={file.path}>{preview.fileName || file.path}</code>
+        <span className='inline-file-preview-stats'>{`增 +${preview.added} · 删 -${preview.deleted}`}</span>
+      </div>
+      {preview.lines.length > 0 ? (
+        <div className='inline-file-preview-content diff'>
+          {preview.lines.map((line, index) => (
+            <div key={`${index}-${line.text}`} className={`inline-file-preview-line ${line.type}`}>
+              <span className='inline-file-preview-line-number'>{index + 1}</span>
+              <code>{line.text || ' '}</code>
+            </div>
+          ))}
         </div>
+      ) : (
+        <pre className='inline-file-preview-content'>{fallbackContent}</pre>
       )}
     </div>
   )
@@ -2217,6 +2277,7 @@ export function CliLogBubble(props: {
   expandedEventIds: string[]
   onToggleEvent: (eventId: string) => void
   onOpenFile: (ownerId: string, path: string) => void
+  onFileContextMenu?: (event: MouseEvent<HTMLButtonElement>, path: string) => void
   onCopy: () => void
   onDelete: () => void
   onRespondInteraction: (requestId: string, interactionId: string, action: CliInteractionAction) => void
@@ -2234,6 +2295,7 @@ export function CliLogBubble(props: {
     expandedEventIds,
     onToggleEvent,
     onOpenFile,
+    onFileContextMenu,
     onCopy,
     onDelete,
     onRespondInteraction,
@@ -2242,7 +2304,8 @@ export function CliLogBubble(props: {
   } = props
   const uniqueFiles = Array.from(new Map(item.files.map((file) => [file.path, file])).values())
   const executedToolNames = collectCliToolNames(item.events.map((eventItem) => eventItem.sourceKind))
-  const logStatus = resolveCliLogGroupStatus(item.events)
+  const headerExtensionTags = item.selectedExtensions || []
+  const logStatus = resolveCliLogGroupStatus(item.events, item.requestTerminalEvent)
   const visibleEvents = expanded ? item.events : item.events.slice(0, 1)
   const visualBlocks = buildCliVisualLogBlocks(visibleEvents)
   const [collapsedSectionIds, setCollapsedSectionIds] = useState<string[]>([])
@@ -2451,6 +2514,7 @@ export function CliLogBubble(props: {
                   className='ghost-button tiny cli-log-file'
                   type='button'
                   onClick={() => onOpenFile(ownerId, fileItem.path)}
+                  onContextMenu={(event) => onFileContextMenu?.(event, fileItem.path)}
                   title={fileItem.path}
                 >
                   <FileText size={14} />
@@ -2459,10 +2523,15 @@ export function CliLogBubble(props: {
               ))}
             </div>
             {previewFile && previewFile.ownerId === ownerId ? (
-              <div className='inline-file-preview'>
-                <code className='inline-file-preview-path'>{previewFile.path}</code>
-                <pre className='inline-file-preview-content'>{previewFile.content}</pre>
-              </div>
+              <InlineFileChangePreview
+                file={{
+                  path: previewFile.path,
+                  kind: 'unknown',
+                  content: previewFile.content,
+                  ...uniqueEventFiles.find((item) => item.path === previewFile.path),
+                }}
+                fallbackContent={previewFile.content}
+              />
             ) : null}
           </div>
         ) : null}
@@ -2475,10 +2544,13 @@ export function CliLogBubble(props: {
       <div className='cli-log-card-head'>
         <div className='cli-log-card-title'>
           <span className='message-role'>{logStatus.tone === 'error' ? '运行异常' : 'AI 执行过程'}</span>
-          <strong>{logRunTitle}</strong>
-        </div>
-        {executedToolNames.length > 0 ? (
-          <div className='cli-log-header-tools'>
+          <div className='cli-log-title-inline-tags'>
+            {headerExtensionTags.map((extension) => (
+              <div key={`${extension.kind}-${extension.id}`} className='message-extension-chip subtle'>
+                <span className='message-extension-kind'>{getCliExtensionKindLabel(extension)}</span>
+                <strong>{buildCliExtensionDisplayName(extension.name, extension.note)}</strong>
+              </div>
+            ))}
             {executedToolNames.map((itemName) => (
               <div key={itemName} className='message-extension-chip subtle'>
                 <span className='message-extension-kind'>工具</span>
@@ -2486,7 +2558,8 @@ export function CliLogBubble(props: {
               </div>
             ))}
           </div>
-        ) : null}
+          <strong>{logRunTitle}</strong>
+        </div>
       </div>
       {item.events.length >= 40 ? (
         <div className='cli-log-overview-strip'>
@@ -2650,7 +2723,22 @@ export function CliLogBubble(props: {
                                 } as CSSProperties
                               }
                             >
-                              <div className='cli-log-event-dot' />
+                              {hasExpandableContent ? (
+                                <button
+                                  className='cli-log-event-dot-button'
+                                  type='button'
+                                  title={eventExpanded ? '收起详情' : '展开详情'}
+                                  aria-label={eventExpanded ? '收起详情' : '展开详情'}
+                                  onClick={(event) => {
+                                    event.stopPropagation()
+                                    onToggleEvent(eventItem.id)
+                                  }}
+                                >
+                                  <span className='cli-log-event-dot' />
+                                </button>
+                              ) : (
+                                <span className='cli-log-event-dot-spacer' aria-hidden='true' />
+                              )}
                               <div className='cli-log-event-body'>
                                 {!duplicatedPrimary ? (
                                   <div className='cli-log-event-head'>
@@ -2722,6 +2810,7 @@ export function CliLogBubble(props: {
               className='ghost-button tiny cli-log-file'
               type='button'
               onClick={() => onOpenFile(item.id, fileItem.path)}
+              onContextMenu={(event) => onFileContextMenu?.(event, fileItem.path)}
               title={fileItem.path}
             >
               <FileText size={14} />
@@ -2773,7 +2862,7 @@ export function CliLogCompletionFooter(props: {
   item: Extract<CliTimelineEntry, { kind: 'log' }>
 }) {
   const { item } = props
-  const logStatus = resolveCliLogGroupStatus(item.events)
+  const logStatus = resolveCliLogGroupStatus(item.events, item.requestTerminalEvent)
   const eventTotals = summarizeCliEventTotals(item.events)
   const summary = formatCliLogStatusSummary({
     eventCount: item.events.length,
@@ -2967,7 +3056,7 @@ export function resolveExistingAssistantId(assistants: AssistantRecord[], reques
 
 export function loadStoredChatSessions() {
   const sessions = readJsonStorage<ChatSessionRecord[]>(CHAT_SESSIONS_STORAGE_KEY, [])
-  return sessions
+  return compactAssistantSessionsForStorage(sessions
     .map((session) => ({
       ...session,
       messages: (session.messages || [])
@@ -2975,7 +3064,7 @@ export function loadStoredChatSessions() {
         .map((message) => normalizeStoredDesktopChatMessage(message))
         .sort((left, right) => left.createdAt - right.createdAt),
     }))
-    .sort((left, right) => right.updatedAt - left.updatedAt)
+    .sort((left, right) => right.updatedAt - left.updatedAt))
 }
 
 export function createDefaultDrawSession(): DrawSessionRecord {
@@ -2989,14 +3078,14 @@ export function createDefaultDrawSession(): DrawSessionRecord {
 
 export function loadStoredDrawSessions() {
   const sessions = readJsonStorage<DrawSessionRecord[]>(DRAW_SESSIONS_STORAGE_KEY, [])
-  return sessions
+  return compactAssistantSessionsForStorage(sessions
     .map((session) => ({
       ...session,
       messages: (session.messages || [])
         .filter((message) => !message.pending)
         .sort((left, right) => left.createdAt - right.createdAt),
     }))
-    .sort((left, right) => right.updatedAt - left.updatedAt)
+    .sort((left, right) => right.updatedAt - left.updatedAt))
 }
 
 export function orderGroupedEntries<T extends { updatedAt?: number }>(

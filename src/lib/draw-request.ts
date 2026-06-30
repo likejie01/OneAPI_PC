@@ -6,7 +6,7 @@ export type PendingDrawRetryRequest =
       group: string
       imageName: string
       mimeType?: string
-      dataBase64: string
+      filePath: string
       size?: string
       quality?: string
     }
@@ -24,7 +24,7 @@ export type PendingDrawRetryRequest =
 export interface PendingDrawAttachmentInput {
   name: string
   mimeType?: string
-  dataBase64: string
+  filePath: string
 }
 
 export function buildPendingDrawRetryRequest(input: {
@@ -46,7 +46,7 @@ export function buildPendingDrawRetryRequest(input: {
       group,
       imageName: input.imageAttachment.name,
       mimeType: input.imageAttachment.mimeType,
-      dataBase64: input.imageAttachment.dataBase64,
+      filePath: input.imageAttachment.filePath,
       size: input.size,
       quality: input.quality,
     }

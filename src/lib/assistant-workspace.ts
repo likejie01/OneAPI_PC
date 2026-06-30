@@ -23,6 +23,59 @@ export type CliLogEntryLike = {
   done?: boolean
 }
 
+export const MAX_CLI_LOGGED_SESSIONS = 24
+export const MAX_CLI_LOG_ENTRIES_PER_SESSION = 160
+export const MAX_CLI_LOG_TEXT_CHARS = 3000
+export const MAX_CLI_LOG_DETAIL_CHARS = 12000
+export const MAX_CLI_LOG_FILE_TEXT_CHARS = 6000
+
+function truncateCliLogText(value: string | undefined, maxLength: number) {
+  if (!value || value.length <= maxLength) {
+    return value
+  }
+  return `${value.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`
+}
+
+export function compactCliLogEntry<T extends CliLogEntryLike>(entry: T): T {
+  const files = entry.files?.map((file) => ({
+    ...file,
+    content: truncateCliLogText(file.content, MAX_CLI_LOG_FILE_TEXT_CHARS),
+    diff: truncateCliLogText(file.diff, MAX_CLI_LOG_FILE_TEXT_CHARS),
+  }))
+  return {
+    ...entry,
+    content: truncateCliLogText(entry.content, MAX_CLI_LOG_TEXT_CHARS) || '',
+    assistantChunk: truncateCliLogText(entry.assistantChunk, MAX_CLI_LOG_TEXT_CHARS),
+    detail: truncateCliLogText(entry.detail, MAX_CLI_LOG_DETAIL_CHARS),
+    command: truncateCliLogText(entry.command, MAX_CLI_LOG_DETAIL_CHARS),
+    files,
+  }
+}
+
+export function compactCliSessionLogsMap<T extends CliLogEntryLike>(
+  logsBySession: Record<string, T[]>,
+): Record<string, T[]> {
+  const entries = Object.entries(logsBySession)
+    .filter(([, logs]) => Array.isArray(logs) && logs.length > 0)
+    .map(([sessionId, logs]) => {
+      const compactedLogs = logs
+        .slice(-MAX_CLI_LOG_ENTRIES_PER_SESSION)
+        .map((entry) => compactCliLogEntry(entry))
+      const updatedAt = compactedLogs.reduce(
+        (latest, entry) => Math.max(latest, Number(entry.createdAt || 0)),
+        0,
+      )
+      return { sessionId, logs: compactedLogs, updatedAt }
+    })
+    .sort((left, right) => right.updatedAt - left.updatedAt)
+    .slice(0, MAX_CLI_LOGGED_SESSIONS)
+
+  return entries.reduce<Record<string, T[]>>((next, item) => {
+    next[item.sessionId] = item.logs
+    return next
+  }, {})
+}
+
 export type CliTimelineLogEvent = {
   id: string
   level: 'status' | 'error'
@@ -90,6 +143,8 @@ export type CliTimelineEntry =
       startedAt: number
       requestId?: string
       sessionId?: string
+      selectedExtensions?: CliSessionMessage['selectedExtensions']
+      requestTerminalEvent?: CliTimelineLogEvent
       files: CliFileChange[]
       events: CliTimelineLogEvent[]
     }
@@ -218,6 +273,73 @@ function stripConsumedAssistantChunks(
   }
 }
 
+function normalizeAssistantSentence(value: string) {
+  return value.replace(/\s+/g, ' ').trim()
+}
+
+function collapseRepeatedAdjacentAssistantSentences(paragraph: string) {
+  const parts = paragraph
+    .match(/[^。！？.!?\n]+[。！？.!?]+|[^。！？.!?\n]+$/g)
+    ?.map((part) => part.trim())
+    .filter(Boolean)
+
+  if (!parts || parts.length <= 1) {
+    return paragraph.trim()
+  }
+
+  let source = parts
+  for (let windowSize = 1; windowSize <= Math.floor(source.length / 2); windowSize += 1) {
+    const collapsedRuns: string[] = []
+    let index = 0
+    while (index < source.length) {
+      const current = source.slice(index, index + windowSize)
+      const next = source.slice(index + windowSize, index + windowSize * 2)
+      const sameRun =
+        current.length === windowSize &&
+        next.length === windowSize &&
+        current.every((part, partIndex) => normalizeAssistantSentence(part) === normalizeAssistantSentence(next[partIndex]))
+
+      if (!sameRun) {
+        collapsedRuns.push(source[index])
+        index += 1
+        continue
+      }
+
+      collapsedRuns.push(...current)
+      index += windowSize
+      while (
+        index + windowSize <= source.length &&
+        current.every((part, partIndex) =>
+          normalizeAssistantSentence(part) === normalizeAssistantSentence(source[index + partIndex]),
+        )
+      ) {
+        index += windowSize
+      }
+    }
+    source = collapsedRuns
+  }
+
+  const collapsed: string[] = []
+  for (const part of source) {
+    const normalized = normalizeAssistantSentence(part)
+    if (!normalized) {
+      continue
+    }
+    const previous = collapsed.at(-1)
+    if (previous && normalizeAssistantSentence(previous) === normalized) {
+      continue
+    }
+    collapsed.push(part)
+  }
+
+  return collapsed.reduce((text, part) => {
+    if (!text) {
+      return part
+    }
+    return `${text}${/[.!?]$/.test(text) && /^[A-Za-z0-9]/.test(part) ? ' ' : ''}${part}`
+  }, '')
+}
+
 function collapseRepeatedAdjacentAssistantParagraphs(content: string) {
   const paragraphs = content
     .replace(/\r\n/g, '\n')
@@ -225,7 +347,8 @@ function collapseRepeatedAdjacentAssistantParagraphs(content: string) {
   const collapsed: string[] = []
 
   for (const paragraph of paragraphs) {
-    const normalized = normalizeMessageContent(paragraph)
+    const nextParagraph = collapseRepeatedAdjacentAssistantSentences(paragraph)
+    const normalized = normalizeMessageContent(nextParagraph)
     if (!normalized) {
       continue
     }
@@ -233,7 +356,7 @@ function collapseRepeatedAdjacentAssistantParagraphs(content: string) {
     if (previous && normalizeMessageContent(previous) === normalized) {
       continue
     }
-    collapsed.push(paragraph.trim())
+    collapsed.push(nextParagraph)
   }
 
   return collapsed.join('\n\n')
@@ -422,6 +545,17 @@ export function buildCliTimeline(input: {
   partialCreatedAt?: number
   partialModelLabel?: string
 }) {
+  const requestUserMetadata = input.messages.reduce<Map<string, {
+    selectedExtensions?: CliSessionMessage['selectedExtensions']
+  }>>((map, item) => {
+    if (item.role === 'user' && item.requestId) {
+      map.set(item.requestId, {
+        selectedExtensions: item.selectedExtensions,
+      })
+    }
+    return map
+  }, new Map())
+
   const mergeLogFiles = (items: CliFileChange[]) => {
     const seen = new Set<string>()
     return items.filter((item) => {
@@ -434,6 +568,48 @@ export function buildCliTimeline(input: {
     })
   }
 
+  const isCliIntentLogEntry = (item: CliLogEntryLike) => {
+    const sourceKind = (item.sourceKind || '').trim().toLowerCase()
+    return sourceKind.startsWith('orchestrator.intent') || sourceKind.startsWith('intent.') || item.logKind === 'intent'
+  }
+
+  const isMetaIntentLogEntry = (item: CliLogEntryLike) => {
+    const sourceKind = (item.sourceKind || '').trim().toLowerCase()
+    return (
+      sourceKind === 'request.started' ||
+      sourceKind === 'thread.started' ||
+      sourceKind === 'turn.started' ||
+      sourceKind === 'session.connected' ||
+      sourceKind === 'system.init' ||
+      sourceKind === 'request.stream.completed' ||
+      sourceKind === 'request.aborted' ||
+      sourceKind === 'request.failed' ||
+      sourceKind === 'turn.completed' ||
+      sourceKind === 'turn.completed.with_warnings' ||
+      sourceKind === 'result' ||
+      sourceKind === 'result.with_warnings'
+    )
+  }
+
+  const isCliTerminalLogEvent = (item: {
+    level: 'status' | 'error'
+    sourceKind?: string
+    done?: boolean
+  }) => {
+    const sourceKind = item.sourceKind || ''
+    return (
+      item.done ||
+      item.level === 'error' ||
+      sourceKind === 'request.failed' ||
+      sourceKind === 'request.aborted' ||
+      sourceKind === 'request.stream.completed' ||
+      sourceKind === 'result' ||
+      sourceKind === 'result.with_warnings' ||
+      sourceKind === 'turn.completed' ||
+      sourceKind === 'turn.completed.with_warnings'
+    )
+  }
+
   const groupedLogs = input.logs.reduce<Array<{
     id: string
     kind: 'log'
@@ -443,6 +619,8 @@ export function buildCliTimeline(input: {
     startedAt: number
     requestId?: string
     sessionId?: string
+    selectedExtensions?: CliSessionMessage['selectedExtensions']
+    requestTerminalEvent?: CliTimelineLogEvent
     files: CliFileChange[]
     events: CliTimelineLogEvent[]
   }>>((groups, item) => {
@@ -470,7 +648,14 @@ export function buildCliTimeline(input: {
       !!item.requestId &&
       lastGroup.requestId === item.requestId
 
-    if (lastGroup && sameRequest) {
+    const startsNarrativeSegment =
+      sameRequest &&
+      isCliIntentLogEntry(item) &&
+      !isMetaIntentLogEntry(item) &&
+      !!item.assistantChunk?.trim() &&
+      lastGroup.events.some((eventItem) => eventItem.assistantChunk?.trim())
+
+    if (lastGroup && sameRequest && !startsNarrativeSegment) {
       lastGroup.createdAt = Math.max(lastGroup.createdAt, normalizedCreatedAt)
       lastGroup.files = mergeLogFiles([...lastGroup.files, ...eventFiles])
       lastGroup.events.push(nextEvent)
@@ -489,11 +674,38 @@ export function buildCliTimeline(input: {
       startedAt: normalizedCreatedAt,
       requestId: item.requestId,
       sessionId: item.sessionId,
+      ...(item.requestId && requestUserMetadata.get(item.requestId)?.selectedExtensions
+        ? { selectedExtensions: requestUserMetadata.get(item.requestId)?.selectedExtensions }
+        : {}),
       files: eventFiles,
       events: [nextEvent],
     })
     return groups
   }, [])
+
+  const terminalEventByRequestId = groupedLogs.reduce<Map<string, CliTimelineLogEvent>>((map, item) => {
+    if (!item.requestId) {
+      return map
+    }
+    const terminalEvent = [...item.events].reverse().find((eventItem) => isCliTerminalLogEvent(eventItem))
+    if (!terminalEvent) {
+      return map
+    }
+    const previous = map.get(item.requestId)
+    if (!previous || previous.createdAt <= terminalEvent.createdAt) {
+      map.set(item.requestId, terminalEvent)
+    }
+    return map
+  }, new Map())
+
+  for (const item of groupedLogs) {
+    if (item.requestId && !item.events.some((eventItem) => isCliTerminalLogEvent(eventItem))) {
+      const terminalEvent = terminalEventByRequestId.get(item.requestId)
+      if (terminalEvent) {
+        item.requestTerminalEvent = terminalEvent
+      }
+    }
+  }
 
   const requestAssistantChunks = groupedLogs.reduce<Map<string, string[]>>((map, item) => {
     if (!item.requestId) {
@@ -658,7 +870,12 @@ export function resolveCliLogGroupStatus(
     sourceKind?: string
     interaction?: CliInteractionPrompt
     done?: boolean
-  }>
+  }>,
+  requestTerminalEvent?: {
+    level: 'status' | 'error'
+    sourceKind?: string
+    done?: boolean
+  }
 ) {
   const pendingInteraction = [...events].reverse().find((item) => item.interaction?.status === 'pending')
   if (pendingInteraction) {
@@ -678,7 +895,7 @@ export function resolveCliLogGroupStatus(
       sourceKind === 'turn.completed' ||
       sourceKind === 'turn.completed.with_warnings'
     )
-  })
+  }) || requestTerminalEvent
 
   if (terminal?.sourceKind === 'request.aborted') {
     return { tone: 'aborted', label: '已停止' as const }

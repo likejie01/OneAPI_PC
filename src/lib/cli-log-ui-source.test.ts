@@ -5,7 +5,9 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const appSource = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '..', 'App.tsx'), 'utf8')
+const assistantChatDrawSource = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '..', 'features', 'assistants', 'AssistantChatDrawWorkspaces.tsx'), 'utf8')
 const assistantSupportSource = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '..', 'features', 'assistants', 'AssistantWorkspaceSupport.tsx'), 'utf8')
+const assistantWorkspaceSource = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), 'assistant-workspace.ts'), 'utf8')
 const settingsWorkspaceSource = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '..', 'features', 'settings', 'SettingsWorkspaces.tsx'), 'utf8')
 const accountWorkspaceSource = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '..', 'features', 'account', 'AccountWorkspaces.tsx'), 'utf8')
 const walletDomainSource = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '..', 'domains', 'wallet.ts'), 'utf8')
@@ -34,23 +36,64 @@ test('cli progress logs are batched without stringify comparisons in the hot pat
   assert.match(appSource, /enqueueCliLogEntry\(targetSessionId, nextEntry, !!payload\.done\)/)
   assert.match(appSource, /pendingCliLogEntriesRef\.current\[sessionId\] = \[entry\]/)
   assert.match(appSource, /entries\.push\(entry\)/)
+  assert.match(appSource, /compactCliLogEntry\(entry\)/)
+  assert.match(appSource, /const compactedNext = compactCliSessionLogsMap\(next\)/)
   assert.match(appSource, /startTransition\(\(\) => \{\s*setSessionLogsMap/)
   assert.doesNotMatch(appSource, /JSON\.stringify\(lastEntry/)
   assert.doesNotMatch(appSource, /pendingCliLogEntriesRef\.current = \{\s*\.\.\.pendingCliLogEntriesRef\.current/)
+  assert.doesNotMatch(appSource, /flushPendingCliLogEntries[\s\S]*?writeJsonStorage\(`oneapi-desktop-\$\{client\}-session-logs`, next\)/)
 })
 
 test('cli persisted logs and message overlays flush synchronously before window unload', () => {
   assert.match(appSource, /flushPersistentCliSessionState/)
-  assert.match(appSource, /writeJsonStorage\(`oneapi-desktop-\$\{client\}-message-overlays`, cliMessageOverlaysRef\.current\)/)
-  assert.match(appSource, /writeJsonStorage\(`oneapi-desktop-\$\{client\}-session-logs`, sessionLogsMapRef\.current\)/)
+  assert.match(appSource, /writeJsonStorage\(`oneapi-desktop-\$\{client\}-message-overlays`, compactCliMessageOverlayStore\(cliMessageOverlaysRef\.current\)\)/)
+  assert.match(appSource, /writeJsonStorage\(`oneapi-desktop-\$\{client\}-session-logs`, compactCliSessionLogsMap\(sessionLogsMapRef\.current\)\)/)
+  assert.match(appSource, /writeJsonStorage\(`oneapi-desktop-\$\{client\}-session-partials`, compactedSessionPartialMap\)/)
   assert.match(appSource, /window\.addEventListener\('beforeunload', flushPersistentCliSessionState\)/)
 })
 
-test('cli running messages and logs are persisted immediately during streaming', () => {
-  assert.match(appSource, /writeJsonStorage\(`oneapi-desktop-\$\{client\}-message-overlays`, next\)/)
-  assert.match(appSource, /writeJsonStorage\(`oneapi-desktop-\$\{client\}-session-logs`, next\)/)
-  assert.match(appSource, /writeJsonStorage\(`oneapi-desktop-\$\{client\}-session-partials`, next\)/)
+test('cli running messages persist immediately while logs and partials are bounded or debounced', () => {
+  assert.match(appSource, /compactCliMessageOverlayStore\(readJsonStorage<CliMessageOverlayStore>/)
+  assert.match(appSource, /compactCliPartialMap\(readJsonStorage<Record<string, string>>/)
+  assert.match(appSource, /writeJsonStorage\(`oneapi-desktop-\$\{client\}-message-overlays`, compactedNext\)/)
+  assert.match(appSource, /useMemo\(\s*\(\) => compactCliSessionLogsMap\(sessionLogsMap\)/)
+  assert.match(appSource, /useMemo\(\s*\(\) => compactCliMessageOverlayStore\(cliMessageOverlays\)/)
+  assert.match(appSource, /useMemo\(\s*\(\) => compactCliPartialMap\(sessionPartialMap\)/)
+  assert.match(appSource, /useDebouncedJsonStorage\([\s\S]*?`oneapi-desktop-\$\{client\}-session-logs`[\s\S]*?compactedSessionLogsMap/)
+  assert.match(appSource, /useDebouncedJsonStorage\([\s\S]*?`oneapi-desktop-\$\{client\}-message-overlays`[\s\S]*?compactedCliMessageOverlays/)
+  assert.match(appSource, /useDebouncedJsonStorage\([\s\S]*?`oneapi-desktop-\$\{client\}-session-partials`[\s\S]*?compactedSessionPartialMap/)
+  assert.doesNotMatch(appSource, /setPersistedCliPartialMap[\s\S]*?writeJsonStorage\(`oneapi-desktop-\$\{client\}-session-partials`, next\)/)
   assert.match(appSource, /setPersistedCliPartialMap/)
+})
+
+test('cli workspaces unmount when inactive unless a run is still active', () => {
+  assert.doesNotMatch(appSource, /visitedCliModes/)
+  assert.match(appSource, /const shouldMountCodexWorkspace = mode === 'codex' \|\| cliRunningState\.codex\.running/)
+  assert.match(appSource, /const shouldMountClaudeWorkspace = mode === 'claude' \|\| cliRunningState\.claude\.running/)
+  assert.match(appSource, /\{shouldMountCodexWorkspace \? \([\s\S]*?<CliWorkspace[\s\S]*?client='codex'/)
+  assert.match(appSource, /\{shouldMountClaudeWorkspace \? \([\s\S]*?<CliWorkspace[\s\S]*?client='claude'/)
+})
+
+test('aichat and draw workspaces unmount when inactive unless a request is running', () => {
+  assert.match(appSource, /const \[chatRunning, setChatRunning\] = useState\(false\)/)
+  assert.match(appSource, /const \[drawRunning, setDrawRunning\] = useState\(false\)/)
+  assert.match(appSource, /const shouldMountChatWorkspace = mode === 'chat' \|\| chatRunning/)
+  assert.match(appSource, /const shouldMountDrawWorkspace = mode === 'draw' \|\| drawRunning/)
+  assert.match(appSource, /\{shouldMountChatWorkspace \? \([\s\S]*?<AssistantsChatWorkspace[\s\S]*?onRunningChange=\{setChatRunning\}/)
+  assert.match(appSource, /\{shouldMountDrawWorkspace \? \([\s\S]*?<DrawWorkspace[\s\S]*?onRunningChange=\{setDrawRunning\}/)
+  assert.match(assistantChatDrawSource, /onRunningChange\?: \(running: boolean\) => void/)
+  assert.match(assistantChatDrawSource, /onRunningChange\?\.\(sending\)/)
+})
+
+test('aichat and draw persisted sessions are compacted before storage and history sync', () => {
+  assert.match(assistantSupportSource, /loadStoredChatSessions\(\)[\s\S]*?compactAssistantSessionsForStorage\(sessions/)
+  assert.match(assistantSupportSource, /loadStoredDrawSessions\(\)[\s\S]*?compactAssistantSessionsForStorage\(sessions/)
+  assert.doesNotMatch(assistantChatDrawSource, /persistedChatSessions\s*=\s*useMemo\([\s\S]*?compactAssistantSessionsForStorage\(chatSessions\)/)
+  assert.doesNotMatch(assistantChatDrawSource, /persistedDrawSessions\s*=\s*useMemo\([\s\S]*?compactAssistantSessionsForStorage\(drawSessions\)/)
+  assert.match(assistantChatDrawSource, /const compactedSessions = compactAssistantSessionsForStorage\(chatSessions\)[\s\S]*?writeJsonStorage\(CHAT_SESSIONS_STORAGE_KEY, compactedSessions\)/)
+  assert.match(assistantChatDrawSource, /const compactedSessions = compactAssistantSessionsForStorage\(chatSessions\)[\s\S]*?compactedSessions\.map\(\(session\) => \(\{/)
+  assert.match(assistantChatDrawSource, /const compactedSessions = compactAssistantSessionsForStorage\(drawSessions\)[\s\S]*?writeJsonStorage\(DRAW_SESSIONS_STORAGE_KEY, compactedSessions\)/)
+  assert.match(assistantChatDrawSource, /const compactedSessions = compactAssistantSessionsForStorage\(drawSessions\)[\s\S]*?compactedSessions\.map\(\(session\) => \(\{/)
 })
 
 test('cli new session keeps an empty draft instead of auto hydrating the latest project session', () => {
@@ -92,10 +135,14 @@ test('slash plan command enables plan mode instead of direct command passthrough
 test('cli log tools are rendered in the log header without the old tool-call label', () => {
   assert.doesNotMatch(appSource, /实际工具调用/)
   assert.match(assistantSupportSource, /formatCliLogRunTitle\(\{[\s\S]*?eventCount: item\.events\.length[\s\S]*?diagnosticCount: eventTotals\.diagnosticCount/)
-  assert.match(assistantSupportSource, /<span className='message-role'>\{logStatus\.tone === 'error' \? '运行异常' : 'AI 执行过程'\}<\/span>[\s\S]*?<strong>\{logRunTitle\}<\/strong>/)
+  assert.match(assistantSupportSource, /<span className='message-role'>\{logStatus\.tone === 'error' \? '运行异常' : 'AI 执行过程'\}<\/span>[\s\S]*?<div className='cli-log-title-inline-tags'>[\s\S]*?<strong>\{logRunTitle\}<\/strong>/)
   assert.doesNotMatch(assistantSupportSource, /已执行 \$\{item\.events\.length\} 步/)
-  assert.match(assistantSupportSource, /<div className='cli-log-header-tools'>[\s\S]*?executedToolNames\.map/)
+  assert.match(assistantSupportSource, /const headerExtensionTags = item\.selectedExtensions \|\| \[\]/)
+  assert.match(assistantSupportSource, /headerExtensionTags\.map\(\(extension\) =>/)
+  assert.match(assistantSupportSource, /executedToolNames\.map/)
   assert.match(assistantSupportSource, /<strong>\{formatCliToolDisplayName\(itemName\)\}<\/strong>/)
+  assert.match(assistantWorkspaceSource, /selectedExtensions\?: CliSessionMessage\['selectedExtensions'\][\s\S]*?events: CliTimelineLogEvent\[\]/)
+  assert.match(assistantWorkspaceSource, /selectedExtensions: item\.selectedExtensions/)
 })
 
 test('cli log entries remove the outer bubble surface and spacing authority', () => {
@@ -197,11 +244,11 @@ test('aichat usage summary uses readable Chinese labels without placeholder moji
 test('professional client and cli transcript skin uses restrained timeline and terminal surfaces', () => {
   assert.match(polishStylesSource, /\/\* Final professional client shell and CLI transcript skin\. \*\//)
   assert.match(polishStylesSource, /--bg:\s*#eef1f4 !important/)
-  assert.match(polishStylesSource, /--accent:\s*#4f6f7a !important/)
-  assert.match(polishStylesSource, /:root\[data-theme='dark'\]\s*\{[\s\S]*?--bg:\s*#222831 !important[\s\S]*?--accent:\s*#9caab6 !important/)
+  assert.match(polishStylesSource, /--accent:\s*#287c8e !important/)
+  assert.match(polishStylesSource, /:root\[data-theme='dark'\]\s*\{[\s\S]*?--bg:\s*#222831 !important[\s\S]*?--accent:\s*#78c7d8 !important/)
   assert.match(polishStylesSource, /\.cli-page \.cli-log-entry\s*\{[\s\S]*?padding-left:\s*18px !important[\s\S]*?border-left:\s*1px solid/)
   assert.match(polishStylesSource, /\.cli-page \.cli-log-time-dot,[\s\S]*?\.cli-page \.cli-log-event-dot,[\s\S]*?\.cli-page \.cli-log-child-dot\s*\{[\s\S]*?background:\s*var\(--accent\) !important/)
-  assert.match(polishStylesSource, /\.cli-page \.cli-log-detail-window,[\s\S]*?\.cli-page \.inline-file-preview-content\s*\{[\s\S]*?background:\s*#2b3038 !important[\s\S]*?font-family:\s*var\(--font-mono\) !important/)
+  assert.match(polishStylesSource, /:root\[data-theme='dark'\] \.desktop-window-shell \.cli-page \.cli-log-detail-window,[\s\S]*?:root\[data-theme='dark'\] \.desktop-window-shell \.cli-page \.inline-file-preview-content\s*\{[\s\S]*?background:\s*#2b3038 !important[\s\S]*?font-family:\s*var\(--font-mono\) !important/)
   assert.match(polishStylesSource, /\.cli-page \.message-bubble\.assistant\s*\{[\s\S]*?padding:\s*2px 4px 4px !important[\s\S]*?background:\s*transparent !important/)
   assert.match(polishStylesSource, /\.cli-page \.cli-log-header-tools \.message-extension-chip\.subtle\s*\{[\s\S]*?border-radius:\s*999px !important[\s\S]*?background:\s*transparent !important/)
   assert.match(polishStylesSource, /\.cli-page \.reasoning-card\s*\{[\s\S]*?padding-left:\s*18px !important[\s\S]*?background:\s*transparent !important/)
@@ -211,6 +258,46 @@ test('professional client and cli transcript skin uses restrained timeline and t
   assert.match(polishStylesSource, /\.cli-page \.cli-log-detail-window,[\s\S]*?\.cli-page \.inline-file-preview-content\s*\{[\s\S]*?box-sizing:\s*border-box !important[\s\S]*?max-width:\s*100% !important/)
   assert.match(polishStylesSource, /\.cli-page \.cli-log-header-tools \.message-extension-chip\.subtle,[\s\S]*?\.cli-page \.cli-log-header-tools \.message-extension-chip strong\s*\{[\s\S]*?white-space:\s*nowrap !important/)
   assert.match(polishStylesSource, /@media \(max-width: 640px\)\s*\{[\s\S]*?\.cli-page \.cli-log-card-head\s*\{[\s\S]*?flex-direction:\s*column !important[\s\S]*?\.cli-page \.cli-log-header-tools\s*\{[\s\S]*?flex-wrap:\s*wrap !important/)
+})
+
+test('light mode cli code surfaces stay light while dark mode keeps terminal contrast', () => {
+  assert.match(polishStylesSource, /:root:not\(\[data-theme='dark'\]\) \.desktop-window-shell \.cli-page \.cli-log-detail-window,[\s\S]*?:root:not\(\[data-theme='dark'\]\) \.desktop-window-shell \.cli-page \.inline-file-preview-content\s*\{[\s\S]*?background:\s*color-mix\(in srgb, var\(--surface-strong\) 74%, white\) !important[\s\S]*?color:\s*var\(--text-primary\) !important/)
+  assert.match(polishStylesSource, /:root\[data-theme='dark'\] \.desktop-window-shell \.cli-page \.cli-log-detail-window,[\s\S]*?:root\[data-theme='dark'\] \.desktop-window-shell \.cli-page \.inline-file-preview-content\s*\{[\s\S]*?background:\s*#2b3038 !important[\s\S]*?color:\s*#d7dde5 !important/)
+  assert.doesNotMatch(polishStylesSource, /\.desktop-window-shell \.cli-page \.cli-log-detail-window,[\s\S]*?:root\[data-theme='dark'\] \.desktop-window-shell \.cli-page \.cli-log-detail-window,[\s\S]*?background:\s*#2b3038 !important/)
+})
+
+test('cli execution tool tags sit beside the process title instead of floating right', () => {
+  assert.match(polishStylesSource, /\.cli-page \.cli-log-card-head\s*\{[\s\S]*?flex-wrap:\s*wrap !important[\s\S]*?justify-content:\s*flex-start !important/)
+  assert.match(polishStylesSource, /\.cli-page \.cli-log-header-tools\s*\{[\s\S]*?justify-content:\s*flex-start !important[\s\S]*?max-width:\s*none !important[\s\S]*?padding-top:\s*0 !important/)
+  assert.doesNotMatch(polishStylesSource, /\.cli-page \.cli-log-header-tools\s*\{[\s\S]*?justify-content:\s*flex-end !important/)
+})
+
+test('cli execution log dots are type colored and only expandable rows render toggles', () => {
+  assert.match(assistantSupportSource, /hasExpandableContent \? \([\s\S]*?<button[\s\S]*?className='cli-log-event-dot-button'[\s\S]*?<span className='cli-log-event-dot' \/>/)
+  assert.match(assistantSupportSource, /: \(\s*<span className='cli-log-event-dot-spacer' aria-hidden='true' \/>/)
+  assert.doesNotMatch(assistantSupportSource, /cli-log-event-dot static/)
+  assert.match(polishStylesSource, /\.cli-page \.cli-log-event-row\.command \.cli-log-event-dot\s*\{[\s\S]*?background:\s*color-mix\(in srgb, var\(--accent\) 92%, white\) !important/)
+  assert.match(polishStylesSource, /\.cli-page \.cli-log-event-row\.tool \.cli-log-event-dot\s*\{[\s\S]*?background:\s*color-mix\(in srgb, var\(--warning\) 82%, var\(--accent\)\) !important/)
+  assert.match(polishStylesSource, /\.cli-page \.cli-log-event-row\.stdout \.cli-log-event-dot,[\s\S]*?\.cli-page \.cli-log-event-row\.result \.cli-log-event-dot\s*\{[\s\S]*?background:\s*color-mix\(in srgb, var\(--success\) 86%, var\(--accent\)\) !important/)
+  assert.match(polishStylesSource, /\.cli-page \.cli-log-event-row\.stderr \.cli-log-event-dot,[\s\S]*?\.cli-page \.cli-log-event-row\.error \.cli-log-event-dot\s*\{[\s\S]*?background:\s*var\(--danger\) !important/)
+})
+
+test('cli execution previews are capped to fifteen lines and file diffs show red green stats', () => {
+  assert.match(assistantSupportSource, /const preview = buildCliFileChangePreview\(\{[\s\S]*?path: file\.path[\s\S]*?diff: file\.diff/)
+  assert.match(assistantSupportSource, /className=\{`inline-file-preview-line \$\{line\.type\}`\}/)
+  assert.match(assistantSupportSource, /<span className='inline-file-preview-stats'>\{\`增 \+\$\{preview\.added\} · 删 -\$\{preview\.deleted\}\`\}<\/span>/)
+  assert.match(polishStylesSource, /\.cli-page \.cli-log-detail-window,[\s\S]*?\.cli-page \.inline-file-preview-content\s*\{[\s\S]*?max-height:\s*calc\(1\.65em \* 15 \+ 24px\) !important[\s\S]*?overflow-y:\s*auto !important/)
+  assert.match(polishStylesSource, /\.cli-page \.inline-file-preview\s*\{[\s\S]*?max-height:\s*none !important[\s\S]*?overflow:\s*visible !important/)
+  assert.match(polishStylesSource, /\.inline-file-preview-line\.add\s*\{[\s\S]*?background:\s*color-mix\(in srgb, var\(--success\) 18%, transparent\) !important/)
+  assert.match(polishStylesSource, /\.inline-file-preview-line\.delete\s*\{[\s\S]*?background:\s*color-mix\(in srgb, var\(--danger\) 18%, transparent\) !important/)
+})
+
+test('final selected labels use richer saturation without opaque blocks', () => {
+  assert.match(polishStylesSource, /\/\* Final selected label saturation authority\. \*\//)
+  assert.match(polishStylesSource, /\.side-nav-item\.active,[\s\S]*?\.conversation-item\.selected\s*\{[\s\S]*?background:\s*color-mix\(in srgb, var\(--accent\) 16%, var\(--surface-strong\)\) !important[\s\S]*?color:\s*var\(--accent-strong\) !important/)
+  assert.match(polishStylesSource, /\.picker-menu \.picker-option\.active,[\s\S]*?\.cli-extension-menu \.cli-extension-card\.selected\s*\{[\s\S]*?background:\s*color-mix\(in srgb, var\(--accent\) 15%, var\(--panel-strong\)\) !important[\s\S]*?border-color:\s*color-mix\(in srgb, var\(--accent\) 42%, transparent\) !important/)
+  assert.match(polishStylesSource, /\.badge,[\s\S]*?\.composer-token-chip\s*\{[\s\S]*?background:\s*color-mix\(in srgb, var\(--accent\) 11%, var\(--surface-strong\)\) !important[\s\S]*?color:\s*var\(--accent-strong\) !important/)
+  assert.match(polishStylesSource, /\.cli-page \.cli-log-header-tools \.message-extension-chip\.subtle,[\s\S]*?\.cli-page \.cli-log-overview-strip span\s*\{[\s\S]*?background:\s*color-mix\(in srgb, var\(--accent\) 12%, transparent\) !important[\s\S]*?color:\s*var\(--accent-strong\) !important/)
 })
 
 test('professional cli transcript final authority beats older dark theme detail surfaces', () => {
@@ -290,10 +377,30 @@ test('desktop bridge supports explicit alipay checkout from the in-app payment d
   assert.match(accountWorkspaceSource, /await getDesktopBridge\(\)\?\.openExternal\(payUrl\)/)
 })
 
+test('desktop bridge supports opening an exact file with the system handler', () => {
+  assert.match(electronPreloadSource, /openFile: \(targetPath: string\) =>[\s\S]*?ipcRenderer\.invoke\('desktop:open-file', targetPath\)/)
+  assert.match(electronMainSource, /ipcMain\.handle\('desktop:open-file'[\s\S]*?resolveOpenFileTarget\(targetPath\)/)
+  assert.match(assistantSupportSource, /export async function openDesktopFile\(targetPath: string\)/)
+  assert.match(appSource, /openDesktopFile\(normalized\)/)
+})
+
+test('cli file chips expose right click file actions', () => {
+  assert.match(assistantSupportSource, /onFileContextMenu\?: \(event: MouseEvent<HTMLButtonElement>, path: string\) => void/)
+  assert.match(assistantSupportSource, /onContextMenu=\{\(event\) => onFileContextMenu\?\.\(event, item\.path\)\}/)
+  assert.match(appSource, /function showLocalFileContextMenu\(event: MouseEvent<HTMLElement>, targetPath: string\)/)
+  assert.match(appSource, /label: '系统打开'[\s\S]*?openDesktopFile\(normalized\)/)
+  assert.match(appSource, /label: '打开文件夹'[\s\S]*?openDesktopFolder\(normalized, true\)/)
+})
+
 test('aichat history panels and ready environment notices use final transparent surfaces', () => {
   assert.match(polishStylesSource, /\.chat-history-panel,[\s\S]*?\.cli-history-panel\s*\{[\s\S]*?background:\s*rgba\(255, 255, 255, 0\.35\) !important/)
   assert.match(polishStylesSource, /:root\[data-theme='dark'\] \.chat-history-panel,[\s\S]*?:root\[data-theme='dark'\] \.cli-history-panel\s*\{[\s\S]*?background:\s*rgba\(0, 0, 0, 0\.35\) !important/)
   assert.match(polishStylesSource, /\.inline-settings-card \.inline-notice\.success\s*\{[\s\S]*?padding:\s*0 !important[\s\S]*?background:\s*transparent !important/)
+})
+
+test('login modal form fields do not sit on a separate white panel', () => {
+  assert.match(polishStylesSource, /\/\* Final login modal form authority: keep auth fields on the modal background/)
+  assert.match(polishStylesSource, /\.login-modal-card \.login-card \.subform,[\s\S]*?:root\[data-theme='dark'\] \.login-modal-card \.login-card \.verification-inline-fields\s*\{[\s\S]*?background:\s*transparent !important[\s\S]*?background-image:\s*none !important[\s\S]*?box-shadow:\s*none !important/)
 })
 
 test('client background images use the packaged light and dark jpg assets with cache busting', () => {
@@ -316,10 +423,6 @@ test('context menus and side navigation use restrained radius', () => {
 })
 
 test('chat model picker uses the same fixed popup width calculation as other model menus', () => {
-  const assistantChatDrawSource = readFileSync(
-    resolve(dirname(fileURLToPath(import.meta.url)), '..', 'features', 'assistants', 'AssistantChatDrawWorkspaces.tsx'),
-    'utf8'
-  )
   assert.match(
     assistantChatDrawSource,
     /const chatModelMenuWidthStyle = useMemo\([\s\S]*?createPickerMenuWidthStyle\([\s\S]*?\{ min: 320, max: 420, padding: 96, itemCount: chatModeModels\.length, rowHeight: 42, maxListHeight: 260 \}/

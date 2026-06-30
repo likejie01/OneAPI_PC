@@ -1,4 +1,17 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import {
+  Children,
+  cloneElement,
+  isValidElement,
+  lazy,
+  Suspense,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type ReactElement,
+  type ReactNode,
+} from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Copy } from 'lucide-react'
@@ -9,6 +22,7 @@ import {
 } from '../lib/markdown-code'
 import { extractMessageLinkChips } from '../lib/message-links'
 import { resolveSelectionContextMenuText } from '../lib/context-menu'
+import { appendMarkdownLinkSuffix, resolveMarkdownLinkTarget, splitBareFilePathLinks, type BareFilePathPart } from '../lib/file-links'
 
 const MermaidDiagramLazy = lazy(async () => {
   const module = await import('./MermaidDiagram')
@@ -19,15 +33,138 @@ interface MarkdownMessageContentProps {
   content: string
   onOpenLocalPath: (targetPath: string) => void | Promise<void>
   onOpenExternal: (targetUrl: string) => void | Promise<void>
+  onLocalPathContextMenu?: (event: ReactMouseEvent<HTMLElement>, targetPath: string) => void
   onSelectionContextMenu?: (event: ReactMouseEvent<HTMLDivElement>, selectedText: string) => void
+  localPathBase?: string
   renderMermaid?: boolean
 }
 
+interface MarkdownTextLinkOptions {
+  localPathBase?: string
+  onOpenLocalPath: (targetPath: string) => void | Promise<void>
+  onLocalPathContextMenu?: (event: ReactMouseEvent<HTMLElement>, targetPath: string) => void
+}
+
+function renderLocalPathLink(
+  part: Extract<BareFilePathPart, { kind: 'local' }>,
+  key: string,
+  options: MarkdownTextLinkOptions,
+) {
+  return (
+    <button
+      key={key}
+      type='button'
+      className='markdown-inline-link'
+      onClick={() => void options.onOpenLocalPath(part.path)}
+      onContextMenu={(event) => {
+        if (!options.onLocalPathContextMenu) {
+          return
+        }
+        event.preventDefault()
+        event.stopPropagation()
+        options.onLocalPathContextMenu(event, part.path)
+      }}
+    >
+      {part.text}
+    </button>
+  )
+}
+
+function linkifyMarkdownText(text: string, options: MarkdownTextLinkOptions) {
+  const parts = splitBareFilePathLinks(text, options.localPathBase)
+  if (parts.length === 1 && parts[0]?.kind === 'text') {
+    return text
+  }
+  return parts.map((part, index) => (
+    part.kind === 'local'
+      ? renderLocalPathLink(part, `local-path:${index}:${part.text}`, options)
+      : part.text
+  ))
+}
+
+function linkifyMarkdownTextChildren(children: ReactNode, options: MarkdownTextLinkOptions): ReactNode {
+  return Children.map(children, (child) => {
+    if (typeof child === 'string') {
+      const text = child
+      return linkifyMarkdownText(text, options)
+    }
+
+    if (!isValidElement(child)) {
+      return child
+    }
+
+    if (typeof child.type === 'string' && ['a', 'button', 'code', 'pre'].includes(child.type)) {
+      return child
+    }
+
+    const element = child as ReactElement<{ children?: ReactNode }>
+    if (!element.props.children) {
+      return child
+    }
+
+    return cloneElement(element, {
+      children: linkifyMarkdownTextChildren(element.props.children, options),
+    })
+  })
+}
+
+function flattenTextChildren(children: ReactNode): string[] {
+  const parts: string[] = []
+  Children.forEach(children, (child) => {
+    if (typeof child === 'string') {
+      parts.push(child)
+      return
+    }
+    if (typeof child === 'number') {
+      parts.push(String(child))
+      return
+    }
+    if (isValidElement(child)) {
+      parts.push(...flattenTextChildren((child as ReactElement<{ children?: ReactNode }>).props.children))
+    }
+  })
+  return parts
+}
+
+function removeConsumedLinkSuffix(children: ReactNode, consumedChildren: string[]) {
+  if (!consumedChildren.length) {
+    return children
+  }
+  let remaining = consumedChildren.join('')
+  return Children.map(children, (child) => {
+    if (!remaining) {
+      return child
+    }
+    if (typeof child !== 'string') {
+      return child
+    }
+    if (!remaining || !child.startsWith(remaining)) {
+      return child
+    }
+    const nextChild = child.slice(remaining.length)
+    remaining = ''
+    return nextChild
+  })
+}
+
 export function MarkdownMessageContent(props: MarkdownMessageContentProps) {
-  const { content, onOpenExternal, onOpenLocalPath, onSelectionContextMenu, renderMermaid = true } = props
+  const {
+    content,
+    localPathBase,
+    onLocalPathContextMenu,
+    onOpenExternal,
+    onOpenLocalPath,
+    onSelectionContextMenu,
+    renderMermaid = true,
+  } = props
   const [copiedCode, setCopiedCode] = useState<string | null>(null)
   const extractedContent = useMemo(() => extractMessageLinkChips(content), [content])
   const rootRef = useRef<HTMLDivElement | null>(null)
+  const markdownTextLinkOptions = useMemo<MarkdownTextLinkOptions>(() => ({
+    localPathBase,
+    onLocalPathContextMenu,
+    onOpenLocalPath,
+  }), [localPathBase, onLocalPathContextMenu, onOpenLocalPath])
 
   useEffect(() => {
     if (!copiedCode) {
@@ -57,37 +194,62 @@ export function MarkdownMessageContent(props: MarkdownMessageContentProps) {
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
           components={{
+            p: ({ children }) => (
+              <p>{linkifyMarkdownTextChildren(children, markdownTextLinkOptions)}</p>
+            ),
+            li: ({ children, ...rest }) => (
+              <li {...rest}>{linkifyMarkdownTextChildren(children, markdownTextLinkOptions)}</li>
+            ),
+            td: ({ children, ...rest }) => (
+              <td {...rest}>{linkifyMarkdownTextChildren(children, markdownTextLinkOptions)}</td>
+            ),
+            th: ({ children, ...rest }) => (
+              <th {...rest}>{linkifyMarkdownTextChildren(children, markdownTextLinkOptions)}</th>
+            ),
+            blockquote: ({ children, ...rest }) => (
+              <blockquote {...rest}>{linkifyMarkdownTextChildren(children, markdownTextLinkOptions)}</blockquote>
+            ),
             a: ({ href, children }) => {
               const target = href || ''
-              const isLocalPath =
-                /^file:\/\//i.test(target) ||
-                /^[A-Za-z]:[\\/]/.test(target) ||
-                /^\/(Users|home|var|private|Volumes)\//.test(target)
+              const suffixFixedTarget = appendMarkdownLinkSuffix(target, flattenTextChildren(children))
+              const resolvedTarget = resolveMarkdownLinkTarget(suffixFixedTarget.href, localPathBase)
+              const renderedChildren = removeConsumedLinkSuffix(children, suffixFixedTarget.consumedChildren)
 
-              if (isLocalPath) {
-                const resolved = target.replace(/^file:\/\/\/?/i, '')
+              if (resolvedTarget.kind === 'local') {
                 return (
                   <button
                     type='button'
                     className='markdown-inline-link'
-                    onClick={() => void onOpenLocalPath(decodeURIComponent(resolved))}
+                    onClick={() => void onOpenLocalPath(resolvedTarget.path)}
+                    onContextMenu={(event) => {
+                      if (!onLocalPathContextMenu) {
+                        return
+                      }
+                      event.preventDefault()
+                      event.stopPropagation()
+                      onLocalPathContextMenu(event, resolvedTarget.path)
+                    }}
                   >
-                    {children}
+                    {renderedChildren}
                   </button>
                 )
               }
 
+              if (resolvedTarget.kind === 'ignored') {
+                return <span>{renderedChildren}</span>
+              }
+
               return (
                 <a
-                  href={target}
+                  href={resolvedTarget.url}
                   target='_blank'
                   rel='noreferrer'
                   onClick={(event) => {
                     event.preventDefault()
-                    void onOpenExternal(target)
+                    void onOpenExternal(resolvedTarget.url)
                   }}
                 >
-                  {children}
+                  {renderedChildren}
                 </a>
               )
             },

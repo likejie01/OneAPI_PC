@@ -2697,16 +2697,16 @@ body:has(.cli-extension-floating-tooltip)::after {
   --line-strong: rgba(33, 45, 58, 0.18) !important;
   --border-subtle: rgba(33, 45, 58, 0.1) !important;
   --border-strong: rgba(33, 45, 58, 0.18) !important;
-  --accent: #4f6f7a !important;
-  --accent-rgb: 79 111 122 !important;
-  --accent-soft: rgba(79, 111, 122, 0.12) !important;
-  --accent-softer: rgba(79, 111, 122, 0.07) !important;
-  --accent-strong: #344d59 !important;
-  --accent-2: #6f7f8f !important;
-  --success: #507765 !important;
-  --warning: #9a7a44 !important;
-  --warn: #9a7a44 !important;
-  --danger: #9b665c !important;
+  --accent: #287c8e !important;
+  --accent-rgb: 40 124 142 !important;
+  --accent-soft: rgba(40, 124, 142, 0.16) !important;
+  --accent-softer: rgba(40, 124, 142, 0.09) !important;
+  --accent-strong: #176b7b !important;
+  --accent-2: #b5873f !important;
+  --success: #2f8f6a !important;
+  --warning: #b7791f !important;
+  --warn: #b7791f !important;
+  --danger: #b45c52 !important;
   --bubble-user: rgba(255, 255, 255, 0.92) !important;
   --bubble-ai: transparent !important;
   --bubble-log: transparent !important;
@@ -2745,16 +2745,16 @@ body:has(.cli-extension-floating-tooltip)::after {
   --line-strong: rgba(214, 224, 235, 0.18) !important;
   --border-subtle: rgba(214, 224, 235, 0.1) !important;
   --border-strong: rgba(214, 224, 235, 0.18) !important;
-  --accent: #9caab6 !important;
-  --accent-rgb: 156 170 182 !important;
-  --accent-soft: rgba(156, 170, 182, 0.14) !important;
-  --accent-softer: rgba(156, 170, 182, 0.08) !important;
-  --accent-strong: #c3ccd5 !important;
-  --accent-2: #b5a37f !important;
-  --success: #9eb8aa !important;
-  --warning: #c5ad7a !important;
-  --warn: #c5ad7a !important;
-  --danger: #d19a90 !important;
+  --accent: #78c7d8 !important;
+  --accent-rgb: 120 199 216 !important;
+  --accent-soft: rgba(120, 199, 216, 0.18) !important;
+  --accent-softer: rgba(120, 199, 216, 0.1) !important;
+  --accent-strong: #a2dfec !important;
+  --accent-2: #d9b66e !important;
+  --success: #82d8ab !important;
+  --warning: #e0bd63 !important;
+  --warn: #e0bd63 !important;
+  --danger: #e6958b !important;
   --bubble-user: rgba(53, 61, 74, 0.82) !important;
   --bubble-ai: transparent !important;
   --bubble-log: transparent !important;
@@ -2948,10 +2948,49 @@ textarea {
   box-shadow: none !important;
 }
 
-.cli-page .cli-log-event-row.command .cli-log-event-dot,
-.cli-page .cli-log-event-row.tool .cli-log-event-dot,
+.cli-page .cli-log-event-dot-button {
+  width: 14px !important;
+  height: 24px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  display: inline-flex !important;
+  align-items: flex-start !important;
+  justify-content: center !important;
+  cursor: pointer !important;
+}
+
+.cli-page .cli-log-event-dot-button:hover .cli-log-event-dot,
+.cli-page .cli-log-event-dot-button:focus-visible .cli-log-event-dot {
+  transform: scale(1.2) !important;
+  opacity: 1 !important;
+}
+
+.cli-page .cli-log-event-dot-spacer {
+  width: 14px !important;
+  height: 24px !important;
+  display: block !important;
+}
+
+.cli-page .cli-log-event-row.command .cli-log-event-dot {
+  background: color-mix(in srgb, var(--accent) 92%, white) !important;
+  opacity: 0.92 !important;
+}
+
+.cli-page .cli-log-event-row.tool .cli-log-event-dot {
+  background: color-mix(in srgb, var(--warning) 82%, var(--accent)) !important;
+  opacity: 0.9 !important;
+}
+
 .cli-page .cli-log-event-row.intent .cli-log-event-dot {
-  opacity: 0.82 !important;
+  background: color-mix(in srgb, var(--warning) 82%, var(--accent)) !important;
+  opacity: 0.9 !important;
+}
+
+.cli-page .cli-log-event-row.stdout .cli-log-event-dot,
+.cli-page .cli-log-event-row.result .cli-log-event-dot {
+  background: color-mix(in srgb, var(--success) 86%, var(--accent)) !important;
+  opacity: 0.9 !important;
 }
 
 .cli-page .cli-log-event-row.stderr .cli-log-event-dot,
@@ -2968,20 +3007,112 @@ textarea {
 .cli-page .inline-file-preview-content {
   margin: 4px 0 2px !important;
   padding: 12px 14px !important;
-  border: 1px solid rgba(255, 255, 255, 0.06) !important;
+  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent) !important;
   border-radius: 8px !important;
-  background: #2b3038 !important;
-  color: #d7dde5 !important;
+  background: color-mix(in srgb, var(--surface-strong) 74%, white) !important;
+  color: var(--text-primary) !important;
   font-family: var(--font-mono) !important;
   font-size: 12px !important;
   line-height: 1.65 !important;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035) !important;
+  max-height: calc(1.65em * 15 + 24px) !important;
+  overflow-y: auto !important;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.54) !important;
+}
+
+.cli-page .inline-file-preview {
+  max-height: none !important;
+  overflow: visible !important;
 }
 
 .cli-page .cli-log-detail-window.code-like,
 .cli-page .cli-log-detail-window.compact.code-like {
-  color: #d7dde5 !important;
+  color: var(--text-primary) !important;
+  background: color-mix(in srgb, var(--surface-strong) 74%, white) !important;
+}
+
+:root[data-theme='dark'] .cli-page .cli-log-detail-window,
+:root[data-theme='dark'] .cli-page .cli-log-detail-window.compact,
+:root[data-theme='dark'] .cli-page .timeline-code,
+:root[data-theme='dark'] .cli-page .timeline-detail,
+:root[data-theme='dark'] .cli-page .inline-file-preview,
+:root[data-theme='dark'] .cli-page .inline-file-preview-content,
+:root[data-theme='dark'] .cli-page .cli-log-detail-window.code-like,
+:root[data-theme='dark'] .cli-page .cli-log-detail-window.compact.code-like {
+  border-color: rgba(255, 255, 255, 0.06) !important;
   background: #2b3038 !important;
+  background-color: #2b3038 !important;
+  color: #d7dde5 !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035) !important;
+}
+
+.inline-file-preview-head {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  margin-bottom: 8px !important;
+  min-width: 0 !important;
+}
+
+.inline-file-preview-path {
+  min-width: 0 !important;
+  margin-bottom: 0 !important;
+  color: var(--text-primary) !important;
+}
+
+.inline-file-preview-stats {
+  flex: 0 0 auto !important;
+  color: var(--text-tertiary) !important;
+  font-size: 11px !important;
+  font-family: var(--font-mono) !important;
+}
+
+.inline-file-preview-content.diff {
+  display: block !important;
+  padding: 0 !important;
+  overflow: auto !important;
+}
+
+.inline-file-preview-line {
+  display: grid !important;
+  grid-template-columns: 48px minmax(0, 1fr) !important;
+  gap: 10px !important;
+  min-height: 20px !important;
+  padding: 1px 10px 1px 0 !important;
+  color: var(--text-secondary) !important;
+  font-family: var(--font-mono) !important;
+  white-space: pre !important;
+}
+
+.inline-file-preview-line-number {
+  padding-left: 10px !important;
+  color: var(--text-tertiary) !important;
+  text-align: right !important;
+  user-select: none !important;
+}
+
+.inline-file-preview-line code {
+  color: inherit !important;
+  background: transparent !important;
+  white-space: pre !important;
+}
+
+.inline-file-preview-line.add {
+  background: color-mix(in srgb, var(--success) 18%, transparent) !important;
+  color: color-mix(in srgb, var(--success) 55%, var(--text-primary)) !important;
+}
+
+.inline-file-preview-line.delete {
+  background: color-mix(in srgb, var(--danger) 18%, transparent) !important;
+  color: color-mix(in srgb, var(--danger) 60%, var(--text-primary)) !important;
+}
+
+.inline-file-preview-line.hunk {
+  background: color-mix(in srgb, var(--accent) 12%, transparent) !important;
+  color: var(--accent-strong) !important;
+}
+
+.inline-file-preview-line.meta {
+  color: var(--text-tertiary) !important;
 }
 
 .cli-page .message-bubble.assistant {
@@ -3083,12 +3214,6 @@ textarea {
   box-shadow: 0 0 0 3px rgb(var(--bg-rgb) / 1) !important;
 }
 
-.desktop-window-shell .cli-page .cli-log-detail-window,
-.desktop-window-shell .cli-page .cli-log-detail-window.compact,
-.desktop-window-shell .cli-page .timeline-code,
-.desktop-window-shell .cli-page .timeline-detail,
-.desktop-window-shell .cli-page .inline-file-preview,
-.desktop-window-shell .cli-page .inline-file-preview-content,
 :root[data-theme='dark'] .desktop-window-shell .cli-page .cli-log-detail-window,
 :root[data-theme='dark'] .desktop-window-shell .cli-page .cli-log-detail-window.compact,
 :root[data-theme='dark'] .desktop-window-shell .cli-page .timeline-code,
@@ -3104,17 +3229,35 @@ textarea {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035) !important;
 }
 
+:root:not([data-theme='dark']) .desktop-window-shell .cli-page .cli-log-detail-window,
+:root:not([data-theme='dark']) .desktop-window-shell .cli-page .cli-log-detail-window.compact,
+:root:not([data-theme='dark']) .desktop-window-shell .cli-page .timeline-code,
+:root:not([data-theme='dark']) .desktop-window-shell .cli-page .timeline-detail,
+:root:not([data-theme='dark']) .desktop-window-shell .cli-page .inline-file-preview,
+:root:not([data-theme='dark']) .desktop-window-shell .cli-page .inline-file-preview-content {
+  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent) !important;
+  background: color-mix(in srgb, var(--surface-strong) 74%, white) !important;
+  background-color: color-mix(in srgb, var(--surface-strong) 74%, white) !important;
+  background-image: none !important;
+  color: var(--text-primary) !important;
+  font-family: var(--font-mono) !important;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.54) !important;
+}
+
 /* Final AIChat process narrative pass. */
 .cli-page .cli-log-card-head {
   align-items: flex-start !important;
+  flex-wrap: wrap !important;
+  justify-content: flex-start !important;
   margin: 0 0 10px !important;
   padding: 0 !important;
 }
 
 .cli-page .cli-log-card-title {
-  flex-direction: column !important;
-  align-items: flex-start !important;
-  gap: 2px !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  flex-wrap: wrap !important;
+  gap: 4px 6px !important;
 }
 
 .cli-page .cli-log-card-title .message-role {
@@ -3129,14 +3272,32 @@ textarea {
   line-height: 1.55 !important;
 }
 
-.cli-page .cli-log-header-tools {
-  justify-content: flex-end !important;
+.cli-page .cli-log-title-inline-tags {
+  display: inline-flex !important;
+  align-items: center !important;
+  flex-wrap: wrap !important;
   gap: 4px !important;
-  max-width: min(42%, 360px) !important;
-  padding-top: 2px !important;
+  max-width: none !important;
+}
+
+.cli-page .cli-log-header-tools {
+  justify-content: flex-start !important;
+  gap: 4px !important;
+  max-width: none !important;
+  padding-top: 0 !important;
 }
 
 .cli-page .cli-log-header-tools .message-extension-chip.subtle {
+  min-height: 22px !important;
+  padding: 2px 7px !important;
+  border-radius: 999px !important;
+  border-color: color-mix(in srgb, var(--accent) 18%, transparent) !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: var(--text-secondary) !important;
+}
+
+.cli-page .cli-log-title-inline-tags .message-extension-chip.subtle {
   min-height: 22px !important;
   padding: 2px 7px !important;
   border-radius: 999px !important;
@@ -3150,7 +3311,18 @@ textarea {
   display: none !important;
 }
 
+.cli-page .cli-log-title-inline-tags .message-extension-kind {
+  display: none !important;
+}
+
 .cli-page .cli-log-header-tools .message-extension-chip strong {
+  color: var(--text-tertiary) !important;
+  font-size: 11px !important;
+  font-weight: 520 !important;
+  line-height: 1.35 !important;
+}
+
+.cli-page .cli-log-title-inline-tags .message-extension-chip strong {
   color: var(--text-tertiary) !important;
   font-size: 11px !important;
   font-weight: 520 !important;
@@ -3216,6 +3388,103 @@ textarea {
   background-color: transparent !important;
   background-image: none !important;
   box-shadow: none !important;
+}
+
+/* Final selected label saturation authority. */
+.side-nav-item.active,
+.sidebar.collapsed .side-nav-item.active,
+.sidebar-item.active,
+.nav-item.active,
+.sidebar-item.selected,
+.conversation-item.selected {
+  background: color-mix(in srgb, var(--accent) 16%, var(--surface-strong)) !important;
+  border-color: color-mix(in srgb, var(--accent) 36%, transparent) !important;
+  color: var(--accent-strong) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent) !important;
+}
+
+.history-panel-tabs .ghost-button.tiny.selected-toggle {
+  background: color-mix(in srgb, var(--accent) 16%, var(--surface-strong)) !important;
+  color: var(--accent-strong) !important;
+  border-bottom-color: var(--accent) !important;
+  box-shadow: inset 0 -2px 0 var(--accent) !important;
+}
+
+.picker-menu .picker-option.active,
+.assistant-menu .assistant-picker-option.active,
+.image-style-menu .image-style-picker-option.active,
+.picker-menu .picker-filter-chip.active,
+.picker-filter-chip.active,
+.cli-extension-menu .cli-extension-card.selected {
+  background: color-mix(in srgb, var(--accent) 15%, var(--panel-strong)) !important;
+  background-color: color-mix(in srgb, var(--accent) 15%, var(--panel-strong)) !important;
+  border-color: color-mix(in srgb, var(--accent) 42%, transparent) !important;
+  color: var(--accent-strong) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 14%, transparent) !important;
+}
+
+.badge,
+.pill,
+.tag,
+.chip,
+.label-chip,
+.status-pill,
+.message-extension-chip,
+.composer-token-chip {
+  background: color-mix(in srgb, var(--accent) 11%, var(--surface-strong)) !important;
+  border-color: color-mix(in srgb, var(--accent) 26%, transparent) !important;
+  color: var(--accent-strong) !important;
+}
+
+.cli-page .cli-log-header-tools .message-extension-chip.subtle,
+.cli-page .cli-log-overview-strip span {
+  background: color-mix(in srgb, var(--accent) 12%, transparent) !important;
+  background-color: color-mix(in srgb, var(--accent) 12%, transparent) !important;
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent) !important;
+  color: var(--accent-strong) !important;
+}
+
+.cli-page .cli-log-header-tools .message-extension-chip strong,
+.cli-page .cli-log-overview-strip span strong {
+  color: var(--accent-strong) !important;
+}
+
+.cli-page .cli-log-status-pill {
+  background: color-mix(in srgb, var(--accent) 14%, transparent) !important;
+  color: var(--accent-strong) !important;
+}
+
+.cli-page .cli-log-status-pill.success {
+  background: color-mix(in srgb, var(--success) 18%, transparent) !important;
+  color: var(--success) !important;
+}
+
+.cli-page .cli-log-status-pill.warning {
+  background: color-mix(in srgb, var(--warning) 18%, transparent) !important;
+  color: var(--warning) !important;
+}
+
+.cli-page .cli-log-status-pill.error {
+  background: color-mix(in srgb, var(--danger) 18%, transparent) !important;
+  color: var(--danger) !important;
+}
+
+/* Final login modal form authority: keep auth fields on the modal background, not on a separate white panel. */
+.login-modal-card .login-card .subform,
+.login-modal-card .login-card .password-field,
+.login-modal-card .login-card .inline-fields,
+.login-modal-card .login-card .verification-inline-fields,
+:root[data-theme='dark'] .login-modal-card .login-card .subform,
+:root[data-theme='dark'] .login-modal-card .login-card .password-field,
+:root[data-theme='dark'] .login-modal-card .login-card .inline-fields,
+:root[data-theme='dark'] .login-modal-card .login-card .verification-inline-fields {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
 }
 
 /* Final AIChat narrow viewport authority. */

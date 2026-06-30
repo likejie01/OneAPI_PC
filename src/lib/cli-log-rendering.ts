@@ -226,6 +226,57 @@ export function shouldRenderCliLogOutputEntry(input: {
   return normalizeComparable(input.entryHeadline) !== normalizeComparable(input.groupHeadline)
 }
 
+export type CliFileChangePreviewLine = {
+  type: 'add' | 'delete' | 'context' | 'hunk' | 'meta'
+  text: string
+}
+
+export function buildCliFileChangePreview(input: {
+  path: string
+  kind: 'created' | 'modified' | 'deleted' | 'renamed' | 'unknown'
+  content?: string
+  diff?: string
+}) {
+  const fileName = basename(input.path)
+  const raw = (input.diff || input.content || '').replace(/\r\n/g, '\n')
+  const sourceLines = raw ? raw.split('\n') : []
+  let added = 0
+  let deleted = 0
+
+  const lines: CliFileChangePreviewLine[] = sourceLines.map((line) => {
+    if (line.startsWith('+++') || line.startsWith('---') || line.startsWith('diff --git') || line.startsWith('index ')) {
+      return { type: 'meta', text: line }
+    }
+    if (line.startsWith('@@')) {
+      return { type: 'hunk', text: line }
+    }
+    if (line.startsWith('+')) {
+      added += 1
+      return { type: 'add', text: line }
+    }
+    if (line.startsWith('-')) {
+      deleted += 1
+      return { type: 'delete', text: line }
+    }
+    if (!input.diff && input.content && input.kind === 'created') {
+      added += 1
+      return { type: 'add', text: line }
+    }
+    if (!input.diff && input.content && input.kind === 'deleted') {
+      deleted += 1
+      return { type: 'delete', text: line }
+    }
+    return { type: 'context', text: line }
+  })
+
+  return {
+    fileName,
+    added,
+    deleted,
+    lines,
+  }
+}
+
 export function formatCliProcessHeadline(input: {
   message: string
   kind?: string

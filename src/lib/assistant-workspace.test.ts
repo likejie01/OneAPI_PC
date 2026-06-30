@@ -6,8 +6,13 @@ import {
   buildCliAbortLogEntry,
   buildCliRecentSessions,
   buildCliTimeline,
+  compactCliSessionLogsMap,
   filterAssistantModels,
   filterModelsByVendor,
+  MAX_CLI_LOG_DETAIL_CHARS,
+  MAX_CLI_LOG_ENTRIES_PER_SESSION,
+  MAX_CLI_LOG_TEXT_CHARS,
+  MAX_CLI_LOGGED_SESSIONS,
   resolveCompatibleModel,
   resolveCliLogGroupStatus,
 } from './assistant-workspace.ts'
@@ -287,6 +292,44 @@ test('resolveCompatibleModel returns empty when no compatible model exists', () 
   )
 })
 
+test('compactCliSessionLogsMap bounds retained sessions and log payload size', () => {
+  const logsBySession: Record<string, Array<{
+    id: string
+    level: 'status' | 'error'
+    content: string
+    createdAt: number
+    detail?: string
+    command?: string
+  }>> = {}
+
+  for (let sessionIndex = 0; sessionIndex < MAX_CLI_LOGGED_SESSIONS + 4; sessionIndex += 1) {
+    const sessionId = `session-${sessionIndex}`
+    logsBySession[sessionId] = Array.from({ length: MAX_CLI_LOG_ENTRIES_PER_SESSION + 6 }, (_, logIndex) => ({
+      id: `${sessionId}-log-${logIndex}`,
+      level: 'status',
+      content: `content-${sessionIndex}-${logIndex}-${'x'.repeat(MAX_CLI_LOG_TEXT_CHARS + 20)}`,
+      detail: `detail-${'d'.repeat(MAX_CLI_LOG_DETAIL_CHARS + 20)}`,
+      command: `command-${'c'.repeat(MAX_CLI_LOG_DETAIL_CHARS + 20)}`,
+      createdAt: sessionIndex * 1000 + logIndex,
+    }))
+  }
+
+  const compacted = compactCliSessionLogsMap(logsBySession)
+  const sessionIds = Object.keys(compacted)
+
+  assert.equal(sessionIds.length, MAX_CLI_LOGGED_SESSIONS)
+  assert.ok(!sessionIds.includes('session-0'))
+  assert.ok(sessionIds.includes(`session-${MAX_CLI_LOGGED_SESSIONS + 3}`))
+
+  for (const entries of Object.values(compacted)) {
+    assert.equal(entries.length, MAX_CLI_LOG_ENTRIES_PER_SESSION)
+    assert.ok(entries.every((entry) => entry.content.length <= MAX_CLI_LOG_TEXT_CHARS))
+    assert.ok(entries.every((entry) => !entry.detail || entry.detail.length <= MAX_CLI_LOG_DETAIL_CHARS))
+    assert.ok(entries.every((entry) => !entry.command || entry.command.length <= MAX_CLI_LOG_DETAIL_CHARS))
+    assert.ok(entries.every((entry) => !entry.content.includes('x'.repeat(MAX_CLI_LOG_TEXT_CHARS + 1))))
+  }
+})
+
 test('buildCliTimeline sorts messages and logs by timestamp', () => {
   const timeline = buildCliTimeline({
     messages: [
@@ -504,6 +547,215 @@ test('buildCliTimeline collapses repeated adjacent assistant paragraphs from str
     timeline.find((item) => item.id === 'assistant-1' && item.kind === 'message')?.content,
     [repeated, '最终改用 Python 写入文件。'].join('\n\n')
   )
+})
+
+test('buildCliTimeline collapses repeated assistant sentence runs inside one paragraph', () => {
+  const repeatedSentence = '好的，文件已经成功创建了。现在让我验证一下文件是否正确创建，并查看其内容。'
+  const timeline = buildCliTimeline({
+    messages: [
+      {
+        id: 'assistant-1',
+        role: 'assistant',
+        content: `${repeatedSentence} ${repeatedSentence} ${repeatedSentence}`,
+        createdAt: 100,
+        modelLabel: 'Codex',
+        requestId: 'req-1',
+      },
+    ],
+    logs: [],
+  })
+
+  assert.equal(
+    timeline.find((item) => item.id === 'assistant-1' && item.kind === 'message')?.content,
+    repeatedSentence
+  )
+})
+
+test('buildCliTimeline splits request logs by assistant intent chunks for interleaved process flow', () => {
+  const timeline = buildCliTimeline({
+    messages: [
+      { id: 'user-1', role: 'user', content: 'build page', createdAt: 1, requestId: 'req-1' },
+      {
+        id: 'assistant-1',
+        role: 'assistant',
+        content: '我先创建文件。\n然后检查内容。\n最后总结结果。',
+        createdAt: 10,
+        modelLabel: 'Codex',
+        requestId: 'req-1',
+      },
+    ],
+    logs: [
+      {
+        id: 'log-intent-1',
+        requestId: 'req-1',
+        level: 'status',
+        logKind: 'intent',
+        sourceKind: 'intent.before_tool.Write',
+        content: '执行意图',
+        assistantChunk: '我先创建文件。',
+        createdAt: 2,
+      },
+      {
+        id: 'log-tool-1',
+        requestId: 'req-1',
+        level: 'status',
+        logKind: 'tool',
+        sourceKind: 'assistant.tool_use.Write',
+        content: '写入文件',
+        createdAt: 3,
+      },
+      {
+        id: 'log-intent-2',
+        requestId: 'req-1',
+        level: 'status',
+        logKind: 'intent',
+        sourceKind: 'intent.before_tool.Read',
+        content: '执行意图',
+        assistantChunk: '然后检查内容。',
+        createdAt: 4,
+      },
+      {
+        id: 'log-tool-2',
+        requestId: 'req-1',
+        level: 'status',
+        logKind: 'tool',
+        sourceKind: 'assistant.tool_use.Read',
+        content: '读取文件',
+        createdAt: 5,
+      },
+    ],
+  })
+
+  const logs = timeline.filter((item): item is Extract<typeof item, { kind: 'log' }> => item.kind === 'log')
+  assert.equal(logs.length, 2)
+  assert.deepEqual(logs.map((item) => item.id), ['log-intent-1', 'log-intent-2'])
+  assert.deepEqual(logs.map((item) => item.events.map((event) => event.id)), [
+    ['log-intent-1', 'log-tool-1'],
+    ['log-intent-2', 'log-tool-2'],
+  ])
+  assert.equal(
+    timeline.find((item) => item.id === 'assistant-1' && item.kind === 'message')?.content,
+    '最后总结结果。'
+  )
+})
+
+test('buildCliTimeline carries selected skills and plugins onto each request log segment', () => {
+  const timeline = buildCliTimeline({
+    messages: [
+      {
+        id: 'user-1',
+        role: 'user',
+        content: 'fix bug',
+        createdAt: 1,
+        requestId: 'req-1',
+        selectedExtensions: [
+          {
+            id: 'skill-debugging',
+            client: 'codex',
+            kind: 'skill',
+            name: 'systematic-debugging',
+            description: 'Debug systematically',
+            path: 'skills/systematic-debugging/SKILL.md',
+          },
+          {
+            id: 'plugin-browser',
+            client: 'codex',
+            kind: 'plugin',
+            name: 'browser',
+            description: 'Browser plugin',
+            path: 'plugins/browser',
+          },
+        ],
+      },
+    ],
+    logs: [
+      {
+        id: 'log-intent-1',
+        requestId: 'req-1',
+        level: 'status',
+        logKind: 'intent',
+        sourceKind: 'intent.before_tool.Read',
+        content: '读取文件',
+        assistantChunk: '我先读取文件。',
+        createdAt: 2,
+      },
+      {
+        id: 'log-intent-2',
+        requestId: 'req-1',
+        level: 'status',
+        logKind: 'intent',
+        sourceKind: 'intent.before_tool.Edit',
+        content: '修改文件',
+        assistantChunk: '然后修改文件。',
+        createdAt: 3,
+      },
+    ],
+  })
+
+  const logs = timeline.filter((item): item is Extract<typeof item, { kind: 'log' }> => item.kind === 'log')
+  assert.equal(logs.length, 2)
+  assert.deepEqual(
+    logs.map((item) => item.selectedExtensions?.map((extension) => `${extension.kind}:${extension.name}`)),
+    [
+      ['skill:systematic-debugging', 'plugin:browser'],
+      ['skill:systematic-debugging', 'plugin:browser'],
+    ],
+  )
+})
+
+test('buildCliTimeline marks earlier split log segments completed when the same request has a terminal event', () => {
+  const timeline = buildCliTimeline({
+    messages: [
+      { id: 'user-1', role: 'user', content: 'open file', createdAt: 1, requestId: 'req-1' },
+      {
+        id: 'assistant-1',
+        role: 'assistant',
+        content: '我先检查文件。\n然后打开文件。\n完成了。',
+        createdAt: 10,
+        modelLabel: 'Codex',
+        requestId: 'req-1',
+      },
+    ],
+    logs: [
+      {
+        id: 'log-intent-1',
+        requestId: 'req-1',
+        level: 'status',
+        logKind: 'intent',
+        sourceKind: 'intent.before_tool.Read',
+        content: '执行意图',
+        assistantChunk: '我先检查文件。',
+        createdAt: 2,
+      },
+      {
+        id: 'log-intent-2',
+        requestId: 'req-1',
+        level: 'status',
+        logKind: 'intent',
+        sourceKind: 'intent.before_tool.Open',
+        content: '执行意图',
+        assistantChunk: '然后打开文件。',
+        createdAt: 3,
+      },
+      {
+        id: 'log-done',
+        requestId: 'req-1',
+        level: 'status',
+        logKind: 'status',
+        sourceKind: 'turn.completed',
+        content: 'Codex 已完成本次回复。',
+        done: true,
+        createdAt: 4,
+      },
+    ],
+  })
+
+  const logs = timeline.filter((item): item is Extract<typeof item, { kind: 'log' }> => item.kind === 'log')
+  assert.equal(logs.length, 2)
+  assert.deepEqual(logs.map((item) => resolveCliLogGroupStatus(item.events, item.requestTerminalEvent)), [
+    { tone: 'success', label: '已完成' },
+    { tone: 'success', label: '已完成' },
+  ])
 })
 
 test('buildCliTimeline strips assistant intent chunks already attached to logs', () => {
