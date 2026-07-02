@@ -84,6 +84,11 @@ import {
   shouldUseWindowsCommandShimForPath,
 } from '../src/lib/desktop-service.ts'
 import {
+  DEFAULT_CLAUDE_BASE_URL,
+  DEFAULT_CODEX_BASE_URL,
+  DEFAULT_SERVER_BASE_URL,
+} from '../src/shared/official-service-node.ts'
+import {
   createMobileBridgeEventMapper,
   materializeMobileBridgeAttachments,
   normalizeMobileBridgeJob,
@@ -92,9 +97,6 @@ import {
 } from './mobile-bridge.ts'
 import { createCliServices } from './main-cli-services.ts'
 
-const DEFAULT_SERVER_BASE_URL = 'https://ai.oneapi.center'
-const DEFAULT_CODEX_BASE_URL = 'https://ai.oneapi.center/v1'
-const DEFAULT_CLAUDE_BASE_URL = 'https://ai.oneapi.center'
 const DEFAULT_CODEX_MODEL = 'gpt-5.4'
 const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-4-6'
 const MOBILE_BRIDGE_PENDING_JOB_ACTIVE_INTERVAL_MS = 1000

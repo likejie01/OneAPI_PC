@@ -22,10 +22,12 @@ import { resolveActiveDesktopApiKeySummary, resolveCliDeployModelForActiveKey, r
 import { PasswordField } from '../../components/PasswordField'
 import type { CliClient, CliDeployPreset, CliStatus, DeployProgressPayload } from '../../shared/desktop'
 import type { UserProfile } from '../../shared/contracts'
+import {
+  DEFAULT_CLAUDE_BASE_URL,
+  DEFAULT_CODEX_BASE_URL,
+  DEFAULT_SERVER_BASE_URL,
+} from '../../shared/official-service.ts'
 
-const DEFAULT_SERVER_BASE_URL = 'https://ai.oneapi.center'
-const DEFAULT_CODEX_BASE_URL = 'https://ai.oneapi.center/v1'
-const DEFAULT_CLAUDE_BASE_URL = 'https://ai.oneapi.center'
 const DEFAULT_CODEX_MODEL = 'gpt-5.4'
 const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-4-6'
 type ThemeMode = 'light' | 'dark'

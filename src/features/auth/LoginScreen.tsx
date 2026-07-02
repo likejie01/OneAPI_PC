@@ -15,8 +15,7 @@ import {
 } from '../../lib/desktop-client'
 import type { AuthStatus, UserProfile } from '../../shared/contracts'
 import { PasswordField } from '../../components/PasswordField'
-
-const DEFAULT_SERVER_BASE_URL = 'https://ai.oneapi.center'
+import { DEFAULT_SERVER_BASE_URL } from '../../shared/official-service.ts'
 
 export function LoginScreen(props: {
   platformLabel: string

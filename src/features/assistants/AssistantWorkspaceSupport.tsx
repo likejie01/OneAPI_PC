@@ -35,6 +35,11 @@ import { type PendingDrawRetryRequest } from '../../lib/draw-request'
 import { type AiChatProviderState } from '../../lib/aichat-provider'
 import type { AssistantRecord, ChatMessage, ChatModelOption } from '../../shared/contracts'
 import type { CliClient, CliExtensionEntry, CliFileChange, CliInteractionAction, CliInteractionPrompt, CliLogKind, CliSessionMessage, CliStatus } from '../../shared/desktop'
+export {
+  DEFAULT_CLAUDE_BASE_URL,
+  DEFAULT_CODEX_BASE_URL,
+  DEFAULT_SERVER_BASE_URL,
+} from '../../shared/official-service.ts'
 
 const MarkdownMessageContentLazy = lazy(async () => {
   const module = await import('../../components/MarkdownMessageContent')
@@ -598,9 +603,6 @@ export const DEFAULT_CHAT_MODEL = 'mimo-v2.5-pro'
 export const DEFAULT_DRAW_MODEL = 'gpt-image-2'
 export const DEFAULT_CODEX_MODEL = 'gpt-5.4'
 export const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-4-6'
-export const DEFAULT_SERVER_BASE_URL = 'https://ai.oneapi.center'
-export const DEFAULT_CODEX_BASE_URL = 'https://ai.oneapi.center/v1'
-export const DEFAULT_CLAUDE_BASE_URL = 'https://ai.oneapi.center'
 export const CHAT_SESSIONS_STORAGE_KEY = 'oneapi-desktop-chat-sessions'
 export const CHAT_ACTIVE_SESSION_STORAGE_KEY = 'oneapi-desktop-chat-active-session'
 export const CHAT_REASONING_STORAGE_KEY = 'oneapi-desktop-chat-reasoning'

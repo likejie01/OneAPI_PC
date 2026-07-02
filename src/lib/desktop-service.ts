@@ -1,5 +1,6 @@
 import type { ApiKeyRecord } from '../shared/contracts'
 import type { CliClient, CliStatus } from '../shared/desktop'
+import { DEFAULT_SERVER_BASE_URL } from '../shared/official-service.ts'
 
 type ApiKeyCandidate = Pick<ApiKeyRecord, 'id' | 'name' | 'status' | 'group' | 'created_time'>
 
@@ -247,7 +248,7 @@ export function sanitizeCliNpmEnvironment(
 
 function normalizeDesktopServerBaseUrl(serverBaseUrl?: string) {
   const normalized = (serverBaseUrl || '').trim().replace(/\/+$/, '')
-  return normalized || 'https://ai.oneapi.center'
+  return normalized || DEFAULT_SERVER_BASE_URL
 }
 
 function normalizeWorkspaceCliBaseUrl(client: CliClient, baseUrl?: string) {
