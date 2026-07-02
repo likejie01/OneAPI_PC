@@ -2,8 +2,6 @@
 
 [中文](#中文) | [English](#english)
 
-![OneAPI PC desktop settings](images/Snipaste_2026-06-27_18-27-25.png)
-
 ## 中文
 
 OneAPI PC 是面向 Windows 的 OneAPI 桌面客户端。它把 [ai.oneapi.center](https://ai.oneapi.center) 的账号、订阅、钱包、模型服务和 Codex / Claude 开发工作流整合到一个本地桌面应用中，让用户可以在同一个界面完成 AI 对话、绘图、CLI 项目开发、模型切换、插件/技能调用、设备互联和客户端更新。
@@ -22,15 +20,13 @@ OneAPI PC 是面向 Windows 的 OneAPI 桌面客户端。它把 [ai.oneapi.cente
 - **隐私合规**：首次登录和新建开发会话时提供安全与隐私提醒，内置协议、隐私政策和内容安全说明。
 - **自动更新**：通过桌面更新清单和发布产物支持安装包、便携包下载与版本提示。
 
-### 界面预览
+### 界面范围
 
-| 系统设置与部署 | Codex 项目日志与模型选择 |
-| --- | --- |
-| ![Settings and deployment](images/Snipaste_2026-06-27_18-27-25.png) | ![Codex workflow](images/Snipaste_2026-06-27_18-29-39.png) |
-
-| 隐私合规弹窗 |
-| --- |
-| ![Privacy compliance](images/Snipaste_2026-06-27_18-33-32.png) |
+- 系统设置与环境部署
+- AIChat / 绘图工作台
+- Codex / Claude 项目日志与模型选择
+- 钱包用量、套餐订阅、服务状态
+- 隐私合规弹窗与 App 互联
 
 ### 技术栈
 
@@ -47,7 +43,6 @@ OneAPI PC 是面向 Windows 的 OneAPI 桌面客户端。它把 [ai.oneapi.cente
 .
 ├── build/                 # 应用图标和安装器资源
 ├── electron/              # Electron 主进程源码
-├── images/                # README 与发布说明截图
 ├── public/                # 静态资源
 ├── scripts/               # 打包、图标和发布辅助脚本
 ├── src/                   # React 渲染进程源码
@@ -115,15 +110,13 @@ OneAPI PC is the Windows desktop client for OneAPI. It brings the [ai.oneapi.cen
 - **Privacy and compliance**: first-login legal confirmation plus safety reminders before new development sessions.
 - **Desktop updates**: installer, portable package, ZIP package, and update manifest support.
 
-### Screenshots
+### Interface Scope
 
-| Settings and deployment | Codex workflow and model picker |
-| --- | --- |
-| ![Settings and deployment](images/Snipaste_2026-06-27_18-27-25.png) | ![Codex workflow](images/Snipaste_2026-06-27_18-29-39.png) |
-
-| Privacy compliance |
-| --- |
-| ![Privacy compliance](images/Snipaste_2026-06-27_18-33-32.png) |
+- System settings and environment deployment
+- AIChat / image workspace
+- Codex / Claude project logs and model selection
+- Wallet usage, subscriptions, and service status
+- Privacy compliance modal and app linking
 
 ### Tech Stack
 
@@ -140,7 +133,6 @@ OneAPI PC is the Windows desktop client for OneAPI. It brings the [ai.oneapi.cen
 .
 ├── build/                 # App icons and installer assets
 ├── electron/              # Electron main-process source
-├── images/                # README and release screenshots
 ├── public/                # Static assets
 ├── scripts/               # Packaging, icon, and release helper scripts
 ├── src/                   # React renderer source

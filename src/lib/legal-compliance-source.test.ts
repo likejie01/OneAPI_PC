@@ -94,11 +94,12 @@ test('cli extension palette uses fixed Chinese tab labels', () => {
   assert.doesNotMatch(assistantSupportSource, /<span>\{tab\}<\/span>/)
 })
 
-test('readme promotes ai.oneapi.center with bilingual screenshots', () => {
+test('readme promotes ai.oneapi.center without local screenshot dependencies', () => {
   assert.match(readmeSource, /\[中文\]\(#中文\) \| \[English\]\(#english\)/)
   assert.match(readmeSource, /https:\/\/ai\.oneapi\.center/)
-  assert.match(readmeSource, /images\/Snipaste_2026-06-27_18-27-25\.png/)
-  assert.match(readmeSource, /images\/Snipaste_2026-06-27_18-29-39\.png/)
-  assert.match(readmeSource, /images\/Snipaste_2026-06-27_18-33-32\.png/)
+  assert.doesNotMatch(readmeSource, /images\/Snipaste_/)
+  assert.doesNotMatch(readmeSource, /images\/PixPin_/)
+  assert.match(readmeSource, /界面范围/)
+  assert.match(readmeSource, /Interface Scope/)
   assert.match(readmeSource, /Privacy and compliance/)
 })

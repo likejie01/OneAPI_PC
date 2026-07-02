@@ -43,6 +43,11 @@ server.env
 *.p12
 alipay/
 
+# Local screenshots and manual review captures
+images/Snipaste_*.png
+images/PixPin_*.png
+images/codex-clipboard-*.png
+
 # Local AI/editor state
 .claude/
 .codex/
